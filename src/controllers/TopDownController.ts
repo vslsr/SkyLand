@@ -3,59 +3,44 @@ import type { CameraAxes } from '../camera/cameraMath';
 import { createCameraViewMatrix } from '../camera/cameraMath';
 import type { Vec3 } from '../math/vec3';
 import { cross, normalize } from '../math/vec3';
+import {
+  PLAYER_BOUNDS,
+  PLAYER_MOVE_SPEED,
+  PLAYER_SPRINT_MULTIPLIER,
+  applyPlayerMovement,
+  clampToRange,
+  lerpAngle,
+  normalizeAngle,
+} from '../../shared/playerMovement.mjs';
+import type { PlayerInputFrame } from '../network/protocol';
 import type * as THREE from 'three';
 
 export interface TopDownControllerOptions {
   enabled?: boolean;
-  moveSpeed?: number;
-  sprintMultiplier?: number;
   cameraOffset?: Vec3;
   fieldOfViewDegrees?: number;
-  bounds?: {
-    minimumX: number;
-    maximumX: number;
-    minimumY: number;
-    maximumY: number;
-  };
 }
-
-export interface TopDownInputFrame {
-  move: { x: number; y: number; z: number };
-  look: { yaw: number; pitch: number };
-}
-
-const DEFAULT_BOUNDS = {
-  minimumX: -16,
-  maximumX: 16,
-  minimumY: -21,
-  maximumY: 11,
-};
 
 export class TopDownController {
   private readonly canvas: HTMLCanvasElement;
   private readonly player: THREE.Object3D;
   private readonly pressedKeys = new Set<string>();
   private readonly cameraOffset: Vec3;
-  private readonly moveSpeed: number;
-  private readonly sprintMultiplier: number;
   private readonly fieldOfViewRadians: number;
-  private readonly bounds: TopDownControllerOptions['bounds'];
   private readonly pointer = { x: 0, y: 0, available: false };
   private enabled: boolean;
   private facingYaw = Math.PI;
   private currentSpeed = 0;
   private moveX = 0;
   private moveZ = 0;
+  private sprinting = false;
 
   public constructor(canvas: HTMLCanvasElement, player: THREE.Object3D, options: TopDownControllerOptions = {}) {
     this.canvas = canvas;
     this.player = player;
     this.enabled = options.enabled ?? true;
-    this.moveSpeed = options.moveSpeed ?? 3.2;
-    this.sprintMultiplier = options.sprintMultiplier ?? 1.65;
     this.cameraOffset = options.cameraOffset ?? [5.5, 7.5, 8.5];
     this.fieldOfViewRadians = ((options.fieldOfViewDegrees ?? 50) * Math.PI) / 180;
-    this.bounds = options.bounds ?? DEFAULT_BOUNDS;
     this.bindEvents();
   }
 
@@ -81,10 +66,16 @@ export class TopDownController {
     return this.currentSpeed;
   }
 
-  public get inputFrame(): TopDownInputFrame {
+  public get position(): { x: number; z: number } {
+    return { x: this.player.position.x, z: this.player.position.z };
+  }
+
+  /** 上行的一帧输入：只描述意图，位置留给服务端算。 */
+  public get inputFrame(): PlayerInputFrame {
     return {
-      move: { x: this.moveX, y: 0, z: this.moveZ },
-      look: { yaw: this.facingYaw, pitch: 0 },
+      move: { x: this.moveX, z: this.moveZ },
+      sprint: this.sprinting,
+      yaw: normalizeAngle(this.facingYaw),
     };
   }
 
@@ -95,7 +86,17 @@ export class TopDownController {
       this.currentSpeed = 0;
       this.moveX = 0;
       this.moveZ = 0;
+      this.sprinting = false;
     }
+  }
+
+  public setPosition(x: number, z: number): void {
+    this.player.position.x = clampToRange(x, PLAYER_BOUNDS.minimumX, PLAYER_BOUNDS.maximumX);
+    this.player.position.z = clampToRange(z, PLAYER_BOUNDS.minimumZ, PLAYER_BOUNDS.maximumZ);
+  }
+
+  public translate(deltaX: number, deltaZ: number): void {
+    this.setPosition(this.player.position.x + deltaX, this.player.position.z + deltaZ);
   }
 
   public update(deltaSeconds: number): void {
@@ -113,23 +114,21 @@ export class TopDownController {
 
     this.moveX = 0;
     this.moveZ = 0;
+    this.sprinting = this.pressedKeys.has('ShiftLeft') || this.pressedKeys.has('ShiftRight');
     if (inputLength > 0) {
       const normalizedX = localX / inputLength;
       const normalizedY = localY / inputLength;
       this.moveX = rightX * normalizedX + forwardX * normalizedY;
       this.moveZ = rightZ * normalizedX + forwardZ * normalizedY;
-      const sprinting = this.pressedKeys.has('ShiftLeft') || this.pressedKeys.has('ShiftRight');
-      const speed = this.moveSpeed * (sprinting ? this.sprintMultiplier : 1);
-      this.player.position.x = this.clamp(
-        this.player.position.x + this.moveX * speed * deltaSeconds,
-        this.bounds?.minimumX ?? DEFAULT_BOUNDS.minimumX,
-        this.bounds?.maximumX ?? DEFAULT_BOUNDS.maximumX,
+      // 本地预测：和房间进程跑同一份 applyPlayerMovement，输入一致则结果一致。
+      const next = applyPlayerMovement(
+        this.position,
+        { x: this.moveX, z: this.moveZ, sprint: this.sprinting },
+        deltaSeconds,
       );
-      this.player.position.z = this.clamp(
-        this.player.position.z + this.moveZ * speed * deltaSeconds,
-        this.bounds?.minimumY ?? DEFAULT_BOUNDS.minimumY,
-        this.bounds?.maximumY ?? DEFAULT_BOUNDS.maximumY,
-      );
+      this.player.position.x = next.x;
+      this.player.position.z = next.z;
+      const speed = PLAYER_MOVE_SPEED * (this.sprinting ? PLAYER_SPRINT_MULTIPLIER : 1);
       this.currentSpeed += (speed - this.currentSpeed) * Math.min(1, deltaSeconds * 12);
     } else {
       this.currentSpeed += (0 - this.currentSpeed) * Math.min(1, deltaSeconds * 10);
@@ -141,12 +140,13 @@ export class TopDownController {
       const deltaY = groundPoint.y - this.player.position.z;
       if (Math.hypot(deltaX, deltaY) > 0.08) {
         const targetYaw = Math.atan2(deltaX, deltaY);
-        this.facingYaw = this.lerpAngle(this.facingYaw, targetYaw, Math.min(1, deltaSeconds * 14));
+        this.facingYaw = lerpAngle(this.facingYaw, targetYaw, Math.min(1, deltaSeconds * 14));
       }
     } else if (inputLength > 0) {
       const targetYaw = Math.atan2(this.moveX, this.moveZ);
-      this.facingYaw = this.lerpAngle(this.facingYaw, targetYaw, Math.min(1, deltaSeconds * 10));
+      this.facingYaw = lerpAngle(this.facingYaw, targetYaw, Math.min(1, deltaSeconds * 10));
     }
+    this.facingYaw = normalizeAngle(this.facingYaw);
     this.player.rotation.y = this.facingYaw;
   }
 
@@ -220,14 +220,5 @@ export class TopDownController {
 
   private isTextEntry(target: EventTarget | null): boolean {
     return target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || target instanceof HTMLSelectElement;
-  }
-
-  private lerpAngle(current: number, target: number, amount: number): number {
-    const difference = ((target - current + Math.PI * 3) % (Math.PI * 2)) - Math.PI;
-    return current + difference * amount;
-  }
-
-  private clamp(value: number, minimum: number, maximum: number): number {
-    return Math.max(minimum, Math.min(maximum, value));
   }
 }

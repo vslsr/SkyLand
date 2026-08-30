@@ -1,4 +1,5 @@
 import { ServerScene } from '../scene/ServerScene.mjs';
+import { SERVER_TICK_RATE, TICKS_PER_SNAPSHOT } from '../../shared/networkTuning.mjs';
 
 const room = {
   id: process.env.SKYLAND_ROOM_ID,
@@ -6,8 +7,6 @@ const room = {
   capacity: Number(process.env.SKYLAND_ROOM_CAPACITY) || 8,
 };
 const scene = new ServerScene(process.env.SKYLAND_SCENE_ID || 'grassland');
-const tickRate = 20;
-let snapshotCounter = 0;
 
 function send(message) {
   if (process.connected) process.send?.(message);
@@ -25,12 +24,11 @@ function sendSummary() {
 }
 
 const ticker = setInterval(() => {
-  scene.update(1 / tickRate);
-  snapshotCounter += 1;
-  if (snapshotCounter % 2 === 0) {
+  scene.update();
+  if (scene.tick % TICKS_PER_SNAPSHOT === 0) {
     send({ type: 'room:snapshot', snapshot: scene.createSnapshot() });
   }
-}, 1000 / tickRate);
+}, 1000 / SERVER_TICK_RATE);
 
 process.on('message', (message) => {
   if (!message || typeof message !== 'object') return;

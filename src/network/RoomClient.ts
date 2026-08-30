@@ -1,3 +1,5 @@
+import type { PlayerInputFrame, RoomSnapshot } from './protocol';
+
 export interface RoomSummary {
   id: string;
   name: string;
@@ -12,6 +14,8 @@ export interface JoinedRoom {
   player: {
     id: string;
     name: string;
+    slot: number;
+    spawn: { x: number; z: number };
   };
 }
 
@@ -19,21 +23,21 @@ interface ServerMessage {
   type: string;
   room?: RoomSummary;
   player?: JoinedRoom['player'];
+  snapshot?: RoomSnapshot;
   message?: string;
 }
 
 type RoomUpdateListener = (room: RoomSummary) => void;
+type SnapshotListener = (snapshot: RoomSnapshot) => void;
 type DisconnectListener = () => void;
 
-export interface PlayerInputFrame {
-  move: { x: number; y: number; z: number };
-  look: { yaw: number; pitch: number };
-}
+export type { PlayerInputFrame, RoomSnapshot } from './protocol';
 
 export class RoomClient {
   private socket?: WebSocket;
   private socketReady?: Promise<WebSocket>;
   private readonly roomListeners = new Set<RoomUpdateListener>();
+  private readonly snapshotListeners = new Set<SnapshotListener>();
   private readonly disconnectListeners = new Set<DisconnectListener>();
   private inputSequence = 0;
 
@@ -100,22 +104,35 @@ export class RoomClient {
     }
   }
 
-  public sendPlayerInput(input: PlayerInputFrame): void {
-    if (this.socket?.readyState !== WebSocket.OPEN) return;
+  /**
+   * 上报一帧输入。deltaSeconds 是这条输入覆盖的真实时间，
+   * 服务端会用自己的时钟核对，客户端谎报也换不来额外的位移。
+   * 返回本条输入的序号，调用方据此记录预测位置。
+   */
+  public sendPlayerInput(input: PlayerInputFrame, deltaSeconds: number): number | undefined {
+    if (this.socket?.readyState !== WebSocket.OPEN) return undefined;
     this.inputSequence += 1;
     this.socket.send(
       JSON.stringify({
         type: 'player:input',
         sequence: this.inputSequence,
+        deltaSeconds,
         move: input.move,
-        look: input.look,
+        sprint: input.sprint,
+        yaw: input.yaw,
       }),
     );
+    return this.inputSequence;
   }
 
   public onRoomUpdate(listener: RoomUpdateListener): () => void {
     this.roomListeners.add(listener);
     return () => this.roomListeners.delete(listener);
+  }
+
+  public onSnapshot(listener: SnapshotListener): () => void {
+    this.snapshotListeners.add(listener);
+    return () => this.snapshotListeners.delete(listener);
   }
 
   public onDisconnect(listener: DisconnectListener): () => void {
@@ -152,6 +169,8 @@ export class RoomClient {
     const message = this.parseMessage(event.data);
     if (message?.type === 'room:summary' && message.room) {
       for (const listener of this.roomListeners) listener(message.room);
+    } else if (message?.type === 'room:snapshot' && message.snapshot) {
+      for (const listener of this.snapshotListeners) listener(message.snapshot);
     } else if (message?.type === 'room:closed') {
       this.socket?.close();
     }

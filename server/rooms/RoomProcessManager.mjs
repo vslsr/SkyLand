@@ -2,6 +2,7 @@ import { fork } from 'node:child_process';
 import { EventEmitter } from 'node:events';
 import { randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
+import { createSpawnPoint } from '../../shared/playerMovement.mjs';
 
 const WORKER_PATH = fileURLToPath(new URL('./room-worker.mjs', import.meta.url));
 
@@ -27,7 +28,7 @@ export class RoomProcessManager extends EventEmitter {
       sceneId: 'grassland',
       createdAt: new Date().toISOString(),
       child: undefined,
-      players: new Set(),
+      players: new Map(),
       pid: undefined,
     };
 
@@ -94,11 +95,14 @@ export class RoomProcessManager extends EventEmitter {
     if (!record) throw new Error('房间不存在或已经关闭');
     if (record.players.size >= record.capacity) throw new Error('房间已满');
 
+    const slot = this.allocateSlot(record);
     const player = {
       id: randomUUID(),
       name: sanitizeText(requestedName, `旅人-${Math.floor(1000 + Math.random() * 9000)}`, 20),
+      slot,
+      spawn: createSpawnPoint(slot),
     };
-    record.players.add(player.id);
+    record.players.set(player.id, player);
     record.child.send({ type: 'player:join', player });
     const room = this.toSummary(record);
     this.emit('summary', room);
@@ -116,6 +120,15 @@ export class RoomProcessManager extends EventEmitter {
     const record = this.rooms.get(roomId);
     if (!record || !record.players.has(playerId)) return;
     record.child.send({ type: 'player:input', playerId, input });
+  }
+
+  /** 取最小的空闲座位号，出生点由座位号决定。 */
+  allocateSlot(record) {
+    const used = new Set(Array.from(record.players.values(), (player) => player.slot));
+    for (let slot = 0; slot < record.capacity; slot += 1) {
+      if (!used.has(slot)) return slot;
+    }
+    return record.players.size;
   }
 
   removeRoom(roomId) {

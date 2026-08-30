@@ -1,4 +1,9 @@
 import { WebSocket, WebSocketServer } from 'ws';
+import {
+  INPUT_MESSAGE_BURST,
+  MAXIMUM_INPUT_MESSAGES_PER_SECOND,
+  SOCKET_HEARTBEAT_MS,
+} from '../../shared/networkTuning.mjs';
 
 function parseMessage(data) {
   try {
@@ -24,17 +29,32 @@ export class WebSocketGateway {
     roomManager.on('closed', (roomId) => {
       this.broadcastToRoom(roomId, { type: 'room:closed', message: '房间已经关闭' });
     });
+
+    // 半开连接不会触发 close，靠心跳把占着座位的死连接清掉。
+    this.heartbeat = setInterval(() => this.pruneDeadSockets(), SOCKET_HEARTBEAT_MS);
+    this.heartbeat.unref?.();
   }
 
   close() {
+    clearInterval(this.heartbeat);
     for (const socket of this.sessions.keys()) socket.close(1001, 'server shutdown');
     this.webSocketServer.close();
   }
 
   handleConnection(socket) {
-    const session = { roomId: undefined, playerId: undefined };
+    const session = {
+      roomId: undefined,
+      playerId: undefined,
+      alive: true,
+      inputTokens: INPUT_MESSAGE_BURST,
+      inputTokensAt: Date.now(),
+    };
     this.sessions.set(socket, session);
     this.send(socket, { type: 'connected' });
+
+    socket.on('pong', () => {
+      session.alive = true;
+    });
 
     socket.on('message', (data, isBinary) => {
       if (isBinary) {
@@ -71,7 +91,8 @@ export class WebSocketGateway {
           this.send(socket, { type: 'room:left' });
           break;
         case 'player:input':
-          if (session.roomId && session.playerId) {
+          // 输入频率有上限，超出的直接丢弃，避免单个连接刷爆房间进程。
+          if (session.roomId && session.playerId && this.consumeInputToken(session)) {
             this.roomManager.sendInput(session.roomId, session.playerId, message);
           }
           break;
@@ -80,6 +101,27 @@ export class WebSocketGateway {
       }
     } catch (error) {
       this.sendError(socket, error instanceof Error ? error.message : '服务器处理失败');
+    }
+  }
+
+  consumeInputToken(session) {
+    const now = Date.now();
+    const refill = ((now - session.inputTokensAt) / 1000) * MAXIMUM_INPUT_MESSAGES_PER_SECOND;
+    session.inputTokens = Math.min(INPUT_MESSAGE_BURST, session.inputTokens + refill);
+    session.inputTokensAt = now;
+    if (session.inputTokens < 1) return false;
+    session.inputTokens -= 1;
+    return true;
+  }
+
+  pruneDeadSockets() {
+    for (const [socket, session] of this.sessions) {
+      if (!session.alive) {
+        socket.terminate();
+        continue;
+      }
+      session.alive = false;
+      if (socket.readyState === WebSocket.OPEN) socket.ping();
     }
   }
 
