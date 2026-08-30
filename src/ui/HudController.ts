@@ -1,32 +1,29 @@
+import type { RoomSummary } from '../network/RoomClient';
+
 export class HudController {
-  private readonly panel: HTMLElement;
-  private readonly enterButton: HTMLButtonElement;
   private readonly lockHint: HTMLElement;
-  private hasEntered = false;
+  private readonly roomLabel: HTMLElement;
+  private readonly roomPopulation: HTMLElement;
 
   public constructor() {
-    this.panel = this.requireElement<HTMLElement>('start-panel');
-    this.enterButton = this.requireElement<HTMLButtonElement>('enter-button');
     this.lockHint = this.requireElement<HTMLElement>('lock-hint');
+    this.roomLabel = this.requireElement<HTMLElement>('room-label');
+    this.roomPopulation = this.requireElement<HTMLElement>('room-population');
   }
 
-  public onEnter(handler: () => void): void {
-    this.enterButton.addEventListener('click', () => {
-      this.hasEntered = true;
-      this.panel.classList.add('is-hidden');
-      handler();
-    });
+  public setRoom(room: RoomSummary): void {
+    this.roomLabel.textContent = room.name;
+    this.roomPopulation.textContent = `${room.playerCount}/${room.capacity}`;
+  }
+
+  public setDisconnected(): void {
+    this.roomLabel.textContent = '未连接房间';
+    this.roomPopulation.textContent = 'OFFLINE';
   }
 
   public setLocked(locked: boolean): void {
     document.body.classList.toggle('is-locked', locked);
-    if (locked) {
-      this.hasEntered = true;
-      this.panel.classList.add('is-hidden');
-      this.lockHint.textContent = 'Esc · 释放鼠标';
-    } else {
-      this.lockHint.textContent = this.hasEntered ? '点击画面重新控制镜头' : '点击画面控制镜头';
-    }
+    this.lockHint.textContent = locked ? 'Esc · 释放鼠标' : '点击画面控制镜头';
   }
 
   private requireElement<T extends HTMLElement>(id: string): T {

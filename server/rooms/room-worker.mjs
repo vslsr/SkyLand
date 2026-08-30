@@ -1,0 +1,63 @@
+import { ServerScene } from '../scene/ServerScene.mjs';
+
+const room = {
+  id: process.env.SKYLAND_ROOM_ID,
+  name: process.env.SKYLAND_ROOM_NAME,
+  capacity: Number(process.env.SKYLAND_ROOM_CAPACITY) || 8,
+};
+const scene = new ServerScene(process.env.SKYLAND_SCENE_ID || 'grassland');
+const tickRate = 20;
+let snapshotCounter = 0;
+
+function send(message) {
+  if (process.connected) process.send?.(message);
+}
+
+function sendSummary() {
+  send({
+    type: 'room:summary',
+    room: {
+      ...room,
+      sceneId: scene.id,
+      playerCount: scene.players.size,
+    },
+  });
+}
+
+const ticker = setInterval(() => {
+  scene.update(1 / tickRate);
+  snapshotCounter += 1;
+  if (snapshotCounter % 2 === 0) {
+    send({ type: 'room:snapshot', snapshot: scene.createSnapshot() });
+  }
+}, 1000 / tickRate);
+
+process.on('message', (message) => {
+  if (!message || typeof message !== 'object') return;
+
+  switch (message.type) {
+    case 'player:join':
+      scene.addPlayer(message.player);
+      sendSummary();
+      break;
+    case 'player:leave':
+      scene.removePlayer(message.playerId);
+      sendSummary();
+      break;
+    case 'player:input':
+      scene.applyInput(message.playerId, message.input ?? {});
+      break;
+    case 'room:shutdown':
+      shutdown();
+      break;
+  }
+});
+
+function shutdown() {
+  clearInterval(ticker);
+  process.exit(0);
+}
+
+process.on('disconnect', shutdown);
+process.on('SIGTERM', shutdown);
+send({ type: 'room:ready', pid: process.pid });

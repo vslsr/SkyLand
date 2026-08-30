@@ -1,31 +1,34 @@
 import './style.css';
-import { FlyController } from './camera/FlyController';
-import { SceneRenderer } from './rendering/SceneRenderer';
-import { HudController } from './ui/HudController';
+import { GrasslandScene } from './scenes/GrasslandScene';
+import { SceneManager } from './scenes/SceneManager';
 
-const canvas = document.getElementById('scene') as HTMLCanvasElement | null;
+function requireElement<T extends HTMLElement>(id: string): T {
+  const element = document.getElementById(id);
+  if (!element) throw new Error(`缺少页面元素 #${id}`);
+  return element as T;
+}
+
 const errorPanel = document.getElementById('webgl-error');
 
-if (!canvas) throw new Error('缺少场景 canvas');
-
 try {
-  const hud = new HudController();
-  const renderer = new SceneRenderer(canvas);
-  const controller = new FlyController(canvas, {
-    position: [0, 4.2, 13.5],
-    yaw: 0,
-    pitch: -0.12,
-    onLockChange: (locked) => hud.setLocked(locked),
+  const sceneManager = new SceneManager();
+  const grasslandScene = new GrasslandScene({
+    canvas: requireElement<HTMLCanvasElement>('scene'),
+    sceneRoot: requireElement<HTMLElement>('app-shell'),
+    baseLayer: requireElement<HTMLElement>('game-layer'),
+    overlayRoot: requireElement<HTMLElement>('common-ui-root'),
   });
+  sceneManager.switchTo(grasslandScene);
 
   let previousTime = performance.now();
+  const startedAt = previousTime;
 
-  hud.onEnter(() => controller.requestLock());
   const frame = (now: number): void => {
     const deltaSeconds = Math.min((now - previousTime) / 1000, 0.05);
+    const elapsedSeconds = (now - startedAt) / 1000;
     previousTime = now;
-    controller.update(deltaSeconds);
-    renderer.render(controller.frame);
+    sceneManager.update(deltaSeconds, elapsedSeconds);
+    sceneManager.render(elapsedSeconds);
     requestAnimationFrame(frame);
   };
 

@@ -1,0 +1,14 @@
+---
+description: Use the bundled line-art magic cabin project as the visual and implementation reference
+alwaysApply: true
+---
+
+# Line-art reference project
+
+- Treat `.cursor/line-art-style-magic-cabin-main/` as the primary reference for this project's visual language, procedural models, animation feel, and Three.js implementation patterns.
+- Before implementing or revising a visual feature, inspect the matching implementation in `.cursor/line-art-style-magic-cabin-main/index.html` when one exists.
+- Preserve the reference's core line-art method: a filled mesh paired with `THREE.EdgesGeometry` and `THREE.LineSegments`.
+- Match the reference's restrained paper-toned palette, dark geometry outlines, low-poly shapes, soft transparency, and playful deformation where appropriate.
+- Adapt reference code into the project's modular TypeScript structure; do not copy unrelated systems into one file.
+- Keep all adapted procedural geometry under `src/models/`, controllers under their own subsystem, and animation behavior separate from scene composition.
+- When an exact match conflicts with the current project's networking, Scene lifecycle, CommonUI stack, or maintainability rules, preserve the visual behavior while integrating through the existing architecture.

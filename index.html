@@ -7,41 +7,31 @@
     <title>SkyLand · 线稿小景</title>
   </head>
   <body>
-    <main class="app-shell">
-      <canvas id="scene" aria-label="SkyLand 线稿树林场景"></canvas>
+    <main id="app-shell" class="app-shell">
+      <section id="game-layer" class="game-layer" aria-label="游戏交互层">
+        <canvas id="scene" aria-label="SkyLand 线稿树林场景"></canvas>
 
-      <header class="hud hud--header">
-        <div class="brand">
-          <span class="brand__eyebrow">THREE.JS LINE STUDY · 01</span>
-          <h1>SkyLand</h1>
-        </div>
-        <span class="style-badge">GEOMETRY EDGES</span>
-      </header>
+        <header class="hud hud--header">
+          <div class="brand">
+            <span class="brand__eyebrow">THREE.JS LINE STUDY · 01</span>
+            <h1>SkyLand</h1>
+          </div>
+          <span class="style-badge">
+            <strong id="room-label">未连接房间</strong>
+            <i></i>
+            <span id="room-population">OFFLINE</span>
+          </span>
+        </header>
 
-      <section id="start-panel" class="start-panel" aria-label="控制说明">
-        <p class="start-panel__kicker">自由飞行镜头</p>
-        <h2>线稿小景</h2>
-        <p>一块平地、三棵树，以及零散生长的草丛。</p>
-        <div class="controls-grid" aria-label="操作键位">
-          <div class="key-cluster">
-            <span></span><kbd>W</kbd><span></span>
-            <kbd>A</kbd><kbd>S</kbd><kbd>D</kbd>
-          </div>
-          <div class="controls-copy">
-            <span>鼠标 · 转向</span>
-            <span>Space / C · 升降</span>
-            <span>Shift · 加速</span>
-          </div>
+        <div class="hud hud--footer">
+          <span><i class="status-dot"></i> THREE.JS · EDGES GEOMETRY</span>
+          <span id="lock-hint">点击画面控制镜头</span>
         </div>
-        <button id="enter-button" type="button">进入场景 <span>→</span></button>
+
+        <div id="crosshair" class="crosshair" aria-hidden="true"></div>
       </section>
 
-      <div class="hud hud--footer" aria-hidden="true">
-        <span><i class="status-dot"></i> THREE.JS · EDGES GEOMETRY</span>
-        <span id="lock-hint">点击画面重新控制镜头</span>
-      </div>
-
-      <div id="crosshair" class="crosshair" aria-hidden="true"></div>
+      <div id="common-ui-root" class="common-ui-root" aria-label="通用界面层"></div>
       <div id="webgl-error" class="error-panel" hidden>
         当前浏览器无法创建 WebGL 上下文，请更新显卡驱动或使用新版浏览器。
       </div>
