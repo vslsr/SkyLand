@@ -1,0 +1,27 @@
+---
+description: Keep feature modules separated into focused, maintainable files
+alwaysApply: true
+---
+
+# Module boundaries
+
+- When code forms a distinct module or responsibility, place it in its own file instead of adding it to an unrelated large file.
+- Keep application bootstrap files limited to composition, lifecycle wiring, and top-level orchestration.
+- Separate procedural models, render passes, GLSL shader sources, controllers, math utilities, and UI behavior by responsibility.
+- Put all procedural geometry generation under `src/models/` and import it through TypeScript modules.
+- Prefer a focused directory with an `index.ts` public entry point when a subsystem contains multiple internal files.
+- Avoid files that mix geometry generation, input handling, rendering setup, and shader source code.
+- When adding a feature, extend the matching module or create a new focused module before editing the application entry point.
+
+Example structure:
+
+```text
+src/
+  controllers/FlyController.ts
+  core/Renderer.ts
+  math/mat4.ts
+  models/terrain.ts
+  models/grass.ts
+  shaders/terrain.ts
+  shaders/grass.ts
+```

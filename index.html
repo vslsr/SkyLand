@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#fdfbf6" />
+    <title>SkyLand · 线稿小景</title>
+  </head>
+  <body>
+    <main class="app-shell">
+      <canvas id="scene" aria-label="SkyLand 线稿树林场景"></canvas>
+
+      <header class="hud hud--header">
+        <div class="brand">
+          <span class="brand__eyebrow">THREE.JS LINE STUDY · 01</span>
+          <h1>SkyLand</h1>
+        </div>
+        <span class="style-badge">GEOMETRY EDGES</span>
+      </header>
+
+      <section id="start-panel" class="start-panel" aria-label="控制说明">
+        <p class="start-panel__kicker">自由飞行镜头</p>
+        <h2>线稿小景</h2>
+        <p>一块平地、三棵树，以及零散生长的草丛。</p>
+        <div class="controls-grid" aria-label="操作键位">
+          <div class="key-cluster">
+            <span></span><kbd>W</kbd><span></span>
+            <kbd>A</kbd><kbd>S</kbd><kbd>D</kbd>
+          </div>
+          <div class="controls-copy">
+            <span>鼠标 · 转向</span>
+            <span>Space / C · 升降</span>
+            <span>Shift · 加速</span>
+          </div>
+        </div>
+        <button id="enter-button" type="button">进入场景 <span>→</span></button>
+      </section>
+
+      <div class="hud hud--footer" aria-hidden="true">
+        <span><i class="status-dot"></i> THREE.JS · EDGES GEOMETRY</span>
+        <span id="lock-hint">点击画面重新控制镜头</span>
+      </div>
+
+      <div id="crosshair" class="crosshair" aria-hidden="true"></div>
+      <div id="webgl-error" class="error-panel" hidden>
+        当前浏览器无法创建 WebGL 上下文，请更新显卡驱动或使用新版浏览器。
+      </div>
+    </main>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
