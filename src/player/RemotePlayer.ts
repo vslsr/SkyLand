@@ -1,12 +1,14 @@
 import * as THREE from 'three';
 import { createPlayerSlimeModel, createSlimePalette } from '../models/playerSlime';
+import { isSharedGeometry } from '../models/sharedGeometry';
 import type { InterpolatedPlayerState } from '../network/protocol';
 import { SlimeAnimator } from './SlimeAnimator';
 
+/** 只释放这个物体独占的资源，共用的几何留给别的物体继续使用。 */
 function disposeSubtree(root: THREE.Object3D): void {
   root.traverse((object) => {
     const target = object as Partial<THREE.Mesh>;
-    target.geometry?.dispose();
+    if (target.geometry && !isSharedGeometry(target.geometry)) target.geometry.dispose();
     const material = target.material;
     if (Array.isArray(material)) material.forEach((entry) => entry.dispose());
     else material?.dispose();

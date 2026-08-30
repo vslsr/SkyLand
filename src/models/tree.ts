@@ -1,9 +1,26 @@
 import * as THREE from 'three';
 import { createFillMaterial } from '../materials/createFillMaterial';
 import { createOutlinedObject } from './outlinedObject';
+import { markSharedGeometry } from './sharedGeometry';
 
 const TRUNK_MATERIAL = createFillMaterial(0xd6bea3);
 const NEEDLE_MATERIAL = createFillMaterial(0xcbdcbc);
+
+interface CrownLayer {
+  geometry: THREE.ConeGeometry;
+  y: number;
+  rotation: number;
+}
+
+// 每棵树的形状都一样，几何只建一份共用，位置与旋转留在 Object3D 上。
+const TRUNK_GEOMETRY = markSharedGeometry(new THREE.CylinderGeometry(0.1, 0.17, 1.3, 7, 1, false));
+
+const CROWN_LAYERS: readonly CrownLayer[] = [
+  { geometry: new THREE.ConeGeometry(1.35, 1.7, 7, 1, false), y: 1.45, rotation: 0.08 },
+  { geometry: new THREE.ConeGeometry(1.05, 1.55, 7, 1, false), y: 2.15, rotation: -0.13 },
+  { geometry: new THREE.ConeGeometry(0.75, 1.4, 7, 1, false), y: 2.8, rotation: 0.17 },
+  { geometry: new THREE.ConeGeometry(0.45, 1.2, 7, 1, false), y: 3.38, rotation: -0.04 },
+].map((layer) => ({ ...layer, geometry: markSharedGeometry(layer.geometry) }));
 
 interface TreePlacement {
   position: readonly [number, number, number];
@@ -17,25 +34,20 @@ const TREE_PLACEMENTS: readonly TreePlacement[] = [
   { position: [5.1, 0, -4.8], rotation: 0.3, scale: 0.92 },
 ];
 
-function createCrownLayer(radius: number, height: number, y: number, rotation: number): THREE.Group {
-  const geometry = new THREE.ConeGeometry(radius, height, 7, 1, false);
-  const layer = createOutlinedObject(geometry, NEEDLE_MATERIAL);
-  layer.position.y = y;
-  layer.rotation.y = rotation;
-  return layer;
+function createCrownLayer(layer: CrownLayer): THREE.Group {
+  const crown = createOutlinedObject(layer.geometry, NEEDLE_MATERIAL);
+  crown.position.y = layer.y;
+  crown.rotation.y = layer.rotation;
+  return crown;
 }
 
 export function createTreeModel(): THREE.Group {
   const tree = new THREE.Group();
-  const trunkGeometry = new THREE.CylinderGeometry(0.1, 0.17, 1.3, 7, 1, false);
-  const trunk = createOutlinedObject(trunkGeometry, TRUNK_MATERIAL);
+  const trunk = createOutlinedObject(TRUNK_GEOMETRY, TRUNK_MATERIAL);
   trunk.position.y = 0.65;
   tree.add(trunk);
 
-  tree.add(createCrownLayer(1.35, 1.7, 1.45, 0.08));
-  tree.add(createCrownLayer(1.05, 1.55, 2.15, -0.13));
-  tree.add(createCrownLayer(0.75, 1.4, 2.8, 0.17));
-  tree.add(createCrownLayer(0.45, 1.2, 3.38, -0.04));
+  for (const layer of CROWN_LAYERS) tree.add(createCrownLayer(layer));
   return tree;
 }
 

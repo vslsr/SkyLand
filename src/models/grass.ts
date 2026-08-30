@@ -1,9 +1,10 @@
 import * as THREE from 'three';
 import { createFillMaterial } from '../materials/createFillMaterial';
 import { createOutlinedObject } from './outlinedObject';
+import { markSharedGeometry } from './sharedGeometry';
 
 const GRASS_MATERIAL = createFillMaterial(0xc1d7a6);
-const BLADE_GEOMETRY = new THREE.ConeGeometry(0.035, 1, 4, 1, false);
+const BLADE_GEOMETRY = markSharedGeometry(new THREE.ConeGeometry(0.035, 1, 4, 1, false));
 
 interface GrassPatch {
   position: readonly [number, number];

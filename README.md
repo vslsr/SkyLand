@@ -33,8 +33,9 @@ npm test          # 服务端与客户端纯逻辑测试
 npm run build
 ```
 
-`tests/` 下的客户端测试由 Node.js 的类型剥离直接运行，只覆盖不依赖 DOM 与
-Three.js 的纯逻辑（和解、快照插值），因此不参与 `tsc` 构建。
+`tests/` 下的客户端测试由 Node.js 的类型剥离直接运行，覆盖不依赖浏览器的逻辑
+（和解、快照插值、几何共用），因此不参与 `tsc` 构建。`src/` 按 Vite 的习惯写
+不带扩展名的相对导入，`tests/tsResolverHooks.mjs` 在测试时补上扩展名。
 
 ## CommonUI 事件栈
 
@@ -130,10 +131,23 @@ const page: CommonUIPage = {
 - `src/controllers/`：TopDown 控制器与 Fly/TopDown 控制路由
 - `src/player/`：玩家实体和史莱姆动画
 - `src/network/`：浏览器房间客户端、消息协议与快照插值
-- `src/models/`：程序化平地、树木和草丛
+- `src/models/`：程序化平地、树木、草丛与共用几何登记
 - `src/materials/`：填充 Shader 与轮廓线材质
 - `server/network/`：WebSocket 网关
 - `server/rooms/`：房间进程管理器与 worker
 - `server/scene/`：服务端权威场景状态
 - `shared/`：前后端共用的移动模拟与同步常量
+
+## 几何共用
+
+线稿风格下每个物体都是「填充网格 + `EdgesGeometry` 轮廓线」两份资源，草叶和树冠
+这类重复形状一旦逐个构建，浪费会随场景规模线性放大。
+
+`createOutlinedObject` 按几何缓存顶点法线与轮廓线：同一份几何加同一个阈值只算一次，
+之后所有实例共用同一个 `BufferGeometry`，位置与旋转留在 `Object3D` 上。当前草地场景
+的几何上传量因此从 118 次 / 31.2 KB 降到 36 次 / 9.6 KB，渲染结果逐像素不变。
+
+共用的代价是所有权变含糊：任何单个物体 dispose 掉它，其他还在用的物体会一起失效。
+`src/models/sharedGeometry.ts` 把共用关系显式登记下来，释放资源的一方（例如玩家离开
+时的 `RemotePlayer.dispose`）据此跳过。
 - `tests/`：不依赖浏览器的客户端逻辑测试
