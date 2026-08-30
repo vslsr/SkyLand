@@ -7,6 +7,7 @@ import type { RoomSnapshot } from '../network/protocol';
 import { PlayerEntity } from '../player/PlayerEntity';
 import { RemotePlayerGroup } from '../player/RemotePlayerGroup';
 import { SceneRenderer } from '../rendering/SceneRenderer';
+import { ChunkStreamer } from '../world/ChunkStreamer';
 import { INPUT_SEND_INTERVAL_SECONDS } from '../../shared/networkTuning.mjs';
 import { HudController } from '../ui/HudController';
 import { CreateRoomPage, type CreateRoomFormValue } from '../ui/pages/CreateRoomPage';
@@ -28,6 +29,7 @@ export class GrasslandScene extends Scene {
   private readonly lobbyPage = new RoomLobbyPage();
   private readonly snapshots = new SnapshotBuffer();
   private readonly remotePlayers = new RemotePlayerGroup();
+  private readonly chunks = new ChunkStreamer();
   private joinedRoom?: JoinedRoom;
   private player?: PlayerEntity;
   private timeSinceInputSent = 0;
@@ -57,6 +59,7 @@ export class GrasslandScene extends Scene {
     this.roomClient.onSnapshot((snapshot) => this.handleSnapshot(snapshot));
     this.roomClient.onDisconnect(() => this.handleDisconnect());
     this.renderer.addWorldObject(this.remotePlayers.root);
+    this.renderer.addWorldObject(this.chunks.root);
   }
 
   public update(deltaSeconds: number, elapsedSeconds: number): void {
@@ -65,13 +68,24 @@ export class GrasslandScene extends Scene {
     this.sendPlayerInput(deltaSeconds);
     this.remotePlayers.sync(this.snapshots.sample(), this.joinedRoom?.player.id);
     this.remotePlayers.update(deltaSeconds, elapsedSeconds);
+    this.chunks.update(this.streamingFocus.x, this.streamingFocus.z);
   }
 
   public render(): void {
-    this.renderer.render(this.controls.frame);
+    this.renderer.prepare(this.controls.frame);
+    this.chunks.cull(this.renderer);
+    this.renderer.render();
+  }
+
+  /** 地块以玩家为中心加载；还没有玩家时（大厅、自由飞行）退回相机位置。 */
+  private get streamingFocus(): { x: number; z: number } {
+    if (this.player) return this.player.controller.position;
+    const position = this.controls.frame.position;
+    return { x: position[0], z: position[2] };
   }
 
   protected onEnter(): void {
+    this.chunks.prime(this.streamingFocus.x, this.streamingFocus.z);
     if (this.joinedRoom) return;
     this.hud.setDisconnected();
     this.commonUI.push(this.lobbyPage);
@@ -169,6 +183,8 @@ export class GrasslandScene extends Scene {
     this.renderer.addWorldObject(this.player.object3D);
     this.controls.setPlayerController(this.player.controller);
     this.timeSinceInputSent = 0;
+    // 出生点可能落在另一个地块，进场景前先把周围补齐，避免看到空白世界。
+    this.chunks.prime(spawn.x, spawn.z);
   }
 
   private destroyPlayer(): void {

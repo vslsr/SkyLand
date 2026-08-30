@@ -45,5 +45,11 @@ export const RECONCILE_SNAP_DISTANCE = 2.5;
 /** 平滑纠正的收敛速率，值越大拉回越快。 */
 export const RECONCILE_RATE = 9;
 
+/**
+ * 兴趣区半径（米）：快照里只包含这个距离内的其他玩家。
+ * 雾在 52 米就把画面吞白了，所以取 96 米足够，边界处的进出玩家看不见。
+ */
+export const AREA_OF_INTEREST_RADIUS = 96;
+
 /** WebSocket 心跳间隔（毫秒），用来清理半开连接。 */
 export const SOCKET_HEARTBEAT_MS = 30_000;

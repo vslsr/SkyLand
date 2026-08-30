@@ -1,13 +1,21 @@
 import * as THREE from 'three';
 
+// three 在渲染 InstancedMesh 时会自动声明 instanceMatrix，但自定义 ShaderMaterial
+// 不会套用内置的顶点变换块，必须自己把它乘进模型矩阵。
 const VERTEX_SHADER = /* glsl */ `
   varying vec3 vWorldNormal;
   varying vec3 vWorldPosition;
 
   void main() {
-    vec4 worldPosition = modelMatrix * vec4(position, 1.0);
+    #ifdef USE_INSTANCING
+      mat4 instancedModelMatrix = modelMatrix * instanceMatrix;
+    #else
+      mat4 instancedModelMatrix = modelMatrix;
+    #endif
+
+    vec4 worldPosition = instancedModelMatrix * vec4(position, 1.0);
     vWorldPosition = worldPosition.xyz;
-    vWorldNormal = normalize(mat3(modelMatrix) * normal);
+    vWorldNormal = normalize(mat3(instancedModelMatrix) * normal);
     gl_Position = projectionMatrix * viewMatrix * worldPosition;
   }
 `;

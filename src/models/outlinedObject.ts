@@ -8,13 +8,13 @@ import { markSharedGeometry } from './sharedGeometry';
 const normalizedGeometries = new WeakSet<THREE.BufferGeometry>();
 const edgesByGeometry = new WeakMap<THREE.BufferGeometry, Map<number, THREE.BufferGeometry>>();
 
-function ensureVertexNormals(geometry: THREE.BufferGeometry): void {
+export function ensureVertexNormals(geometry: THREE.BufferGeometry): void {
   if (normalizedGeometries.has(geometry)) return;
   geometry.computeVertexNormals();
   normalizedGeometries.add(geometry);
 }
 
-function getOutlineGeometry(
+export function getOutlineGeometry(
   geometry: THREE.BufferGeometry,
   thresholdAngle: number,
 ): THREE.BufferGeometry {

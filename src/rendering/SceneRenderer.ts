@@ -7,6 +7,8 @@ export class SceneRenderer {
   private readonly camera = new THREE.PerspectiveCamera(50, 1, 0.1, 100);
   private readonly scene = createLineArtScene();
   private readonly lookTarget = new THREE.Vector3();
+  private readonly frustum = new THREE.Frustum();
+  private readonly viewProjection = new THREE.Matrix4();
 
   public constructor(canvas: HTMLCanvasElement) {
     this.renderer = new THREE.WebGLRenderer({
@@ -19,7 +21,11 @@ export class SceneRenderer {
     this.renderer.outputEncoding = THREE.sRGBEncoding;
   }
 
-  public render(frame: CameraFrame): void {
+  /**
+   * 更新相机与视锥。和 `render` 分开是为了让调用方能在两者之间做自己的可见性
+   * 剔除——按包围盒剔除整块地形，比 three 逐物体的包围球判定紧得多。
+   */
+  public prepare(frame: CameraFrame): void {
     this.resizeToDisplaySize();
     this.camera.position.set(...frame.position);
     this.camera.up.set(...frame.axes.up);
@@ -29,6 +35,19 @@ export class SceneRenderer {
       frame.position[2] + frame.axes.forward[2],
     );
     this.camera.lookAt(this.lookTarget);
+    this.camera.updateMatrixWorld();
+    this.viewProjection.multiplyMatrices(
+      this.camera.projectionMatrix,
+      this.camera.matrixWorldInverse,
+    );
+    this.frustum.setFromProjectionMatrix(this.viewProjection);
+  }
+
+  public isBoxVisible(box: THREE.Box3): boolean {
+    return this.frustum.intersectsBox(box);
+  }
+
+  public render(): void {
     this.renderer.render(this.scene, this.camera);
   }
 

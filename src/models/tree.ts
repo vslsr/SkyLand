@@ -1,64 +1,46 @@
 import * as THREE from 'three';
+import { BufferGeometryUtils } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { createFillMaterial } from '../materials/createFillMaterial';
-import { createOutlinedObject } from './outlinedObject';
 import { markSharedGeometry } from './sharedGeometry';
 
-const TRUNK_MATERIAL = createFillMaterial(0xd6bea3);
-const NEEDLE_MATERIAL = createFillMaterial(0xcbdcbc);
+export const TRUNK_MATERIAL = createFillMaterial(0xd6bea3);
+export const NEEDLE_MATERIAL = createFillMaterial(0xcbdcbc);
 
 interface CrownLayer {
-  geometry: THREE.ConeGeometry;
+  radius: number;
+  height: number;
   y: number;
   rotation: number;
 }
 
-// 每棵树的形状都一样，几何只建一份共用，位置与旋转留在 Object3D 上。
-const TRUNK_GEOMETRY = markSharedGeometry(new THREE.CylinderGeometry(0.1, 0.17, 1.3, 7, 1, false));
-
 const CROWN_LAYERS: readonly CrownLayer[] = [
-  { geometry: new THREE.ConeGeometry(1.35, 1.7, 7, 1, false), y: 1.45, rotation: 0.08 },
-  { geometry: new THREE.ConeGeometry(1.05, 1.55, 7, 1, false), y: 2.15, rotation: -0.13 },
-  { geometry: new THREE.ConeGeometry(0.75, 1.4, 7, 1, false), y: 2.8, rotation: 0.17 },
-  { geometry: new THREE.ConeGeometry(0.45, 1.2, 7, 1, false), y: 3.38, rotation: -0.04 },
-].map((layer) => ({ ...layer, geometry: markSharedGeometry(layer.geometry) }));
-
-interface TreePlacement {
-  position: readonly [number, number, number];
-  rotation: number;
-  scale: number;
-}
-
-const TREE_PLACEMENTS: readonly TreePlacement[] = [
-  { position: [-5.2, 0, -3.8], rotation: 0.14, scale: 1.05 },
-  { position: [0.5, 0, -8.2], rotation: -0.22, scale: 1.34 },
-  { position: [5.1, 0, -4.8], rotation: 0.3, scale: 0.92 },
+  { radius: 1.35, height: 1.7, y: 1.45, rotation: 0.08 },
+  { radius: 1.05, height: 1.55, y: 2.15, rotation: -0.13 },
+  { radius: 0.75, height: 1.4, y: 2.8, rotation: 0.17 },
+  { radius: 0.45, height: 1.2, y: 3.38, rotation: -0.04 },
 ];
 
-function createCrownLayer(layer: CrownLayer): THREE.Group {
-  const crown = createOutlinedObject(layer.geometry, NEEDLE_MATERIAL);
-  crown.position.y = layer.y;
-  crown.rotation.y = layer.rotation;
-  return crown;
+/** 一棵树的顶端高度，用于估算地块包围球。 */
+export const TREE_HEIGHT = 3.98;
+
+function createCrownGeometry(): THREE.BufferGeometry {
+  // 四层树冠的相对位置在每棵树上都一样，直接烘焙进几何，
+  // 这样整片树林的树冠只需要一个 InstancedMesh。
+  const layers = CROWN_LAYERS.map((layer) => {
+    const geometry = new THREE.ConeGeometry(layer.radius, layer.height, 7, 1, false);
+    geometry.rotateY(layer.rotation);
+    geometry.translate(0, layer.y, 0);
+    return geometry;
+  });
+
+  const merged = BufferGeometryUtils.mergeBufferGeometries(layers);
+  if (!merged) throw new Error('树冠几何合并失败');
+  for (const layer of layers) layer.dispose();
+  return merged;
 }
 
-export function createTreeModel(): THREE.Group {
-  const tree = new THREE.Group();
-  const trunk = createOutlinedObject(TRUNK_GEOMETRY, TRUNK_MATERIAL);
-  trunk.position.y = 0.65;
-  tree.add(trunk);
+export const TREE_TRUNK_GEOMETRY = markSharedGeometry(
+  new THREE.CylinderGeometry(0.1, 0.17, 1.3, 7, 1, false).translate(0, 0.65, 0),
+);
 
-  for (const layer of CROWN_LAYERS) tree.add(createCrownLayer(layer));
-  return tree;
-}
-
-export function createTreeField(): THREE.Group {
-  const trees = new THREE.Group();
-  for (const placement of TREE_PLACEMENTS) {
-    const tree = createTreeModel();
-    tree.position.set(...placement.position);
-    tree.rotation.y = placement.rotation;
-    tree.scale.setScalar(placement.scale);
-    trees.add(tree);
-  }
-  return trees;
-}
+export const TREE_CROWN_GEOMETRY = markSharedGeometry(createCrownGeometry());

@@ -116,12 +116,17 @@ test('时间预算限制了不推进时钟时能走出的总距离', () => {
   assert.ok(scene.createSnapshot().players[0].x - spawn.x > moved);
 });
 
-test('玩家无法走出玩法平面的活动范围', () => {
+test('玩家无法走出世界边界', () => {
   const clock = createClock();
   const scene = new ServerScene('grassland', { now: clock.now });
   scene.addPlayer({ id: 'player-1', name: '旅人', slot: 0 });
 
-  for (let sequence = 1; sequence <= 400; sequence += 1) {
+  // 直接放到边界附近，再一路往外冲。
+  const player = scene.players.get('player-1');
+  player.x = PLAYER_BOUNDS.maximumX - 1;
+  player.z = PLAYER_BOUNDS.maximumZ - 1;
+
+  for (let sequence = 1; sequence <= 200; sequence += 1) {
     clock.advance(0.05);
     scene.update();
     scene.applyInput('player-1', {
@@ -132,9 +137,9 @@ test('玩家无法走出玩法平面的活动范围', () => {
     });
   }
 
-  const player = scene.createSnapshot().players[0];
-  assert.ok(player.x <= PLAYER_BOUNDS.maximumX);
-  assert.ok(player.z <= PLAYER_BOUNDS.maximumZ);
+  const snapshot = scene.createSnapshot().players[0];
+  assert.equal(snapshot.x, PLAYER_BOUNDS.maximumX);
+  assert.equal(snapshot.z, PLAYER_BOUNDS.maximumZ);
 });
 
 test('非法数值不会污染权威状态', () => {

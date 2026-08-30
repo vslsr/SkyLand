@@ -12,6 +12,7 @@
 - 参考项目风格的透明软体史莱姆玩家
 - Fly / TopDown 双控制器自动切换
 - 服务端权威的移动同步：输入上行、快照广播、客户端预测与和解
+- 无限世界：按玩家位置流式加载程序化地块，内容合批到固定 draw call
 
 ## 运行
 
@@ -65,6 +66,9 @@ const page: CommonUIPage = {
 - W / A / S / D：按俯视镜头的屏幕方向移动。
 - Shift：加速移动。
 - 鼠标：通过透视射线投影到玩法 XY 平面，并让史莱姆面向投影点。玩法坐标的 Y 在 Three.js 世界中映射为地面的 Z 轴。
+
+地形目前是平的，玩家的 Y 恒为 0，所以服务端不需要知道地块内容。等地形起伏之后，
+`worldGen` 要移进 `shared/`，让房间进程也能算出同一份高度来校验位置。
 
 史莱姆参考 `.cursor/line-art-style-magic-cabin-main/index.html`，使用三层透明材质、内部核心、气泡、阴影、顶点波动和移动压缩回弹。该参考路径也记录在 `.cursor/rules/line-art-reference.mdc` 中，作为项目始终生效的规范。
 
@@ -131,12 +135,55 @@ const page: CommonUIPage = {
 - `src/controllers/`：TopDown 控制器与 Fly/TopDown 控制路由
 - `src/player/`：玩家实体和史莱姆动画
 - `src/network/`：浏览器房间客户端、消息协议与快照插值
-- `src/models/`：程序化平地、树木、草丛与共用几何登记
+- `src/world/`：地块生成、构建与流式加载
+- `src/models/`：程序化平地、树木、草丛、实例化合批与共用几何登记
 - `src/materials/`：填充 Shader 与轮廓线材质
 - `server/network/`：WebSocket 网关
 - `server/rooms/`：房间进程管理器与 worker
 - `server/scene/`：服务端权威场景状态
-- `shared/`：前后端共用的移动模拟与同步常量
+- `shared/`：前后端共用的移动模拟、分块坐标与同步常量
+
+## 无限世界与分块
+
+世界没有边界。地块边长 32 米、以原点为中心对齐，`ChunkStreamer` 按玩家所在地块
+加载周围半径 2（5×5）的范围，走出去就卸载身后的。内容由 `worldGen` 按地块坐标
+确定性生成——同一个坐标永远给出同一批树，所以既不需要保存，也不需要在网络上传输。
+地块 (0,0) 是出生地，沿用原来手工摆放的三棵树和十三处草丛，向外才程序化生成。
+
+### 合批
+
+线稿风格下每个物体都是「填充网格 + 轮廓线」两次 draw call，逐个物体画的话
+draw call 会随内容量线性增长。地块给了一个天然的合批粒度：
+
+- 重复形状（树干、树冠、草叶）各压成一个 `InstancedMesh`
+- 所有轮廓线顶点预先乘上各自的变换，合并成一条 `LineSegments`
+
+于是一个地块永远是 6 次 draw call——地面填充、地面网格、树干、树冠、草叶、
+合并轮廓线——与里面有多少棵树、多少片草无关。同样的内容（一块地面、三棵树、
+33 片草叶）改造前需要 99 次 draw call。
+
+`InstancedMesh` 用自定义 `ShaderMaterial` 时要注意：three 会自动声明
+`instanceMatrix`，但不会套用内置的顶点变换块，`createFillMaterial` 必须自己
+在 `#ifdef USE_INSTANCING` 下把它乘进模型矩阵。
+
+### 剔除
+
+地块内容又宽又扁（32×32×4），外接球半径至少 22.6 米，球与球大面积交叠，
+three 逐物体的包围球判定几乎剔不掉任何东西。所以子物体统一关掉
+`frustumCulled`，改由 `ChunkStreamer.cull` 按地块的包围盒整块判定；
+`SceneRenderer` 为此把 `prepare`（更新相机与视锥）和 `render` 分成两步。
+
+`InstancedMesh` 还有一个坑：它的包围球只覆盖单个实例，整片草只要地块原点不在
+画面里就会被整体剔掉。`instancedBatch` 用同一批 `BufferAttribute` 另建一个
+`BufferGeometry` 来换包围球——three 的 GPU 缓冲以 attribute 为键，这样不产生
+任何额外上传，代价是这个视图与别处共用底层数据，绝不能 dispose。
+
+### 兴趣区
+
+世界无限之后，一份快照装下全房间玩家就没有意义了。`filterSnapshotForViewer`
+按每个连接自己的位置裁剪快照，只保留 96 米内的其他玩家；观察者自己那条永远保留，
+客户端的预测和解要靠它对账。兴趣区半径远大于雾的可见距离（52 米），所以边界处
+玩家的进出在画面上看不出来。
 
 ## 几何共用
 

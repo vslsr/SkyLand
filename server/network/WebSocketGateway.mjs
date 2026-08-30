@@ -4,6 +4,7 @@ import {
   MAXIMUM_INPUT_MESSAGES_PER_SECOND,
   SOCKET_HEARTBEAT_MS,
 } from '../../shared/networkTuning.mjs';
+import { filterSnapshotForViewer } from './areaOfInterest.mjs';
 
 function parseMessage(data) {
   try {
@@ -20,9 +21,7 @@ export class WebSocketGateway {
     this.webSocketServer = new WebSocketServer({ server, path: '/ws', maxPayload: 8192 });
 
     this.webSocketServer.on('connection', (socket) => this.handleConnection(socket));
-    roomManager.on('snapshot', (roomId, snapshot) => {
-      this.broadcastToRoom(roomId, { type: 'room:snapshot', snapshot });
-    });
+    roomManager.on('snapshot', (roomId, snapshot) => this.broadcastSnapshot(roomId, snapshot));
     roomManager.on('summary', (room) => {
       this.broadcastToRoom(room.id, { type: 'room:summary', room });
     });
@@ -131,6 +130,17 @@ export class WebSocketGateway {
     }
     session.roomId = undefined;
     session.playerId = undefined;
+  }
+
+  /** 每个连接收到的是按自己位置裁剪过的快照，而不是整个房间。 */
+  broadcastSnapshot(roomId, snapshot) {
+    for (const [socket, session] of this.sessions) {
+      if (session.roomId !== roomId) continue;
+      this.send(socket, {
+        type: 'room:snapshot',
+        snapshot: filterSnapshotForViewer(snapshot, session.playerId),
+      });
+    }
   }
 
   broadcastToRoom(roomId, message) {

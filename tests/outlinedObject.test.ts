@@ -3,22 +3,13 @@ import assert from 'node:assert/strict';
 import * as THREE from 'three';
 import { createOutlinedObject } from '../src/models/outlinedObject.ts';
 import { isSharedGeometry } from '../src/models/sharedGeometry.ts';
-import { createTreeModel } from '../src/models/tree.ts';
+import { TREE_CROWN_GEOMETRY, TREE_TRUNK_GEOMETRY } from '../src/models/tree.ts';
 
 const FILL_MATERIAL = new THREE.MeshBasicMaterial();
 
 function outlineOf(group: THREE.Group): THREE.BufferGeometry {
   const line = group.children.find((child) => child instanceof THREE.LineSegments);
   return (line as THREE.LineSegments).geometry;
-}
-
-function collectGeometries(root: THREE.Object3D): THREE.BufferGeometry[] {
-  const geometries: THREE.BufferGeometry[] = [];
-  root.traverse((object) => {
-    const geometry = (object as Partial<THREE.Mesh>).geometry;
-    if (geometry) geometries.push(geometry);
-  });
-  return geometries;
 }
 
 test('同一份几何与阈值只构建一次轮廓线', () => {
@@ -58,11 +49,9 @@ test('缓存出来的轮廓线被登记为共用，不该被单个物体释放',
   assert.equal(isSharedGeometry(geometry), false, '调用方自己传进来的几何不由这里登记');
 });
 
-test('多棵树共用同一批几何', () => {
-  const first = collectGeometries(createTreeModel());
-  const second = collectGeometries(createTreeModel());
-
-  assert.ok(first.length > 0);
-  assert.deepEqual(first, second, '两棵树引用的是同一批几何实例');
-  assert.ok(first.every((geometry) => isSharedGeometry(geometry)));
+test('树木几何全局只有一份并登记为共用', () => {
+  for (const geometry of [TREE_TRUNK_GEOMETRY, TREE_CROWN_GEOMETRY]) {
+    assert.ok(geometry.getAttribute('position').count > 0);
+    assert.equal(isSharedGeometry(geometry), true);
+  }
 });

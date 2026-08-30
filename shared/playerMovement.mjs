@@ -14,12 +14,19 @@ export const PLAYER_MOVE_SPEED = 3.2;
 export const PLAYER_SPRINT_MULTIPLIER = 1.65;
 export const PLAYER_MAXIMUM_SPEED = PLAYER_MOVE_SPEED * PLAYER_SPRINT_MULTIPLIER;
 
-/** 玩法平面的活动范围，与草地模型的尺寸对应。 @type {PlayerBounds} */
+/**
+ * 世界半径。地块是无限生成的，这里保留一个很大的硬边界有两个理由：
+ * 一是 float32 在更远处精度会掉到影响手感，二是服务端总要有个上限，
+ * 防止有人把自己送到 1e9 让地块生成炸掉。
+ */
+export const WORLD_RADIUS = 4096;
+
+/** 玩法平面的活动范围。 @type {PlayerBounds} */
 export const PLAYER_BOUNDS = {
-  minimumX: -16,
-  maximumX: 16,
-  minimumZ: -21,
-  maximumZ: 11,
+  minimumX: -WORLD_RADIUS,
+  maximumX: WORLD_RADIUS,
+  minimumZ: -WORLD_RADIUS,
+  maximumZ: WORLD_RADIUS,
 };
 
 export const SPAWN_SLOT_COUNT = 8;

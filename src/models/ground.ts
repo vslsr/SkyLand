@@ -1,38 +1,32 @@
 import * as THREE from 'three';
+import { CHUNK_HALF_SIZE, CHUNK_SIZE } from '../../shared/chunkCoordinates.mjs';
 import { createFillMaterial } from '../materials/createFillMaterial';
 import { GROUND_GRID_MATERIAL } from '../materials/lineMaterials';
-import { createOutlinedObject } from './outlinedObject';
+import { markSharedGeometry } from './sharedGeometry';
 
-const GROUND_WIDTH = 34;
-const GROUND_DEPTH = 34;
-const GROUND_CENTER_Z = -5;
+const GRID_SPACING = 2;
 
-function createGroundGrid(): THREE.LineSegments {
+export const GROUND_MATERIAL = createFillMaterial(0xf1eddf);
+
+export const GROUND_PLANE_GEOMETRY = markSharedGeometry(
+  new THREE.PlaneGeometry(CHUNK_SIZE, CHUNK_SIZE).rotateX(-Math.PI / 2),
+);
+
+function createGridGeometry(): THREE.BufferGeometry {
   const positions: number[] = [];
-  const halfWidth = GROUND_WIDTH / 2;
-  const halfDepth = GROUND_DEPTH / 2;
-  const spacing = 2;
 
-  for (let x = -halfWidth + spacing; x < halfWidth; x += spacing) {
-    positions.push(x, 0.012, -halfDepth, x, 0.012, halfDepth);
-  }
-  for (let z = -halfDepth + spacing; z < halfDepth; z += spacing) {
-    positions.push(-halfWidth, 0.012, z, halfWidth, 0.012, z);
+  // 起点含左/下边界、终点不含右/上边界，相邻地块的网格线因此首尾相接，
+  // 拼起来看不出接缝。地面本身不再描边——无限世界没有边界可画。
+  for (let offset = -CHUNK_HALF_SIZE; offset < CHUNK_HALF_SIZE; offset += GRID_SPACING) {
+    positions.push(offset, 0.012, -CHUNK_HALF_SIZE, offset, 0.012, CHUNK_HALF_SIZE);
+    positions.push(-CHUNK_HALF_SIZE, 0.012, offset, CHUNK_HALF_SIZE, 0.012, offset);
   }
 
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
-  return new THREE.LineSegments(geometry, GROUND_GRID_MATERIAL);
+  return geometry;
 }
 
-export function createGroundModel(): THREE.Group {
-  const ground = new THREE.Group();
-  ground.position.z = GROUND_CENTER_Z;
+export const GROUND_GRID_GEOMETRY = markSharedGeometry(createGridGeometry());
 
-  const planeGeometry = new THREE.PlaneGeometry(GROUND_WIDTH, GROUND_DEPTH);
-  const plane = createOutlinedObject(planeGeometry, createFillMaterial(0xf1eddf));
-  plane.rotation.x = -Math.PI / 2;
-  ground.add(plane);
-  ground.add(createGroundGrid());
-  return ground;
-}
+export { GROUND_GRID_MATERIAL };
