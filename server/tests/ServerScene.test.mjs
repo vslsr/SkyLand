@@ -16,7 +16,7 @@ test('ServerScene adds, moves and removes a player', () => {
   assert.equal(snapshot.players.length, 1);
   assert.equal(snapshot.players[0].acknowledgedSequence, 1);
   assert.ok(snapshot.players[0].position.x > 0);
-  assert.ok(snapshot.players[0].position.z < 8);
+  assert.ok(snapshot.players[0].position.z < 4.5);
 
   scene.removePlayer('player-1');
   assert.equal(scene.createSnapshot().players.length, 0);

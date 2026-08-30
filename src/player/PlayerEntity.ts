@@ -9,7 +9,7 @@ export class PlayerEntity {
   private readonly animator = new SlimeAnimator(this.model);
 
   public constructor(canvas: HTMLCanvasElement) {
-    this.model.root.position.set(0, 0, 8);
+    this.model.root.position.set(0, 0, 4.5);
     this.controller = new TopDownController(canvas, this.model.root, { enabled: false });
   }
 
@@ -23,6 +23,6 @@ export class PlayerEntity {
 
   public dispose(): void {
     this.controller.dispose();
-    this.model.root.removeFromParent();
+    this.model.root.parent?.remove(this.model.root);
   }
 }

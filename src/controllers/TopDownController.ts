@@ -53,7 +53,7 @@ export class TopDownController {
     this.enabled = options.enabled ?? true;
     this.moveSpeed = options.moveSpeed ?? 3.2;
     this.sprintMultiplier = options.sprintMultiplier ?? 1.65;
-    this.cameraOffset = options.cameraOffset ?? [7.5, 10.5, 11.5];
+    this.cameraOffset = options.cameraOffset ?? [5.5, 7.5, 8.5];
     this.fieldOfViewRadians = ((options.fieldOfViewDegrees ?? 50) * Math.PI) / 180;
     this.bounds = options.bounds ?? DEFAULT_BOUNDS;
     this.bindEvents();

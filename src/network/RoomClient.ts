@@ -25,11 +25,17 @@ interface ServerMessage {
 type RoomUpdateListener = (room: RoomSummary) => void;
 type DisconnectListener = () => void;
 
+export interface PlayerInputFrame {
+  move: { x: number; y: number; z: number };
+  look: { yaw: number; pitch: number };
+}
+
 export class RoomClient {
   private socket?: WebSocket;
   private socketReady?: Promise<WebSocket>;
   private readonly roomListeners = new Set<RoomUpdateListener>();
   private readonly disconnectListeners = new Set<DisconnectListener>();
+  private inputSequence = 0;
 
   public async listRooms(): Promise<RoomSummary[]> {
     const response = await fetch('/api/rooms');
@@ -62,6 +68,7 @@ export class RoomClient {
         const message = this.parseMessage(event.data);
         if (!message) return;
         if (message.type === 'room:joined' && message.room && message.player) {
+          this.inputSequence = 0;
           cleanup();
           resolve({ room: message.room, player: message.player });
         } else if (message.type === 'error') {
@@ -91,6 +98,19 @@ export class RoomClient {
     if (this.socket?.readyState === WebSocket.OPEN) {
       this.socket.send(JSON.stringify({ type: 'room:leave' }));
     }
+  }
+
+  public sendPlayerInput(input: PlayerInputFrame): void {
+    if (this.socket?.readyState !== WebSocket.OPEN) return;
+    this.inputSequence += 1;
+    this.socket.send(
+      JSON.stringify({
+        type: 'player:input',
+        sequence: this.inputSequence,
+        move: input.move,
+        look: input.look,
+      }),
+    );
   }
 
   public onRoomUpdate(listener: RoomUpdateListener): () => void {

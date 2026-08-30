@@ -1,6 +1,8 @@
 import { FlyController } from '../camera/FlyController';
 import { GameInteractionLayer } from '../interaction/GameInteractionLayer';
+import { SceneControlRouter } from '../controllers/SceneControlRouter';
 import { RoomClient, type JoinedRoom, type RoomSummary } from '../network/RoomClient';
+import { PlayerEntity } from '../player/PlayerEntity';
 import { SceneRenderer } from '../rendering/SceneRenderer';
 import { HudController } from '../ui/HudController';
 import { CreateRoomPage, type CreateRoomFormValue } from '../ui/pages/CreateRoomPage';
@@ -14,27 +16,32 @@ export interface GrasslandSceneOptions extends SceneUIContext {
 export class GrasslandScene extends Scene {
   private readonly canvas: HTMLCanvasElement;
   private readonly renderer: SceneRenderer;
-  private readonly controller: FlyController;
+  private readonly flyController: FlyController;
+  private readonly controls: SceneControlRouter;
   private readonly gameInteractions = new GameInteractionLayer();
   private readonly hud = new HudController();
   private readonly roomClient = new RoomClient();
   private readonly lobbyPage = new RoomLobbyPage();
   private joinedRoom?: JoinedRoom;
+  private player?: PlayerEntity;
+  private networkInputAccumulator = 0;
 
   public constructor(options: GrasslandSceneOptions) {
     super('grassland', options);
     this.canvas = options.canvas;
     this.renderer = new SceneRenderer(options.canvas);
-    this.controller = new FlyController(options.canvas, {
+    this.flyController = new FlyController(options.canvas, {
       position: [0, 4.2, 13.5],
       yaw: 0,
       pitch: -0.12,
       enabled: false,
       onLockChange: (locked) => this.hud.setLocked(locked),
     });
+    this.controls = new SceneControlRouter(this.flyController);
+    this.controls.onModeChange((mode) => this.hud.setControlMode(mode));
 
     this.commonUI.onStackChange(() => {
-      this.controller.setInputEnabled(this.commonUI.allowsGameInteraction && Boolean(this.joinedRoom));
+      this.controls.setInputEnabled(this.commonUI.allowsGameInteraction);
     });
     this.commonUI.setBaseEventHandler((event) => this.gameInteractions.dispatch(event));
     this.lobbyPage.onRefresh(() => void this.refreshRooms());
@@ -44,12 +51,14 @@ export class GrasslandScene extends Scene {
     this.roomClient.onDisconnect(() => this.handleDisconnect());
   }
 
-  public update(deltaSeconds: number): void {
-    this.controller.update(deltaSeconds);
+  public update(deltaSeconds: number, elapsedSeconds: number): void {
+    this.controls.update(deltaSeconds, elapsedSeconds);
+    this.player?.updateAnimation(deltaSeconds, elapsedSeconds);
+    this.sendPlayerInput(deltaSeconds);
   }
 
   public render(): void {
-    this.renderer.render(this.controller.frame);
+    this.renderer.render(this.controls.frame);
   }
 
   protected onEnter(): void {
@@ -60,7 +69,7 @@ export class GrasslandScene extends Scene {
   }
 
   protected onLeave(): void {
-    this.controller.setInputEnabled(false);
+    this.controls.setInputEnabled(false);
     if (document.pointerLockElement === this.canvas) document.exitPointerLock();
   }
 
@@ -108,6 +117,7 @@ export class GrasslandScene extends Scene {
       return;
     }
     this.joinedRoom = joined;
+    this.createPlayer();
     this.hud.setRoom(joined.room);
     this.commonUI.clear();
   }
@@ -121,6 +131,7 @@ export class GrasslandScene extends Scene {
   private handleDisconnect(): void {
     if (!this.joinedRoom) return;
     this.joinedRoom = undefined;
+    this.destroyPlayer();
     this.hud.setDisconnected();
     if (this.isActive && this.commonUI.size === 0) {
       this.commonUI.push(this.lobbyPage);
@@ -130,5 +141,28 @@ export class GrasslandScene extends Scene {
 
   private getErrorMessage(error: unknown): string {
     return error instanceof Error ? error.message : '发生了未知错误';
+  }
+
+  private createPlayer(): void {
+    if (this.player) return;
+    this.player = new PlayerEntity(this.canvas);
+    this.renderer.addWorldObject(this.player.object3D);
+    this.controls.setPlayerController(this.player.controller);
+  }
+
+  private destroyPlayer(): void {
+    if (!this.player) return;
+    this.controls.setPlayerController(undefined);
+    this.renderer.removeWorldObject(this.player.object3D);
+    this.player.dispose();
+    this.player = undefined;
+  }
+
+  private sendPlayerInput(deltaSeconds: number): void {
+    if (!this.player || !this.joinedRoom) return;
+    this.networkInputAccumulator += deltaSeconds;
+    if (this.networkInputAccumulator < 0.05) return;
+    this.networkInputAccumulator %= 0.05;
+    this.roomClient.sendPlayerInput(this.player.controller.inputFrame);
   }
 }

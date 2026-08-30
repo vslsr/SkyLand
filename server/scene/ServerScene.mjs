@@ -15,7 +15,7 @@ export class ServerScene {
     this.players.set(player.id, {
       id: player.id,
       name: player.name,
-      position: { x: 0, y: 1.8, z: 8 },
+      position: { x: 0, y: 0, z: 4.5 },
       look: { yaw: 0, pitch: 0 },
       input: { x: 0, y: 0, z: 0 },
       sequence: 0,

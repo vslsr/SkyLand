@@ -9,6 +9,8 @@
 - 每个 Scene 独立的 `CommonUIManager` 栈
 - 房间大厅、Grid 房间卡片和通用弹出窗体
 - Node.js 大厅进程、WebSocket 网关和每房间独立子进程
+- 参考项目风格的透明软体史莱姆玩家
+- Fly / TopDown 双控制器自动切换
 
 ## 运行
 
@@ -51,6 +53,16 @@ const page: CommonUIPage = {
 
 切换 Scene 时，`Scene.leave()` 会停用并清空该 Scene 的全部 CommonUI。
 
+## 玩家控制
+
+- 玩家实体不存在：使用原有 `FlyController` 自由飞行镜头。
+- 玩家加入房间并生成实体：`SceneControlRouter` 自动切换到 `TopDownController`。
+- W / A / S / D：按俯视镜头的屏幕方向移动。
+- Shift：加速移动。
+- 鼠标：通过透视射线投影到玩法 XY 平面，并让史莱姆面向投影点。玩法坐标的 Y 在 Three.js 世界中映射为地面的 Z 轴。
+
+史莱姆参考 `.cursor/line-art-style-magic-cabin-main/index.html`，使用三层透明材质、内部核心、气泡、阴影、顶点波动和移动压缩回弹。该参考路径也记录在 `.cursor/rules/line-art-reference.mdc` 中，作为项目始终生效的规范。
+
 ## 房间进程
 
 客户端通过 HTTP 获取或创建房间，通过 `/ws` WebSocket 加入房间。大厅进程只管理连接和路由；`RoomProcessManager` 每创建一个房间都会使用 `child_process.fork()` 启动独立的 `room-worker.mjs`。
@@ -63,6 +75,8 @@ const page: CommonUIPage = {
 - `src/ui/common/`：CommonUI 栈和通用窗体
 - `src/ui/pages/`：房间大厅、创建房间页面
 - `src/interaction/`：最底层游戏交互事件路由
+- `src/controllers/`：TopDown 控制器与 Fly/TopDown 控制路由
+- `src/player/`：玩家实体和史莱姆动画
 - `src/network/`：浏览器房间客户端
 - `src/models/`：程序化平地、树木和草丛
 - `src/materials/`：填充 Shader 与轮廓线材质

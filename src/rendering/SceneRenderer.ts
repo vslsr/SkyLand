@@ -32,6 +32,14 @@ export class SceneRenderer {
     this.renderer.render(this.scene, this.camera);
   }
 
+  public addWorldObject(object: THREE.Object3D): void {
+    this.scene.add(object);
+  }
+
+  public removeWorldObject(object: THREE.Object3D): void {
+    this.scene.remove(object);
+  }
+
   private resizeToDisplaySize(): void {
     const canvas = this.renderer.domElement;
     const pixelRatio = Math.min(window.devicePixelRatio || 1, 1.75);
