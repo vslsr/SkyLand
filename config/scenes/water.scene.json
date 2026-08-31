@@ -53,10 +53,10 @@
       "noiseScale": 0.085,
       "noiseStrength": 1.15,
       "interlaceStrength": 0.42,
-      "surfaceColor": "#d7e7e5",
-      "secondaryColor": "#c6dcdb",
-      "gridLineColor": "#617f82",
-      "gridLineOpacity": 0.28
+      "surfaceColor": "#c9e6f2",
+      "secondaryColor": "#b7dbea",
+      "gridLineColor": "#5f8195",
+      "gridLineOpacity": 0.25
     }
   },
   "gameplay": {

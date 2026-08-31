@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import type { ThreeObjectComponent } from '../../actors/components/ThreeObjectComponent';
 import { createAbilityLabModel } from '../../models/abilityLab';
 import type { AbilityLabAction, AbilityLabViewState } from './AbilityLabSimulation';
 
@@ -25,11 +26,27 @@ function disposeObject(root: THREE.Object3D): void {
 export class AbilityLabVisualSystem {
   private readonly model = createAbilityLabModel();
   private readonly projectiles: AbilityProjectile[] = [];
+  private readonly targetPosition = new THREE.Vector3();
+  private targetRender?: ThreeObjectComponent;
   private hitPulse = 0;
   private ragePulse = 0;
 
   public get root(): THREE.Group {
     return this.model.root;
+  }
+
+  public bindTarget(targetRender: ThreeObjectComponent): void {
+    if (!targetRender.abilityTargetRig) {
+      throw new Error('能力实验室目标 Actor 缺少 abilityTargetRig');
+    }
+    this.unbindTarget();
+    this.targetRender = targetRender;
+    this.resetTargetVisual();
+  }
+
+  public unbindTarget(): void {
+    this.resetTargetVisual();
+    this.targetRender = undefined;
   }
 
   public play(
@@ -52,20 +69,25 @@ export class AbilityLabVisualSystem {
     state: AbilityLabViewState,
     source: THREE.Vector3,
   ): void {
+    const targetRig = this.targetRender?.abilityTargetRig;
+    if (!targetRig) return;
     this.model.casterRune.position.set(source.x, 0, source.z);
     this.model.casterRune.rotation.y = elapsedSeconds * 0.18;
 
     const healthRatio = Math.max(0, state.target.health / state.target.maximumHealth);
     const targetPulse = 1 + this.hitPulse * 0.12;
-    this.model.targetCore.scale.setScalar(Math.max(0.72, targetPulse * (0.86 + healthRatio * 0.14)));
-    this.model.targetCore.rotation.y = elapsedSeconds * (0.35 + healthRatio * 0.25);
-    this.model.targetCore.position.y = 1.72 + Math.sin(elapsedSeconds * 2.1) * 0.035;
-    this.model.target.rotation.z = healthRatio <= 0 ? -0.5 : Math.sin(elapsedSeconds * 0.7) * 0.008;
+    targetRig.core.scale.setScalar(Math.max(0.72, targetPulse * (0.86 + healthRatio * 0.14)));
+    targetRig.core.rotation.y = elapsedSeconds * (0.35 + healthRatio * 0.25);
+    const coreBaseY = Number(targetRig.core.userData.baseY ?? targetRig.core.position.y);
+    targetRig.core.position.y = coreBaseY + Math.sin(elapsedSeconds * 2.1) * 0.035;
+    targetRig.targetRoot.rotation.z = healthRatio <= 0
+      ? -0.5
+      : Math.sin(elapsedSeconds * 0.7) * 0.008;
 
     const burning = state.target.tags.some((tag) => tag === 'State.Burning');
-    this.model.burningAura.visible = burning;
+    targetRig.burningAura.visible = burning;
     if (burning) {
-      for (const child of this.model.burningAura.children) {
+      for (const child of targetRig.burningAura.children) {
         const phase = Number(child.userData.phase ?? 0);
         child.scale.y = 0.72 + Math.sin(elapsedSeconds * 7 + phase * Math.PI * 2) * 0.24;
         child.position.y = Number(child.userData.baseY ?? child.position.y)
@@ -95,10 +117,12 @@ export class AbilityLabVisualSystem {
     }
     this.hitPulse = 0;
     this.ragePulse = 0;
+    this.resetTargetVisual();
   }
 
   public dispose(): void {
     this.reset();
+    this.unbindTarget();
     this.root.parent?.remove(this.root);
     disposeObject(this.root);
   }
@@ -126,10 +150,17 @@ export class AbilityLabVisualSystem {
     );
     object.add(glow);
     this.model.projectileLayer.add(object);
+    const targetPoint = this.targetRender?.abilityTargetRig?.targetPoint;
+    if (!targetPoint) {
+      object.parent?.remove(object);
+      disposeObject(object);
+      return;
+    }
+    targetPoint.getWorldPosition(this.targetPosition);
     this.projectiles.push({
       object,
       start: new THREE.Vector3(source.x, 0.68, source.z),
-      end: this.model.targetPoint.clone(),
+      end: this.targetPosition.clone(),
       duration: action === 'arcane' ? 0.34 : 0.52,
       elapsed: 0,
     });
@@ -150,5 +181,17 @@ export class AbilityLabVisualSystem {
       projectile.object.parent?.remove(projectile.object);
       disposeObject(projectile.object);
     }
+  }
+
+  private resetTargetVisual(): void {
+    const rig = this.targetRender?.abilityTargetRig;
+    if (!rig) return;
+    rig.targetRoot.rotation.z = 0;
+    rig.core.scale.setScalar(1);
+    rig.core.rotation.y = 0;
+    if (rig.core.userData.baseY !== undefined) {
+      rig.core.position.y = Number(rig.core.userData.baseY);
+    }
+    rig.burningAura.visible = false;
   }
 }

@@ -58,6 +58,18 @@ test('Player InputAction、InputConfig、Context 与设备提示来自同一份 
     'Keyboard.KeyE',
   );
   assert.equal(
+    PlayerInputSchemeDefinition.inputMappingContexts[0].mappings.find((mapping) => (
+      mapping.id === 'WorldInteract.Touch.Button'
+    ))?.control,
+    'Virtual.WorldInteractButton',
+  );
+  assert.equal(
+    PlayerInputSchemeDefinition.inputMappingContexts[0].mappings.find((mapping) => (
+      mapping.id === 'WorldInteract.Gamepad.Button'
+    ))?.control,
+    'Gamepad.ButtonNorth',
+  );
+  assert.equal(
     PlayerInputSchemeDefinition.inputConfig.bindings.find((binding) => (
       binding.actionId === 'IA_AbilityLab_Arcane'
     ))?.tag,
@@ -78,6 +90,9 @@ test('Player InputAction、InputConfig、Context 与设备提示来自同一份 
   assert.equal(String(PlayerInputTags.DebugMenu), 'Input.Debug.Menu');
 
   const runtime = createPlayerInputScheme({ storage: null });
+  assert.equal(runtime.getControlLabel('Keyboard.KeyE'), 'E');
+  assert.equal(runtime.getControlLabel('Virtual.WorldInteractButton'), 'ACT');
+  assert.equal(runtime.getControlLabel('Gamepad.ButtonNorth'), 'Y');
   assert.match(runtime.getPrompt('topdown', 'keyboardMouse'), /W\/A\/S\/D · 移动/);
   assert.match(runtime.getPrompt('fly', 'gamepad', 'unlocked'), /F 接管木筏/);
 });
@@ -183,7 +198,12 @@ test('虚拟摇杆 V2 配置来自 JSON，并拒绝没有 touch Mapping 的控�
   assert.equal(PlayerInputSchemeDefinition.virtualControls.layouts.portrait.scale, 0.9);
   assert.deepEqual(
     PlayerInputSchemeDefinition.virtualControls.buttons.map((button) => button.control),
-    ['Virtual.SprintButton', 'Virtual.InteractButton', 'Virtual.DodgeButton'],
+    [
+      'Virtual.SprintButton',
+      'Virtual.InteractButton',
+      'Virtual.DodgeButton',
+      'Virtual.WorldInteractButton',
+    ],
   );
 
   const broken = JSON.parse(JSON.stringify(PlayerInputSchemeDefinition)) as {

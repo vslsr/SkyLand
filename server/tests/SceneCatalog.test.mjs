@@ -13,15 +13,46 @@ test('loads every selectable map from an independent scene JSON', async () => {
   const abilityLab = catalog.require('ability-lab');
   assert.equal(abilityLab.capacity, 1);
   assert.equal(abilityLab.camera.mode, 'topdown');
-  assert.deepEqual(abilityLab.sceneComponents, [{ type: 'ability-lab' }]);
-  assert.deepEqual(abilityLab.actors, []);
+  assert.deepEqual(abilityLab.sceneComponents, [{
+    type: 'ability-lab',
+    targetActorId: 'training-dummy-01',
+  }]);
+  assert.deepEqual(
+    abilityLab.actors.map((actor) => [actor.id, actor.archetypeId]),
+    [
+      ['training-dummy-01', 'training-dummy'],
+      ['arcane-focus-01', 'arcane-focus-obelisk'],
+      ['ember-focus-01', 'ember-focus-obelisk'],
+      ['ability-floor-plaque-01', 'ability-floor-plaque'],
+    ],
+  );
+  assert.equal(
+    abilityLab.actorArchetypes.find((actor) => actor.id === 'training-dummy')
+      .components.render.model,
+    'line-art-training-dummy',
+  );
   const grassTest = catalog.require('grass-test');
   assert.equal(grassTest.renderer.content.grass, true);
   assert.deepEqual(grassTest.sceneComponents, [{ type: 'mouse-grass-interaction' }]);
   assert.equal(grassTest.renderer.content.trees, false);
   assert.equal(grassTest.renderer.content.ocean, false);
   assert.equal(grassTest.camera.mode, 'topdown');
-  assert.equal(catalog.require('grassland').renderer.type, 'line-art');
+  const grassland = catalog.require('grassland');
+  assert.equal(grassland.renderer.type, 'line-art');
+  assert.deepEqual(grassland.sceneComponents[1], {
+    type: 'interactive-particle-effect',
+    id: 'grassland-leaves',
+    preset: 'line-art-leaves',
+    position: [0, 0, 1.5],
+    particleCount: 180,
+    radius: 8,
+    seed: 139732,
+    fillColor: '#d6a45b',
+    accentColor: '#bd7041',
+    lineColor: '#493426',
+    interactionRadius: 0.9,
+    impulseStrength: 3.4,
+  });
   assert.equal(catalog.require('open-meadow').renderer.content.trees, false);
   assert.deepEqual(catalog.require('open-world').sceneComponents, []);
   const water = catalog.require('water');

@@ -14,6 +14,16 @@
       "additionalProperties": false,
       "required": ["render"],
       "properties": {
+        "playerMovement": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["walkSpeed", "sprintMultiplier", "maximumStepHeight"],
+          "properties": {
+            "walkSpeed": { "type": "number", "exclusiveMinimum": 0, "maximum": 30 },
+            "sprintMultiplier": { "type": "number", "minimum": 1, "maximum": 4 },
+            "maximumStepHeight": { "type": "number", "minimum": 0, "maximum": 2 }
+          }
+        },
         "buoyancy": {
           "type": "object",
           "additionalProperties": false,
@@ -106,6 +116,30 @@
             {
               "type": "object",
               "additionalProperties": false,
+              "required": [
+                "model",
+                "radius",
+                "membraneColor",
+                "middleColor",
+                "coreColor",
+                "bubbleColor",
+                "inkColor",
+                "shadowColor"
+              ],
+              "properties": {
+                "model": { "const": "line-art-player-slime" },
+                "radius": { "type": "number", "exclusiveMinimum": 0, "maximum": 2 },
+                "membraneColor": { "$ref": "#/$defs/color" },
+                "middleColor": { "$ref": "#/$defs/color" },
+                "coreColor": { "$ref": "#/$defs/color" },
+                "bubbleColor": { "$ref": "#/$defs/color" },
+                "inkColor": { "$ref": "#/$defs/color" },
+                "shadowColor": { "$ref": "#/$defs/color" }
+              }
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
               "required": ["model", "foamColor", "length", "width"],
               "properties": {
                 "model": { "const": "line-art-raft" },
@@ -150,6 +184,43 @@
                 "spotColor": { "$ref": "#/$defs/color" },
                 "radius": { "type": "number", "exclusiveMinimum": 0, "maximum": 3 },
                 "height": { "type": "number", "exclusiveMinimum": 0, "maximum": 5 }
+              }
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["model", "woodColor", "accentColor", "radius", "height"],
+              "properties": {
+                "model": { "const": "line-art-training-dummy" },
+                "woodColor": { "$ref": "#/$defs/color" },
+                "accentColor": { "$ref": "#/$defs/color" },
+                "radius": { "type": "number", "exclusiveMinimum": 0, "maximum": 3 },
+                "height": { "type": "number", "exclusiveMinimum": 0, "maximum": 6 }
+              }
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["model", "stoneColor", "crystalColor", "radius", "height"],
+              "properties": {
+                "model": { "const": "line-art-focus-obelisk" },
+                "stoneColor": { "$ref": "#/$defs/color" },
+                "crystalColor": { "$ref": "#/$defs/color" },
+                "radius": { "type": "number", "exclusiveMinimum": 0, "maximum": 3 },
+                "height": { "type": "number", "exclusiveMinimum": 0, "maximum": 6 }
+              }
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["model", "color", "accentColor", "width", "length", "height"],
+              "properties": {
+                "model": { "const": "line-art-floor-plaque" },
+                "color": { "$ref": "#/$defs/color" },
+                "accentColor": { "$ref": "#/$defs/color" },
+                "width": { "type": "number", "exclusiveMinimum": 0, "maximum": 12 },
+                "length": { "type": "number", "exclusiveMinimum": 0, "maximum": 12 },
+                "height": { "type": "number", "exclusiveMinimum": 0, "maximum": 1 }
               }
             }
           ]

@@ -2,6 +2,7 @@ import type { CameraFrame } from '../camera/CameraTransform';
 import { PlayerInputTags } from '../input/config/playerInput';
 import type { InputSubsystem } from '../input/core/InputSubsystem';
 import type { ActorInteractionCandidate } from '../scene/SceneVisualSystem';
+import type { TagLike } from '../tags';
 
 export interface ActorInteractionPort {
   getPlayerId(): string | undefined;
@@ -9,8 +10,9 @@ export interface ActorInteractionPort {
   findOwnedActorId(playerId: string): string | undefined;
   pick(frame: CameraFrame): ActorInteractionCandidate | undefined;
   findNearby?(position: { x: number; z: number }): ActorInteractionCandidate | undefined;
+  getInputLabel(tag: TagLike): string | undefined;
   setHoveredActorId(actorId?: string): void;
-  setInteractionMarkerActorId?(actorId?: string): void;
+  setInteractionMarkerActorId?(actorId?: string, inputLabel?: string): void;
   sendInteraction(actorId: string): void;
   setPrompt(text?: string): void;
 }
@@ -43,10 +45,12 @@ export class ActorInteractionController {
       ? this.port.findNearby?.(playerPosition)
       : this.port.pick(frame);
     this.port.setHoveredActorId(usesProximity ? undefined : this.candidate?.actorId);
+    const worldInteractionLabel = this.port.getInputLabel(PlayerInputTags.WorldInteract);
     this.port.setInteractionMarkerActorId?.(
-      usesProximity && this.candidate?.action === 'mushroom-bite'
+      usesProximity && this.candidate?.action === 'mushroom-bite' && worldInteractionLabel
         ? this.candidate.actorId
         : undefined,
+      worldInteractionLabel,
     );
     const playerId = this.port.getPlayerId();
     const vesselId = playerId ? this.port.findOwnedActorId(playerId) : undefined;
@@ -83,13 +87,37 @@ export class ActorInteractionController {
   ): string | undefined {
     if (!candidate) return undefined;
     if (candidate.action === 'mushroom-bite') {
-      if (!candidate.holderPlayerId) return `E · 叼住「${candidate.label}」`;
+      if (!candidate.holderPlayerId) {
+        return this.withInputLabel(
+          this.port.getInputLabel(PlayerInputTags.WorldInteract),
+          `叼住「${candidate.label}」`,
+        );
+      }
       return `「${candidate.label}」正被叼住`;
     }
-    if (!vesselId) return `先按 F 接管木筏，再装载「${candidate.label}」`;
-    if (!candidate.carrierActorId) return `E · 装载「${candidate.label}」`;
-    if (candidate.carrierActorId === vesselId) return `E · 卸载「${candidate.label}」`;
+    if (!vesselId) {
+      const label = this.port.getInputLabel(PlayerInputTags.Interact);
+      return label
+        ? `先按 ${label} 接管木筏，再装载「${candidate.label}」`
+        : `请先接管木筏，再装载「${candidate.label}」`;
+    }
+    if (!candidate.carrierActorId) {
+      return this.withInputLabel(
+        this.port.getInputLabel(PlayerInputTags.WorldInteract),
+        `装载「${candidate.label}」`,
+      );
+    }
+    if (candidate.carrierActorId === vesselId) {
+      return this.withInputLabel(
+        this.port.getInputLabel(PlayerInputTags.WorldInteract),
+        `卸载「${candidate.label}」`,
+      );
+    }
     return `「${candidate.label}」已被其他木筏装载`;
+  }
+
+  private withInputLabel(label: string | undefined, action: string): string {
+    return label ? `${label} · ${action}` : `当前设备未绑定交互 · ${action}`;
   }
 
   private clearSelection(): void {

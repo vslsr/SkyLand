@@ -103,9 +103,24 @@ test('场景组件拒绝未知类型、重复加载和不满足的运行前提',
   await assert.rejects(loadSingleScene(duplicated), /重复加载/);
 
   const missingPlayer = createSceneFile();
-  missingPlayer.sceneComponents = [{ type: 'ability-lab' }];
+  missingPlayer.sceneComponents = [{ type: 'ability-lab', targetActorId: 'training-dummy-01' }];
   missingPlayer.camera.mode = 'fly';
   await assert.rejects(loadSingleScene(missingPlayer), /ability-lab 需要 topdown/);
+});
+
+test('能力实验室组件必须引用场景内的训练假人 Actor', async () => {
+  const missing = createSceneFile();
+  missing.sceneComponents = [{ type: 'ability-lab', targetActorId: 'missing-dummy' }];
+  await assert.rejects(loadSingleScene(missing), /引用了不存在的目标 Actor/);
+
+  const wrongModel = createSceneFile();
+  wrongModel.actors = [{
+    id: 'wrong-target',
+    archetype: 'deck-prop',
+    localTransform: { position: [0, 0, 0], yaw: 0 },
+  }];
+  wrongModel.sceneComponents = [{ type: 'ability-lab', targetActorId: 'wrong-target' }];
+  await assert.rejects(loadSingleScene(wrongModel), /需要 line-art-training-dummy render/);
 });
 
 test('Actor 父节点可后声明，且子节点坐标按局部 Transform 保留', async () => {

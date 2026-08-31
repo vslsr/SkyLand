@@ -44,6 +44,10 @@ export const PlayerInputActionIds = {
   Dodge: 'IA_Player_Dodge',
 } as const;
 
+export const PlayerInputMappingIds = {
+  DebugMenuKeyboard: 'DebugMenu.Keyboard.F8',
+} as const;
+
 const tagForAction = (actionId: string): string => {
   const binding = PlayerInputSchemeDefinition.inputConfig.bindings.find((item) => (
     item.actionId === actionId

@@ -322,3 +322,42 @@ test('axis2D 使用最近活跃的设备来源而不是跨设备相加', () => {
   assert.equal(input.activeDeviceKind, 'keyboardMouse');
   assert.deepEqual(activeDevices, ['keyboardMouse', 'touch', 'keyboardMouse']);
 });
+
+test('输入提示控制路径来自当前生效 Context，并按设备类型筛选', () => {
+  const input = new InputSubsystem({
+    actions: [{ id: 'Use', valueType: 'digital' }],
+    config: { bindings: [{ tag: 'Input.Test.Use', actionId: 'Use' }] },
+    contexts: [
+      {
+        id: 'IMC.Gameplay',
+        priority: 1,
+        activeByDefault: true,
+        mappings: [
+          {
+            control: 'Keyboard.KeyE', actionId: 'Use', deviceKind: 'keyboardMouse',
+          },
+          {
+            control: 'Gamepad.ButtonNorth', actionId: 'Use', deviceKind: 'gamepad',
+          },
+        ],
+      },
+      {
+        id: 'IMC.Menu',
+        priority: 10,
+        activeByDefault: false,
+        mappings: [{
+          control: 'Keyboard.Enter', actionId: 'Use', deviceKind: 'keyboardMouse',
+        }],
+      },
+    ],
+  });
+
+  assert.deepEqual(input.getMappedControls('Input.Test.Use', 'keyboardMouse'), ['Keyboard.KeyE']);
+  assert.deepEqual(input.getMappedControls('Input.Test.Use', 'gamepad'), ['Gamepad.ButtonNorth']);
+
+  input.setContextActive('IMC.Gameplay', false);
+  input.setContextActive('IMC.Menu', true);
+  assert.deepEqual(input.getMappedControls('Input.Test.Use', 'keyboardMouse'), ['Keyboard.Enter']);
+  assert.deepEqual(input.getMappedControls('Input.Test.Use', 'gamepad'), []);
+  input.dispose();
+});

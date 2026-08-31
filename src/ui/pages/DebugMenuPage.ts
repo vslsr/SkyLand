@@ -44,12 +44,6 @@ export class DebugMenuPage extends ModalWindow {
       : '显示 Actor 简单碰撞';
   }
 
-  public handleGlobalInputEvent(event: KeyboardEvent): boolean {
-    if (event.code !== 'F8') return false;
-    this.requestClose();
-    return true;
-  }
-
   public onOpen(): void {
     this.collisionButton.focus();
   }

@@ -94,6 +94,21 @@ function validateVesselMotor(raw, filename) {
   };
 }
 
+function validatePlayerMovement(raw, filename) {
+  const path = `${filename}.components.playerMovement`;
+  const definition = requireObject(raw, path);
+  return {
+    walkSpeed: requireNumber(definition.walkSpeed, `${path}.walkSpeed`, Number.EPSILON, 30),
+    sprintMultiplier: requireNumber(definition.sprintMultiplier, `${path}.sprintMultiplier`, 1, 4),
+    maximumStepHeight: requireNumber(
+      definition.maximumStepHeight,
+      `${path}.maximumStepHeight`,
+      0,
+      2,
+    ),
+  };
+}
+
 function validateInteractable(raw, filename) {
   const path = `${filename}.components.interactable`;
   const definition = requireObject(raw, path);
@@ -155,6 +170,18 @@ function validateHazard(raw, filename) {
 function validateRender(raw, filename) {
   const path = `${filename}.components.render`;
   const render = requireObject(raw, path);
+  if (render.model === 'line-art-player-slime') {
+    return {
+      model: render.model,
+      radius: requireNumber(render.radius, `${path}.radius`, Number.EPSILON, 2),
+      membraneColor: requireColor(render.membraneColor, `${path}.membraneColor`),
+      middleColor: requireColor(render.middleColor, `${path}.middleColor`),
+      coreColor: requireColor(render.coreColor, `${path}.coreColor`),
+      bubbleColor: requireColor(render.bubbleColor, `${path}.bubbleColor`),
+      inkColor: requireColor(render.inkColor, `${path}.inkColor`),
+      shadowColor: requireColor(render.shadowColor, `${path}.shadowColor`),
+    };
+  }
   if (render.model === 'line-art-raft') {
     return {
       model: render.model,
@@ -192,6 +219,34 @@ function validateRender(raw, filename) {
       height: requireNumber(render.height, `${path}.height`, Number.EPSILON, 5),
     };
   }
+  if (render.model === 'line-art-training-dummy') {
+    return {
+      model: render.model,
+      woodColor: requireColor(render.woodColor, `${path}.woodColor`),
+      accentColor: requireColor(render.accentColor, `${path}.accentColor`),
+      radius: requireNumber(render.radius, `${path}.radius`, Number.EPSILON, 3),
+      height: requireNumber(render.height, `${path}.height`, Number.EPSILON, 6),
+    };
+  }
+  if (render.model === 'line-art-focus-obelisk') {
+    return {
+      model: render.model,
+      stoneColor: requireColor(render.stoneColor, `${path}.stoneColor`),
+      crystalColor: requireColor(render.crystalColor, `${path}.crystalColor`),
+      radius: requireNumber(render.radius, `${path}.radius`, Number.EPSILON, 3),
+      height: requireNumber(render.height, `${path}.height`, Number.EPSILON, 6),
+    };
+  }
+  if (render.model === 'line-art-floor-plaque') {
+    return {
+      model: render.model,
+      color: requireColor(render.color, `${path}.color`),
+      accentColor: requireColor(render.accentColor, `${path}.accentColor`),
+      width: requireNumber(render.width, `${path}.width`, Number.EPSILON, 12),
+      length: requireNumber(render.length, `${path}.length`, Number.EPSILON, 12),
+      height: requireNumber(render.height, `${path}.height`, Number.EPSILON, 1),
+    };
+  }
   throw new TypeError(`${path}.model 不受支持：${render.model}`);
 }
 
@@ -200,6 +255,7 @@ function validateActorArchetype(raw, filename) {
   if (definition.schemaVersion !== 1) throw new TypeError(`${filename}.schemaVersion 必须是 1`);
   const components = requireObject(definition.components, `${filename}.components`);
   const knownComponents = new Set([
+    'playerMovement',
     'buoyancy',
     'vesselMotor',
     'interactable',
@@ -214,6 +270,9 @@ function validateActorArchetype(raw, filename) {
     }
   }
   const render = validateRender(components.render, filename);
+  const playerMovement = components.playerMovement
+    ? validatePlayerMovement(components.playerMovement, filename)
+    : undefined;
   const interactable = components.interactable
     ? validateInteractable(components.interactable, filename)
     : undefined;
@@ -229,10 +288,17 @@ function validateActorArchetype(raw, filename) {
   if (elasticTether && render.model !== 'line-art-elastic-mushroom') {
     throw new TypeError(`${filename}.components.elasticTether 需要 line-art-elastic-mushroom render`);
   }
+  if (playerMovement && render.model !== 'line-art-player-slime') {
+    throw new TypeError(`${filename}.components.playerMovement 需要 line-art-player-slime render`);
+  }
+  if (render.model === 'line-art-player-slime' && !playerMovement) {
+    throw new TypeError(`${filename}.components.render line-art-player-slime 需要 playerMovement`);
+  }
   return {
     schemaVersion: 1,
     id: requireId(definition.id, `${filename}.id`),
     components: {
+      ...(playerMovement ? { playerMovement } : {}),
       ...(components.buoyancy ? { buoyancy: validateBuoyancy(components.buoyancy, filename) } : {}),
       ...(components.vesselMotor ? { vesselMotor: validateVesselMotor(components.vesselMotor, filename) } : {}),
       ...(interactable ? { interactable } : {}),

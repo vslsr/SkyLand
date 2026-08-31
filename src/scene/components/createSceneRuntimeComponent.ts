@@ -1,4 +1,5 @@
 import { AbilityLabSceneComponent } from './AbilityLabSceneComponent';
+import { InteractiveParticleEffectSceneComponent } from './InteractiveParticleEffectSceneComponent';
 import { MouseGrassInteractionSceneComponent } from './MouseGrassInteractionSceneComponent';
 import type { SceneComponentFactory } from './SceneComponent';
 
@@ -8,7 +9,9 @@ export const createSceneRuntimeComponent: SceneComponentFactory = (definition, c
     case 'mouse-grass-interaction':
       return new MouseGrassInteractionSceneComponent(context);
     case 'ability-lab':
-      return new AbilityLabSceneComponent(context);
+      return new AbilityLabSceneComponent(definition, context);
+    case 'interactive-particle-effect':
+      return new InteractiveParticleEffectSceneComponent(definition, context);
     default: {
       const unsupported: never = definition;
       throw new Error(`未实现的场景组件：${JSON.stringify(unsupported)}`);

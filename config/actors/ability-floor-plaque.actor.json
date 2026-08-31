@@ -1,0 +1,15 @@
+{
+  "$schema": "./actor.schema.json",
+  "schemaVersion": 1,
+  "id": "ability-floor-plaque",
+  "components": {
+    "render": {
+      "model": "line-art-floor-plaque",
+      "color": "#f7f0df",
+      "accentColor": "#8e5f47",
+      "width": 3.8,
+      "length": 1.1,
+      "height": 0.12
+    }
+  }
+}

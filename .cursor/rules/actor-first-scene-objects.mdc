@@ -1,0 +1,32 @@
+---
+description: Prefer reusable Actors when introducing new independently placeable scene objects
+alwaysApply: true
+---
+
+# Actor-first scene objects
+
+## Trigger boundary
+
+- Apply this rule when a task introduces a new independently identifiable or placeable scene object and therefore needs a new Actor representation.
+- Do not trigger this rule when the task only changes an existing Actor's geometry, material, animation, parameters, Components, or behavior. Keep such changes on the existing Actor unless the request independently requires a new gameplay identity or lifecycle.
+- Never split or rebuild an existing Actor merely to satisfy this rule. The boundary is creation of a new Actor, not modification of an existing one.
+
+## Default design
+
+- Prefer defining every new persistent scene object as a reusable Actor archetype under `config/actors/`, then place instances through the scene's `actors` array.
+- Do not hide a persistent object inside a scene Component, renderer composition function, or one-off aggregate model when the same object could be placed as an Actor.
+- A self-contained object should normally be one Actor. Build a compound object from multiple parent/child Actors when its parts need independent identity, transforms, ownership, state, interaction, replication, replacement, or reuse.
+- Keep instance placement and hierarchy in scene data. Keep reusable visual and gameplay parameters in the Actor archetype and Components; do not duplicate archetype parameters in scene placements.
+- Extend the complete Actor path required by the object: schema and catalog sanitization, server construction and snapshot state, client Replica creation, visual model/System, cleanup, and focused tests.
+
+## Allowed non-Actor cases
+
+- Transient presentation such as projectiles, particles, hit flashes, selection helpers, auras, and short-lived debug visualization may remain visual-only and must stay below the owning Actor's presentation root where applicable.
+- Renderer-owned environment and batched content such as terrain, water surfaces, grass fields, fog, lighting, and streamed chunk decoration do not need one Actor per rendered element unless gameplay identity or authority requires it.
+- New geometry that is an inseparable visual detail of an existing Actor is an existing-Actor modification and remains part of that Actor's model.
+
+## Verification
+
+- Confirm that a new persistent object is present in the sanitized scene `actors` data, the room's initial Actor snapshot, and the client Replica set.
+- Confirm reusability by showing that another instance can be placed or composed through scene configuration without adding scene-specific construction code.
+- For multi-Actor assemblies, verify parent-child transforms, removal policy, snapshot ordering, and disposal without attaching child roots under a parent's presentation-only `visualRoot`.

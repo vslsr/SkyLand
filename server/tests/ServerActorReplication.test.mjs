@@ -31,6 +31,24 @@ test('水域 JSON 生成服务端木筏 Actor 并输出权威浮力快照', asyn
   assert.ok(Number.isFinite(raft.buoyancy.staticPitch));
 });
 
+test('能力实验室的持久测试对象全部由场景 Actor 快照生成', async () => {
+  const catalog = await SceneCatalog.load();
+  const scene = new ServerScene(catalog.require('ability-lab'), { now: () => 1_000_000 });
+  const actors = new Map(scene.createSnapshot().actors.map((actor) => [actor.id, actor]));
+
+  assert.deepEqual([...actors.keys()], [
+    'training-dummy-01',
+    'arcane-focus-01',
+    'ember-focus-01',
+    'ability-floor-plaque-01',
+  ]);
+  assert.equal(actors.get('training-dummy-01').archetypeId, 'training-dummy');
+  assert.deepEqual(
+    actors.get('training-dummy-01').transform,
+    { x: 0, y: 0, z: -1.5, yaw: 0 },
+  );
+});
+
 test('场景 JSON 的子 Actor 输出稳定局部坐标和服务端权威世界坐标', async () => {
   const catalog = await SceneCatalog.load();
   const scene = new ServerScene(catalog.require('water'), { now: () => 1_000_000 });

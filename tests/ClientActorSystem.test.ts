@@ -78,6 +78,49 @@ const deckPropArchetype: SceneDefinition['actorArchetypes'][number] = {
   },
 };
 
+const trainingDummyArchetype: SceneDefinition['actorArchetypes'][number] = {
+  schemaVersion: 1,
+  id: 'training-dummy',
+  components: {
+    render: {
+      model: 'line-art-training-dummy',
+      woodColor: '#b58c63',
+      accentColor: '#e0c6a4',
+      radius: 0.82,
+      height: 2.22,
+    },
+  },
+};
+
+const focusObeliskArchetype: SceneDefinition['actorArchetypes'][number] = {
+  schemaVersion: 1,
+  id: 'arcane-focus-obelisk',
+  components: {
+    render: {
+      model: 'line-art-focus-obelisk',
+      stoneColor: '#d8cfb9',
+      crystalColor: '#c9bad9',
+      radius: 0.36,
+      height: 2.32,
+    },
+  },
+};
+
+const floorPlaqueArchetype: SceneDefinition['actorArchetypes'][number] = {
+  schemaVersion: 1,
+  id: 'ability-floor-plaque',
+  components: {
+    render: {
+      model: 'line-art-floor-plaque',
+      color: '#f7f0df',
+      accentColor: '#8e5f47',
+      width: 3.8,
+      length: 1.1,
+      height: 0.12,
+    },
+  },
+};
+
 const definition = {
   schemaVersion: 1,
   id: 'water',
@@ -91,7 +134,13 @@ const definition = {
     parentActorId: null,
     localTransform: { position: [0, 0, 0], yaw: 0.24 },
   }],
-  actorArchetypes: [raftArchetype, deckPropArchetype],
+  actorArchetypes: [
+    raftArchetype,
+    deckPropArchetype,
+    trainingDummyArchetype,
+    focusObeliskArchetype,
+    floorPlaqueArchetype,
+  ],
   renderer: {
     type: 'line-art',
     background: '#ffffff',
@@ -126,6 +175,27 @@ const snapshot: SnapshotActor = {
   },
   vessel: { speed: 0, throttle: 0, steering: 0 },
   control: { ownerPlayerId: null, revision: 0 },
+};
+
+const trainingDummySnapshot: SnapshotActor = {
+  id: 'training-dummy-01',
+  archetypeId: 'training-dummy',
+  revision: 0,
+  transform: { x: 0, y: 0, z: -1.5, yaw: 0 },
+};
+
+const focusObeliskSnapshot: SnapshotActor = {
+  id: 'arcane-focus-01',
+  archetypeId: 'arcane-focus-obelisk',
+  revision: 0,
+  transform: { x: -2.1, y: 0, z: -1.5, yaw: 0 },
+};
+
+const floorPlaqueSnapshot: SnapshotActor = {
+  id: 'ability-floor-plaque-01',
+  archetypeId: 'ability-floor-plaque',
+  revision: 0,
+  transform: { x: 0, y: 0, z: -3.6, yaw: 0 },
 };
 
 function createDeckPropSnapshot(localX = 0.72): SnapshotActor {
@@ -238,6 +308,36 @@ test('Actor Transform 在两份服务端快照之间插值而不做客户端外�
   assert.ok(Math.abs(transform.x - 5) < 1e-6);
   assert.ok(Math.abs(transform.z + 2) < 1e-6);
   assert.ok(Math.abs(transform.yaw - Math.PI / 4) < 1e-6);
+});
+
+test('能力实验室对象由 Actor 快照创建，训练假人暴露 visualRoot 内的目标 rig', () => {
+  const system = new ClientActorSystem({
+    definition,
+    environment: { fogColor: '#ffffff', fogNear: 20, fogFar: 60 },
+    now: () => 1_000,
+  });
+  system.syncSnapshots([
+    trainingDummySnapshot,
+    focusObeliskSnapshot,
+    floorPlaqueSnapshot,
+  ], 1_000);
+  system.update(0, 0);
+
+  const actor = system.getActor(trainingDummySnapshot.id)!;
+  const render = actor.requireComponent(THREE_OBJECT_COMPONENT) as ThreeObjectComponent;
+  assert.equal(actor.archetypeId, 'training-dummy');
+  assert.ok(render.abilityTargetRig);
+  assert.equal(render.abilityTargetRig.targetRoot, render.visualRoot);
+  assert.equal(render.abilityTargetRig.burningAura.visible, false);
+  assert.equal(render.root.position.z, -1.5);
+  const focusRender = system.getActor(focusObeliskSnapshot.id)!
+    .requireComponent(THREE_OBJECT_COMPONENT) as ThreeObjectComponent;
+  assert.ok(focusRender.root.getObjectByName('focus-obelisk-crystal'));
+  const plaqueCollision = system.getActor(floorPlaqueSnapshot.id)!
+    .requireComponent(SIMPLE_COLLISION_COMPONENT) as SimpleCollisionComponent;
+  assert.equal(plaqueCollision.halfWidth, 1.9);
+  assert.equal(plaqueCollision.halfLength, 0.55);
+  system.dispose();
 });
 
 test('客户端离散恢复父子关系，并只插值子 Actor 的权威世界坐标', () => {

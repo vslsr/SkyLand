@@ -26,6 +26,18 @@ test('ActorCatalog 加载并净化木筏原型', async () => {
   assert.equal(mushroom.components.interactable.action, 'mushroom-bite');
   assert.equal(mushroom.components.elasticTether.breakLength, 2.65);
   assert.equal(mushroom.components.render.model, 'line-art-elastic-mushroom');
+
+  const dummy = catalog.require('training-dummy');
+  assert.equal(dummy.components.render.model, 'line-art-training-dummy');
+  assert.equal(dummy.components.render.height, 2.22);
+
+  const arcaneFocus = catalog.require('arcane-focus-obelisk');
+  assert.equal(arcaneFocus.components.render.model, 'line-art-focus-obelisk');
+  assert.equal(arcaneFocus.components.render.crystalColor, '#c9bad9');
+
+  const plaque = catalog.require('ability-floor-plaque');
+  assert.equal(plaque.components.render.model, 'line-art-floor-plaque');
+  assert.equal(plaque.components.render.width, 3.8);
 });
 
 test('ActorCatalog 拒绝未知原型', async () => {

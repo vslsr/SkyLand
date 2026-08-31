@@ -195,6 +195,11 @@ class TestKeyboardDevice extends BufferedInputDevice {
   public emit(control: string, value: boolean): void { this.setDigital(control, value, this.now()); }
 }
 
+class TestGamepadDevice extends BufferedInputDevice {
+  public constructor(private readonly now: () => number) { super('gamepad'); }
+  public emit(control: string, value: boolean): void { this.setDigital(control, value, this.now()); }
+}
+
 test('E 键只对当前准星货箱发送交互，未控制木筏时只显示提示', () => {
   let now = 0;
   let ownedActorId: string | undefined = 'raft-1';
@@ -215,6 +220,10 @@ test('E 键只对当前准星货箱发送交互，未控制木筏时只显示提
     getPlayerId: () => 'player-1',
     findOwnedActorId: () => ownedActorId,
     pick: () => candidate,
+    getInputLabel: (tag) => {
+      const control = input.getMappedControls(tag)[0];
+      return control ? scheme.getControlLabel(control) : undefined;
+    },
     setHoveredActorId: (actorId) => hovered.push(actorId),
     sendInteraction: (actorId) => sent.push(actorId),
     setPrompt: (text) => prompts.push(text),
@@ -249,16 +258,17 @@ test('E 键只对当前准星货箱发送交互，未控制木筏时只显示提
   input.dispose();
 });
 
-test('史莱姆靠近时显示通用 E 世界标记，按 E 可在没有木筏时叼住蘑菇', () => {
+test('史莱姆靠近时显示当前设备的世界交互键，按映射键可叼住蘑菇', () => {
   let now = 0;
   const sent: string[] = [];
-  const markers: Array<string | undefined> = [];
+  const markers: Array<{ actorId?: string; inputLabel?: string }> = [];
   const prompts: Array<string | undefined> = [];
   const device = new TestKeyboardDevice(() => now);
+  const gamepad = new TestGamepadDevice(() => now);
   const scheme = createPlayerInputScheme({ storage: null });
   const input = new InputSubsystem({
     actions: scheme.actions, config: scheme.config, contexts: scheme.contexts,
-    devices: [device], now: () => now,
+    devices: [device, gamepad], now: () => now,
   });
   const candidate: ActorInteractionCandidate = {
     actorId: 'mushroom-1', label: '弹弹菇', action: 'mushroom-bite',
@@ -270,8 +280,12 @@ test('史莱姆靠近时显示通用 E 世界标记，按 E 可在没有木筏�
     findOwnedActorId: () => undefined,
     pick: () => undefined,
     findNearby: () => candidate,
+    getInputLabel: (tag) => {
+      const control = input.getMappedControls(tag)[0];
+      return control ? scheme.getControlLabel(control) : undefined;
+    },
     setHoveredActorId: () => undefined,
-    setInteractionMarkerActorId: (actorId) => markers.push(actorId),
+    setInteractionMarkerActorId: (actorId, inputLabel) => markers.push({ actorId, inputLabel }),
     sendInteraction: (actorId) => sent.push(actorId),
     setPrompt: (text) => prompts.push(text),
   });
@@ -284,8 +298,27 @@ test('史莱姆靠近时显示通用 E 世界标记，按 E 可在没有木筏�
   input.update();
   controller.update(frame);
   assert.deepEqual(sent, ['mushroom-1']);
-  assert.equal(markers.at(-1), 'mushroom-1');
-  assert.match(prompts.at(-1) ?? '', /叼住/);
+  assert.deepEqual(markers.at(-1), { actorId: 'mushroom-1', inputLabel: 'E' });
+  assert.match(prompts.at(-1) ?? '', /^E · 叼住/);
+
+  device.emit('Keyboard.KeyE', false);
+  now = 10;
+  input.update();
+  now = 20;
+  gamepad.emit('Gamepad.ButtonWest', true);
+  input.update();
+  controller.update(frame);
+  assert.deepEqual(markers.at(-1), { actorId: 'mushroom-1', inputLabel: 'Y' });
+  assert.match(prompts.at(-1) ?? '', /^Y · 叼住/);
+
+  scheme.rebind('WorldInteract.Keyboard.Primary', 'Keyboard.KeyQ');
+  input.replaceMappingContexts(scheme.contexts);
+  now = 30;
+  device.emit('Keyboard.KeyQ', true);
+  input.update();
+  controller.update(frame);
+  assert.deepEqual(markers.at(-1), { actorId: 'mushroom-1', inputLabel: 'Q' });
+  assert.match(prompts.at(-1) ?? '', /^Q · 叼住/);
   controller.dispose();
   input.dispose();
 });
@@ -301,7 +334,7 @@ test('弹性蘑菇 Replica 拉长并在释放后回弹，标记组件始终可�
   system.update(0, 0);
   assert.equal(system.findNearbyInteractableActor({ x: 0.6, z: 0 })?.actorId, 'mushroom-1');
 
-  system.setInteractionMarkerActorId('mushroom-1');
+  system.setInteractionMarkerActorId('mushroom-1', 'E');
   const actor = system.getActor('mushroom-1');
   const marker = actor?.requireComponent(
     INTERACTION_MARKER_COMPONENT,
@@ -310,7 +343,11 @@ test('弹性蘑菇 Replica 拉长并在释放后回弹，标记组件始终可�
   const camera = new THREE.PerspectiveCamera();
   camera.position.set(4, 6, 8);
   system.beforeRender({} as THREE.WebGLRenderer, camera);
-  assert.ok(system.root.getObjectByName('actor-interaction-marker'));
+  const markerRoot = system.root.getObjectByName('actor-interaction-marker');
+  assert.ok(markerRoot);
+  assert.equal(markerRoot.userData.controlLabel, 'E');
+  const glyph = markerRoot.getObjectByName('actor-interaction-marker-glyph');
+  assert.ok(glyph instanceof THREE.Mesh);
 
   now = 1_100;
   system.syncSnapshots([{

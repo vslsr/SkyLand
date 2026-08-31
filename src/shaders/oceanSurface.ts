@@ -27,6 +27,7 @@ export const OCEAN_SURFACE_VERTEX_SHADER = /* glsl */ `
   attribute vec3 color;
   varying vec3 vColor;
   varying vec3 vWorldPosition;
+  varying vec3 vWorldNormal;
   varying float vWaveLight;
 
   float hashGrid(vec2 point) {
@@ -69,9 +70,19 @@ export const OCEAN_SURFACE_VERTEX_SHADER = /* glsl */ `
     float waveHeight = oceanWaveHeight(transformed.xz);
     transformed.y = uSeaLevel + waveHeight;
 
+    float normalStep = max(uGridStep * 0.18, 0.08);
+    float heightRight = oceanWaveHeight(transformed.xz + vec2(normalStep, 0.0));
+    float heightForward = oceanWaveHeight(transformed.xz + vec2(0.0, normalStep));
+    vec3 localNormal = normalize(vec3(
+      waveHeight - heightRight,
+      normalStep,
+      waveHeight - heightForward
+    ));
+
     vec4 worldPosition = modelMatrix * vec4(transformed, 1.0);
     vColor = color;
     vWorldPosition = worldPosition.xyz;
+    vWorldNormal = normalize(mat3(modelMatrix) * localNormal);
     vWaveLight = uWaveHeight > 0.0001
       ? clamp(waveHeight / uWaveHeight * 0.5 + 0.5, 0.0, 1.0)
       : 0.5;
@@ -160,11 +171,22 @@ export const OCEAN_SURFACE_FRAGMENT_SHADER = /* glsl */ `
 
   varying vec3 vColor;
   varying vec3 vWorldPosition;
+  varying vec3 vWorldNormal;
   varying float vWaveLight;
 
   void main() {
-    float waveTone = mix(0.965, 1.035, vWaveLight);
-    vec3 surfaceColor = vColor * waveTone;
+    vec3 surfaceNormal = normalize(vWorldNormal);
+    vec3 lightDirection = normalize(vec3(-0.38, 0.90, 0.22));
+    float diffuseLight = smoothstep(0.72, 0.98, dot(surfaceNormal, lightDirection));
+    float waveTone = mix(0.955, 1.035, diffuseLight);
+
+    vec3 viewDirection = normalize(cameraPosition - vWorldPosition);
+    vec3 halfDirection = normalize(lightDirection + viewDirection);
+    float softHighlight = pow(max(dot(surfaceNormal, halfDirection), 0.0), 36.0) * 0.065;
+    float crestHighlight = smoothstep(0.68, 1.0, vWaveLight) * 0.018;
+    vec3 highlightColor = vec3(0.90, 0.97, 1.0);
+    vec3 surfaceColor = vColor * waveTone
+      + highlightColor * (softHighlight + crestHighlight);
     float cameraDistance = distance(cameraPosition, vWorldPosition);
     float fogFactor = smoothstep(uFogNear, uFogFar, cameraDistance);
     vec3 finalColor = mix(surfaceColor, uFogColor, fogFactor);

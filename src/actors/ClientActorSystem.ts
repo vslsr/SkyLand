@@ -245,13 +245,15 @@ export class ClientActorSystem implements SceneVisualSystem {
     return nearest?.candidate;
   }
 
-  public setInteractionMarkerActorId(actorId?: string): void {
+  public setInteractionMarkerActorId(actorId?: string, inputLabel?: string): void {
     // Actor 数量由场景 Schema 固定在 256 以内；标记切换不随世界面积增长。
     for (const actor of this.world.query(INTERACTION_MARKER_COMPONENT) as Actor[]) {
       const marker = actor.requireComponent(
         INTERACTION_MARKER_COMPONENT,
       ) as InteractionMarkerComponent;
-      marker.setVisible(actor.id === actorId);
+      const selected = actor.id === actorId && Boolean(inputLabel);
+      marker.setLabel(selected ? inputLabel! : '');
+      marker.setVisible(selected);
     }
   }
 

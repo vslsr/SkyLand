@@ -1,12 +1,13 @@
 import { FlyController } from '../camera/FlyController';
 import { GameInteractionLayer } from '../interaction/GameInteractionLayer';
+import { isDevelopmentRuntime } from '../debug/developmentRuntime';
 import {
   createPlayerInputScheme,
   GamepadInputDevice,
   InputSubsystem,
   type InputSchemeRuntime,
   KeyboardMouseInputDevice,
-  PlayerInputTags,
+  PlayerInputMappingIds,
   VirtualControls,
   VirtualInputDevice,
 } from '../input/index';
@@ -36,7 +37,10 @@ export interface GrasslandSceneOptions extends SceneUIContext {
 export class GrasslandScene extends Scene {
   private readonly canvas: HTMLCanvasElement;
   private readonly baseLayer: HTMLElement;
-  private readonly inputScheme: InputSchemeRuntime = createPlayerInputScheme();
+  private readonly developmentRuntime = isDevelopmentRuntime();
+  private readonly inputScheme: InputSchemeRuntime = createPlayerInputScheme({
+    includeDevelopmentMappings: this.developmentRuntime,
+  });
   private readonly input: InputSubsystem;
   private readonly virtualControls: VirtualControls;
   private readonly renderer: SceneRenderer;
@@ -51,6 +55,7 @@ export class GrasslandScene extends Scene {
   private readonly lobbyPage = new RoomLobbyPage();
   private readonly gameMenuPage = new GameMenuPage();
   private readonly debugMenuPage?: DebugMenuPage;
+  private disposeDebugMenuShortcut?: () => void;
   private readonly snapshots = new SnapshotBuffer();
   private readonly remotePlayers: RemotePlayerGroup;
   private joinedRoom?: JoinedRoom;
@@ -82,15 +87,13 @@ export class GrasslandScene extends Scene {
         virtualInput,
       ],
     });
-    if (import.meta.env.DEV) {
+    if (this.developmentRuntime) {
       this.debugMenuPage = new DebugMenuPage();
       this.debugMenuPage.onRequestClose(() => this.commonUI.pop(this.debugMenuPage));
       this.debugMenuPage.onCollisionToggle((visible) => {
         this.renderer.setSimpleCollisionVisible(visible);
       });
-      this.input.bind(PlayerInputTags.DebugMenu, () => this.toggleDebugMenu(), {
-        phases: ['triggered'],
-      });
+      this.refreshDebugMenuShortcut();
     }
     this.virtualControls = new VirtualControls({
       root: options.baseLayer,
@@ -103,6 +106,7 @@ export class GrasslandScene extends Scene {
     this.inputScheme.onBindingsChanged(() => {
       this.input.replaceMappingContexts(this.inputScheme.contexts);
       keyboardInput.setPreventDefaultControls(this.inputScheme.getPreventDefaultControls());
+      this.refreshDebugMenuShortcut();
       this.hud.refreshInputPrompt();
     });
     this.renderer = new SceneRenderer(options.canvas);
@@ -129,9 +133,13 @@ export class GrasslandScene extends Scene {
       findOwnedActorId: (playerId) => this.renderer.findOwnedActorId(playerId),
       pick: (frame) => this.renderer.pickActorInteraction(frame),
       findNearby: (position) => this.renderer.findNearbyActorInteraction(position),
+      getInputLabel: (tag) => {
+        const control = this.input.getMappedControls(tag)[0];
+        return control ? this.inputScheme.getControlLabel(control) : undefined;
+      },
       setHoveredActorId: (actorId) => this.renderer.setHoveredActorId(actorId),
-      setInteractionMarkerActorId: (actorId) => {
-        this.renderer.setInteractionMarkerActorId(actorId);
+      setInteractionMarkerActorId: (actorId, inputLabel) => {
+        this.renderer.setInteractionMarkerActorId(actorId, inputLabel);
       },
       sendInteraction: (actorId) => { this.roomClient.interactWithActor(actorId); },
       setPrompt: (text) => this.hud.setInteractionPrompt(text),
@@ -299,9 +307,18 @@ export class GrasslandScene extends Scene {
       this.commonUI.pop(page);
       return;
     }
-    if (this.commonUI.size > 0) return;
     page.setCollisionVisible(this.renderer.isSimpleCollisionVisible);
     this.commonUI.push(page);
+  }
+
+  private refreshDebugMenuShortcut(): void {
+    if (!this.debugMenuPage) return;
+    this.disposeDebugMenuShortcut?.();
+    const control = this.inputScheme.getMapping(PlayerInputMappingIds.DebugMenuKeyboard).control;
+    this.disposeDebugMenuShortcut = this.commonUI.bindGlobalKeyboardControl(
+      control,
+      () => this.toggleDebugMenu(),
+    );
   }
 
   private exitCurrentRoom(): void {

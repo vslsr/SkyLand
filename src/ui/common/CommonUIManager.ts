@@ -8,6 +8,7 @@ export interface CommonUIManagerOptions {
 
 type StackChangeListener = (top: CommonUIPage | undefined, size: number) => void;
 type BaseEventHandler = (event: Event) => boolean;
+type GlobalKeyboardHandler = () => void;
 
 const POINTER_EVENTS = [
   'pointerdown',
@@ -34,6 +35,7 @@ export class CommonUIManager {
   private readonly overlayRoot: HTMLElement;
   private readonly pages: CommonUIPage[] = [];
   private readonly listeners = new Set<StackChangeListener>();
+  private readonly globalKeyboardHandlers = new Map<string, Set<GlobalKeyboardHandler>>();
   private baseEventHandler?: BaseEventHandler;
   private active = false;
 
@@ -120,6 +122,23 @@ export class CommonUIManager {
     this.baseEventHandler = handler;
   }
 
+  /**
+   * 注册 CommonUI 全局键盘入口，例如开发调试菜单。
+   * control 仍来自 InputMapping 配置；CommonUI 只负责在 Gameplay Input 被暂停时保持入口可用。
+   */
+  public bindGlobalKeyboardControl(control: string, handler: GlobalKeyboardHandler): () => void {
+    if (!control.startsWith('Keyboard.') || control.length <= 'Keyboard.'.length) {
+      throw new TypeError(`CommonUI 全局键盘 control 无效：${control}`);
+    }
+    const handlers = this.globalKeyboardHandlers.get(control) ?? new Set<GlobalKeyboardHandler>();
+    handlers.add(handler);
+    this.globalKeyboardHandlers.set(control, handlers);
+    return () => {
+      handlers.delete(handler);
+      if (handlers.size === 0) this.globalKeyboardHandlers.delete(control);
+    };
+  }
+
   public dispose(): void {
     this.deactivate();
     for (const eventName of POINTER_EVENTS) {
@@ -127,6 +146,7 @@ export class CommonUIManager {
     }
     document.removeEventListener('keydown', this.guardKeyboardEvent, true);
     this.listeners.clear();
+    this.globalKeyboardHandlers.clear();
   }
 
   private readonly guardPointerEvent = (event: Event): void => {
@@ -136,7 +156,18 @@ export class CommonUIManager {
   };
 
   private readonly guardKeyboardEvent = (event: KeyboardEvent): void => {
-    if (!this.active || this.pages.length === 0) return;
+    if (!this.active) return;
+
+    const globalHandlers = event.repeat
+      ? undefined
+      : this.globalKeyboardHandlers.get(`Keyboard.${event.code}`);
+    if (globalHandlers?.size) {
+      for (const handler of [...globalHandlers]) handler();
+      this.rejectEvent(event);
+      return;
+    }
+
+    if (this.pages.length === 0) return;
 
     if (event.key === 'Escape' && this.top?.closeOnEscape !== false) {
       this.rejectEvent(event);

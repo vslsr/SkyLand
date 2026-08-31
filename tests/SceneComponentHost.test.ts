@@ -28,7 +28,7 @@ test('场景组件按配置顺序初始化和更新，并在换图时反向释�
   host.setActive(true);
   host.load([
     { type: 'mouse-grass-interaction' },
-    { type: 'ability-lab' },
+    { type: 'ability-lab', targetActorId: 'training-dummy-01' },
   ], context);
   host.update(1 / 60, 1);
   host.load([], context);

@@ -1,0 +1,14 @@
+{
+  "$schema": "./actor.schema.json",
+  "schemaVersion": 1,
+  "id": "ember-focus-obelisk",
+  "components": {
+    "render": {
+      "model": "line-art-focus-obelisk",
+      "stoneColor": "#d8cfb9",
+      "crystalColor": "#e8b58f",
+      "radius": 0.36,
+      "height": 2.32
+    }
+  }
+}

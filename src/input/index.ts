@@ -41,6 +41,7 @@ export {
   createPlayerInputScheme,
   GameplayInputContext,
   PlayerInputActionIds,
+  PlayerInputMappingIds,
   PlayerInputActions,
   PlayerInputConfig,
   PlayerInputSchemeDefinition,

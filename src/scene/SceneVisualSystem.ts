@@ -1,4 +1,5 @@
 import type * as THREE from 'three';
+import type { Actor } from '../../shared/actor/Actor.mjs';
 import type { GrassInteractionTarget } from '../grass';
 import type { SnapshotActor } from '../network/protocol';
 import type { ActorFloatState, ActorEventType } from '../network/protocol';
@@ -24,6 +25,7 @@ export interface SceneVisualSystem {
 
 export interface ActorSnapshotTarget {
   syncSnapshots(snapshots: readonly SnapshotActor[], serverTime: number, receivedAt?: number): void;
+  getActor(actorId: string): Actor | undefined;
   findOwnedActorId(playerId: string): string | undefined;
   findControllableActorId(): string | undefined;
   pickInteractableActor(
@@ -35,7 +37,7 @@ export interface ActorSnapshotTarget {
     position: { x: number; z: number },
   ): ActorInteractionCandidate | undefined;
   setHoveredActorId(actorId?: string): void;
-  setInteractionMarkerActorId(actorId?: string): void;
+  setInteractionMarkerActorId(actorId?: string, inputLabel?: string): void;
   getVesselHudState(playerId: string): VesselHudState | undefined;
   resolveSimpleCollision(
     position: { x: number; z: number },

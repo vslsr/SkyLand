@@ -113,7 +113,11 @@ function validateSceneComponents(rawComponents, filename) {
   if (!Array.isArray(rawComponents) || rawComponents.length > 16) {
     throw new TypeError(`${filename}.sceneComponents 必须是最多包含 16 项的数组`);
   }
-  const supportedTypes = new Set(['mouse-grass-interaction', 'ability-lab']);
+  const supportedTypes = new Set([
+    'mouse-grass-interaction',
+    'ability-lab',
+    'interactive-particle-effect',
+  ]);
   const seenTypes = new Set();
   return rawComponents.map((rawComponent, index) => {
     const path = `${filename}.sceneComponents[${index}]`;
@@ -121,11 +125,86 @@ function validateSceneComponents(rawComponents, filename) {
     const type = requireString(component.type, `${path}.type`, 48);
     if (!supportedTypes.has(type)) throw new TypeError(`${path}.type 不受支持：${type}`);
     if (seenTypes.has(type)) throw new TypeError(`${filename}.sceneComponents 重复加载：${type}`);
-    const unknownKeys = Object.keys(component).filter((key) => key !== 'type');
+    const knownKeys = type === 'ability-lab'
+      ? new Set(['type', 'targetActorId'])
+      : type === 'interactive-particle-effect'
+        ? new Set([
+          'type',
+          'id',
+          'preset',
+          'position',
+          'particleCount',
+          'radius',
+          'seed',
+          'fillColor',
+          'accentColor',
+          'lineColor',
+          'interactionRadius',
+          'impulseStrength',
+        ])
+        : new Set(['type']);
+    const unknownKeys = Object.keys(component).filter((key) => !knownKeys.has(key));
     if (unknownKeys.length > 0) {
       throw new TypeError(`${path} 包含未知字段：${unknownKeys.join(', ')}`);
     }
     seenTypes.add(type);
+    if (type === 'ability-lab') {
+      const targetActorId = requireString(component.targetActorId, `${path}.targetActorId`, 48);
+      if (!SCENE_ID_PATTERN.test(targetActorId)) {
+        throw new TypeError(`${path}.targetActorId 格式无效`);
+      }
+      return { type, targetActorId };
+    }
+    if (type === 'interactive-particle-effect') {
+      const id = requireString(component.id, `${path}.id`, 48);
+      if (!SCENE_ID_PATTERN.test(id)) throw new TypeError(`${path}.id 格式无效`);
+      if (component.preset !== 'line-art-leaves') {
+        throw new TypeError(`${path}.preset 暂只支持 line-art-leaves`);
+      }
+      if (!Array.isArray(component.position) || component.position.length !== 3) {
+        throw new TypeError(`${path}.position 必须包含 3 个数字`);
+      }
+      const position = component.position.map((value, axis) => (
+        requireNumber(value, `${path}.position[${axis}]`)
+      ));
+      const particleCount = requireInteger(
+        component.particleCount,
+        `${path}.particleCount`,
+        16,
+        512,
+      );
+      const radius = requireNumber(component.radius, `${path}.radius`);
+      if (radius < 1 || radius > 32) throw new TypeError(`${path}.radius 必须是 1-32`);
+      const seed = requireInteger(component.seed, `${path}.seed`, 0, 0xffffffff);
+      const interactionRadius = requireNumber(
+        component.interactionRadius,
+        `${path}.interactionRadius`,
+      );
+      if (interactionRadius < 0.1 || interactionRadius > 4) {
+        throw new TypeError(`${path}.interactionRadius 必须是 0.1-4`);
+      }
+      const impulseStrength = requireNumber(
+        component.impulseStrength,
+        `${path}.impulseStrength`,
+      );
+      if (impulseStrength < 0.1 || impulseStrength > 12) {
+        throw new TypeError(`${path}.impulseStrength 必须是 0.1-12`);
+      }
+      return {
+        type,
+        id,
+        preset: component.preset,
+        position,
+        particleCount,
+        radius,
+        seed,
+        fillColor: requireColor(component.fillColor, `${path}.fillColor`),
+        accentColor: requireColor(component.accentColor, `${path}.accentColor`),
+        lineColor: requireColor(component.lineColor, `${path}.lineColor`),
+        interactionRadius,
+        impulseStrength,
+      };
+    }
     return { type };
   });
 }
@@ -261,6 +340,23 @@ function validateSceneDefinition(raw, filename, actorCatalog) {
   if (pitch < -1.5 || pitch > 1.5) throw new TypeError(`${filename}.camera.pitch 范围无效`);
   if (moveSpeed <= 0 || moveSpeed > 100) throw new TypeError(`${filename}.camera.moveSpeed 范围无效`);
   const actorComposition = validateActorPlacements(scene.actors, filename, actorCatalog);
+  for (const component of sceneComponents) {
+    if (component.type !== 'ability-lab') continue;
+    const target = actorComposition.actors.find((actor) => actor.id === component.targetActorId);
+    if (!target) {
+      throw new TypeError(
+        `${filename}.sceneComponents 的 ability-lab 引用了不存在的目标 Actor：${component.targetActorId}`,
+      );
+    }
+    const archetype = actorComposition.actorArchetypes.find(
+      (definition) => definition.id === target.archetypeId,
+    );
+    if (archetype?.components.render.model !== 'line-art-training-dummy') {
+      throw new TypeError(
+        `${filename}.sceneComponents 的 ability-lab 目标需要 line-art-training-dummy render`,
+      );
+    }
+  }
 
   return {
     schemaVersion: 1,

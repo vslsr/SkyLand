@@ -85,7 +85,7 @@
 | `type` | 作用与约束 |
 | --- | --- |
 | `mouse-grass-interaction` | 注册当前场景独占的鼠标压草输入和渲染前更新。要求 `renderer.content.grass` 为 `true`；不加载它的场景仍保留玩家脚步、远端玩家和玩法效果对草地的通用交互。 |
-| `ability-lab` | 加载能力实验室输入、模拟、线稿表现与 UI 流程。要求 `camera.mode` 为 `topdown`，以保证玩家实体存在。 |
+| `ability-lab` | 加载能力实验室输入、模拟、瞬时特效与 UI 流程。要求 `camera.mode` 为 `topdown`，并通过必填的 `targetActorId` 引用同场景内使用 `line-art-training-dummy` 渲染模型的 Actor；训练假人和周边持久道具必须放在 `actors`，不能由场景组件私自创建。 |
 
 示例：
 
@@ -127,7 +127,7 @@ AOI 或跟随焦点的固定窗口，并在组件停用/销毁时释放监听、
 - `interactable`：交互动作、提示名称、最大权威交互距离和启用状态。
 - `cargo`：货物质量、装载到承载 Actor 后的局部挂点，以及运行态承载关系。
 - `hazard`：服务端碰撞半径、伤害量、冷却时间和受损浮力部件 id。
-- `render`：客户端线稿模型类型和视觉参数；目前支持 `line-art-raft`、`line-art-cargo-crate` 与 `line-art-reef`。
+- `render`：客户端线稿模型类型和视觉参数；除木筏、货箱、礁石与弹性蘑菇外，还支持可复用的 `line-art-training-dummy`、`line-art-focus-obelisk` 和 `line-art-floor-plaque`。
 
 `cargo-crate` 使用 `interactable + cargo + render`，`reef` 使用 `hazard + render`，`raft`
 使用 `buoyancy + vesselMotor + render`。新增组合时要同步 Actor Schema、`ActorCatalog`、共享

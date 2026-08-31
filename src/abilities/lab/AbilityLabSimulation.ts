@@ -153,7 +153,7 @@ function attribute(snapshot: AbilitySystemSnapshot, id: string): number {
 /** 纯运行时测试夹具：不依赖 DOM 或 Three.js，可被场景、单测或调试命令共同驱动。 */
 export class AbilityLabSimulation {
   private readonly casterActor: Actor;
-  private targetActor = new Actor('ability-lab-dummy', 'ability-lab-dummy');
+  private readonly targetActor: Actor;
   private caster?: GameAbilityComponent;
   private target?: GameAbilityComponent;
   private readonly eventDisposers: Array<() => void> = [];
@@ -161,8 +161,10 @@ export class AbilityLabSimulation {
   private readonly logEntries: string[] = [];
   private elapsedSeconds = 0;
 
-  public constructor(casterActor: Actor) {
+  public constructor(casterActor: Actor, targetActor: Actor) {
+    if (casterActor === targetActor) throw new Error('能力实验室的施法者与目标不能是同一个 Actor');
     this.casterActor = casterActor;
+    this.targetActor = targetActor;
     this.rebuild();
     this.emit('实验室就绪：法力每秒恢复 5 点', 'info');
   }
@@ -252,7 +254,6 @@ export class AbilityLabSimulation {
     this.clearRuntime();
     this.elapsedSeconds = 0;
     this.logEntries.length = 0;
-    this.targetActor = new Actor('ability-lab-dummy', 'ability-lab-dummy');
 
     const caster = new GameAbilityComponent({
       attributes: [
@@ -330,10 +331,12 @@ export class AbilityLabSimulation {
 
   private clearRuntime(): void {
     for (const dispose of this.eventDisposers.splice(0)) dispose();
-    if (this.casterActor.getComponent(GAME_ABILITY_COMPONENT)) {
+    if (this.casterActor.getComponent(GAME_ABILITY_COMPONENT) === this.caster) {
       this.casterActor.removeComponent(GAME_ABILITY_COMPONENT);
     }
-    this.targetActor.dispose();
+    if (this.targetActor.getComponent(GAME_ABILITY_COMPONENT) === this.target) {
+      this.targetActor.removeComponent(GAME_ABILITY_COMPONENT);
+    }
     this.caster = undefined;
     this.target = undefined;
   }

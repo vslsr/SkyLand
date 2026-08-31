@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import type { Actor } from '../../shared/actor/Actor.mjs';
 import type { CameraFrame } from '../camera/CameraTransform';
 import {
   type GrassBendImpulse,
@@ -111,6 +112,10 @@ export class SceneRenderer implements GrassInteractionTarget {
     this.actorSnapshotTarget?.syncSnapshots(snapshots, serverTime);
   }
 
+  public getActor(actorId: string): Actor | undefined {
+    return this.actorSnapshotTarget?.getActor(actorId);
+  }
+
   public findOwnedActorId(playerId: string): string | undefined {
     return this.actorSnapshotTarget?.findOwnedActorId(playerId);
   }
@@ -136,8 +141,8 @@ export class SceneRenderer implements GrassInteractionTarget {
     this.actorSnapshotTarget?.setHoveredActorId(actorId);
   }
 
-  public setInteractionMarkerActorId(actorId?: string): void {
-    this.actorSnapshotTarget?.setInteractionMarkerActorId(actorId);
+  public setInteractionMarkerActorId(actorId?: string, inputLabel?: string): void {
+    this.actorSnapshotTarget?.setInteractionMarkerActorId(actorId, inputLabel);
   }
 
   public getVesselHudState(playerId: string): VesselHudState | undefined {

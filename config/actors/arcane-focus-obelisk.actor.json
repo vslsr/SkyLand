@@ -1,0 +1,14 @@
+{
+  "$schema": "./actor.schema.json",
+  "schemaVersion": 1,
+  "id": "arcane-focus-obelisk",
+  "components": {
+    "render": {
+      "model": "line-art-focus-obelisk",
+      "stoneColor": "#d8cfb9",
+      "crystalColor": "#c9bad9",
+      "radius": 0.36,
+      "height": 2.32
+    }
+  }
+}

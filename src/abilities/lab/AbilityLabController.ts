@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import type { Actor } from '../../../shared/actor/Actor.mjs';
+import type { ThreeObjectComponent } from '../../actors/components/ThreeObjectComponent';
 import { PlayerInputTags, type InputSubsystem } from '../../input/index';
 import { AbilityLabPanel } from '../../ui/AbilityLabPanel';
 import {
@@ -45,22 +46,34 @@ export class AbilityLabController {
     return Boolean(this.simulation);
   }
 
-  public activate(casterActor: Actor, casterObject: THREE.Object3D): void {
+  public activate(
+    casterActor: Actor,
+    casterObject: THREE.Object3D,
+    targetActor: Actor,
+    targetRender: ThreeObjectComponent,
+  ): void {
     this.deactivate();
-    this.casterObject = casterObject;
-    this.simulation = new AbilityLabSimulation(casterActor);
-    this.visuals.reset();
-    this.addWorldObject(this.visuals.root);
-    this.panel.setVisible(true);
-    this.panel.setState(this.simulation.createViewState());
+    this.visuals.bindTarget(targetRender);
+    try {
+      this.casterObject = casterObject;
+      this.simulation = new AbilityLabSimulation(casterActor, targetActor);
+      this.visuals.reset();
+      this.addWorldObject(this.visuals.root);
+      this.panel.setVisible(true);
+      this.panel.setState(this.simulation.createViewState());
+    } catch (error) {
+      this.visuals.unbindTarget();
+      this.casterObject = undefined;
+      throw error;
+    }
   }
 
   public deactivate(): void {
-    if (!this.simulation) return;
-    this.simulation.dispose();
+    this.simulation?.dispose();
     this.simulation = undefined;
     this.casterObject = undefined;
     this.visuals.reset();
+    this.visuals.unbindTarget();
     this.removeWorldObject(this.visuals.root);
     this.panel.setVisible(false);
   }

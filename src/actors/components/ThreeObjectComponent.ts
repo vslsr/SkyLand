@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { ActorComponent } from '../../../shared/actor/ActorComponent.mjs';
 import type {
+  AbilityTargetVisualRig,
   ActorSimpleCollision,
   ActorVisualModel,
   ElasticTetherVisualRig,
@@ -33,6 +34,7 @@ export class ThreeObjectComponent extends ActorComponent {
   public readonly simpleCollision: ActorSimpleCollision;
   public readonly interactionAnchorY: number;
   public readonly elasticTetherRig?: ElasticTetherVisualRig;
+  public readonly abilityTargetRig?: AbilityTargetVisualRig;
   private collisionHelper?: THREE.LineSegments<THREE.BufferGeometry, THREE.LineBasicMaterial>;
 
   public constructor(model: ActorVisualModel) {
@@ -44,6 +46,7 @@ export class ThreeObjectComponent extends ActorComponent {
     this.simpleCollision = model.simpleCollision;
     this.interactionAnchorY = model.interactionAnchorY ?? 1.25;
     this.elasticTetherRig = model.elasticTetherRig;
+    this.abilityTargetRig = model.abilityTargetRig;
     this.root.userData[ACTOR_ROOT_MARKER] = true;
     this.attachmentVisualRoot.name = 'actor-attachment-visual-root';
     const visualParent = this.visualRoot.parent ?? this.root;

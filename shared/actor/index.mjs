@@ -28,6 +28,10 @@ export {
   InteractableComponent,
 } from './components/InteractableComponent.mjs';
 export {
+  PLAYER_MOVEMENT_COMPONENT,
+  PlayerMovementComponent,
+} from './components/PlayerMovementComponent.mjs';
+export {
   SIMPLE_COLLISION_COMPONENT,
   SimpleCollisionComponent,
 } from './components/SimpleCollisionComponent.mjs';

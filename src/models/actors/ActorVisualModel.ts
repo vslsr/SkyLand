@@ -20,6 +20,8 @@ export interface ActorVisualModel {
   readonly interactionAnchorY?: number;
   /** 仅弹性模型提供；Actor 视觉 System 通过它驱动局部软体表现。 */
   readonly elasticTetherRig?: ElasticTetherVisualRig;
+  /** 仅训练假人提供；能力表现只修改这些 VisualRoot 下的展示节点。 */
+  readonly abilityTargetRig?: AbilityTargetVisualRig;
 }
 
 export interface ElasticTetherVisualRig {
@@ -27,4 +29,11 @@ export interface ElasticTetherVisualRig {
   readonly stemRoot: THREE.Group;
   readonly capRoot: THREE.Group;
   readonly restLength: number;
+}
+
+export interface AbilityTargetVisualRig {
+  readonly targetRoot: THREE.Group;
+  readonly core: THREE.Group;
+  readonly burningAura: THREE.Group;
+  readonly targetPoint: THREE.Object3D;
 }

@@ -171,6 +171,24 @@ export class InputSubsystem {
     return value;
   }
 
+  /**
+   * 返回当前生效 MappingContext 中，指定语义标签在某设备上的控制路径。
+   * UI 通过这里取得提示来源，避免绕过 Context 优先级或显示已经失效的重绑定。
+   */
+  public getMappedControls(
+    tag: TagLike,
+    deviceKind: InputDeviceKind = this.activeInputDevice,
+  ): readonly string[] {
+    const actionId = this.tagRouter.getActionId(tag);
+    if (this.mappingsDirty) this.rebuildEffectiveMappings();
+    return [...new Set(this.effectiveMappings
+      .filter((mapping) => (
+        mapping.actionId === actionId
+        && (mapping.deviceKind === undefined || mapping.deviceKind === deviceKind)
+      ))
+      .map((mapping) => mapping.control))];
+  }
+
   public update(timestampMs = this.now()): void {
     const frameTimestamp = Math.max(this.lastTimestampMs, timestampMs);
     if (!this.inputEnabled) {

@@ -9,12 +9,19 @@
 /** @typedef {{ x: number, z: number }} PlayerPoint */
 /** @typedef {{ x: number, z: number, sprint: boolean }} PlayerMoveInput */
 /** @typedef {{ minimumX: number, maximumX: number, minimumZ: number, maximumZ: number }} PlayerBounds */
+/** @typedef {{ walkSpeed: number, sprintMultiplier: number }} PlayerMovementDefinition */
 
 export const PLAYER_MOVE_SPEED = 3.2;
 export const PLAYER_SPRINT_MULTIPLIER = 1.65;
 export const PLAYER_MAXIMUM_SPEED = PLAYER_MOVE_SPEED * PLAYER_SPRINT_MULTIPLIER;
 /** 史莱姆模型的玩法平面半径；服务端碰撞与客户端模型共用。 */
 export const PLAYER_COLLISION_RADIUS = 0.42;
+/** 只用于未经过 SceneCatalog 的轻量测试/兼容入口；正式场景读取玩家 Actor 原型。 */
+export const DEFAULT_PLAYER_MOVEMENT = Object.freeze({
+  walkSpeed: PLAYER_MOVE_SPEED,
+  sprintMultiplier: PLAYER_SPRINT_MULTIPLIER,
+  maximumStepHeight: 0,
+});
 
 /** 玩法平面的活动范围，与草地模型的尺寸对应。 @type {PlayerBounds} */
 export const PLAYER_BOUNDS = {
@@ -106,20 +113,32 @@ export function clampToPlayArea(position, bounds = PLAYER_BOUNDS) {
 }
 
 /**
- * 按一帧输入推进玩家位置。速度上限与活动范围都写死在这里，
+ * 按一帧输入推进玩家位置。速度参数来自服务端校验后的玩家 Actor 原型，
  * 客户端只能提交方向与加速开关，无法直接决定自己走多远。
  * @param {PlayerPoint} position
  * @param {PlayerMoveInput} input
  * @param {number} deltaSeconds
  * @param {PlayerBounds} [bounds]
+ * @param {PlayerMovementDefinition} [movement]
  * @returns {PlayerPoint}
  */
-export function applyPlayerMovement(position, input, deltaSeconds, bounds = PLAYER_BOUNDS) {
+export function applyPlayerMovement(
+  position,
+  input,
+  deltaSeconds,
+  bounds = PLAYER_BOUNDS,
+  movement = DEFAULT_PLAYER_MOVEMENT,
+) {
   const move = sanitizeMoveInput(input);
   const length = Math.hypot(move.x, move.z);
   if (length === 0 || !(deltaSeconds > 0)) return clampToPlayArea(position, bounds);
 
-  const speed = PLAYER_MOVE_SPEED * (move.sprint ? PLAYER_SPRINT_MULTIPLIER : 1);
+  const walkSpeed = Math.max(0, toFiniteNumber(movement?.walkSpeed, PLAYER_MOVE_SPEED));
+  const sprintMultiplier = Math.max(
+    1,
+    toFiniteNumber(movement?.sprintMultiplier, PLAYER_SPRINT_MULTIPLIER),
+  );
+  const speed = walkSpeed * (move.sprint ? sprintMultiplier : 1);
   const distance = speed * deltaSeconds;
   return clampToPlayArea(
     { x: position.x + move.x * distance, z: position.z + move.z * distance },

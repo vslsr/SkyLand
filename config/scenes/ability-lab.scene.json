@@ -5,8 +5,29 @@
   "displayName": "能力系统实验室",
   "description": "验证消耗、冷却、周期伤害、效果叠层、标签阻断与属性聚合的交互测试场景。",
   "capacity": 1,
-  "sceneComponents": [{ "type": "ability-lab" }],
-  "actors": [],
+  "sceneComponents": [{ "type": "ability-lab", "targetActorId": "training-dummy-01" }],
+  "actors": [
+    {
+      "id": "training-dummy-01",
+      "archetype": "training-dummy",
+      "localTransform": { "position": [0, 0, -1.5], "yaw": 0 }
+    },
+    {
+      "id": "arcane-focus-01",
+      "archetype": "arcane-focus-obelisk",
+      "localTransform": { "position": [-2.1, 0, -1.5], "yaw": 0 }
+    },
+    {
+      "id": "ember-focus-01",
+      "archetype": "ember-focus-obelisk",
+      "localTransform": { "position": [2.1, 0, -1.5], "yaw": 0 }
+    },
+    {
+      "id": "ability-floor-plaque-01",
+      "archetype": "ability-floor-plaque",
+      "localTransform": { "position": [0, 0, -3.6], "yaw": 0 }
+    }
+  ],
   "renderer": {
     "type": "line-art",
     "background": "#f7f2e8",

@@ -39,8 +39,48 @@
           {
             "type": "object",
             "additionalProperties": false,
-            "required": ["type"],
-            "properties": { "type": { "const": "ability-lab" } }
+            "required": ["type", "targetActorId"],
+            "properties": {
+              "type": { "const": "ability-lab" },
+              "targetActorId": { "type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$" }
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "type",
+              "id",
+              "preset",
+              "position",
+              "particleCount",
+              "radius",
+              "seed",
+              "fillColor",
+              "accentColor",
+              "lineColor",
+              "interactionRadius",
+              "impulseStrength"
+            ],
+            "properties": {
+              "type": { "const": "interactive-particle-effect" },
+              "id": { "type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$" },
+              "preset": { "const": "line-art-leaves" },
+              "position": {
+                "type": "array",
+                "minItems": 3,
+                "maxItems": 3,
+                "items": { "type": "number" }
+              },
+              "particleCount": { "type": "integer", "minimum": 16, "maximum": 512 },
+              "radius": { "type": "number", "minimum": 1, "maximum": 32 },
+              "seed": { "type": "integer", "minimum": 0, "maximum": 4294967295 },
+              "fillColor": { "$ref": "#/$defs/color" },
+              "accentColor": { "$ref": "#/$defs/color" },
+              "lineColor": { "$ref": "#/$defs/color" },
+              "interactionRadius": { "type": "number", "minimum": 0.1, "maximum": 4 },
+              "impulseStrength": { "type": "number", "minimum": 0.1, "maximum": 12 }
+            }
           }
         ]
       }
@@ -158,8 +198,16 @@
     "gameplay": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["bounds", "spawn"],
+      "required": ["playerActor", "bounds", "spawn"],
       "properties": {
+        "playerActor": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["archetype"],
+          "properties": {
+            "archetype": { "type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$" }
+          }
+        },
         "bounds": {
           "type": "object",
           "additionalProperties": false,

@@ -26,6 +26,10 @@ export class InteractionMarkerComponent extends ActorComponent {
     this.visual.root.visible = visible;
   }
 
+  public setLabel(label: string): void {
+    this.visual.setLabel(label);
+  }
+
   public faceCamera(camera: THREE.Camera): void {
     if (!this.visible) return;
     this.host.updateWorldMatrix(true, false);
@@ -33,7 +37,7 @@ export class InteractionMarkerComponent extends ActorComponent {
     this.host.getWorldQuaternion(this.parentQuaternion).invert();
     this.visual.root.quaternion.copy(this.parentQuaternion).multiply(this.cameraQuaternion);
     const distance = camera.position.distanceTo(this.visual.root.getWorldPosition(_markerWorldPosition));
-    const scale = THREE.MathUtils.clamp(distance * 0.075, 0.72, 1.35);
+    const scale = THREE.MathUtils.clamp(distance * 0.09, 0.88, 1.55);
     this.visual.root.scale.setScalar(scale);
   }
 

@@ -1,0 +1,14 @@
+{
+  "$schema": "./actor.schema.json",
+  "schemaVersion": 1,
+  "id": "training-dummy",
+  "components": {
+    "render": {
+      "model": "line-art-training-dummy",
+      "woodColor": "#b58c63",
+      "accentColor": "#e0c6a4",
+      "radius": 0.82,
+      "height": 2.22
+    }
+  }
+}

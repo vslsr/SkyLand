@@ -5,7 +5,23 @@
   "displayName": "线稿草地",
   "description": "树木、草丛与纸张色雾气构成的经典 SkyLand 草地。",
   "capacity": 8,
-  "sceneComponents": [{ "type": "mouse-grass-interaction" }],
+  "sceneComponents": [
+    { "type": "mouse-grass-interaction" },
+    {
+      "type": "interactive-particle-effect",
+      "id": "grassland-leaves",
+      "preset": "line-art-leaves",
+      "position": [0, 0, 1.5],
+      "particleCount": 180,
+      "radius": 8,
+      "seed": 139732,
+      "fillColor": "#d6a45b",
+      "accentColor": "#bd7041",
+      "lineColor": "#493426",
+      "interactionRadius": 0.9,
+      "impulseStrength": 3.4
+    }
+  ],
   "actors": [
     {
       "id": "elastic-mushroom-01",

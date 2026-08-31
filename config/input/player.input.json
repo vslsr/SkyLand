@@ -122,6 +122,7 @@
         { "id": "Interact.Touch.Button", "deviceKind": "touch", "control": "Virtual.InteractButton", "actionId": "IA_Player_Interact" },
         { "id": "Interact.Gamepad.Button", "deviceKind": "gamepad", "control": "Gamepad.ButtonWest", "actionId": "IA_Player_Interact" },
         { "id": "WorldInteract.Keyboard.Primary", "deviceKind": "keyboardMouse", "control": "Keyboard.KeyE", "actionId": "IA_World_Interact" },
+        { "id": "WorldInteract.Touch.Button", "deviceKind": "touch", "control": "Virtual.WorldInteractButton", "actionId": "IA_World_Interact" },
         { "id": "WorldInteract.Gamepad.Button", "deviceKind": "gamepad", "control": "Gamepad.ButtonNorth", "actionId": "IA_World_Interact" },
         { "id": "AbilityLab.Keyboard.Arcane", "deviceKind": "keyboardMouse", "control": "Keyboard.Digit1", "actionId": "IA_AbilityLab_Arcane" },
         { "id": "AbilityLab.Keyboard.Burn", "deviceKind": "keyboardMouse", "control": "Keyboard.Digit2", "actionId": "IA_AbilityLab_Burn" },
@@ -164,8 +165,11 @@
       "Mouse.Button0": "鼠标左键",
       "Virtual.MoveStick": "触摸摇杆",
       "Virtual.SprintButton": "RUN",
+      "Virtual.WorldInteractButton": "ACT",
       "Gamepad.LeftStick": "左摇杆",
-      "Gamepad.LeftStickButton": "L3"
+      "Gamepad.LeftStickButton": "L3",
+      "Gamepad.ButtonWest": "X",
+      "Gamepad.ButtonNorth": "Y"
     },
     "prompts": [
       {
@@ -248,6 +252,16 @@
         "sizePx": 58,
         "gridColumn": 2,
         "gridRow": 2
+      },
+      {
+        "id": "world-interact",
+        "control": "Virtual.WorldInteractButton",
+        "label": "ACT",
+        "ariaLabel": "世界交互",
+        "sizePx": 64,
+        "gridColumn": 3,
+        "gridRow": 1,
+        "rowSpan": 2
       }
     ],
     "layouts": {

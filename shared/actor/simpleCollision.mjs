@@ -67,6 +67,24 @@ export function createSimpleCollisionFromRender(render) {
       maximumY: height,
     });
   }
+  if (model === 'line-art-training-dummy' || model === 'line-art-focus-obelisk') {
+    const radius = positiveNumber(render.radius, 0.5);
+    const height = positiveNumber(render.height, 1);
+    return createSimpleCollisionDefinition({
+      halfWidth: radius,
+      halfLength: radius,
+      minimumY: 0,
+      maximumY: height,
+    });
+  }
+  if (model === 'line-art-floor-plaque') {
+    return createSimpleCollisionDefinition({
+      halfWidth: positiveNumber(render.width, 1) * 0.5,
+      halfLength: positiveNumber(render.length, 1) * 0.5,
+      minimumY: 0,
+      maximumY: positiveNumber(render.height, 0.1),
+    });
+  }
   throw new TypeError(`无法为模型 ${model || '<unknown>'} 生成简易碰撞`);
 }
 

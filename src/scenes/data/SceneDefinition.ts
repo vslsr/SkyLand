@@ -21,9 +21,25 @@ export interface ActorBuoyancyPartDefinition {
   localZ: number;
 }
 
+export interface InteractiveParticleSceneComponentDefinition {
+  type: 'interactive-particle-effect';
+  id: string;
+  preset: 'line-art-leaves';
+  position: [number, number, number];
+  particleCount: number;
+  radius: number;
+  seed: number;
+  fillColor: string;
+  accentColor: string;
+  lineColor: string;
+  interactionRadius: number;
+  impulseStrength: number;
+}
+
 export type SceneComponentDefinition =
   | { type: 'mouse-grass-interaction' }
-  | { type: 'ability-lab' };
+  | { type: 'ability-lab'; targetActorId: string }
+  | InteractiveParticleSceneComponentDefinition;
 
 export type ActorRenderDefinition =
   | {
@@ -53,6 +69,28 @@ export type ActorRenderDefinition =
       stemColor: string;
       spotColor: string;
       radius: number;
+      height: number;
+    }
+  | {
+      model: 'line-art-training-dummy';
+      woodColor: string;
+      accentColor: string;
+      radius: number;
+      height: number;
+    }
+  | {
+      model: 'line-art-focus-obelisk';
+      stoneColor: string;
+      crystalColor: string;
+      radius: number;
+      height: number;
+    }
+  | {
+      model: 'line-art-floor-plaque';
+      color: string;
+      accentColor: string;
+      width: number;
+      length: number;
       height: number;
     };
 

@@ -1,11 +1,14 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Actor } from '../shared/actor/Actor.mjs';
+import { ActorComponent } from '../shared/actor/ActorComponent.mjs';
 import { AbilityLabSimulation } from '../src/abilities/lab/AbilityLabSimulation.ts';
 
 test('能力实验室覆盖消耗、冷却、标签阻断、周期效果与重置', () => {
   const caster = new Actor('ability-lab-caster', 'player-slime');
-  const lab = new AbilityLabSimulation(caster);
+  const target = new Actor('training-dummy-01', 'training-dummy');
+  const targetSentinel = target.addComponent(new ActorComponent('test-sentinel'));
+  const lab = new AbilityLabSimulation(caster, target);
   assert.deepEqual(
     {
       mana: lab.createViewState().caster.mana,
@@ -61,5 +64,8 @@ test('能力实验室覆盖消耗、冷却、标签阻断、周期效果与重�
     },
   );
   lab.dispose();
+  assert.equal(target.getComponent('game-ability'), undefined);
+  assert.equal(target.getComponent('test-sentinel'), targetSentinel);
   caster.dispose();
+  target.dispose();
 });
