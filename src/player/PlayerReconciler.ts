@@ -14,6 +14,8 @@ export interface ReconcilerTarget {
   readonly position: { x: number; z: number };
   translate(deltaX: number, deltaZ: number): void;
   setPosition(x: number, z: number): void;
+  /** 瞬移之后重置随位置累积的本地状态，例如已经收起来的相机悬臂。 */
+  resetCamera?(): void;
 }
 
 const HISTORY_LIMIT = 64;
@@ -56,6 +58,8 @@ export class PlayerReconciler {
       const currentX = target.position.x;
       const currentZ = target.position.z;
       target.setPosition(x, z);
+      // 瞬移可能跨过好几个 chunk，上一处收起来的悬臂长度在新位置没有意义。
+      target.resetCamera?.();
       this.shiftHistory(target.position.x - currentX, target.position.z - currentZ);
       this.pendingX = 0;
       this.pendingZ = 0;

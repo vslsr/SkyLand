@@ -16,6 +16,12 @@ interface PlayerWorldInteraction extends GrassInteractionTarget {
     position: { x: number; z: number },
     radius: number,
   ): { x: number; z: number };
+  /** 第三人称相机悬臂的遮挡探针，见 SceneRenderer.sweepCameraProbe。 */
+  sweepCameraProbe?(
+    start: readonly [number, number, number],
+    end: readonly [number, number, number],
+    radius: number,
+  ): number;
 }
 
 export class PlayerEntity extends Actor {
@@ -34,6 +40,7 @@ export class PlayerEntity extends Actor {
     grassInteraction: PlayerWorldInteraction,
   ) {
     super(playerId, 'player-slime');
+    const cameraProbe = grassInteraction.sweepCameraProbe?.bind(grassInteraction);
     this.model.root.name = 'local-player-slime';
     this.model.root.position.set(spawn.x, 0, spawn.z);
     this.controller = new TopDownController(canvas, this.model.root, input, {
@@ -43,6 +50,7 @@ export class PlayerEntity extends Actor {
       resolveCollision: (position, radius) => (
         grassInteraction.resolveSimpleCollision?.(position, radius) ?? position
       ),
+      cameraProbe,
     });
     this.grassDisplacement = this.addComponent(new GrassDisplacementComponent(
       this.model.root,

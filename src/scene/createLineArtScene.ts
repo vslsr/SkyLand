@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { ClientActorSystem } from '../actors/ClientActorSystem';
+import { CollisionWorld } from '../../shared/collision/index.mjs';
 import { GrassFieldSystem, type GrassInteractionTarget } from '../grass';
 import { createGroundModel } from '../models/ground';
 import { createTreeField } from '../models/tree';
@@ -20,6 +21,9 @@ export function createLineArtScene(
   };
   const scene = new THREE.Scene();
   const visualSystems: SceneVisualSystem[] = [];
+  // 一个场景一张碰撞网格：流式 chunk 往里放静态物件，Actor 往里放动态盒子，
+  // 玩家推出和相机悬臂都只查它，不需要各自再维护一份碰撞体列表。
+  const collisionWorld = new CollisionWorld();
   let grassInteraction: GrassInteractionTarget | undefined;
   let actorSnapshotTarget: ClientActorSystem | undefined;
   scene.background = new THREE.Color(renderer.background);
@@ -32,6 +36,7 @@ export function createLineArtScene(
       world: renderer.world,
       worldSeed,
       environment,
+      collision: collisionWorld,
       templates: {
         content: renderer.content,
         environment,
@@ -79,10 +84,10 @@ export function createLineArtScene(
     visualSystems.push(ocean);
   }
   if (definition.actors.length > 0) {
-    const actors = new ClientActorSystem({ definition, environment });
+    const actors = new ClientActorSystem({ definition, environment, collision: collisionWorld });
     scene.add(actors.root);
     visualSystems.push(actors);
     actorSnapshotTarget = actors;
   }
-  return { scene, visualSystems, grassInteraction, actorSnapshotTarget };
+  return { scene, visualSystems, grassInteraction, actorSnapshotTarget, collisionWorld };
 }

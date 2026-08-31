@@ -13,6 +13,9 @@
 | `shared/world/chunkKey.mjs` | 世界坐标、chunk 坐标与 chunk key 之间的换算，以及半径查询。 |
 | `shared/world/chunkContent.mjs` | 放置算法的 JS 参考实现。输出整数放置记录。 |
 | `shared/world/chunkStream.mjs` | 加载/卸载计划。纯函数，没有 WASM 对应实现。 |
+| `shared/world/chunkColliders.mjs` | 由放置记录派生静态碰撞盒。纯函数，没有 WASM 对应实现。 |
+| `shared/collision/` | 均匀网格空间划分、场景碰撞世界与扫掠球求交。 |
+| `server/scene/ServerChunkColliders.mjs` | 房间 DS 侧的静态碰撞常驻策略，跟着玩家走。 |
 | `shared/world/chunkGenerator.mjs` | 生成后端接口定义 + 纯 JS 后端（参考实现与降级路径）。 |
 | `shared/world/chunkGeneratorWasm.mjs` | WASM 后端包装，负责模板上传与结果切片。 |
 | `shared/world/wasm/chunkgen.wasm` | 签入仓库的编译产物。改了 Rust 必须重新构建并一起提交。 |
@@ -143,6 +146,15 @@
 ## 降级路径
 
 `shared/world/chunkGenerator.mjs` 里的 JS 后端与 WASM 行为完全一致，WASM 加载或实例化失败时自动接管，世界照样是同一个。用 `?chunkgen=js` 打开页面可以强制走 JS 后端做对照——两条路径看起来不一样，就说明它们已经分裂，而测试没覆盖到。
+
+## 静态碰撞
+
+`shared/world/chunkColliders.mjs` 把同一批整数放置记录翻译成简易碰撞盒，不引入任何新的随机性，所以浏览器与房间 DS 得到的是同一批盒子——静态碰撞和静态几何体一样，一个字节都不用同步。
+
+- 客户端：`ChunkStreamer` 在 chunk 装载时把碰撞体整组交给场景的 `CollisionWorld`，卸载时整组撤走，参与碰撞的物件数量跟着 `keepRadius` 走。
+- 服务端：`ServerChunkColliders` 只保留每名玩家周围一圈的 chunk，走出两圈才卸载，上界是玩家数 × 25 个 chunk。房间 DS 需要 `worldSeed`，由 `RoomProcessManager` 随 `room:initialize` 下发。
+
+改了物件的形状（`src/models/tree.ts`、`rock.ts`）就要回来核对 `PROP_COLLIDER_TEMPLATES`，否则会出现「看得见但撞不到」或者相反。新增物件种类时，记得给它一份碰撞模板；不需要碰撞的（例如草）显式写成空数组，而不是漏掉。
 
 ## 已知缺口
 

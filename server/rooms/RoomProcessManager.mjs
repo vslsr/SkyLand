@@ -94,6 +94,7 @@ export class RoomProcessManager extends EventEmitter {
         type: 'room:initialize',
         room: { id: record.id, name: record.name, capacity: record.capacity },
         scene: record.sceneDefinition,
+        worldSeed: record.worldSeed,
       });
     }).catch((error) => {
       this.rooms.delete(id);

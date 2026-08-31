@@ -1,5 +1,6 @@
 import type * as THREE from 'three';
 import type { Actor } from '../../shared/actor/Actor.mjs';
+import type { CollisionWorld } from '../../shared/collision/index.mjs';
 import type { GrassInteractionTarget } from '../grass';
 import type { SnapshotActor } from '../network/protocol';
 import type { ActorFloatState, ActorEventType } from '../network/protocol';
@@ -39,10 +40,8 @@ export interface ActorSnapshotTarget {
   setHoveredActorId(actorId?: string): void;
   setInteractionMarkerActorId(actorId?: string, inputLabel?: string): void;
   getVesselHudState(playerId: string): VesselHudState | undefined;
-  resolveSimpleCollision(
-    position: { x: number; z: number },
-    radius: number,
-  ): { x: number; z: number };
+  /** 把 Actor 当前的碰撞盒登记进场景碰撞世界。查询前调用，每帧最多兑现一次。 */
+  refreshColliders(): void;
   setSimpleCollisionVisible(visible: boolean): void;
 }
 
@@ -69,4 +68,9 @@ export interface SceneComposition {
   visualSystems: SceneVisualSystem[];
   grassInteraction?: GrassInteractionTarget;
   actorSnapshotTarget?: ActorSnapshotTarget;
+  /**
+   * 这个场景的碰撞世界：流式 chunk 的静态物件与 Actor 的碰撞盒都登记在这里。
+   * 玩家推出与第三人称相机悬臂共用它，随场景一起创建与丢弃。
+   */
+  collisionWorld?: CollisionWorld;
 }

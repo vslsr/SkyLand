@@ -23,7 +23,7 @@ import {
   TRANSFORM_COMPONENT,
   VESSEL_MOTOR_COMPONENT,
 } from '../../shared/actor/index.mjs';
-import { resolveCircleAgainstSimpleCollisions } from '../../shared/actor/simpleCollision.mjs';
+import { CollisionWorld } from '../../shared/collision/index.mjs';
 import {
   createActorSnapshots,
   createServerActorWorld,
@@ -37,6 +37,7 @@ import {
   grabElasticTether,
   releaseElasticTether,
 } from '../actors/ElasticTetherMutations.mjs';
+import { ServerChunkColliders } from './ServerChunkColliders.mjs';
 
 function roundCoordinate(value) {
   return Math.round(value * 1000) / 1000;
@@ -67,7 +68,19 @@ export class ServerScene {
     this.bounds = definition.gameplay?.bounds ?? PLAYER_BOUNDS;
     this.spawn = definition.gameplay?.spawn;
     this.players = new Map();
-    this.actorWorld = createServerActorWorld(definition, { players: this.players });
+    // 一张空间网格同时承载 Actor 与流式世界的静态物件。玩家推出只查身边的
+    // 几个格子，成本不随房间里的 Actor 数或世界面积增长。
+    this.collision = new CollisionWorld();
+    this.actorWorld = createServerActorWorld(definition, {
+      players: this.players,
+      collision: this.collision,
+    });
+    // 静态碰撞只有流式场景才有；固定摆放的场景里树是布景，没有碰撞体。
+    this.chunkColliders = new ServerChunkColliders({
+      world: this.collision,
+      worldSeed: options.worldSeed,
+      enabled: Boolean(definition.renderer?.world),
+    });
     this.tick = 0;
     this.now = options.now ?? (() => Date.now());
     this.lastRefillAt = this.now();
@@ -75,11 +88,18 @@ export class ServerScene {
 
   addPlayer(player) {
     const spawn = createSpawnPoint(player.slot ?? this.players.size, this.spawn, this.bounds);
+    // 出生点是按槽位算的固定圆周，未必避得开树和石头；先把它推到碰撞外面，
+    // 否则新玩家会卡在树干里，等第一条输入才被挤出来。
+    this.chunkColliders.ensureAround(spawn.x, spawn.z);
+    const placed = clampToPlayArea(
+      this.collision.resolveCircle(spawn, PLAYER_COLLISION_RADIUS),
+      this.bounds,
+    );
     this.players.set(player.id, {
       id: player.id,
       name: player.name,
-      x: spawn.x,
-      z: spawn.z,
+      x: placed.x,
+      z: placed.z,
       yaw: Math.PI,
       speed: 0,
       sequence: 0,
@@ -315,14 +335,11 @@ export class ServerScene {
 
     const move = sanitizeMoveInput({ ...message?.move, sprint: message?.sprint === true });
     const next = applyPlayerMovement({ x: player.x, z: player.z }, move, granted, this.bounds);
-    const colliders = this.actorWorld
-      .query(TRANSFORM_COMPONENT, SIMPLE_COLLISION_COMPONENT)
-      .map((actor) => ({
-        collision: actor.requireComponent(SIMPLE_COLLISION_COMPONENT),
-        transform: actor.requireComponent(TRANSFORM_COMPONENT),
-      }));
+    // 玩家可能刚加入或刚跨过边界，先确认脚下这一片的静态碰撞体已经就位，
+    // 否则这一步会从树里穿过去，再被下一个 tick 拉回来。
+    this.chunkColliders.ensureAround(next.x, next.z);
     const resolved = clampToPlayArea(
-      resolveCircleAgainstSimpleCollisions(next, PLAYER_COLLISION_RADIUS, colliders),
+      this.collision.resolveCircle(next, PLAYER_COLLISION_RADIUS),
       this.bounds,
     );
     const distance = Math.hypot(resolved.x - player.x, resolved.z - player.z);
@@ -346,7 +363,10 @@ export class ServerScene {
       );
       if (now - player.lastInputAt > MOVEMENT_IDLE_TIMEOUT_MS) player.speed = 0;
     }
+    // Actor 的碰撞盒由 ActorColliderIndex 在 tick 内同步，这里不用再管。
     this.actorWorld.update(elapsedSeconds, now / 1000);
+    // 常驻的静态碰撞跟着玩家走；没人跨过 chunk 边界时这一步直接返回。
+    this.chunkColliders.sync(this.players.values());
   }
 
   createSnapshot() {

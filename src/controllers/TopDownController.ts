@@ -1,3 +1,4 @@
+import { CameraBoom, type CameraProbe } from '../camera/CameraBoom';
 import type { CameraFrame } from '../camera/CameraTransform';
 import type { CameraAxes } from '../camera/cameraMath';
 import { createCameraViewMatrix } from '../camera/cameraMath';
@@ -31,7 +32,15 @@ export interface TopDownControllerOptions {
     position: { x: number; z: number },
     radius: number,
   ) => { x: number; z: number };
+  /**
+   * 第三人称相机的遮挡探针。传进来时机位会挂在一根会被世界挡住的悬臂上，
+   * 镜头不再穿进树、石头或船体；不传就是原来的固定偏移机位。
+   */
+  cameraProbe?: CameraProbe;
 }
+
+/** 悬臂支点的离地高度：史莱姆胸口附近，不是脚下，免得镜头贴地。 */
+const CAMERA_PIVOT_HEIGHT = 0.25;
 
 export class TopDownController {
   private readonly canvas: HTMLCanvasElement;
@@ -44,6 +53,9 @@ export class TopDownController {
   private readonly bounds: SceneBounds;
   private readonly collisionRadius: number;
   private readonly resolveCollision?: TopDownControllerOptions['resolveCollision'];
+  private readonly cameraProbe?: CameraProbe;
+  private readonly cameraBoom = new CameraBoom();
+  private cameraDistanceRatio = 1;
   private enabled: boolean;
   private facingYaw = Math.PI;
   private currentSpeed = 0;
@@ -64,17 +76,21 @@ export class TopDownController {
     this.bounds = options.bounds ?? PLAYER_BOUNDS;
     this.collisionRadius = Math.max(0, options.collisionRadius ?? 0);
     this.resolveCollision = options.resolveCollision;
+    this.cameraProbe = options.cameraProbe;
     this.fieldOfViewRadians = ((options.fieldOfViewDegrees ?? 50) * Math.PI) / 180;
     this.bindInput(input);
     this.bindPointerEvents();
   }
 
   public get frame(): CameraFrame {
-    const target: Vec3 = [this.player.position.x, 0.25, this.player.position.z];
+    const target = this.cameraPivot;
+    // 悬臂只改长度不改方向，所以三条相机轴与无遮挡时完全一致：
+    // 鼠标射线投影、朝向解算都不需要为镜头收缩单独处理。
+    const ratio = this.cameraDistanceRatio;
     const position: Vec3 = [
-      target[0] + this.cameraOffset[0],
-      target[1] + this.cameraOffset[1],
-      target[2] + this.cameraOffset[2],
+      target[0] + this.cameraOffset[0] * ratio,
+      target[1] + this.cameraOffset[1] * ratio,
+      target[2] + this.cameraOffset[2] * ratio,
     ];
     const forward = normalize([
       target[0] - position[0],
@@ -89,6 +105,16 @@ export class TopDownController {
 
   public get movementSpeed(): number {
     return this.currentSpeed;
+  }
+
+  /** 悬臂支点：角色所在位置抬高到胸口。 */
+  private get cameraPivot(): Vec3 {
+    return [this.player.position.x, CAMERA_PIVOT_HEIGHT, this.player.position.z];
+  }
+
+  /** 当前悬臂占原长的比例，1 表示没有被遮挡。调试面板与测试用它。 */
+  public get cameraDistance(): number {
+    return this.cameraDistanceRatio;
   }
 
   public get position(): { x: number; z: number } {
@@ -116,6 +142,12 @@ export class TopDownController {
     }
   }
 
+  /** 传送或重新出生：悬臂不该把上一处的收缩量带过来。 */
+  public resetCamera(): void {
+    this.cameraBoom.reset();
+    this.cameraDistanceRatio = 1;
+  }
+
   public setPosition(x: number, z: number): void {
     const bounded = {
       x: clampToRange(x, this.bounds.minimumX, this.bounds.maximumX),
@@ -131,6 +163,9 @@ export class TopDownController {
   }
 
   public update(deltaSeconds: number): void {
+    // 镜头必须先解算：即使输入被 UI 接管，角色仍可能被服务端和解拉着走，
+    // 这时镜头照样要躲开挡在中间的树。
+    this.updateCameraBoom(deltaSeconds);
     if (!this.enabled) return;
 
     const localX = this.movementInput.x;
@@ -178,6 +213,21 @@ export class TopDownController {
     }
     this.facingYaw = normalizeAngle(this.facingYaw);
     this.player.rotation.y = this.facingYaw;
+  }
+
+  /**
+   * 解算第三人称镜头的遮挡。
+   *
+   * 每帧一次扫掠查询：起点是角色，终点是无遮挡时的机位。查询走场景碰撞网格的
+   * CAMERA 层，所以只会命中附近格子里的那几个盒子，成本与世界大小无关。
+   */
+  private updateCameraBoom(deltaSeconds: number): void {
+    this.cameraDistanceRatio = this.cameraBoom.solve(
+      this.cameraPivot,
+      this.cameraOffset,
+      deltaSeconds,
+      this.cameraProbe,
+    );
   }
 
   public dispose(): void {
