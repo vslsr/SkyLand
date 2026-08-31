@@ -4,9 +4,11 @@ import { SceneControlRouter } from '../controllers/SceneControlRouter';
 import { RoomClient, type JoinedRoom, type RoomSummary } from '../network/RoomClient';
 import { SnapshotBuffer } from '../network/SnapshotBuffer';
 import type { RoomSnapshot } from '../network/protocol';
+import { registerChunkTemplates } from '../models/chunkTemplates';
 import { PlayerEntity } from '../player/PlayerEntity';
 import { RemotePlayerGroup } from '../player/RemotePlayerGroup';
 import { SceneRenderer } from '../rendering/SceneRenderer';
+import { ChunkStreamer, loadChunkGenerator } from '../world';
 import { INPUT_SEND_INTERVAL_SECONDS } from '../../shared/networkTuning.mjs';
 import { HudController } from '../ui/HudController';
 import { CreateRoomPage, type CreateRoomFormValue } from '../ui/pages/CreateRoomPage';
@@ -28,6 +30,7 @@ export class GrasslandScene extends Scene {
   private readonly lobbyPage = new RoomLobbyPage();
   private readonly snapshots = new SnapshotBuffer();
   private readonly remotePlayers = new RemotePlayerGroup();
+  private readonly chunks = new ChunkStreamer();
   private joinedRoom?: JoinedRoom;
   private player?: PlayerEntity;
   private timeSinceInputSent = 0;
@@ -57,6 +60,25 @@ export class GrasslandScene extends Scene {
     this.roomClient.onSnapshot((snapshot) => this.handleSnapshot(snapshot));
     this.roomClient.onDisconnect(() => this.handleDisconnect());
     this.renderer.addWorldObject(this.remotePlayers.root);
+    this.renderer.addWorldObject(this.chunks.root);
+    void this.initializeChunkStreaming();
+  }
+
+  /**
+   * 接上 chunk 生成后端。
+   *
+   * WASM 是异步取回来的，在它就位之前 ChunkStreamer 不建任何东西，
+   * 世界会晚一两帧出现；这比先用 JS 铺一遍再用 WASM 重铺一遍划算。
+   * WASM 取不到时 loadChunkGenerator 会降级成 JS 实现，世界照样是同一个。
+   */
+  private async initializeChunkStreaming(): Promise<void> {
+    try {
+      const generator = await loadChunkGenerator();
+      registerChunkTemplates(generator);
+      this.chunks.setGenerator(generator);
+    } catch (error) {
+      console.error('[world] chunk 生成后端初始化失败', error);
+    }
   }
 
   public update(deltaSeconds: number, elapsedSeconds: number): void {
@@ -65,6 +87,21 @@ export class GrasslandScene extends Scene {
     this.sendPlayerInput(deltaSeconds);
     this.remotePlayers.sync(this.snapshots.sample(), this.joinedRoom?.player.id);
     this.remotePlayers.update(deltaSeconds, elapsedSeconds);
+    this.streamWorldAroundFocus();
+  }
+
+  /**
+   * 以玩家为中心流式加载世界；还没有玩家时跟着飞行相机，
+   * 这样大厅背后看到的也是一片正常的世界，而不是空白。
+   */
+  private streamWorldAroundFocus(): void {
+    const player = this.player?.controller.position;
+    if (player) {
+      this.chunks.update(player.x, player.z);
+      return;
+    }
+    const [cameraX, , cameraZ] = this.controls.frame.position;
+    this.chunks.update(cameraX, cameraZ);
   }
 
   public render(): void {
@@ -127,6 +164,8 @@ export class GrasslandScene extends Scene {
       return;
     }
     this.joinedRoom = joined;
+    // 房间的种子决定了这一局的世界，换房间就要换掉已经建好的 chunk。
+    this.chunks.setWorldSeed(joined.room.worldSeed);
     this.snapshots.clear();
     this.createPlayer(joined.player.spawn);
     this.hud.setRoom(joined.room);

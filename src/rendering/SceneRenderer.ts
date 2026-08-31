@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import type { CameraFrame } from '../camera/CameraTransform';
+import { PAPER_COLOR } from '../materials/atmosphere';
 import { createLineArtScene } from '../scene/createLineArtScene';
 
 export class SceneRenderer {
@@ -15,7 +16,7 @@ export class SceneRenderer {
       alpha: false,
       powerPreference: 'high-performance',
     });
-    this.renderer.setClearColor(0xfdfbf6, 1);
+    this.renderer.setClearColor(PAPER_COLOR, 1);
     this.renderer.outputEncoding = THREE.sRGBEncoding;
   }
 

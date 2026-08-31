@@ -1,10 +1,13 @@
 import { ServerScene } from '../scene/ServerScene.mjs';
 import { SERVER_TICK_RATE, TICKS_PER_SNAPSHOT } from '../../shared/networkTuning.mjs';
+import { toWorldSeed } from '../../shared/world/worldConfig.mjs';
 
 const room = {
   id: process.env.SKYLAND_ROOM_ID,
   name: process.env.SKYLAND_ROOM_NAME,
   capacity: Number(process.env.SKYLAND_ROOM_CAPACITY) || 8,
+  // 房间的世界种子由大厅进程分配，随房间摘要一起下发给客户端。
+  worldSeed: toWorldSeed(process.env.SKYLAND_WORLD_SEED),
 };
 const scene = new ServerScene(process.env.SKYLAND_SCENE_ID || 'grassland');
 

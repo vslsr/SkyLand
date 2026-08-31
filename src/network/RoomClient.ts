@@ -6,6 +6,8 @@ export interface RoomSummary {
   playerCount: number;
   capacity: number;
   sceneId: string;
+  /** 房间的世界种子，客户端据此生成与服务端一致的地形与物件。 */
+  worldSeed: number;
   createdAt: string;
 }
 

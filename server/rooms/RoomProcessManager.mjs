@@ -1,10 +1,21 @@
 import { fork } from 'node:child_process';
 import { EventEmitter } from 'node:events';
-import { randomUUID } from 'node:crypto';
+import { randomBytes, randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { createSpawnPoint } from '../../shared/playerMovement.mjs';
+import { toWorldSeed } from '../../shared/world/worldConfig.mjs';
 
 const WORKER_PATH = fileURLToPath(new URL('./room-worker.mjs', import.meta.url));
+
+/**
+ * 每个房间一个世界种子。
+ *
+ * 客户端拿到种子后自己生成地形与物件，静态内容因此完全不需要走网络；
+ * 前提是两端跑的是同一套确定性算法（shared/world/chunkContent.mjs）。
+ */
+function createWorldSeed() {
+  return toWorldSeed(randomBytes(4).readUInt32LE(0));
+}
 
 function sanitizeText(value, fallback, maximumLength) {
   const text = String(value ?? '').replace(/[\u0000-\u001f<>]/g, '').trim();
@@ -26,6 +37,7 @@ export class RoomProcessManager extends EventEmitter {
       name: sanitizeText(name, `草地房间 ${this.rooms.size + 1}`, 28),
       capacity: this.capacity,
       sceneId: 'grassland',
+      worldSeed: createWorldSeed(),
       createdAt: new Date().toISOString(),
       child: undefined,
       players: new Map(),
@@ -39,6 +51,7 @@ export class RoomProcessManager extends EventEmitter {
         SKYLAND_ROOM_NAME: record.name,
         SKYLAND_ROOM_CAPACITY: String(record.capacity),
         SKYLAND_SCENE_ID: record.sceneId,
+        SKYLAND_WORLD_SEED: String(record.worldSeed),
       },
       stdio: ['ignore', 'inherit', 'inherit', 'ipc'],
     });
@@ -167,6 +180,7 @@ export class RoomProcessManager extends EventEmitter {
       playerCount: record.players.size,
       capacity: record.capacity,
       sceneId: record.sceneId,
+      worldSeed: record.worldSeed,
       createdAt: record.createdAt,
     };
   }

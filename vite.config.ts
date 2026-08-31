@@ -1,6 +1,11 @@
 import { defineConfig } from 'vite';
 
 export default defineConfig({
+  build: {
+    // chunkgen.wasm 只有几 KB，会被默认的内联阈值转成 base64 塞进 JS。
+    // 保持它是独立文件：体积不再被 base64 放大三分之一，浏览器也能单独缓存。
+    assetsInlineLimit: (filePath) => (filePath.endsWith('.wasm') ? false : undefined),
+  },
   server: {
     host: '0.0.0.0',
     port: 5180,

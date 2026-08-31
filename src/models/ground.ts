@@ -1,38 +1,47 @@
 import * as THREE from 'three';
-import { createFillMaterial } from '../materials/createFillMaterial';
+import { CHUNK_SIZE } from '../../shared/world/worldConfig.mjs';
 import { GROUND_GRID_MATERIAL } from '../materials/lineMaterials';
-import { createOutlinedObject } from './outlinedObject';
 
-const GROUND_WIDTH = 34;
-const GROUND_DEPTH = 34;
-const GROUND_CENTER_Z = -5;
+/** 地面的填充色，chunk 合批时作为顶点色写入。 */
+export const GROUND_COLOR = 0xf1eddf;
 
-function createGroundGrid(): THREE.LineSegments {
+const GRID_SPACING = 2;
+const GRID_HEIGHT = 0.012;
+
+/**
+ * 单个 chunk 的地面几何体，以 chunk 中心为原点。
+ * 地面不描边：每块地都描一圈的话，世界上会浮现出一张 chunk 的网格。
+ */
+export function createChunkGroundGeometry(): THREE.BufferGeometry {
+  const geometry = new THREE.PlaneGeometry(CHUNK_SIZE, CHUNK_SIZE);
+  geometry.rotateX(-Math.PI / 2);
+  return geometry;
+}
+
+let sharedGridGeometry: THREE.BufferGeometry | undefined;
+
+/**
+ * chunk 的地面网格线。
+ *
+ * 每个 chunk 的网格长得一模一样，所以只建一份几何体，由所有 ChunkView 共用，
+ * 各自靠自身的位置偏移对齐。线只画在起始边、不画结束边，
+ * 相邻 chunk 拼起来后间距才是均匀的，接缝上也不会出现双线。
+ */
+export function getChunkGridGeometry(): THREE.BufferGeometry {
+  if (sharedGridGeometry) return sharedGridGeometry;
+
   const positions: number[] = [];
-  const halfWidth = GROUND_WIDTH / 2;
-  const halfDepth = GROUND_DEPTH / 2;
-  const spacing = 2;
-
-  for (let x = -halfWidth + spacing; x < halfWidth; x += spacing) {
-    positions.push(x, 0.012, -halfDepth, x, 0.012, halfDepth);
-  }
-  for (let z = -halfDepth + spacing; z < halfDepth; z += spacing) {
-    positions.push(-halfWidth, 0.012, z, halfWidth, 0.012, z);
+  const half = CHUNK_SIZE / 2;
+  for (let offset = -half; offset < half; offset += GRID_SPACING) {
+    positions.push(offset, GRID_HEIGHT, -half, offset, GRID_HEIGHT, half);
+    positions.push(-half, GRID_HEIGHT, offset, half, GRID_HEIGHT, offset);
   }
 
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
-  return new THREE.LineSegments(geometry, GROUND_GRID_MATERIAL);
+  sharedGridGeometry = geometry;
+  return geometry;
 }
 
-export function createGroundModel(): THREE.Group {
-  const ground = new THREE.Group();
-  ground.position.z = GROUND_CENTER_Z;
-
-  const planeGeometry = new THREE.PlaneGeometry(GROUND_WIDTH, GROUND_DEPTH);
-  const plane = createOutlinedObject(planeGeometry, createFillMaterial(0xf1eddf));
-  plane.rotation.x = -Math.PI / 2;
-  ground.add(plane);
-  ground.add(createGroundGrid());
-  return ground;
-}
+/** chunk 网格线共用的材质。 */
+export const CHUNK_GRID_MATERIAL = GROUND_GRID_MATERIAL;

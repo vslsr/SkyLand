@@ -6,6 +6,8 @@
  * 这里只依赖纯数学，不引入 Three.js 或任何浏览器 API。
  */
 
+import { WORLD_PLAY_AREA } from './world/worldConfig.mjs';
+
 /** @typedef {{ x: number, z: number }} PlayerPoint */
 /** @typedef {{ x: number, z: number, sprint: boolean }} PlayerMoveInput */
 /** @typedef {{ minimumX: number, maximumX: number, minimumZ: number, maximumZ: number }} PlayerBounds */
@@ -14,17 +16,23 @@ export const PLAYER_MOVE_SPEED = 3.2;
 export const PLAYER_SPRINT_MULTIPLIER = 1.65;
 export const PLAYER_MAXIMUM_SPEED = PLAYER_MOVE_SPEED * PLAYER_SPRINT_MULTIPLIER;
 
-/** 玩法平面的活动范围，与草地模型的尺寸对应。 @type {PlayerBounds} */
+/**
+ * 玩法平面的活动范围。
+ *
+ * 大世界的地形由 chunk 按种子生成，活动范围比生成范围向内收了一圈，
+ * 玩家因此永远走不到没有内容的世界边缘旁边。
+ * @type {PlayerBounds}
+ */
 export const PLAYER_BOUNDS = {
-  minimumX: -16,
-  maximumX: 16,
-  minimumZ: -21,
-  maximumZ: 11,
+  minimumX: WORLD_PLAY_AREA.minimumX,
+  maximumX: WORLD_PLAY_AREA.maximumX,
+  minimumZ: WORLD_PLAY_AREA.minimumZ,
+  maximumZ: WORLD_PLAY_AREA.maximumZ,
 };
 
 export const SPAWN_SLOT_COUNT = 8;
-const SPAWN_CENTER_Z = 4.5;
-const SPAWN_RADIUS = 1.8;
+const SPAWN_CENTER_Z = 0;
+const SPAWN_RADIUS = 6;
 
 /**
  * @param {unknown} value
