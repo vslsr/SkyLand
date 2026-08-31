@@ -25,6 +25,7 @@ If the request adds or changes Actor Component state, server Systems, ownership,
 
 - For a new composition of supported content (`ground`, `trees`, `grass`, `ocean`), add only a new `config/scenes/<id>.scene.json` file.
 - For a new field or content type, update the JSON Schema, runtime server validation/sanitization, client TypeScript definitions, renderer factory, and tests together. Do not place unsupported data in JSON and expect the client to discover it dynamically.
+- For a scene carrying `renderer.world`, the world is streamed from a seed rather than authored. Adding such a map is still configuration-only, but changing what the chunks contain or how they load belongs to the `skyland-chunk-world` skill.
 - Keep `.cursor/demo/` read-only. Adapt ideas into the active modular source tree.
 
 ## Add a scene

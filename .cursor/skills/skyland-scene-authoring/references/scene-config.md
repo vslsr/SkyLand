@@ -40,6 +40,38 @@
 
 当前服务端总会读取全部 `palette` 字段，因此即使关闭相应内容也不能省略它们。
 
+### `renderer.world`：流式大世界
+
+出现这个块就表示场景的地面与物件不再摆在场景里，而是由房间下发的世界种子确定性生成、按 chunk 流式加载；`content` 的 `ground` / `trees` / `grass` 开关随之改为决定 chunk 里放什么。世界尺寸不在这里配置，它是生成算法的固有属性，写在 `shared/world/worldConfig.mjs`。
+
+| 字段 | 格式/范围 | 作用 |
+| --- | --- | --- |
+| `loadRadius` | 1–6 的整数 | 以焦点所在 chunk 为中心向外加载几圈。 |
+| `keepRadius` | 2–8 的整数，且必须大于 `loadRadius` | 走出几圈之外才卸载。两者相等会让 chunk 在边界上反复构建与销毁。 |
+| `rockColor` | `#RRGGBB` | 岩石填充色。地面、草、树沿用 `palette`。 |
+
+`SceneCatalog` 另外校验：`fog.far` 不得大于 `loadRadius × 32`（否则视野越过最近的未加载 chunk），`gameplay.bounds` 必须落在流式世界向内收过的活动范围内（否则玩家能走到还没有内容的边缘）。
+
+改动流式世界的生成或加载策略请使用 `skyland-chunk-world` skill，它记录了两份放置实现必须逐位一致这一前提。
+
+### `renderer.ocean`：动态海面
+
+仅在 `content.ocean` 为 `true` 时使用。
+
+| 字段 | 格式/范围 | 作用 |
+| --- | --- | --- |
+| `size` | 16–1024 | 正方形海面的边长。通常至少覆盖 `bounds` 的 X、Z 两个跨度，避免玩家看到边缘。 |
+| `segments` | 8–128 的整数 | 海面网格细分数。越高，波形更平滑，但每帧更新的顶点和渲染成本越高。 |
+| `waveHeight` | 0–1 | 波浪垂直振幅。`0` 表示平面；也会影响木筏取样到的浮力高度。 |
+| `waveSpeed` | 0–4 | 波形随时间变化的速度。`0` 保留波形但停止动画。 |
+| `noiseScale` | 大于 0 且不超过 1 | 客户端波形噪声的空间尺度。 |
+| `noiseStrength` | 0–3 | 方向波相位受到噪声扰动的强度。 |
+| `interlaceStrength` | 0–0.75 | 相邻低多边形网格顶点反相起伏所占的比例。 |
+| `surfaceColor` | `#RRGGBB` | 海面主要填充色。 |
+| `secondaryColor` | `#RRGGBB` | 海面的次级色，用于丰富纸绘水面层次。 |
+| `gridLineColor` | `#RRGGBB` | 低多边形三角网格的线稿颜色。 |
+| `gridLineOpacity` | 0–1 | 三角网格线稿的不透明度。 |
+
 ## `sceneComponents`：场景特化规则与流程
 
 场景通过顶层 `sceneComponents` 声明要加载的逻辑组件，不在通用场景宿主里按 `scene.id`
@@ -65,24 +97,6 @@
 
 流式大世界的组件不得按世界总面积分配纹理、缓存或扫描全部 chunk；应依赖活动 chunk、
 AOI 或跟随焦点的固定窗口，并在组件停用/销毁时释放监听、GPU 资源和局部状态。
-
-### `renderer.ocean`：动态海面
-
-仅在 `content.ocean` 为 `true` 时使用。
-
-| 字段 | 格式/范围 | 作用 |
-| --- | --- | --- |
-| `size` | 16–1024 | 正方形海面的边长。通常至少覆盖 `bounds` 的 X、Z 两个跨度，避免玩家看到边缘。 |
-| `segments` | 8–128 的整数 | 海面网格细分数。越高，波形更平滑，但每帧更新的顶点和渲染成本越高。 |
-| `waveHeight` | 0–1 | 波浪垂直振幅。`0` 表示平面；也会影响木筏取样到的浮力高度。 |
-| `waveSpeed` | 0–4 | 波形随时间变化的速度。`0` 保留波形但停止动画。 |
-| `noiseScale` | 大于 0 且不超过 1 | 客户端波形噪声的空间尺度。 |
-| `noiseStrength` | 0–3 | 方向波相位受到噪声扰动的强度。 |
-| `interlaceStrength` | 0–0.75 | 相邻低多边形网格顶点反相起伏所占的比例。 |
-| `surfaceColor` | `#RRGGBB` | 海面主要填充色。 |
-| `secondaryColor` | `#RRGGBB` | 海面的次级色，用于丰富纸绘水面层次。 |
-| `gridLineColor` | `#RRGGBB` | 低多边形三角网格的线稿颜色。 |
-| `gridLineOpacity` | 0–1 | 三角网格线稿的不透明度。 |
 
 ## `actors`：场景 Actor 摆放
 
