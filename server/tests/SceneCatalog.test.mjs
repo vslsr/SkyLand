@@ -1,0 +1,24 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { SceneCatalog } from '../scenes/SceneCatalog.mjs';
+
+test('loads every selectable map from an independent scene JSON', async () => {
+  const catalog = await SceneCatalog.load();
+  const scenes = catalog.list();
+
+  assert.deepEqual(scenes.map((scene) => scene.id), ['grassland', 'open-meadow', 'water']);
+  assert.equal(catalog.require('grassland').renderer.type, 'line-art');
+  assert.equal(catalog.require('open-meadow').renderer.content.trees, false);
+  const water = catalog.require('water');
+  assert.equal(water.camera.mode, 'fly');
+  assert.equal(water.renderer.content.ocean, true);
+  assert.equal(water.gameplay.water.seaLevel, 0);
+  assert.equal(water.renderer.ocean.noiseStrength, 1.15);
+  assert.equal(water.renderer.ocean.segments, 28);
+  assert.equal(water.renderer.ocean.interlaceStrength, 0.42);
+});
+
+test('rejects unknown scene ids instead of silently selecting another map', async () => {
+  const catalog = await SceneCatalog.load();
+  assert.throws(() => catalog.require('missing-map'), /请选择有效的地图/);
+});

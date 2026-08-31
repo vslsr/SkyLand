@@ -243,3 +243,82 @@ test('设备失焦取消会清零状态并派发 canceled', () => {
   assert.equal(events.at(-1)?.phase, 'canceled');
   assert.equal(parentEvents.at(-1)?.phase, 'canceled');
 });
+
+test('axis2D Modifier 按配置顺序执行', () => {
+  const clock = createClock();
+  const device = new VirtualInputDevice({ now: clock.now });
+  const input = new InputSubsystem({
+    actions: [{
+      id: 'ModifiedMove',
+      valueType: 'axis2D',
+      modifiers: [{ type: 'normalize' }],
+    }],
+    config: { bindings: [{ tag: 'Input.ModifiedMove', actionId: 'ModifiedMove' }] },
+    contexts: [{
+      id: 'IMC.Modifier',
+      priority: 1,
+      activeByDefault: true,
+      mappings: [{
+        control: 'Virtual.RawAxis',
+        actionId: 'ModifiedMove',
+        modifiers: [
+          { type: 'swizzle', order: 'yx' },
+          { type: 'negate', axes: 'y' },
+          { type: 'scale', x: 2, y: 1 },
+        ],
+      }],
+    }],
+    devices: [device],
+    now: clock.now,
+  });
+
+  device.setAxis2D('Virtual.RawAxis', { x: 0.5, y: 0.25 });
+  input.update();
+
+  const value = input.getAxis2D('Input.ModifiedMove');
+  assert.ok(Math.abs(value.x - Math.SQRT1_2) < 1e-9);
+  assert.ok(Math.abs(value.y + Math.SQRT1_2) < 1e-9);
+});
+
+test('axis2D 使用最近活跃的设备来源而不是跨设备相加', () => {
+  const clock = createClock();
+  const keyboard = new VirtualInputDevice({ now: clock.now, kind: 'keyboardMouse' });
+  const touch = new VirtualInputDevice({ now: clock.now, kind: 'touch' });
+  const input = new InputSubsystem({
+    actions: [{ id: 'MoveBySource', valueType: 'axis2D' }],
+    config: { bindings: [{ tag: 'Input.MoveBySource', actionId: 'MoveBySource' }] },
+    contexts: [{
+      id: 'IMC.Sources',
+      priority: 1,
+      activeByDefault: true,
+      mappings: [
+        { control: 'Virtual.KeyboardMove', actionId: 'MoveBySource' },
+        { control: 'Virtual.TouchMove', actionId: 'MoveBySource' },
+      ],
+    }],
+    devices: [keyboard, touch],
+    now: clock.now,
+  });
+  const activeDevices: string[] = [];
+  input.onActiveDeviceChanged((deviceKind) => activeDevices.push(deviceKind));
+
+  keyboard.setAxis2D('Virtual.KeyboardMove', { x: 1, y: 0 });
+  input.update();
+  assert.deepEqual(input.getAxis2D('Input.MoveBySource'), { x: 1, y: 0 });
+
+  clock.value = 10;
+  touch.setAxis2D('Virtual.TouchMove', { x: 0, y: 1 });
+  input.update();
+  assert.deepEqual(input.getAxis2D('Input.MoveBySource'), { x: 0, y: 1 });
+
+  clock.value = 20;
+  touch.setAxis2D('Virtual.TouchMove', { x: 0, y: 0 });
+  input.update();
+  assert.deepEqual(input.getAxis2D('Input.MoveBySource'), { x: 1, y: 0 });
+
+  clock.value = 30;
+  keyboard.setAxis2D('Virtual.KeyboardMove', { x: 0.8, y: 0 });
+  input.update();
+  assert.equal(input.activeDeviceKind, 'keyboardMouse');
+  assert.deepEqual(activeDevices, ['keyboardMouse', 'touch', 'keyboardMouse']);
+});

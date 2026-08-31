@@ -33,6 +33,11 @@ function requireInteger(value, path, minimum, maximum) {
   return value;
 }
 
+function requireBoolean(value, path) {
+  if (typeof value !== 'boolean') throw new TypeError(`${path} 必须是布尔值`);
+  return value;
+}
+
 function requireColor(value, path) {
   if (typeof value !== 'string' || !COLOR_PATTERN.test(value)) {
     throw new TypeError(`${path} 必须是 #RRGGBB 颜色`);
@@ -54,8 +59,35 @@ function validateSceneDefinition(raw, filename) {
   const fogNear = requireNumber(fog.near, `${filename}.renderer.fog.near`);
   const fogFar = requireNumber(fog.far, `${filename}.renderer.fog.far`);
   if (fogNear < 0 || fogFar <= fogNear) throw new TypeError(`${filename}.renderer.fog 范围无效`);
-  for (const key of ['ground', 'trees', 'grass']) {
-    if (typeof content[key] !== 'boolean') throw new TypeError(`${filename}.renderer.content.${key} 必须是布尔值`);
+  for (const key of ['ground', 'trees', 'grass', 'ocean']) {
+    requireBoolean(content[key], `${filename}.renderer.content.${key}`);
+  }
+
+  let ocean;
+  if (content.ocean) {
+    const rawOcean = requireObject(renderer.ocean, `${filename}.renderer.ocean`);
+    ocean = {
+      size: requireNumber(rawOcean.size, `${filename}.renderer.ocean.size`),
+      segments: requireInteger(rawOcean.segments, `${filename}.renderer.ocean.segments`, 8, 128),
+      waveHeight: requireNumber(rawOcean.waveHeight, `${filename}.renderer.ocean.waveHeight`),
+      waveSpeed: requireNumber(rawOcean.waveSpeed, `${filename}.renderer.ocean.waveSpeed`),
+      noiseScale: requireNumber(rawOcean.noiseScale, `${filename}.renderer.ocean.noiseScale`),
+      noiseStrength: requireNumber(rawOcean.noiseStrength, `${filename}.renderer.ocean.noiseStrength`),
+      interlaceStrength: requireNumber(rawOcean.interlaceStrength, `${filename}.renderer.ocean.interlaceStrength`),
+      surfaceColor: requireColor(rawOcean.surfaceColor, `${filename}.renderer.ocean.surfaceColor`),
+      secondaryColor: requireColor(rawOcean.secondaryColor, `${filename}.renderer.ocean.secondaryColor`),
+      gridLineColor: requireColor(rawOcean.gridLineColor, `${filename}.renderer.ocean.gridLineColor`),
+      gridLineOpacity: requireNumber(rawOcean.gridLineOpacity, `${filename}.renderer.ocean.gridLineOpacity`),
+      foamColor: requireColor(rawOcean.foamColor, `${filename}.renderer.ocean.foamColor`),
+      demoRaft: requireBoolean(rawOcean.demoRaft, `${filename}.renderer.ocean.demoRaft`),
+    };
+    if (ocean.size < 16 || ocean.size > 1024) throw new TypeError(`${filename}.renderer.ocean.size 范围无效`);
+    if (ocean.waveHeight < 0 || ocean.waveHeight > 1) throw new TypeError(`${filename}.renderer.ocean.waveHeight 范围无效`);
+    if (ocean.waveSpeed < 0 || ocean.waveSpeed > 4) throw new TypeError(`${filename}.renderer.ocean.waveSpeed 范围无效`);
+    if (ocean.noiseScale <= 0 || ocean.noiseScale > 1) throw new TypeError(`${filename}.renderer.ocean.noiseScale 范围无效`);
+    if (ocean.noiseStrength < 0 || ocean.noiseStrength > 3) throw new TypeError(`${filename}.renderer.ocean.noiseStrength 范围无效`);
+    if (ocean.interlaceStrength < 0 || ocean.interlaceStrength > 0.75) throw new TypeError(`${filename}.renderer.ocean.interlaceStrength 范围无效`);
+    if (ocean.gridLineOpacity < 0 || ocean.gridLineOpacity > 1) throw new TypeError(`${filename}.renderer.ocean.gridLineOpacity 范围无效`);
   }
 
   const gameplay = requireObject(scene.gameplay, `${filename}.gameplay`);
@@ -74,13 +106,25 @@ function validateSceneDefinition(raw, filename) {
     throw new TypeError(`${filename}.gameplay.spawn 必须位于玩法边界内`);
   }
 
+  let water;
+  if (content.ocean) {
+    const rawWater = requireObject(gameplay.water, `${filename}.gameplay.water`);
+    water = { seaLevel: requireNumber(rawWater.seaLevel, `${filename}.gameplay.water.seaLevel`) };
+  }
+
   const camera = requireObject(scene.camera, `${filename}.camera`);
+  if (camera.mode !== 'topdown' && camera.mode !== 'fly') {
+    throw new TypeError(`${filename}.camera.mode 必须是 topdown 或 fly`);
+  }
   if (!Array.isArray(camera.position) || camera.position.length !== 3) {
     throw new TypeError(`${filename}.camera.position 必须包含 3 个数字`);
   }
   camera.position.forEach((value, index) => requireNumber(value, `${filename}.camera.position[${index}]`));
-  requireNumber(camera.yaw, `${filename}.camera.yaw`);
-  requireNumber(camera.pitch, `${filename}.camera.pitch`);
+  const yaw = requireNumber(camera.yaw, `${filename}.camera.yaw`);
+  const pitch = requireNumber(camera.pitch, `${filename}.camera.pitch`);
+  const moveSpeed = requireNumber(camera.moveSpeed, `${filename}.camera.moveSpeed`);
+  if (pitch < -1.5 || pitch > 1.5) throw new TypeError(`${filename}.camera.pitch 范围无效`);
+  if (moveSpeed <= 0 || moveSpeed > 100) throw new TypeError(`${filename}.camera.moveSpeed 范围无效`);
 
   return {
     schemaVersion: 1,
@@ -92,13 +136,19 @@ function validateSceneDefinition(raw, filename) {
       type: 'line-art',
       background: requireColor(renderer.background, `${filename}.renderer.background`),
       fog: { color: requireColor(fog.color, `${filename}.renderer.fog.color`), near: fogNear, far: fogFar },
-      content: { ground: content.ground, trees: content.trees, grass: content.grass },
+      content: {
+        ground: content.ground,
+        trees: content.trees,
+        grass: content.grass,
+        ocean: content.ocean,
+      },
       palette: {
         ground: requireColor(palette.ground, `${filename}.renderer.palette.ground`),
         grass: requireColor(palette.grass, `${filename}.renderer.palette.grass`),
         treeTrunk: requireColor(palette.treeTrunk, `${filename}.renderer.palette.treeTrunk`),
         treeNeedles: requireColor(palette.treeNeedles, `${filename}.renderer.palette.treeNeedles`),
       },
+      ...(ocean ? { ocean } : {}),
     },
     gameplay: {
       bounds: { minimumX, maximumX, minimumZ, maximumZ },
@@ -108,8 +158,15 @@ function validateSceneDefinition(raw, filename) {
         radius,
         slots: requireInteger(spawn.slots, `${filename}.gameplay.spawn.slots`, 1, 64),
       },
+      ...(water ? { water } : {}),
     },
-    camera: { position: [...camera.position], yaw: camera.yaw, pitch: camera.pitch },
+    camera: {
+      mode: camera.mode,
+      position: [...camera.position],
+      yaw,
+      pitch,
+      moveSpeed,
+    },
   };
 }
 

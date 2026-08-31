@@ -9,6 +9,7 @@ export interface RoomSummary {
   sceneId: string;
   sceneName: string;
   createdAt: string;
+  idleExpiresAt: string | null;
 }
 
 export interface JoinedRoom {
@@ -110,6 +111,7 @@ export class RoomClient {
   }
 
   public leaveRoom(): void {
+    this.inputSequence = 0;
     if (this.socket?.readyState === WebSocket.OPEN) {
       this.socket.send(JSON.stringify({ type: 'room:leave' }));
     }

@@ -56,6 +56,15 @@ export class CameraTransform {
     this.orientationVersion += 1;
   }
 
+  public setPose(options: CameraTransformOptions): void {
+    if (options.position) this.position = [...options.position];
+    if (options.yaw !== undefined) this.yaw = options.yaw;
+    if (options.pitch !== undefined) {
+      this.pitch = Math.max(-1.5, Math.min(1.5, options.pitch));
+    }
+    this.orientationVersion += 1;
+  }
+
   public moveLocal(direction: LocalDirection, distance: number): void {
     const length = Math.hypot(direction[0], direction[1], direction[2]);
     if (length === 0) return;

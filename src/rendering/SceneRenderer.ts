@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import type { CameraFrame } from '../camera/CameraTransform';
 import { createLineArtScene } from '../scene/createLineArtScene';
+import type { SceneVisualSystem } from '../scene/SceneVisualSystem';
 import type { SceneDefinition } from '../scenes/data/SceneDefinition';
 
 const EMPTY_SCENE_COLOR = 0xfdfbf6;
@@ -27,6 +28,7 @@ export class SceneRenderer {
   private readonly renderer: THREE.WebGLRenderer;
   private readonly camera = new THREE.PerspectiveCamera(50, 1, 0.1, 100);
   private scene = createEmptyScene();
+  private visualSystems: SceneVisualSystem[] = [];
   private readonly dynamicWorld = new THREE.Group();
   private readonly lookTarget = new THREE.Vector3();
 
@@ -63,21 +65,27 @@ export class SceneRenderer {
     this.dynamicWorld.remove(object);
   }
 
+  public update(deltaSeconds: number, elapsedSeconds: number): void {
+    for (const system of this.visualSystems) system.update(deltaSeconds, elapsedSeconds);
+  }
+
   public loadScene(definition: SceneDefinition): void {
     if (definition.renderer.type !== 'line-art') {
       throw new Error(`不支持的场景渲染器：${definition.renderer.type as string}`);
     }
-    this.replaceScene(createLineArtScene(definition));
+    const composition = createLineArtScene(definition);
+    this.replaceScene(composition.scene, composition.visualSystems);
   }
 
   public showEmptyScene(): void {
-    this.replaceScene(createEmptyScene());
+    this.replaceScene(createEmptyScene(), []);
   }
 
-  private replaceScene(nextScene: THREE.Scene): void {
+  private replaceScene(nextScene: THREE.Scene, visualSystems: SceneVisualSystem[]): void {
     this.scene.remove(this.dynamicWorld);
     disposeScene(this.scene);
     this.scene = nextScene;
+    this.visualSystems = visualSystems;
     this.scene.add(this.dynamicWorld);
   }
 

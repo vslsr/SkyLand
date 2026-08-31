@@ -2,6 +2,7 @@ import type {
   Axis2DValue,
   InputControlEvent,
   InputDevice,
+  InputDeviceKind,
   InputValue,
 } from '../core/types';
 
@@ -12,9 +13,14 @@ function valuesEqual(left: InputValue, right: InputValue): boolean {
 
 /** 为事件型输入设备提供去重、缓冲和统一取消通知。 */
 export abstract class BufferedInputDevice implements InputDevice {
+  public readonly kind: InputDeviceKind;
   private readonly values = new Map<string, InputValue>();
   private readonly events: InputControlEvent[] = [];
   private readonly cancelHandlers = new Set<() => void>();
+
+  protected constructor(kind: InputDeviceKind) {
+    this.kind = kind;
+  }
 
   public drainEvents(): readonly InputControlEvent[] {
     return this.events.splice(0);
@@ -52,6 +58,6 @@ export abstract class BufferedInputDevice implements InputDevice {
     const previous = this.values.get(control);
     if (previous !== undefined && valuesEqual(previous, value)) return;
     this.values.set(control, value);
-    this.events.push({ control, value, timestampMs });
+    this.events.push({ control, value, timestampMs, deviceKind: this.kind });
   }
 }

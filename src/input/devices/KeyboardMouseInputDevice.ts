@@ -15,7 +15,7 @@ export class KeyboardMouseInputDevice extends BufferedInputDevice {
   private readonly pressedButtons = new Set<number>();
 
   public constructor(options: KeyboardMouseInputDeviceOptions = {}) {
-    super();
+    super('keyboardMouse');
     this.keyboardTarget = options.keyboardTarget ?? document;
     this.pointerTarget = options.pointerTarget ?? document.documentElement;
     this.preventDefaultControls = new Set(options.preventDefaultControls);

@@ -1,8 +1,10 @@
-import type { Axis2DValue } from '../core/types';
+import type { Axis2DValue, InputDeviceKind } from '../core/types';
 import { BufferedInputDevice } from './BufferedInputDevice';
 
 export interface VirtualInputDeviceOptions {
   readonly now?: () => number;
+  /** 默认是 touch；测试或桌面虚拟设备可显式覆盖。 */
+  readonly kind?: InputDeviceKind;
 }
 
 /** 供虚拟摇杆、触摸按钮和测试代码写入输入。 */
@@ -10,7 +12,7 @@ export class VirtualInputDevice extends BufferedInputDevice {
   private readonly now: () => number;
 
   public constructor(options: VirtualInputDeviceOptions = {}) {
-    super();
+    super(options.kind ?? 'touch');
     this.now = options.now ?? (() => performance.now());
   }
 

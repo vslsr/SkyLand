@@ -8,9 +8,12 @@
 - `Scene` / `SceneManager` 场景生命周期
 - 每个 Scene 独立的 `CommonUIManager` 栈
 - 房间大厅、Grid 房间卡片和通用弹出窗体
+- 游戏内低存在感菜单，可主动退出当前房间并返回空场景大厅
+- 空房间 60 秒后自动回收，房间卡片显示服务端回收倒计时
 - Node.js 单端口 Web/API/WebSocket 组合服务器和每房间独立 DS 子进程
 - 参考项目风格的透明软体史莱姆玩家
 - Fly / TopDown 双控制器自动切换
+- 大厅空场景、JSON 地图目录与创建房间时的地图选择
 - 服务端权威的移动同步：输入上行、快照广播、客户端预测与和解
 
 ## 运行与联机测试
@@ -61,6 +64,8 @@ npm start
 | `/api/health` | 服务角色、房间数量和 Web 构建状态 |
 | `/api/rooms` | 查询或创建房间 |
 | `/api/rooms/:id` | 删除指定房间 |
+| `/api/scenes` | 查询所有可选择地图的摘要 |
+| `/api/scenes/:id` | 查询服务器校验后的完整场景 JSON |
 | `/ws` | WebSocket 游戏会话、输入上行和快照广播 |
 
 健康检查示例：
@@ -163,6 +168,50 @@ const page: CommonUIPage = {
 
 切换 Scene 时，`Scene.leave()` 会停用并清空该 Scene 的全部 CommonUI。
 
+## 数据化场景
+
+大厅阶段只创建一个带纸张色背景的空 Three.js Scene，不加载地面、树木、草丛、玩家
+或远端玩家模型。创建或加入房间并收到服务器的 `room:joined` 后，客户端才按照响应中
+的场景 JSON 构建地图；断开房间后会释放地图资源并恢复空场景。
+
+可选择地图位于 `config/scenes/*.scene.json`，每个文件定义一张独立地图。当前示例：
+
+- `grassland.scene.json`：完整线稿草地、树林和草丛
+- `open-meadow.scene.json`：移除树林的暖色开阔原野
+
+`config/scenes/scene.schema.json` 描述可编辑字段。场景配置包括：
+
+- 地图 id、显示名称、描述和人数上限
+- 渲染器类型、背景、雾效、内容开关和颜色表
+- 服务端权威活动边界与出生点规则
+- 默认观察相机参数
+
+新增地图时复制一个 `.scene.json` 并使用新的唯一 `id`；Node.js 组合服务器启动时会
+扫描并严格校验全部配置。配置无效或 id 重复会阻止服务器启动，避免客户端与 DS 使用
+不同的地图数据。修改配置后需要重启 Node.js 服务器。
+
+创建房间与加载顺序：
+
+```text
+大厅空场景
+   │ GET /api/scenes
+   ↓
+选择地图并 POST /api/rooms { name, sceneId }
+   ↓
+RoomProcessManager fork 新 room-worker
+   │ IPC: room:initialize + 服务器校验后的 Scene JSON
+   ↓
+DS 初始化 ServerScene、边界、出生规则并回复 room:ready
+   ↓
+客户端连接 /ws 并加入房间
+   │ room:joined { room, player, scene }
+   ↓
+客户端根据服务器返回的 scene JSON 构建地图并生成玩家
+```
+
+客户端不会使用本地选择结果直接加载地图；最终始终以服务器在 `room:joined` 中返回的
+场景定义为准。
+
 ## 玩家控制
 
 - 玩家实体不存在：使用原有 `FlyController` 自由飞行镜头。
@@ -170,6 +219,7 @@ const page: CommonUIPage = {
 - W / A / S / D：按俯视镜头的屏幕方向移动。
 - Shift：加速移动。
 - 鼠标：通过透视射线投影到玩法 XY 平面，并让史莱姆面向投影点。玩法坐标的 Y 在 Three.js 世界中映射为地面的 Z 轴。
+- 左上角 `•••`：打开游戏菜单；“退出房间”会发送离开消息、清理当前地图与玩家，并返回大厅空场景。WebSocket 保持可复用，之后可以直接加入其他房间。
 
 史莱姆参考 `.cursor/demo/line-art-style-magic-cabin-main/index.html`，使用三层透明材质、内部核心、气泡、阴影、顶点波动和移动压缩回弹。`.cursor/demo/` 用于集中存放只读参考案例；该参考路径也记录在 `.cursor/rules/line-art-reference.mdc` 中，作为项目始终生效的规范。
 
@@ -195,6 +245,8 @@ HTTP Server；WebSocket 网关再把玩家输入路由到对应的房间 DS：
 一个房间都会使用 `child_process.fork()` 启动独立的 `room-worker.mjs`。
 
 每个房间进程拥有自己的 `ServerScene`、玩家集合、输入队列和 20 Hz 更新循环。房间异常退出不会拖垮其他房间。
+
+房间创建后如果没有玩家，或最后一名玩家离开后，会启动 60 秒空置回收计时；期间有玩家加入会立即取消计时。大厅接口通过 `idleExpiresAt` 返回服务端截止时间，房间卡片据此显示倒计时，归零后自动刷新列表。计时到期仍为空房间时，主进程会关闭并移除对应 DS 子进程。
 
 收到 `SIGINT` 或 `SIGTERM` 时，组合服务器会关闭 WebSocket 网关、通知所有房间 DS
 退出，并在 HTTP Server 停止监听后结束主进程。
@@ -256,11 +308,14 @@ HTTP Server；WebSocket 网关再把玩家输入路由到对应的房间 DS：
 - `src/controllers/`：TopDown 控制器与 Fly/TopDown 控制路由
 - `src/player/`：玩家实体和史莱姆动画
 - `src/network/`：浏览器房间客户端、消息协议与快照插值
+- `src/scenes/data/`：客户端场景 JSON 类型
 - `src/models/`：程序化平地、树木和草丛
 - `src/materials/`：填充 Shader 与轮廓线材质
 - `server/network/`：WebSocket 网关
 - `server/http/`：API 路由、HTTP 响应和生产静态站点服务
 - `server/rooms/`：房间进程管理器与 worker
 - `server/scene/`：服务端权威场景状态
+- `server/scenes/`：JSON 场景目录加载、校验与查询
+- `config/scenes/`：每张地图的独立 JSON 与 Schema
 - `shared/`：前后端共用的移动模拟与同步常量
 - `tests/`：不依赖浏览器的客户端逻辑测试

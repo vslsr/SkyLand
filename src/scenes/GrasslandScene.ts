@@ -2,6 +2,7 @@ import { FlyController } from '../camera/FlyController';
 import { GameInteractionLayer } from '../interaction/GameInteractionLayer';
 import {
   GameplayInputContext,
+  GamepadInputDevice,
   InputSubsystem,
   KeyboardMouseInputDevice,
   PlayerInputActions,
@@ -20,6 +21,7 @@ import { SceneRenderer } from '../rendering/SceneRenderer';
 import { INPUT_SEND_INTERVAL_SECONDS } from '../../shared/networkTuning.mjs';
 import { HudController } from '../ui/HudController';
 import { CreateRoomPage, type CreateRoomFormValue } from '../ui/pages/CreateRoomPage';
+import { GameMenuPage } from '../ui/pages/GameMenuPage';
 import { RoomLobbyPage } from '../ui/pages/RoomLobbyPage';
 import { Scene, type SceneUIContext } from './Scene';
 import type { SceneSummary } from './data/SceneDefinition';
@@ -39,6 +41,7 @@ export class GrasslandScene extends Scene {
   private readonly hud = new HudController();
   private readonly roomClient = new RoomClient();
   private readonly lobbyPage = new RoomLobbyPage();
+  private readonly gameMenuPage = new GameMenuPage();
   private readonly snapshots = new SnapshotBuffer();
   private readonly remotePlayers = new RemotePlayerGroup();
   private joinedRoom?: JoinedRoom;
@@ -59,6 +62,7 @@ export class GrasslandScene extends Scene {
           pointerTarget: options.canvas,
           preventDefaultControls: PREVENT_DEFAULT_GAMEPLAY_CONTROLS,
         }),
+        new GamepadInputDevice(),
         virtualInput,
       ],
     });
@@ -73,6 +77,7 @@ export class GrasslandScene extends Scene {
     });
     this.controls = new SceneControlRouter(this.flyController);
     this.controls.onModeChange((mode) => this.hud.setControlMode(mode));
+    this.input.onActiveDeviceChanged((deviceKind) => this.hud.setInputDevice(deviceKind));
 
     this.commonUI.onStackChange(() => {
       const allowsGameInteraction = this.commonUI.allowsGameInteraction;
@@ -84,6 +89,9 @@ export class GrasslandScene extends Scene {
     this.lobbyPage.onRefresh(() => void this.refreshRooms());
     this.lobbyPage.onCreate((temporaryName) => this.openCreateRoom(temporaryName));
     this.lobbyPage.onJoin((room, temporaryName) => void this.joinRoom(room, temporaryName));
+    this.hud.onMenuRequest(() => this.openGameMenu());
+    this.gameMenuPage.onRequestClose(() => this.commonUI.pop(this.gameMenuPage));
+    this.gameMenuPage.onExit(() => this.exitCurrentRoom());
     this.roomClient.onRoomUpdate((room) => this.handleRoomUpdate(room));
     this.roomClient.onSnapshot((snapshot) => this.handleSnapshot(snapshot));
     this.roomClient.onDisconnect(() => this.handleDisconnect());
@@ -93,10 +101,15 @@ export class GrasslandScene extends Scene {
   public update(deltaSeconds: number, elapsedSeconds: number): void {
     this.input.update();
     this.controls.update(deltaSeconds, elapsedSeconds);
+    this.renderer.update(deltaSeconds, elapsedSeconds);
     this.player?.update(deltaSeconds, elapsedSeconds);
     this.sendPlayerInput(deltaSeconds);
-    this.remotePlayers.sync(this.snapshots.sample(), this.joinedRoom?.player.id);
-    this.remotePlayers.update(deltaSeconds, elapsedSeconds);
+    if (this.joinedRoom?.scene.camera.mode === 'topdown') {
+      this.remotePlayers.sync(this.snapshots.sample(), this.joinedRoom.player.id);
+      this.remotePlayers.update(deltaSeconds, elapsedSeconds);
+    } else {
+      this.remotePlayers.clear();
+    }
   }
 
   public render(): void {
@@ -172,9 +185,33 @@ export class GrasslandScene extends Scene {
     this.joinedRoom = joined;
     this.snapshots.clear();
     this.renderer.loadScene(joined.scene);
-    this.createPlayer(joined.player.spawn, joined.scene.gameplay.bounds);
+    this.flyController.configure(joined.scene.camera);
+    if (joined.scene.camera.mode === 'topdown') {
+      this.createPlayer(joined.player.spawn, joined.scene.gameplay.bounds);
+    } else {
+      this.controls.setPlayerController(undefined);
+      this.remotePlayers.clear();
+    }
     this.hud.setRoom(joined.room);
     this.commonUI.clear();
+  }
+
+  private openGameMenu(): void {
+    if (!this.joinedRoom || this.commonUI.size > 0) return;
+    this.commonUI.push(this.gameMenuPage);
+  }
+
+  private exitCurrentRoom(): void {
+    if (!this.joinedRoom) return;
+    this.roomClient.leaveRoom();
+    this.joinedRoom = undefined;
+    this.destroyPlayer();
+    this.hud.setDisconnected();
+    this.commonUI.clear();
+    if (this.isActive) {
+      this.commonUI.push(this.lobbyPage);
+      void this.refreshRooms();
+    }
   }
 
   private handleRoomUpdate(room: RoomSummary): void {

@@ -41,11 +41,12 @@
         "content": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["ground", "trees", "grass"],
+          "required": ["ground", "trees", "grass", "ocean"],
           "properties": {
             "ground": { "type": "boolean" },
             "trees": { "type": "boolean" },
-            "grass": { "type": "boolean" }
+            "grass": { "type": "boolean" },
+            "ocean": { "type": "boolean" }
           }
         },
         "palette": {
@@ -57,6 +58,40 @@
             "grass": { "$ref": "#/$defs/color" },
             "treeTrunk": { "$ref": "#/$defs/color" },
             "treeNeedles": { "$ref": "#/$defs/color" }
+          }
+        },
+        "ocean": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "size",
+            "segments",
+            "waveHeight",
+            "waveSpeed",
+            "noiseScale",
+            "noiseStrength",
+            "interlaceStrength",
+            "surfaceColor",
+            "secondaryColor",
+            "gridLineColor",
+            "gridLineOpacity",
+            "foamColor",
+            "demoRaft"
+          ],
+          "properties": {
+            "size": { "type": "number", "minimum": 16, "maximum": 1024 },
+            "segments": { "type": "integer", "minimum": 8, "maximum": 128 },
+            "waveHeight": { "type": "number", "minimum": 0, "maximum": 1 },
+            "waveSpeed": { "type": "number", "minimum": 0, "maximum": 4 },
+            "noiseScale": { "type": "number", "exclusiveMinimum": 0, "maximum": 1 },
+            "noiseStrength": { "type": "number", "minimum": 0, "maximum": 3 },
+            "interlaceStrength": { "type": "number", "minimum": 0, "maximum": 0.75 },
+            "surfaceColor": { "$ref": "#/$defs/color" },
+            "secondaryColor": { "$ref": "#/$defs/color" },
+            "gridLineColor": { "$ref": "#/$defs/color" },
+            "gridLineOpacity": { "type": "number", "minimum": 0, "maximum": 1 },
+            "foamColor": { "$ref": "#/$defs/color" },
+            "demoRaft": { "type": "boolean" }
           }
         }
       }
@@ -87,14 +122,23 @@
             "radius": { "type": "number", "minimum": 0 },
             "slots": { "type": "integer", "minimum": 1, "maximum": 64 }
           }
+        },
+        "water": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["seaLevel"],
+          "properties": {
+            "seaLevel": { "type": "number" }
+          }
         }
       }
     },
     "camera": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["position", "yaw", "pitch"],
+      "required": ["mode", "position", "yaw", "pitch", "moveSpeed"],
       "properties": {
+        "mode": { "enum": ["topdown", "fly"] },
         "position": {
           "type": "array",
           "minItems": 3,
@@ -102,7 +146,8 @@
           "items": { "type": "number" }
         },
         "yaw": { "type": "number" },
-        "pitch": { "type": "number" }
+        "pitch": { "type": "number", "minimum": -1.5, "maximum": 1.5 },
+        "moveSpeed": { "type": "number", "exclusiveMinimum": 0, "maximum": 100 }
       }
     }
   },

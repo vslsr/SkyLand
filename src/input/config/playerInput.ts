@@ -25,7 +25,7 @@ export const PlayerInputActions: readonly InputActionDefinition[] = [
   {
     id: PlayerInputActionIds.Move,
     valueType: 'axis2D',
-    deadZone: 0.1,
+    modifiers: [{ type: 'deadZone', minimum: 0.12 }],
     trigger: { type: 'pressed' },
   },
   {
@@ -74,16 +74,30 @@ export const GameplayInputContext: InputMappingContextDefinition = {
     { control: 'Keyboard.KeyD', actionId: PlayerInputActionIds.Move, axis2D: { x: 1, y: 0 } },
     { control: 'Keyboard.ArrowRight', actionId: PlayerInputActionIds.Move, axis2D: { x: 1, y: 0 } },
     { control: 'Virtual.MoveStick', actionId: PlayerInputActionIds.Move },
+    {
+      control: 'Gamepad.LeftStick',
+      actionId: PlayerInputActionIds.Move,
+      modifiers: [{ type: 'negate', axes: 'y' }],
+    },
+    { control: 'Gamepad.DPadUp', actionId: PlayerInputActionIds.Move, axis2D: { x: 0, y: 1 } },
+    { control: 'Gamepad.DPadDown', actionId: PlayerInputActionIds.Move, axis2D: { x: 0, y: -1 } },
+    { control: 'Gamepad.DPadLeft', actionId: PlayerInputActionIds.Move, axis2D: { x: -1, y: 0 } },
+    { control: 'Gamepad.DPadRight', actionId: PlayerInputActionIds.Move, axis2D: { x: 1, y: 0 } },
 
     { control: 'Keyboard.ShiftLeft', actionId: PlayerInputActionIds.Sprint },
     { control: 'Keyboard.ShiftRight', actionId: PlayerInputActionIds.Sprint },
     { control: 'Virtual.SprintButton', actionId: PlayerInputActionIds.Sprint },
+    { control: 'Gamepad.LeftStickButton', actionId: PlayerInputActionIds.Sprint },
 
     { control: 'Mouse.Button0', actionId: PlayerInputActionIds.Primary },
+    { control: 'Gamepad.ButtonSouth', actionId: PlayerInputActionIds.Primary },
+    { control: 'Gamepad.RightTrigger', actionId: PlayerInputActionIds.Primary },
     { control: 'Keyboard.KeyF', actionId: PlayerInputActionIds.Interact },
     { control: 'Virtual.InteractButton', actionId: PlayerInputActionIds.Interact },
+    { control: 'Gamepad.ButtonWest', actionId: PlayerInputActionIds.Interact },
     { control: 'Keyboard.Space', actionId: PlayerInputActionIds.Dodge },
     { control: 'Virtual.DodgeButton', actionId: PlayerInputActionIds.Dodge },
+    { control: 'Gamepad.ButtonEast', actionId: PlayerInputActionIds.Dodge },
   ],
 };
 

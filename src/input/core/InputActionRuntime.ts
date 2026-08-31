@@ -1,6 +1,7 @@
 import type {
   DoubleTapInputTrigger,
   InputActionDefinition,
+  InputDeviceKind,
   InputPhase,
   InputTriggerDefinition,
   InputValue,
@@ -20,6 +21,7 @@ export interface EvaluatedActionEvent {
   readonly elapsedMs: number;
   readonly timestampMs: number;
   readonly sourceControl?: string;
+  readonly deviceKind?: InputDeviceKind;
 }
 
 const DEFAULT_TRIGGER: InputTriggerDefinition = { type: 'pressed' };
@@ -32,6 +34,7 @@ export class InputActionRuntime {
   private value: InputValue;
   private startedAt?: number;
   private sourceControl?: string;
+  private deviceKind?: InputDeviceKind;
   private hasTriggered = false;
   private doubleTapStage: DoubleTapStage = 'idle';
   private firstTapReleasedAt?: number;
@@ -49,17 +52,32 @@ export class InputActionRuntime {
     return cloneInputValue(this.value);
   }
 
-  public applyValue(nextValue: InputValue, timestampMs: number, sourceControl?: string): void {
-    if (inputValuesEqual(this.value, nextValue)) return;
+  public applyValue(
+    nextValue: InputValue,
+    timestampMs: number,
+    sourceControl?: string,
+    deviceKind?: InputDeviceKind,
+  ): void {
+    if (inputValuesEqual(this.value, nextValue)) {
+      if (inputValueIsActive(this.value, this.definition.deadZone) && deviceKind) {
+        this.sourceControl = sourceControl ?? this.sourceControl;
+        this.deviceKind = deviceKind;
+      }
+      return;
+    }
     const wasActive = inputValueIsActive(this.value, this.definition.deadZone);
     const isActive = inputValueIsActive(nextValue, this.definition.deadZone);
     this.value = cloneInputValue(nextValue);
+    if (isActive && deviceKind) {
+      this.sourceControl = sourceControl ?? this.sourceControl;
+      this.deviceKind = deviceKind;
+    }
     if (wasActive === isActive) return;
 
     const trigger = this.definition.trigger ?? DEFAULT_TRIGGER;
     if (trigger.type === 'pressed') {
       if (isActive) {
-        this.beginSequence(timestampMs, sourceControl);
+        this.beginSequence(timestampMs, sourceControl, deviceKind);
         this.triggerSequence(timestampMs);
       } else {
         this.finishSequence('completed', timestampMs);
@@ -68,12 +86,12 @@ export class InputActionRuntime {
     }
 
     if (trigger.type === 'hold') {
-      if (isActive) this.beginSequence(timestampMs, sourceControl);
+      if (isActive) this.beginSequence(timestampMs, sourceControl, deviceKind);
       else this.finishSequence(this.hasTriggered ? 'completed' : 'canceled', timestampMs);
       return;
     }
 
-    this.applyDoubleTapTransition(trigger, isActive, timestampMs, sourceControl);
+    this.applyDoubleTapTransition(trigger, isActive, timestampMs, sourceControl, deviceKind);
   }
 
   public advanceTimedTrigger(timestampMs: number): void {
@@ -115,6 +133,7 @@ export class InputActionRuntime {
     isActive: boolean,
     timestampMs: number,
     sourceControl?: string,
+    deviceKind?: InputDeviceKind,
   ): void {
     if (isActive) {
       if (
@@ -124,12 +143,13 @@ export class InputActionRuntime {
       ) {
         this.doubleTapStage = 'secondDown';
         this.sourceControl = sourceControl ?? this.sourceControl;
+        this.deviceKind = deviceKind ?? this.deviceKind;
         this.triggerSequence(timestampMs);
         return;
       }
 
       if (this.startedAt !== undefined) this.finishSequence('canceled', timestampMs);
-      this.beginSequence(timestampMs, sourceControl);
+      this.beginSequence(timestampMs, sourceControl, deviceKind);
       this.doubleTapStage = 'firstDown';
       return;
     }
@@ -147,9 +167,14 @@ export class InputActionRuntime {
     }
   }
 
-  private beginSequence(timestampMs: number, sourceControl?: string): void {
+  private beginSequence(
+    timestampMs: number,
+    sourceControl?: string,
+    deviceKind?: InputDeviceKind,
+  ): void {
     this.startedAt = timestampMs;
     this.sourceControl = sourceControl;
+    this.deviceKind = deviceKind;
     this.hasTriggered = false;
     this.firstTapReleasedAt = undefined;
     this.emit('started', timestampMs);
@@ -168,6 +193,7 @@ export class InputActionRuntime {
   private resetSequence(): void {
     this.startedAt = undefined;
     this.sourceControl = undefined;
+    this.deviceKind = undefined;
     this.hasTriggered = false;
     this.doubleTapStage = 'idle';
     this.firstTapReleasedAt = undefined;
@@ -180,6 +206,7 @@ export class InputActionRuntime {
       elapsedMs: this.startedAt === undefined ? 0 : Math.max(0, timestampMs - this.startedAt),
       timestampMs,
       sourceControl: this.sourceControl,
+      deviceKind: this.deviceKind,
     });
   }
 }

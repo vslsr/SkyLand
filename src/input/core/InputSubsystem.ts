@@ -1,5 +1,6 @@
 import type { TagLike } from '../../tags/index';
 import { InputActionRuntime } from './InputActionRuntime';
+import { applyAxis2DModifiers, validateAxis2DModifier } from './InputModifiers';
 import { InputTagRouter } from './InputTagRouter';
 import {
   cloneInputValue,
@@ -14,6 +15,7 @@ import type {
   InputBindingOptions,
   InputConfigDefinition,
   InputDevice,
+  InputDeviceKind,
   InputMappingContextDefinition,
   InputMappingDefinition,
   InputValue,
@@ -25,9 +27,24 @@ export interface InputSubsystemOptions {
   readonly contexts: readonly InputMappingContextDefinition[];
   readonly devices?: readonly InputDevice[];
   readonly now?: () => number;
+  readonly initialDeviceKind?: InputDeviceKind;
 }
 
 const DEFAULT_DOUBLE_TAP_DURATION_MS = 250;
+const DEVICE_ACTIVITY_THRESHOLD = 0.12;
+
+interface ControlState {
+  readonly value: InputValue;
+  readonly deviceKind: InputDeviceKind;
+}
+
+interface AxisAccumulator {
+  x: number;
+  y: number;
+  sourceControl?: string;
+}
+
+type ActiveDeviceListener = (deviceKind: InputDeviceKind) => void;
 
 /**
  * 把设备事件、Mapping Context、Action 触发器和标签回调组合为统一输入管线。
@@ -41,15 +58,19 @@ export class InputSubsystem {
   private readonly activeContexts = new Set<string>();
   private readonly devices: InputDevice[];
   private readonly deviceCancelDisposers: Array<() => void> = [];
-  private readonly controlValues = new Map<string, InputValue>();
+  private readonly controlValues = new Map<string, ControlState>();
+  private readonly lastDeviceActivityMs = new Map<InputDeviceKind, number>();
+  private readonly activeDeviceListeners = new Set<ActiveDeviceListener>();
   private effectiveMappings: readonly InputMappingDefinition[] = [];
   private mappingsDirty = true;
   private inputEnabled = true;
+  private activeInputDevice: InputDeviceKind;
   private lastTimestampMs: number;
 
   public constructor(options: InputSubsystemOptions) {
     this.now = options.now ?? (() => performance.now());
     this.lastTimestampMs = this.now();
+    this.activeInputDevice = options.initialDeviceKind ?? 'keyboardMouse';
     this.devices = [...(options.devices ?? [])];
     this.registerActions(options.actions);
     this.tagRouter = new InputTagRouter(options.config, new Set(this.actions.keys()));
@@ -62,6 +83,16 @@ export class InputSubsystem {
 
   public get enabled(): boolean {
     return this.inputEnabled;
+  }
+
+  public get activeDeviceKind(): InputDeviceKind {
+    return this.activeInputDevice;
+  }
+
+  public onActiveDeviceChanged(listener: ActiveDeviceListener): () => void {
+    this.activeDeviceListeners.add(listener);
+    listener(this.activeInputDevice);
+    return () => this.activeDeviceListeners.delete(listener);
   }
 
   public setEnabled(enabled: boolean): void {
@@ -124,6 +155,8 @@ export class InputSubsystem {
       this.recalculateActions(this.lastTimestampMs);
     }
 
+    for (const device of this.devices) device.poll?.(frameTimestamp);
+
     const events = this.devices
       .flatMap((device) => [...device.drainEvents()])
       .sort((left, right) => left.timestampMs - right.timestampMs);
@@ -134,8 +167,12 @@ export class InputSubsystem {
         Math.min(frameTimestamp, event.timestampMs),
       );
       this.advanceTimedTriggers(eventTimestamp);
-      this.controlValues.set(event.control, cloneInputValue(event.value));
-      this.recalculateActions(eventTimestamp, event.control);
+      this.noteDeviceActivity(event.deviceKind, event.value, eventTimestamp);
+      this.controlValues.set(event.control, {
+        value: cloneInputValue(event.value),
+        deviceKind: event.deviceKind,
+      });
+      this.recalculateActions(eventTimestamp, event.control, event.deviceKind);
       this.advanceTimedTriggers(eventTimestamp);
       this.lastTimestampMs = eventTimestamp;
     }
@@ -158,6 +195,7 @@ export class InputSubsystem {
     for (const device of this.devices) device.dispose?.();
     this.tagRouter.clear();
     this.controlValues.clear();
+    this.activeDeviceListeners.clear();
   }
 
   private readonly handleDeviceCancel = (): void => {
@@ -188,8 +226,15 @@ export class InputSubsystem {
         if (!this.actions.has(mapping.actionId)) {
           throw new Error(`${definition.id} 引用了不存在的 InputAction：${mapping.actionId}`);
         }
+        const action = this.actions.get(mapping.actionId)?.definition;
+        if (action?.valueType === 'digital' && mapping.modifiers?.length) {
+          throw new TypeError(`${definition.id}/${mapping.control} 不能给 digital Action 配置 axis2D Modifier`);
+        }
         this.validateAxis(mapping.axis2D, `${definition.id}/${mapping.control} 的 axis2D`);
         this.validateAxis(mapping.scale, `${definition.id}/${mapping.control} 的 scale`);
+        for (const modifier of mapping.modifiers ?? []) {
+          validateAxis2DModifier(modifier, `${definition.id}/${mapping.control}`);
+        }
       }
       this.contexts.set(definition.id, definition);
       if (definition.activeByDefault) this.activeContexts.add(definition.id);
@@ -200,6 +245,12 @@ export class InputSubsystem {
     const deadZone = definition.deadZone ?? 0;
     if (!Number.isFinite(deadZone) || deadZone < 0 || deadZone >= 1) {
       throw new RangeError(`${definition.id} 的 deadZone 必须位于 [0, 1)`);
+    }
+    if (definition.valueType === 'digital' && definition.modifiers?.length) {
+      throw new TypeError(`${definition.id} 不能给 digital Action 配置 axis2D Modifier`);
+    }
+    for (const modifier of definition.modifiers ?? []) {
+      validateAxis2DModifier(modifier, definition.id);
     }
     const trigger = definition.trigger;
     if (trigger?.type === 'hold' && (!Number.isFinite(trigger.thresholdMs) || trigger.thresholdMs < 0)) {
@@ -248,41 +299,74 @@ export class InputSubsystem {
     this.mappingsDirty = false;
   }
 
-  private recalculateActions(timestampMs: number, sourceControl?: string): void {
-    const nextValues = new Map<string, InputValue>();
-    for (const [actionId, runtime] of this.actions) {
-      nextValues.set(actionId, zeroInputValue(runtime.definition));
-    }
+  private recalculateActions(
+    timestampMs: number,
+    eventControl?: string,
+    eventDeviceKind?: InputDeviceKind,
+  ): void {
+    const digitalSources = new Map<
+      string,
+      Map<InputDeviceKind, string>
+    >();
+    const axisSources = new Map<
+      string,
+      Map<InputDeviceKind, AxisAccumulator>
+    >();
 
     for (const mapping of this.effectiveMappings) {
-      const rawValue = this.controlValues.get(mapping.control);
-      if (rawValue === undefined) continue;
+      const controlState = this.controlValues.get(mapping.control);
+      if (!controlState) continue;
       const runtime = this.actions.get(mapping.actionId);
       if (!runtime) continue;
 
       if (runtime.definition.valueType === 'digital') {
-        if (inputValueIsActive(rawValue, runtime.definition.deadZone)) {
-          nextValues.set(mapping.actionId, true);
-        }
+        if (!inputValueIsActive(controlState.value, runtime.definition.deadZone)) continue;
+        const sources = digitalSources.get(mapping.actionId) ?? new Map();
+        sources.set(controlState.deviceKind, mapping.control);
+        digitalSources.set(mapping.actionId, sources);
         continue;
       }
 
-      const contribution = this.mapToAxis2D(rawValue, mapping);
-      if (!contribution) continue;
-      const accumulated = nextValues.get(mapping.actionId);
-      if (!accumulated || typeof accumulated === 'boolean') continue;
-      nextValues.set(mapping.actionId, {
-        x: accumulated.x + contribution.x,
-        y: accumulated.y + contribution.y,
-      });
+      const contribution = this.mapToAxis2D(controlState.value, mapping);
+      if (!contribution || Math.hypot(contribution.x, contribution.y) <= 1e-8) continue;
+      const sources = axisSources.get(mapping.actionId) ?? new Map();
+      const accumulated = sources.get(controlState.deviceKind) ?? { x: 0, y: 0 };
+      accumulated.x += contribution.x;
+      accumulated.y += contribution.y;
+      accumulated.sourceControl = mapping.control;
+      sources.set(controlState.deviceKind, accumulated);
+      axisSources.set(mapping.actionId, sources);
     }
 
     for (const [actionId, runtime] of this.actions) {
-      let nextValue = nextValues.get(actionId) ?? zeroInputValue(runtime.definition);
-      if (isAxis2DValue(nextValue)) {
-        nextValue = this.finalizeAxis(nextValue, runtime.definition.deadZone ?? 0);
+      if (runtime.definition.valueType === 'digital') {
+        const sources = digitalSources.get(actionId);
+        const deviceKind = this.chooseMostRecentDevice(sources?.keys());
+        const sourceControl = deviceKind ? sources?.get(deviceKind) : undefined;
+        runtime.applyValue(deviceKind !== undefined, timestampMs, sourceControl, deviceKind);
+        continue;
       }
-      runtime.applyValue(nextValue, timestampMs, sourceControl);
+
+      const candidates = new Map<InputDeviceKind, AxisAccumulator>();
+      for (const [deviceKind, source] of axisSources.get(actionId) ?? []) {
+        const modified = this.finalizeAxis(
+          applyAxis2DModifiers(source, runtime.definition.modifiers),
+          runtime.definition.deadZone ?? 0,
+        );
+        if (Math.hypot(modified.x, modified.y) <= 1e-8) continue;
+        candidates.set(deviceKind, { ...modified, sourceControl: source.sourceControl });
+      }
+      const deviceKind = this.chooseMostRecentDevice(candidates.keys());
+      const selected = deviceKind ? candidates.get(deviceKind) : undefined;
+      const sourceControl = deviceKind === eventDeviceKind
+        ? eventControl ?? selected?.sourceControl
+        : selected?.sourceControl;
+      runtime.applyValue(
+        selected ? { x: selected.x, y: selected.y } : zeroInputValue(runtime.definition),
+        timestampMs,
+        sourceControl,
+        deviceKind,
+      );
     }
   }
 
@@ -297,10 +381,11 @@ export class InputSubsystem {
     } else {
       value = rawValue;
     }
-    return {
+    const scaled = {
       x: value.x * (mapping.scale?.x ?? 1),
       y: value.y * (mapping.scale?.y ?? 1),
     };
+    return applyAxis2DModifiers(scaled, mapping.modifiers);
   }
 
   private finalizeAxis(value: Axis2DValue, deadZone: number): Axis2DValue {
@@ -312,6 +397,38 @@ export class InputSubsystem {
 
   private advanceTimedTriggers(timestampMs: number): void {
     for (const runtime of this.actions.values()) runtime.advanceTimedTrigger(timestampMs);
+  }
+
+  private noteDeviceActivity(
+    deviceKind: InputDeviceKind,
+    value: InputValue,
+    timestampMs: number,
+  ): void {
+    if (!inputValueIsActive(value, DEVICE_ACTIVITY_THRESHOLD)) return;
+    this.lastDeviceActivityMs.set(deviceKind, timestampMs);
+    if (this.activeInputDevice === deviceKind) return;
+    this.activeInputDevice = deviceKind;
+    for (const listener of [...this.activeDeviceListeners]) listener(deviceKind);
+  }
+
+  private chooseMostRecentDevice(
+    devices: Iterable<InputDeviceKind> | undefined,
+  ): InputDeviceKind | undefined {
+    if (!devices) return undefined;
+    let selected: InputDeviceKind | undefined;
+    let selectedTimestamp = Number.NEGATIVE_INFINITY;
+    for (const deviceKind of devices) {
+      const timestamp = this.lastDeviceActivityMs.get(deviceKind) ?? Number.NEGATIVE_INFINITY;
+      if (
+        selected === undefined
+        || timestamp > selectedTimestamp
+        || (timestamp === selectedTimestamp && deviceKind === this.activeInputDevice)
+      ) {
+        selected = deviceKind;
+        selectedTimestamp = timestamp;
+      }
+    }
+    return selected;
   }
 
   private getRuntimeForTag(tag: TagLike): InputActionRuntime {
