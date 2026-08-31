@@ -39,6 +39,20 @@
 
 当前服务端总会读取全部 `palette` 字段，因此即使关闭相应内容也不能省略它们。
 
+### `renderer.world`：流式大世界
+
+出现这个块就表示场景的地面与物件不再摆在场景里，而是由房间下发的世界种子确定性生成、按 chunk 流式加载；`content` 的 `ground` / `trees` / `grass` 开关随之改为决定 chunk 里放什么。世界尺寸不在这里配置，它是生成算法的固有属性，写在 `shared/world/worldConfig.mjs`。
+
+| 字段 | 格式/范围 | 作用 |
+| --- | --- | --- |
+| `loadRadius` | 1–6 的整数 | 以焦点所在 chunk 为中心向外加载几圈。 |
+| `keepRadius` | 2–8 的整数，且必须大于 `loadRadius` | 走出几圈之外才卸载。两者相等会让 chunk 在边界上反复构建与销毁。 |
+| `rockColor` | `#RRGGBB` | 岩石填充色。地面、草、树沿用 `palette`。 |
+
+`SceneCatalog` 另外校验：`fog.far` 不得大于 `loadRadius × 32`（否则视野越过最近的未加载 chunk），`gameplay.bounds` 必须落在流式世界向内收过的活动范围内（否则玩家能走到还没有内容的边缘）。
+
+改动流式世界的生成或加载策略请使用 `skyland-chunk-world` skill，它记录了两份放置实现必须逐位一致这一前提。
+
 ### `renderer.ocean`：动态海面
 
 仅在 `content.ocean` 为 `true` 时使用。
