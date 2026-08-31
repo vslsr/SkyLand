@@ -247,8 +247,9 @@ JS 两个后端之间必须逐位一致，所以它不接受任何逐场景的�
 `StreamingGrassSystem`，只为当前加载的 chunk 创建草叶。流式系统直接读取生成器原有的
 草簇坐标、朝向和缩放，每簇仍保持三片叶子，因此替换不会改变位置或密度；所有已加载
 chunk 共用一张跟随玩家焦点、按固定步长滑动的 32 米局部弯曲纹理。玩家踩踏始终可写入
-当前场景的草地交互目标，鼠标输入则由各场景的 `renderer.grassInteraction.mouse` 独立控制；
-`open-world` 明确关闭鼠标压草。窗口移动时会按世界坐标重投影仍在重叠区内的草痕，快速传送到不重叠区域则
+当前场景的草地交互目标，鼠标输入则由场景级 `mouse-grass-interaction` Component 独立提供；
+`open-world.scene.json` 的 `sceneComponents` 为空，因此不会注册鼠标压草。窗口移动时会按世界坐标
+重投影仍在重叠区内的草痕，快速传送到不重叠区域则
 自动回到中性状态；纹理成本因此不随世界尺寸增长。两条路的叶片形状都取自
 `createGrassBladeGeometry`，观感保持一致。
 
@@ -323,7 +324,8 @@ Actor 简易碰撞边框，产品构建会移除该 Mapping，不占用 F8。
 
 - 地图 id、显示名称、描述和人数上限
 - 场景 Actor 的原型引用、初始位置和朝向
-- 渲染器类型、背景、雾效、内容开关、场景级鼠标草地交互开关和颜色表
+- 按顺序加载的场景级 Component（场景专属逻辑、流程与规则）
+- 渲染器类型、背景、雾效、内容开关和颜色表
 - 服务端权威活动边界与出生点规则
 - 默认观察相机参数
 
@@ -498,6 +500,7 @@ Actor 控制和断线清理逻辑。
 ## 模块结构
 
 - `src/scenes/`：Scene 基类、SceneManager 与草地场景
+- `src/scene/components/`：由场景 JSON 选择的场景级 Component、生命周期宿主与注册表
 - `src/world/`：chunk 流式加载、ChunkView 与生成后端的加载
 - `src/ui/common/`：CommonUI 栈和通用窗体
 - `src/ui/pages/`：房间大厅、创建房间页面

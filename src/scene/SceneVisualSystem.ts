@@ -31,7 +31,11 @@ export interface ActorSnapshotTarget {
     direction: readonly [number, number, number],
     maximumDistance?: number,
   ): ActorInteractionCandidate | undefined;
+  findNearbyInteractableActor(
+    position: { x: number; z: number },
+  ): ActorInteractionCandidate | undefined;
   setHoveredActorId(actorId?: string): void;
+  setInteractionMarkerActorId(actorId?: string): void;
   getVesselHudState(playerId: string): VesselHudState | undefined;
   resolveSimpleCollision(
     position: { x: number; z: number },
@@ -43,8 +47,9 @@ export interface ActorSnapshotTarget {
 export interface ActorInteractionCandidate {
   actorId: string;
   label: string;
-  action: 'cargo-toggle';
+  action: 'cargo-toggle' | 'mushroom-bite';
   carrierActorId: string | null;
+  holderPlayerId: string | null;
 }
 
 export interface VesselHudState {

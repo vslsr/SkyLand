@@ -1,5 +1,4 @@
 import type { SceneComponentDefinition } from '../../scenes/data/SceneDefinition';
-import { createSceneRuntimeComponent } from './createSceneRuntimeComponent';
 import type {
   SceneComponentContext,
   SceneComponentFactory,
@@ -11,9 +10,7 @@ export class SceneComponentHost {
   private components: SceneRuntimeComponent[] = [];
   private active = false;
 
-  public constructor(
-    private readonly factory: SceneComponentFactory = createSceneRuntimeComponent,
-  ) {}
+  public constructor(private readonly factory: SceneComponentFactory) {}
 
   public load(
     definitions: readonly SceneComponentDefinition[],
@@ -26,8 +23,7 @@ export class SceneComponentHost {
       if (this.active) this.activate(created);
       this.components = created;
     } catch (error) {
-      this.deactivate(created);
-      this.dispose(created);
+      this.disposeComponents(created);
       throw error;
     }
   }
@@ -50,7 +46,7 @@ export class SceneComponentHost {
 
   public clear(): void {
     if (this.active) this.deactivate(this.components);
-    this.dispose(this.components);
+    this.disposeComponents(this.components);
     this.components = [];
   }
 
@@ -78,7 +74,7 @@ export class SceneComponentHost {
     }
   }
 
-  private dispose(components: readonly SceneRuntimeComponent[]): void {
+  private disposeComponents(components: readonly SceneRuntimeComponent[]): void {
     for (let index = components.length - 1; index >= 0; index -= 1) {
       components[index].dispose?.();
     }

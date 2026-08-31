@@ -97,8 +97,8 @@ function validateVesselMotor(raw, filename) {
 function validateInteractable(raw, filename) {
   const path = `${filename}.components.interactable`;
   const definition = requireObject(raw, path);
-  if (definition.action !== 'cargo-toggle') {
-    throw new TypeError(`${path}.action 暂只支持 cargo-toggle`);
+  if (definition.action !== 'cargo-toggle' && definition.action !== 'mushroom-bite') {
+    throw new TypeError(`${path}.action 暂只支持 cargo-toggle 或 mushroom-bite`);
   }
   return {
     action: definition.action,
@@ -115,6 +115,27 @@ function validateCargo(raw, filename) {
     mountLocalX: requireNumber(definition.mountLocalX, `${path}.mountLocalX`, -10, 10),
     mountLocalY: requireNumber(definition.mountLocalY, `${path}.mountLocalY`, -2, 10),
     mountLocalZ: requireNumber(definition.mountLocalZ, `${path}.mountLocalZ`, -10, 10),
+  };
+}
+
+function validateElasticTether(raw, filename) {
+  const path = `${filename}.components.elasticTether`;
+  const definition = requireObject(raw, path);
+  const restLength = requireNumber(definition.restLength, `${path}.restLength`, Number.EPSILON, 5);
+  const breakLength = requireNumber(definition.breakLength, `${path}.breakLength`, Number.EPSILON, 12);
+  if (breakLength <= restLength) {
+    throw new TypeError(`${path}.breakLength 必须大于 restLength`);
+  }
+  return {
+    restLength,
+    breakLength,
+    mouthHeight: requireNumber(definition.mouthHeight, `${path}.mouthHeight`, 0, 3),
+    mouthForwardOffset: requireNumber(
+      definition.mouthForwardOffset,
+      `${path}.mouthForwardOffset`,
+      0,
+      2,
+    ),
   };
 }
 
@@ -161,6 +182,16 @@ function validateRender(raw, filename) {
       height: requireNumber(render.height, `${path}.height`, Number.EPSILON, 20),
     };
   }
+  if (render.model === 'line-art-elastic-mushroom') {
+    return {
+      model: render.model,
+      capColor: requireColor(render.capColor, `${path}.capColor`),
+      stemColor: requireColor(render.stemColor, `${path}.stemColor`),
+      spotColor: requireColor(render.spotColor, `${path}.spotColor`),
+      radius: requireNumber(render.radius, `${path}.radius`, Number.EPSILON, 3),
+      height: requireNumber(render.height, `${path}.height`, Number.EPSILON, 5),
+    };
+  }
   throw new TypeError(`${path}.model 不受支持：${render.model}`);
 }
 
@@ -168,21 +199,45 @@ function validateActorArchetype(raw, filename) {
   const definition = requireObject(raw, filename);
   if (definition.schemaVersion !== 1) throw new TypeError(`${filename}.schemaVersion 必须是 1`);
   const components = requireObject(definition.components, `${filename}.components`);
-  const knownComponents = new Set(['buoyancy', 'vesselMotor', 'interactable', 'cargo', 'hazard', 'render']);
+  const knownComponents = new Set([
+    'buoyancy',
+    'vesselMotor',
+    'interactable',
+    'cargo',
+    'elasticTether',
+    'hazard',
+    'render',
+  ]);
   for (const componentName of Object.keys(components)) {
     if (!knownComponents.has(componentName)) {
       throw new TypeError(`${filename}.components 包含未知 Component：${componentName}`);
     }
   }
   const render = validateRender(components.render, filename);
+  const interactable = components.interactable
+    ? validateInteractable(components.interactable, filename)
+    : undefined;
+  const elasticTether = components.elasticTether
+    ? validateElasticTether(components.elasticTether, filename)
+    : undefined;
+  if (elasticTether && interactable?.action !== 'mushroom-bite') {
+    throw new TypeError(`${filename}.components.elasticTether 需要 mushroom-bite interactable`);
+  }
+  if (interactable?.action === 'mushroom-bite' && !elasticTether) {
+    throw new TypeError(`${filename}.components.interactable mushroom-bite 需要 elasticTether`);
+  }
+  if (elasticTether && render.model !== 'line-art-elastic-mushroom') {
+    throw new TypeError(`${filename}.components.elasticTether 需要 line-art-elastic-mushroom render`);
+  }
   return {
     schemaVersion: 1,
     id: requireId(definition.id, `${filename}.id`),
     components: {
       ...(components.buoyancy ? { buoyancy: validateBuoyancy(components.buoyancy, filename) } : {}),
       ...(components.vesselMotor ? { vesselMotor: validateVesselMotor(components.vesselMotor, filename) } : {}),
-      ...(components.interactable ? { interactable: validateInteractable(components.interactable, filename) } : {}),
+      ...(interactable ? { interactable } : {}),
       ...(components.cargo ? { cargo: validateCargo(components.cargo, filename) } : {}),
+      ...(elasticTether ? { elasticTether } : {}),
       ...(components.hazard ? { hazard: validateHazard(components.hazard, filename) } : {}),
       render,
     },

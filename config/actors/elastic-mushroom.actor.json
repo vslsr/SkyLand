@@ -1,0 +1,26 @@
+{
+  "$schema": "./actor.schema.json",
+  "schemaVersion": 1,
+  "id": "elastic-mushroom",
+  "components": {
+    "interactable": {
+      "action": "mushroom-bite",
+      "label": "弹弹菇",
+      "maximumDistance": 1.35
+    },
+    "elasticTether": {
+      "restLength": 0.72,
+      "breakLength": 2.65,
+      "mouthHeight": 0.3,
+      "mouthForwardOffset": 0.36
+    },
+    "render": {
+      "model": "line-art-elastic-mushroom",
+      "capColor": "#c97868",
+      "stemColor": "#eadfc5",
+      "spotColor": "#f8f1df",
+      "radius": 0.5,
+      "height": 0.95
+    }
+  }
+}

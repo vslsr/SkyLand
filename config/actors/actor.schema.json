@@ -63,7 +63,7 @@
           "additionalProperties": false,
           "required": ["action", "label", "maximumDistance"],
           "properties": {
-            "action": { "const": "cargo-toggle" },
+            "action": { "enum": ["cargo-toggle", "mushroom-bite"] },
             "label": { "type": "string", "minLength": 1, "maxLength": 32 },
             "maximumDistance": { "type": "number", "minimum": 0.5, "maximum": 12 }
           }
@@ -77,6 +77,17 @@
             "mountLocalX": { "type": "number", "minimum": -10, "maximum": 10 },
             "mountLocalY": { "type": "number", "minimum": -2, "maximum": 10 },
             "mountLocalZ": { "type": "number", "minimum": -10, "maximum": 10 }
+          }
+        },
+        "elasticTether": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["restLength", "breakLength", "mouthHeight", "mouthForwardOffset"],
+          "properties": {
+            "restLength": { "type": "number", "exclusiveMinimum": 0, "maximum": 5 },
+            "breakLength": { "type": "number", "exclusiveMinimum": 0, "maximum": 12 },
+            "mouthHeight": { "type": "number", "minimum": 0, "maximum": 3 },
+            "mouthForwardOffset": { "type": "number", "minimum": 0, "maximum": 2 }
           }
         },
         "hazard": {
@@ -126,6 +137,19 @@
                 "accentColor": { "$ref": "#/$defs/color" },
                 "radius": { "type": "number", "exclusiveMinimum": 0 },
                 "height": { "type": "number", "exclusiveMinimum": 0 }
+              }
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["model", "capColor", "stemColor", "spotColor", "radius", "height"],
+              "properties": {
+                "model": { "const": "line-art-elastic-mushroom" },
+                "capColor": { "$ref": "#/$defs/color" },
+                "stemColor": { "$ref": "#/$defs/color" },
+                "spotColor": { "$ref": "#/$defs/color" },
+                "radius": { "type": "number", "exclusiveMinimum": 0, "maximum": 3 },
+                "height": { "type": "number", "exclusiveMinimum": 0, "maximum": 5 }
               }
             }
           ]

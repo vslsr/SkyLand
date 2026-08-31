@@ -1,10 +1,21 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import * as THREE from 'three';
 import {
   CARGO_COMPONENT,
+  ELASTIC_TETHER_COMPONENT,
   type CargoComponent,
+  type ElasticTetherComponent,
 } from '../shared/actor/index.mjs';
 import { ClientActorSystem } from '../src/actors/ClientActorSystem';
+import {
+  INTERACTION_MARKER_COMPONENT,
+  type InteractionMarkerComponent,
+} from '../src/actors/components/InteractionMarkerComponent';
+import {
+  THREE_OBJECT_COMPONENT,
+  type ThreeObjectComponent,
+} from '../src/actors/components/ThreeObjectComponent';
 import { ActorInteractionController } from '../src/controllers/ActorInteractionController';
 import {
   createPlayerInputScheme,
@@ -21,6 +32,7 @@ const definition = {
   displayName: '水域',
   description: 'interaction test',
   capacity: 8,
+  sceneComponents: [],
   actors: [],
   actorArchetypes: [
     {
@@ -69,13 +81,29 @@ const definition = {
         },
       },
     },
+    {
+      schemaVersion: 1,
+      id: 'elastic-mushroom',
+      components: {
+        interactable: { action: 'mushroom-bite', label: '弹弹菇', maximumDistance: 1.35 },
+        elasticTether: {
+          restLength: 0.72,
+          breakLength: 2.65,
+          mouthHeight: 0.3,
+          mouthForwardOffset: 0.36,
+        },
+        render: {
+          model: 'line-art-elastic-mushroom', capColor: '#c97868', stemColor: '#eadfc5',
+          spotColor: '#f8f1df', radius: 0.5, height: 0.95,
+        },
+      },
+    },
   ],
   renderer: {
     type: 'line-art',
     background: '#ffffff',
     fog: { color: '#ffffff', near: 20, far: 60 },
     content: { ground: false, trees: false, grass: false, ocean: true },
-    grassInteraction: { mouse: false },
     palette: { ground: '#ffffff', grass: '#ffffff', treeTrunk: '#ffffff', treeNeedles: '#ffffff' },
     ocean: {
       size: 32, segments: 8, waveHeight: 0.2, waveSpeed: 0.8, noiseScale: 0.08,
@@ -113,6 +141,16 @@ const reefSnapshot: SnapshotActor = {
   id: 'reef-1', archetypeId: 'reef', revision: 0,
   transform: { x: -5, y: -0.4, z: 0, yaw: 0 },
   hazard: { radius: 2 },
+};
+
+const mushroomSnapshot: SnapshotActor = {
+  id: 'mushroom-1', archetypeId: 'elastic-mushroom', revision: 0,
+  transform: { x: 0, y: 0, z: 0, yaw: 0 },
+  interactable: { action: 'mushroom-bite', label: '弹弹菇', enabled: true, revision: 0 },
+  elasticTether: {
+    holderPlayerId: null, targetX: 0, targetY: 0, targetZ: 0,
+    releaseRevision: 0, revision: 0,
+  },
 };
 
 test('异构 Actor 创建线稿模型，准星选中货箱并提供木筏 HUD 状态', () => {
@@ -161,7 +199,8 @@ test('E 键只对当前准星货箱发送交互，未控制木筏时只显示提
   let now = 0;
   let ownedActorId: string | undefined = 'raft-1';
   let candidate: ActorInteractionCandidate | undefined = {
-    actorId: 'cargo-1', label: '测试货箱', action: 'cargo-toggle', carrierActorId: null,
+    actorId: 'cargo-1', label: '测试货箱', action: 'cargo-toggle',
+    carrierActorId: null, holderPlayerId: null,
   };
   const sent: string[] = [];
   const prompts: Array<string | undefined> = [];
@@ -208,4 +247,102 @@ test('E 键只对当前准星货箱发送交互，未控制木筏时只显示提
   assert.equal(prompts.at(-1), undefined);
   controller.dispose();
   input.dispose();
+});
+
+test('史莱姆靠近时显示通用 E 世界标记，按 E 可在没有木筏时叼住蘑菇', () => {
+  let now = 0;
+  const sent: string[] = [];
+  const markers: Array<string | undefined> = [];
+  const prompts: Array<string | undefined> = [];
+  const device = new TestKeyboardDevice(() => now);
+  const scheme = createPlayerInputScheme({ storage: null });
+  const input = new InputSubsystem({
+    actions: scheme.actions, config: scheme.config, contexts: scheme.contexts,
+    devices: [device], now: () => now,
+  });
+  const candidate: ActorInteractionCandidate = {
+    actorId: 'mushroom-1', label: '弹弹菇', action: 'mushroom-bite',
+    carrierActorId: null, holderPlayerId: null,
+  };
+  const controller = new ActorInteractionController(input, {
+    getPlayerId: () => 'player-1',
+    getPlayerPosition: () => ({ x: 0.4, z: 0 }),
+    findOwnedActorId: () => undefined,
+    pick: () => undefined,
+    findNearby: () => candidate,
+    setHoveredActorId: () => undefined,
+    setInteractionMarkerActorId: (actorId) => markers.push(actorId),
+    sendInteraction: (actorId) => sent.push(actorId),
+    setPrompt: (text) => prompts.push(text),
+  });
+  const frame = {
+    position: [0, 5, 8],
+    axes: { right: [1, 0, 0], up: [0, 1, 0], forward: [0, -0.5, -1] },
+  } as const;
+
+  device.emit('Keyboard.KeyE', true);
+  input.update();
+  controller.update(frame);
+  assert.deepEqual(sent, ['mushroom-1']);
+  assert.equal(markers.at(-1), 'mushroom-1');
+  assert.match(prompts.at(-1) ?? '', /叼住/);
+  controller.dispose();
+  input.dispose();
+});
+
+test('弹性蘑菇 Replica 拉长并在释放后回弹，标记组件始终可面向相机', () => {
+  let now = 1_000;
+  const system = new ClientActorSystem({
+    definition,
+    environment: { fogColor: '#ffffff', fogNear: 20, fogFar: 60 },
+    now: () => now,
+  });
+  system.syncSnapshots([mushroomSnapshot], 1_000);
+  system.update(0, 0);
+  assert.equal(system.findNearbyInteractableActor({ x: 0.6, z: 0 })?.actorId, 'mushroom-1');
+
+  system.setInteractionMarkerActorId('mushroom-1');
+  const actor = system.getActor('mushroom-1');
+  const marker = actor?.requireComponent(
+    INTERACTION_MARKER_COMPONENT,
+  ) as InteractionMarkerComponent;
+  assert.equal(marker.visible, true);
+  const camera = new THREE.PerspectiveCamera();
+  camera.position.set(4, 6, 8);
+  system.beforeRender({} as THREE.WebGLRenderer, camera);
+  assert.ok(system.root.getObjectByName('actor-interaction-marker'));
+
+  now = 1_100;
+  system.syncSnapshots([{
+    ...mushroomSnapshot,
+    revision: 1,
+    interactable: { ...mushroomSnapshot.interactable!, enabled: false, revision: 1 },
+    elasticTether: {
+      holderPlayerId: 'player-1', targetX: 2.2, targetY: 0.3, targetZ: 0,
+      releaseRevision: 0, revision: 1,
+    },
+  }], 1_100);
+  now = 1_230;
+  for (let index = 0; index < 90; index += 1) system.update(1 / 60, index / 60);
+  const render = actor?.requireComponent(THREE_OBJECT_COMPONENT) as ThreeObjectComponent;
+  const stretchedScale = render.elasticTetherRig?.stemRoot.scale.y ?? 1;
+  assert.ok(stretchedScale > 2);
+  const tether = actor?.requireComponent(ELASTIC_TETHER_COMPONENT) as ElasticTetherComponent;
+  assert.equal(tether.holderPlayerId, 'player-1');
+
+  now = 1_400;
+  system.syncSnapshots([{
+    ...mushroomSnapshot,
+    revision: 2,
+    elasticTether: {
+      holderPlayerId: null, targetX: 2.2, targetY: 0.3, targetZ: 0,
+      releaseRevision: 1, revision: 2,
+    },
+  }], 1_400);
+  now = 1_530;
+  for (let index = 0; index < 180; index += 1) system.update(1 / 60, 2 + index / 60);
+  const returnedScale = render.elasticTetherRig?.stemRoot.scale.y ?? 99;
+  assert.ok(returnedScale < stretchedScale);
+  assert.ok(Math.abs(returnedScale - 1) < 0.2);
+  system.dispose();
 });

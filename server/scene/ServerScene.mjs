@@ -17,6 +17,7 @@ import {
   ACTOR_CONTROL_COMPONENT,
   BUOYANCY_COMPONENT,
   CARGO_COMPONENT,
+  ELASTIC_TETHER_COMPONENT,
   INTERACTABLE_COMPONENT,
   SIMPLE_COLLISION_COMPONENT,
   TRANSFORM_COMPONENT,
@@ -32,6 +33,10 @@ import {
   damageVesselPart,
   removeVesselCargo,
 } from '../actors/VesselStateMutations.mjs';
+import {
+  grabElasticTether,
+  releaseElasticTether,
+} from '../actors/ElasticTetherMutations.mjs';
 
 function roundCoordinate(value) {
   return Math.round(value * 1000) / 1000;
@@ -61,9 +66,9 @@ export class ServerScene {
     this.id = definition.id;
     this.bounds = definition.gameplay?.bounds ?? PLAYER_BOUNDS;
     this.spawn = definition.gameplay?.spawn;
-    this.actorWorld = createServerActorWorld(definition);
-    this.tick = 0;
     this.players = new Map();
+    this.actorWorld = createServerActorWorld(definition, { players: this.players });
+    this.tick = 0;
     this.now = options.now ?? (() => Date.now());
     this.lastRefillAt = this.now();
   }
@@ -85,6 +90,15 @@ export class ServerScene {
   }
 
   removePlayer(playerId) {
+    for (const actor of this.actorWorld.query(
+      ELASTIC_TETHER_COMPONENT,
+      INTERACTABLE_COMPONENT,
+    )) {
+      const tether = actor.requireComponent(ELASTIC_TETHER_COMPONENT);
+      if (tether.holderPlayerId === playerId) {
+        releaseElasticTether(tether, actor.requireComponent(INTERACTABLE_COMPONENT));
+      }
+    }
     this.players.delete(playerId);
     for (const actor of this.actorWorld.query(ACTOR_CONTROL_COMPONENT)) {
       const control = actor.requireComponent(ACTOR_CONTROL_COMPONENT);
@@ -179,10 +193,7 @@ export class ServerScene {
     return true;
   }
 
-  /**
-   * 场景交互入口。自由镜头不属于权威玩法坐标，因此距离以玩家控制的木筏为基准。
-   * 当前 cargo-toggle 同时完成装载/卸载、附着状态和浮力载荷变更。
-   */
+  /** 场景交互入口；按动作分别使用权威玩家或权威载具坐标校验。 */
   interactWithActor(playerId, message) {
     const player = this.players.get(playerId);
     if (!player) return false;
@@ -190,10 +201,25 @@ export class ServerScene {
     if (sequence <= player.actorInteractionSequence) return false;
     const target = this.actorWorld.getActor(sanitizeActorId(message?.actorId));
     const interactable = target?.getComponent(INTERACTABLE_COMPONENT);
-    const cargo = target?.getComponent(CARGO_COMPONENT);
     const targetTransform = target?.getComponent(TRANSFORM_COMPONENT);
-    if (!target || !interactable?.enabled || !cargo || !targetTransform) return false;
+    if (!target || !interactable?.enabled || !targetTransform) return false;
+
+    if (interactable.action === 'mushroom-bite') {
+      const tether = target.getComponent(ELASTIC_TETHER_COMPONENT);
+      if (!tether) return false;
+      const distance = Math.hypot(
+        targetTransform.x - player.x,
+        targetTransform.z - player.z,
+      );
+      if (distance > interactable.maximumDistance) return false;
+      if (!grabElasticTether(tether, interactable, player, targetTransform)) return false;
+      player.actorInteractionSequence = sequence;
+      return true;
+    }
+
     if (interactable.action !== 'cargo-toggle') return false;
+    const cargo = target.getComponent(CARGO_COMPONENT);
+    if (!cargo) return false;
 
     const vessel = this.actorWorld.query(
       ACTOR_CONTROL_COMPONENT,

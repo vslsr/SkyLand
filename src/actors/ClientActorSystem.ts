@@ -8,6 +8,8 @@ import {
   BuoyancyComponent,
   CARGO_COMPONENT,
   CargoComponent,
+  ELASTIC_TETHER_COMPONENT,
+  ElasticTetherComponent,
   HazardComponent,
   INTERACTABLE_COMPONENT,
   InteractableComponent,
@@ -37,10 +39,15 @@ import {
   THREE_OBJECT_COMPONENT,
   ThreeObjectComponent,
 } from './components/ThreeObjectComponent';
+import {
+  INTERACTION_MARKER_COMPONENT,
+  InteractionMarkerComponent,
+} from './components/InteractionMarkerComponent';
 import { ActorTransformSystem } from './systems/ActorTransformSystem';
 import { AttachmentVisualSystem } from './systems/AttachmentVisualSystem';
 import { CargoVisualSystem } from './systems/CargoVisualSystem';
 import { WaterBobVisualSystem } from './systems/WaterBobVisualSystem';
+import { ElasticTetherVisualSystem } from './systems/ElasticTetherVisualSystem';
 
 export interface ClientActorSystemOptions {
   definition: SceneDefinition;
@@ -76,6 +83,7 @@ export class ClientActorSystem implements SceneVisualSystem {
       this.world.addSystem(new CargoVisualSystem(options.definition.renderer.ocean));
     }
     this.world.addSystem(new AttachmentVisualSystem());
+    this.world.addSystem(new ElasticTetherVisualSystem());
     this.environment = options.environment;
   }
 
@@ -129,6 +137,15 @@ export class ClientActorSystem implements SceneVisualSystem {
     this.applySnapshotSet(this.snapshots.sample(this.now()));
     this.world.update(deltaSeconds, elapsedSeconds);
     this.hoverHelper?.update();
+  }
+
+  public beforeRender(_renderer: THREE.WebGLRenderer, camera: THREE.Camera): void {
+    for (const actor of this.world.query(INTERACTION_MARKER_COMPONENT) as Actor[]) {
+      const marker = actor.requireComponent(
+        INTERACTION_MARKER_COMPONENT,
+      ) as InteractionMarkerComponent;
+      marker.faceCamera(camera);
+    }
   }
 
   public dispose(): void {
@@ -189,7 +206,6 @@ export class ClientActorSystem implements SceneVisualSystem {
     let nearest: { distance: number; candidate: ActorInteractionCandidate } | undefined;
     for (const actor of this.world.query(
       INTERACTABLE_COMPONENT,
-      CARGO_COMPONENT,
       THREE_OBJECT_COMPONENT,
     ) as Actor[]) {
       const interactable = actor.requireComponent(INTERACTABLE_COMPONENT) as InteractableComponent;
@@ -198,18 +214,45 @@ export class ClientActorSystem implements SceneVisualSystem {
       render.root.updateWorldMatrix(true, true);
       const hit = this.raycaster.intersectObject(render.root, true)[0];
       if (!hit || (nearest && hit.distance >= nearest.distance)) continue;
-      const cargo = actor.requireComponent(CARGO_COMPONENT) as CargoComponent;
       nearest = {
         distance: hit.distance,
-        candidate: {
-          actorId: actor.id,
-          label: interactable.label,
-          action: interactable.action,
-          carrierActorId: cargo.carrierActorId,
-        },
+        candidate: this.createInteractionCandidate(actor, interactable),
       };
     }
     return nearest?.candidate;
+  }
+
+  public findNearbyInteractableActor(
+    position: { x: number; z: number },
+  ): ActorInteractionCandidate | undefined {
+    let nearest: { distance: number; candidate: ActorInteractionCandidate } | undefined;
+    for (const actor of this.world.query(
+      INTERACTABLE_COMPONENT,
+      TRANSFORM_COMPONENT,
+    ) as Actor[]) {
+      const interactable = actor.requireComponent(INTERACTABLE_COMPONENT) as InteractableComponent;
+      if (!interactable.enabled) continue;
+      const transform = actor.requireComponent(TRANSFORM_COMPONENT) as TransformComponent;
+      const distance = Math.hypot(transform.x - position.x, transform.z - position.z);
+      if (distance > interactable.maximumDistance || (nearest && distance >= nearest.distance)) {
+        continue;
+      }
+      nearest = {
+        distance,
+        candidate: this.createInteractionCandidate(actor, interactable),
+      };
+    }
+    return nearest?.candidate;
+  }
+
+  public setInteractionMarkerActorId(actorId?: string): void {
+    // Actor 数量由场景 Schema 固定在 256 以内；标记切换不随世界面积增长。
+    for (const actor of this.world.query(INTERACTION_MARKER_COMPONENT) as Actor[]) {
+      const marker = actor.requireComponent(
+        INTERACTION_MARKER_COMPONENT,
+      ) as InteractionMarkerComponent;
+      marker.setVisible(actor.id === actorId);
+    }
   }
 
   public setHoveredActorId(actorId?: string): void {
@@ -268,6 +311,9 @@ export class ClientActorSystem implements SceneVisualSystem {
     if (archetype.components.cargo) {
       actor.addComponent(new CargoComponent(archetype.components.cargo));
     }
+    if (archetype.components.elasticTether) {
+      actor.addComponent(new ElasticTetherComponent(archetype.components.elasticTether));
+    }
     if (archetype.components.hazard) {
       actor.addComponent(new HazardComponent(archetype.components.hazard));
     }
@@ -280,6 +326,12 @@ export class ClientActorSystem implements SceneVisualSystem {
     const render = new ThreeObjectComponent(model);
     render.setSimpleCollisionVisible(this.simpleCollisionVisible);
     actor.addComponent(render);
+    if (archetype.components.interactable) {
+      actor.addComponent(new InteractionMarkerComponent(
+        model.root,
+        render.interactionAnchorY,
+      ));
+    }
     this.root.add(model.root);
     this.world.addActor(actor);
     return actor;
@@ -325,6 +377,17 @@ export class ClientActorSystem implements SceneVisualSystem {
       cargo.carrierActorId = snapshot.cargo.carrierActorId;
       cargo.revision = snapshot.cargo.revision;
     }
+    if (snapshot.elasticTether) {
+      const tether = actor.requireComponent(
+        ELASTIC_TETHER_COMPONENT,
+      ) as ElasticTetherComponent;
+      tether.holderPlayerId = snapshot.elasticTether.holderPlayerId;
+      tether.targetX = snapshot.elasticTether.targetX;
+      tether.targetY = snapshot.elasticTether.targetY;
+      tether.targetZ = snapshot.elasticTether.targetZ;
+      tether.releaseRevision = snapshot.elasticTether.releaseRevision;
+      tether.revision = snapshot.elasticTether.revision;
+    }
     const render = actor.requireComponent(THREE_OBJECT_COMPONENT) as ThreeObjectComponent;
     render.root.userData.floatState = snapshot.buoyancy?.state;
   }
@@ -336,5 +399,22 @@ export class ClientActorSystem implements SceneVisualSystem {
     (this.hoverHelper.material as THREE.Material).dispose();
     this.hoverHelper = undefined;
     this.hoveredActorId = undefined;
+  }
+
+  private createInteractionCandidate(
+    actor: Actor,
+    interactable: InteractableComponent,
+  ): ActorInteractionCandidate {
+    const cargo = actor.getComponent(CARGO_COMPONENT) as CargoComponent | undefined;
+    const tether = actor.getComponent(
+      ELASTIC_TETHER_COMPONENT,
+    ) as ElasticTetherComponent | undefined;
+    return {
+      actorId: actor.id,
+      label: interactable.label,
+      action: interactable.action,
+      carrierActorId: cargo?.carrierActorId ?? null,
+      holderPlayerId: tether?.holderPlayerId ?? null,
+    };
   }
 }

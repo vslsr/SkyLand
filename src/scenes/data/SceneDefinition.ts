@@ -21,6 +21,10 @@ export interface ActorBuoyancyPartDefinition {
   localZ: number;
 }
 
+export type SceneComponentDefinition =
+  | { type: 'mouse-grass-interaction' }
+  | { type: 'ability-lab' };
+
 export type ActorRenderDefinition =
   | {
       model: 'line-art-raft';
@@ -40,6 +44,14 @@ export type ActorRenderDefinition =
       model: 'line-art-reef';
       color: string;
       accentColor: string;
+      radius: number;
+      height: number;
+    }
+  | {
+      model: 'line-art-elastic-mushroom';
+      capColor: string;
+      stemColor: string;
+      spotColor: string;
       radius: number;
       height: number;
     };
@@ -66,7 +78,7 @@ export interface ActorArchetypeDefinition {
       inputTimeoutMs: number;
     };
     interactable?: {
-      action: 'cargo-toggle';
+      action: 'cargo-toggle' | 'mushroom-bite';
       label: string;
       maximumDistance: number;
     };
@@ -75,6 +87,12 @@ export interface ActorArchetypeDefinition {
       mountLocalX: number;
       mountLocalY: number;
       mountLocalZ: number;
+    };
+    elasticTether?: {
+      restLength: number;
+      breakLength: number;
+      mouthHeight: number;
+      mouthForwardOffset: number;
     };
     hazard?: {
       radius: number;
@@ -130,6 +148,7 @@ export interface WorldStreamingDefinition {
 
 export interface SceneDefinition extends SceneSummary {
   schemaVersion: 1;
+  sceneComponents: SceneComponentDefinition[];
   actors: SceneActorDefinition[];
   actorArchetypes: ActorArchetypeDefinition[];
   renderer: {
@@ -137,8 +156,6 @@ export interface SceneDefinition extends SceneSummary {
     background: string;
     fog: { color: string; near: number; far: number };
     content: { ground: boolean; trees: boolean; grass: boolean; ocean: boolean };
-    /** 场景级本地输入开关；玩家脚步与玩法效果始终走独立的草地交互目标。 */
-    grassInteraction: { mouse: boolean };
     palette: {
       ground: string;
       grass: string;

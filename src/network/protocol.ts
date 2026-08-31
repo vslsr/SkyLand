@@ -51,7 +51,7 @@ export interface SnapshotActor {
     revision: number;
   };
   interactable?: {
-    action: 'cargo-toggle';
+    action: 'cargo-toggle' | 'mushroom-bite';
     label: string;
     enabled: boolean;
     revision: number;
@@ -59,6 +59,14 @@ export interface SnapshotActor {
   cargo?: {
     mass: number;
     carrierActorId: string | null;
+    revision: number;
+  };
+  elasticTether?: {
+    holderPlayerId: string | null;
+    targetX: number;
+    targetY: number;
+    targetZ: number;
+    releaseRevision: number;
     revision: number;
   };
   hazard?: {

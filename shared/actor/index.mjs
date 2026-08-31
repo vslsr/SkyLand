@@ -16,6 +16,10 @@ export {
   CargoComponent,
 } from './components/CargoComponent.mjs';
 export {
+  ELASTIC_TETHER_COMPONENT,
+  ElasticTetherComponent,
+} from './components/ElasticTetherComponent.mjs';
+export {
   HAZARD_COMPONENT,
   HazardComponent,
 } from './components/HazardComponent.mjs';

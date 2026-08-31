@@ -11,6 +11,7 @@ alwaysApply: true
 - Preserve deterministic world placement and authoritative gameplay data. Visual streaming, LOD, pooling, and local effect windows must not change generated positions, server-owned state, or cross-backend world results.
 - Handle chunk boundaries, negative coordinates, world edges, fast travel/teleport, focus changes, late async completion, and load/unload races explicitly. A large focus jump must reset or reproject local state safely instead of dragging stale state across the world.
 - Release chunk-local and window-local geometry, materials, render targets, listeners, caches, and pending work when content leaves the keep radius or the scene is replaced.
+- Scene-level Components must obey the same bounds: never hide full-world scans or allocations inside lifecycle hooks, and always release scene-owned listeners and local state when deactivated or disposed.
 - Prevent sampling or collision data from bleeding outside its valid local region. Content outside a local simulation window must use a defined neutral/fallback state.
 - Prefer chunk-local data or focus-following windows for dense visual effects. Use full-world textures, grids, scans, or caches only when their worst-case memory and update cost have been justified and tested.
 - Verify new features in both fixed scenes and streamed-world paths where applicable. Add focused coverage for recentering, chunk load/unload, large coordinate jumps, bounded resource counts, and preservation of deterministic positions.

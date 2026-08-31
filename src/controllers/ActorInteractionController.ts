@@ -5,9 +5,12 @@ import type { ActorInteractionCandidate } from '../scene/SceneVisualSystem';
 
 export interface ActorInteractionPort {
   getPlayerId(): string | undefined;
+  getPlayerPosition?(): { x: number; z: number } | undefined;
   findOwnedActorId(playerId: string): string | undefined;
   pick(frame: CameraFrame): ActorInteractionCandidate | undefined;
+  findNearby?(position: { x: number; z: number }): ActorInteractionCandidate | undefined;
   setHoveredActorId(actorId?: string): void;
+  setInteractionMarkerActorId?(actorId?: string): void;
   sendInteraction(actorId: string): void;
   setPrompt(text?: string): void;
 }
@@ -34,16 +37,31 @@ export class ActorInteractionController {
       this.clearSelection();
       return;
     }
-    this.candidate = this.port.pick(frame);
-    this.port.setHoveredActorId(this.candidate?.actorId);
+    const playerPosition = this.port.getPlayerPosition?.();
+    const usesProximity = playerPosition !== undefined;
+    this.candidate = playerPosition
+      ? this.port.findNearby?.(playerPosition)
+      : this.port.pick(frame);
+    this.port.setHoveredActorId(usesProximity ? undefined : this.candidate?.actorId);
+    this.port.setInteractionMarkerActorId?.(
+      usesProximity && this.candidate?.action === 'mushroom-bite'
+        ? this.candidate.actorId
+        : undefined,
+    );
     const playerId = this.port.getPlayerId();
     const vesselId = playerId ? this.port.findOwnedActorId(playerId) : undefined;
     const prompt = this.resolvePrompt(this.candidate, vesselId);
     this.port.setPrompt(prompt);
-    if (this.interactionRequested && this.candidate && vesselId) {
-      const carrierId = this.candidate.carrierActorId;
-      if (!carrierId || carrierId === vesselId) {
-        this.port.sendInteraction(this.candidate.actorId);
+    if (this.interactionRequested && this.candidate) {
+      if (this.candidate.action === 'mushroom-bite') {
+        if (playerId && !this.candidate.holderPlayerId) {
+          this.port.sendInteraction(this.candidate.actorId);
+        }
+      } else if (vesselId) {
+        const carrierId = this.candidate.carrierActorId;
+        if (!carrierId || carrierId === vesselId) {
+          this.port.sendInteraction(this.candidate.actorId);
+        }
       }
     }
     this.interactionRequested = false;
@@ -64,6 +82,10 @@ export class ActorInteractionController {
     vesselId: string | undefined,
   ): string | undefined {
     if (!candidate) return undefined;
+    if (candidate.action === 'mushroom-bite') {
+      if (!candidate.holderPlayerId) return `E · 叼住「${candidate.label}」`;
+      return `「${candidate.label}」正被叼住`;
+    }
     if (!vesselId) return `先按 F 接管木筏，再装载「${candidate.label}」`;
     if (!candidate.carrierActorId) return `E · 装载「${candidate.label}」`;
     if (candidate.carrierActorId === vesselId) return `E · 卸载「${candidate.label}」`;
@@ -73,6 +95,7 @@ export class ActorInteractionController {
   private clearSelection(): void {
     this.candidate = undefined;
     this.port.setHoveredActorId(undefined);
+    this.port.setInteractionMarkerActorId?.(undefined);
     this.port.setPrompt(undefined);
   }
 }

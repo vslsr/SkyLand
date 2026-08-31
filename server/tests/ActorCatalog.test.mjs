@@ -21,6 +21,11 @@ test('ActorCatalog 加载并净化木筏原型', async () => {
   const reef = catalog.require('reef');
   assert.equal(reef.components.hazard.partId, 'front-left-float');
   assert.equal(reef.components.render.model, 'line-art-reef');
+
+  const mushroom = catalog.require('elastic-mushroom');
+  assert.equal(mushroom.components.interactable.action, 'mushroom-bite');
+  assert.equal(mushroom.components.elasticTether.breakLength, 2.65);
+  assert.equal(mushroom.components.render.model, 'line-art-elastic-mushroom');
 });
 
 test('ActorCatalog 拒绝未知原型', async () => {

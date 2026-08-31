@@ -84,6 +84,7 @@ const definition = {
   displayName: '水域',
   description: 'test',
   capacity: 8,
+  sceneComponents: [],
   actors: [{
     id: 'demo-raft-01',
     archetypeId: 'raft',
@@ -96,7 +97,6 @@ const definition = {
     background: '#ffffff',
     fog: { color: '#ffffff', near: 20, far: 60 },
     content: { ground: false, trees: false, grass: false, ocean: true },
-    grassInteraction: { mouse: false },
     palette: { ground: '#ffffff', grass: '#ffffff', treeTrunk: '#ffffff', treeNeedles: '#ffffff' },
     ocean,
   },

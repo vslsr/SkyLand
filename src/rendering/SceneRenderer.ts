@@ -85,7 +85,7 @@ export class SceneRenderer implements GrassInteractionTarget {
     this.dynamicWorld.remove(object);
   }
 
-  /** Shared entry point for mouse tests, footsteps, touch input, or gameplay effects. */
+  /** 玩家、场景组件或玩法效果写入当前场景草地的统一入口。 */
   public applyImpulse(impulse: GrassBendImpulse): void {
     this.grassInteraction?.applyImpulse(impulse);
   }
@@ -126,8 +126,18 @@ export class SceneRenderer implements GrassInteractionTarget {
     );
   }
 
+  public findNearbyActorInteraction(
+    position: { x: number; z: number },
+  ): ActorInteractionCandidate | undefined {
+    return this.actorSnapshotTarget?.findNearbyInteractableActor(position);
+  }
+
   public setHoveredActorId(actorId?: string): void {
     this.actorSnapshotTarget?.setHoveredActorId(actorId);
+  }
+
+  public setInteractionMarkerActorId(actorId?: string): void {
+    this.actorSnapshotTarget?.setInteractionMarkerActorId(actorId);
   }
 
   public getVesselHudState(playerId: string): VesselHudState | undefined {

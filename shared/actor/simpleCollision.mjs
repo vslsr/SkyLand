@@ -56,6 +56,17 @@ export function createSimpleCollisionFromRender(render) {
       maximumY: height * 1.08,
     });
   }
+  if (model === 'line-art-elastic-mushroom') {
+    const radius = positiveNumber(render.radius, 0.5);
+    const height = positiveNumber(render.height, 0.9);
+    return createSimpleCollisionDefinition({
+      // 只让细小根部参与推出，宽菌盖可以悬在史莱姆头顶而不形成隐形墙。
+      halfWidth: radius * 0.4,
+      halfLength: radius * 0.4,
+      minimumY: 0,
+      maximumY: height,
+    });
+  }
   throw new TypeError(`无法为模型 ${model || '<unknown>'} 生成简易碰撞`);
 }
 
@@ -157,4 +168,3 @@ export function circleTouchesSimpleCollision(point, radius, instance, epsilon = 
   const resolved = resolveCircleAgainstSimpleCollision(point, radius + Math.max(0, epsilon), instance);
   return Math.hypot(resolved.x - point.x, resolved.z - point.z) > COLLISION_EPSILON;
 }
-

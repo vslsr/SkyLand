@@ -20,13 +20,13 @@ function createSceneFile(overrides = {}) {
     displayName: '流式探针',
     description: '用于校验流式场景约束的测试地图。',
     capacity: 8,
+    sceneComponents: [],
     actors: [],
     renderer: {
       type: 'line-art',
       background: '#fdfbf6',
       fog: { color: '#fdfbf6', near: 22, far: 52 },
       content: { ground: true, trees: true, grass: true, ocean: false },
-      grassInteraction: { mouse: false },
       palette: {
         ground: '#f1eddf',
         grass: '#c1d7a6',
@@ -83,11 +83,29 @@ test('固定场景不受这些约束限制', async () => {
   assert.equal(catalog.require('streaming-probe').renderer.world, undefined);
 });
 
-test('没有草地的场景不能开启鼠标草地交互', async () => {
+test('没有草地的场景不能加载鼠标草地交互组件', async () => {
   const scene = createSceneFile();
   scene.renderer.content.grass = false;
-  scene.renderer.grassInteraction.mouse = true;
-  await assert.rejects(loadSingleScene(scene), /只能在 content\.grass 开启时使用/);
+  scene.sceneComponents = [{ type: 'mouse-grass-interaction' }];
+  await assert.rejects(loadSingleScene(scene), /需要开启 renderer\.content\.grass/);
+});
+
+test('场景组件拒绝未知类型、重复加载和不满足的运行前提', async () => {
+  const unknown = createSceneFile();
+  unknown.sceneComponents = [{ type: 'unknown-rule' }];
+  await assert.rejects(loadSingleScene(unknown), /type 不受支持/);
+
+  const duplicated = createSceneFile();
+  duplicated.sceneComponents = [
+    { type: 'mouse-grass-interaction' },
+    { type: 'mouse-grass-interaction' },
+  ];
+  await assert.rejects(loadSingleScene(duplicated), /重复加载/);
+
+  const missingPlayer = createSceneFile();
+  missingPlayer.sceneComponents = [{ type: 'ability-lab' }];
+  missingPlayer.camera.mode = 'fly';
+  await assert.rejects(loadSingleScene(missingPlayer), /ability-lab 需要 topdown/);
 });
 
 test('Actor 父节点可后声明，且子节点坐标按局部 Transform 保留', async () => {

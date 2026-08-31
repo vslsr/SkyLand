@@ -7,6 +7,8 @@ import {
   BuoyancyComponent,
   CARGO_COMPONENT,
   CargoComponent,
+  ELASTIC_TETHER_COMPONENT,
+  ElasticTetherComponent,
   HAZARD_COMPONENT,
   HazardComponent,
   AttachmentSystem,
@@ -23,15 +25,18 @@ import { ActorSimpleCollisionSystem } from './ActorSimpleCollisionSystem.mjs';
 import { BuoyancySystem } from './BuoyancySystem.mjs';
 import { VesselHazardSystem } from './VesselHazardSystem.mjs';
 import { VesselMotorSystem } from './VesselMotorSystem.mjs';
+import { ElasticTetherSystem } from './ElasticTetherSystem.mjs';
 
-export function createServerActorWorld(sceneDefinition) {
+export function createServerActorWorld(sceneDefinition, options = {}) {
   const world = new ActorWorld({
     seaLevel: sceneDefinition.gameplay?.water?.seaLevel ?? 0,
     bounds: sceneDefinition.gameplay?.bounds,
+    players: options.players,
   });
   world.addSystem(new BuoyancySystem());
   world.addSystem(new VesselMotorSystem());
   world.addSystem(new ActorSimpleCollisionSystem());
+  world.addSystem(new ElasticTetherSystem());
   // 父 Actor 的玩法移动先完成，再统一按拓扑解算所有子 Actor。
   world.addSystem(new AttachmentSystem());
   world.addSystem(new VesselHazardSystem());
@@ -56,6 +61,9 @@ export function createServerActorWorld(sceneDefinition) {
     }
     if (archetype.components.cargo) {
       actor.addComponent(new CargoComponent(archetype.components.cargo));
+    }
+    if (archetype.components.elasticTether) {
+      actor.addComponent(new ElasticTetherComponent(archetype.components.elasticTether));
     }
     if (archetype.components.hazard) {
       actor.addComponent(new HazardComponent(archetype.components.hazard));
@@ -88,6 +96,7 @@ export function createActorSnapshots(world) {
     const control = actor.getComponent(ACTOR_CONTROL_COMPONENT);
     const interactable = actor.getComponent(INTERACTABLE_COMPONENT);
     const cargo = actor.getComponent(CARGO_COMPONENT);
+    const elasticTether = actor.getComponent(ELASTIC_TETHER_COMPONENT);
     const hazard = actor.getComponent(HAZARD_COMPONENT);
     return {
       id: actor.id,
@@ -98,6 +107,7 @@ export function createActorSnapshots(world) {
         control?.revision ?? 0,
         interactable?.revision ?? 0,
         cargo?.revision ?? 0,
+        elasticTether?.revision ?? 0,
       ),
       transform: {
         x: transform.x,
@@ -150,6 +160,16 @@ export function createActorSnapshots(world) {
           mass: cargo.mass,
           carrierActorId: cargo.carrierActorId,
           revision: cargo.revision,
+        },
+      } : {}),
+      ...(elasticTether ? {
+        elasticTether: {
+          holderPlayerId: elasticTether.holderPlayerId,
+          targetX: elasticTether.targetX,
+          targetY: elasticTether.targetY,
+          targetZ: elasticTether.targetZ,
+          releaseRevision: elasticTether.releaseRevision,
+          revision: elasticTether.revision,
         },
       } : {}),
       ...(hazard ? {

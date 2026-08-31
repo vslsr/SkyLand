@@ -5,13 +5,13 @@
   "displayName": "无边草原",
   "description": "由世界种子确定性生成、按 chunk 流式加载的 512 米大世界。",
   "capacity": 16,
+  "sceneComponents": [],
   "actors": [],
   "renderer": {
     "type": "line-art",
     "background": "#fdfbf6",
     "fog": { "color": "#fdfbf6", "near": 22, "far": 52 },
     "content": { "ground": true, "trees": true, "grass": true, "ocean": false },
-    "grassInteraction": { "mouse": false },
     "palette": {
       "ground": "#f1eddf",
       "grass": "#c1d7a6",

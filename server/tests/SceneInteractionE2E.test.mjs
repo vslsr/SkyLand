@@ -126,3 +126,77 @@ test('真实 WebSocket 贯通接管、装货、航行撞礁、损伤和卸货', 
   const unloaded = await unloadedState;
   assert.equal(actorFrom(unloaded, 'demo-raft-01').buoyancy.lastEvent.type, 'cargo:remove');
 });
+
+test('真实 WebSocket 贯通史莱姆叼取、移动拉伸和自动脱离', async (context) => {
+  const sceneCatalog = await SceneCatalog.load();
+  const roomManager = new RoomProcessManager({ sceneCatalog });
+  const room = await roomManager.createRoom('弹性蘑菇闭环测试', 'grassland');
+  const roomRecord = roomManager.rooms.get(room.id);
+  assert.ok(roomRecord);
+  const server = http.createServer();
+  const connectionHub = new RoomConnectionHub(roomManager);
+  const gateway = new WebSocketGateway(server, connectionHub);
+  let socket;
+
+  context.after(async () => {
+    socket?.terminate();
+    gateway.close();
+    connectionHub.close();
+    const childExited = roomRecord.child.exitCode == null
+      ? once(roomRecord.child, 'exit')
+      : Promise.resolve();
+    roomManager.shutdown();
+    await childExited;
+    if (server.listening) await new Promise((resolve) => server.close(resolve));
+  });
+
+  server.listen(0, '127.0.0.1');
+  await once(server, 'listening');
+  const address = server.address();
+  assert.equal(typeof address, 'object');
+
+  socket = new WebSocket(`ws://127.0.0.1:${address.port}/ws`);
+  const connected = waitForJson(socket, (message) => message.type === 'connected');
+  await once(socket, 'open');
+  await connected;
+
+  const joinedState = waitForJson(socket, (message) => message.type === 'room:joined');
+  socket.send(JSON.stringify({ type: 'room:join', roomId: room.id, name: '蘑菇测试员' }));
+  const joined = await joinedState;
+
+  const grabbedState = waitForJson(socket, (message) => (
+    message.type === 'room:snapshot'
+    && actorFrom(message, 'elastic-mushroom-01')?.elasticTether.holderPlayerId
+      === joined.player.id
+  ));
+  socket.send(JSON.stringify({
+    type: 'actor:interact',
+    actorId: 'elastic-mushroom-01',
+    sequence: 1,
+  }));
+  const grabbed = await grabbedState;
+  assert.equal(actorFrom(grabbed, 'elastic-mushroom-01').interactable.enabled, false);
+
+  const releasedState = waitForJson(socket, (message) => {
+    if (message.type !== 'room:snapshot') return false;
+    const mushroom = actorFrom(message, 'elastic-mushroom-01');
+    return mushroom?.elasticTether.holderPlayerId === null
+      && mushroom.elasticTether.releaseRevision >= 1;
+  });
+  let sequence = 0;
+  const movement = setInterval(() => {
+    sequence += 1;
+    socket.send(JSON.stringify({
+      type: 'player:input',
+      sequence,
+      deltaSeconds: 0.05,
+      move: { x: 0, z: 1 },
+      sprint: true,
+      yaw: 0,
+    }));
+  }, 50);
+  const released = await releasedState.finally(() => clearInterval(movement));
+  const mushroom = actorFrom(released, 'elastic-mushroom-01');
+  assert.equal(mushroom.interactable.enabled, true);
+  assert.equal(mushroom.elasticTether.releaseRevision, 1);
+});

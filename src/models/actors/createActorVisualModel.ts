@@ -4,6 +4,7 @@ import { createBuoyancyRaftModel } from '../ocean/createBuoyancyRaftModel';
 import type { ActorVisualModel } from './ActorVisualModel';
 import { createCargoCrateModel } from './createCargoCrateModel';
 import { createReefModel } from './createReefModel';
+import { createElasticMushroomModel } from './createElasticMushroomModel';
 
 export function createActorVisualModel(
   environment: FillMaterialEnvironment,
@@ -14,6 +15,9 @@ export function createActorVisualModel(
   }
   if (definition.model === 'line-art-cargo-crate') {
     return createCargoCrateModel(environment, definition);
+  }
+  if (definition.model === 'line-art-elastic-mushroom') {
+    return createElasticMushroomModel(environment, definition);
   }
   return createReefModel(environment, definition);
 }

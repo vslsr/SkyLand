@@ -29,6 +29,19 @@ function blendActor(from: SnapshotActor, to: SnapshotActor, amount: number): Sna
         steering: blendNumber(from.vessel.steering, to.vessel.steering, amount),
       },
     } : {}),
+    ...(from.elasticTether
+      && to.elasticTether
+      && from.elasticTether.holderPlayerId
+      && from.elasticTether.holderPlayerId === to.elasticTether.holderPlayerId
+      ? {
+          elasticTether: {
+            ...to.elasticTether,
+            targetX: blendNumber(from.elasticTether.targetX, to.elasticTether.targetX, amount),
+            targetY: blendNumber(from.elasticTether.targetY, to.elasticTether.targetY, amount),
+            targetZ: blendNumber(from.elasticTether.targetZ, to.elasticTether.targetZ, amount),
+          },
+        }
+      : {}),
   };
 }
 

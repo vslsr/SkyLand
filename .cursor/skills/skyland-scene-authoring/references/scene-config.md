@@ -14,6 +14,7 @@
 | `displayName` | 1–32 个字符 | 大厅地图选择器和房间信息中显示的名称。 |
 | `description` | 1–120 个字符 | 大厅中的地图说明，帮助玩家理解玩法或视觉特征。 |
 | `capacity` | 1–64 的整数 | 使用该场景创建的房间人数上限，由房间/DS 权威限制。 |
+| `sceneComponents` | 0–16 项的数组 | 按声明顺序加载场景特化逻辑，类似该场景的 GameMode；退出与换图时按相反顺序停用、释放。 |
 | `actors` | 0–256 项的数组 | 场景内服务端权威 Actor 的摆放列表；每项引用 `config/actors` 中的原型。 |
 | `renderer` | 对象 | 客户端如何构建和表现这个场景。 |
 | `gameplay` | 对象 | DS 和客户端共同使用的可活动区域、出生规则与环境基准。 |
@@ -32,13 +33,38 @@
 | `content.trees` | 布尔值 | 是否创建树木群。 |
 | `content.grass` | 布尔值 | 是否创建草丛。 |
 | `content.ocean` | 布尔值 | 是否创建动态海面系统。为 `true` 时必须配置 `renderer.ocean` 和 `gameplay.water`。 |
-| `grassInteraction.mouse` | 布尔值 | 是否允许鼠标移动压弯当前场景的草。该开关只控制鼠标输入源；玩家脚步、远端玩家和玩法效果仍可通过场景草地交互目标压草。没有草地时必须为 `false`。 |
 | `palette.ground` | `#RRGGBB` | 地面的填充主色。 |
 | `palette.grass` | `#RRGGBB` | 草丛的填充主色。 |
 | `palette.treeTrunk` | `#RRGGBB` | 树干填充色。 |
 | `palette.treeNeedles` | `#RRGGBB` | 树冠/针叶填充色。 |
 
 当前服务端总会读取全部 `palette` 字段，因此即使关闭相应内容也不能省略它们。
+
+## `sceneComponents`：场景特化规则与流程
+
+场景通过顶层 `sceneComponents` 声明要加载的逻辑组件，不在通用场景宿主里按 `scene.id`
+写分支。组件可以拥有初始化、激活/停用、逐帧更新和销毁流程；数组顺序就是初始化与更新
+顺序，停用和销毁顺序相反。组件实现统一注册在
+`src/scene/components/createSceneRuntimeComponent.ts`，未知类型、重复类型或额外配置字段会
+被服务端拒绝。
+
+当前组件：
+
+| `type` | 作用与约束 |
+| --- | --- |
+| `mouse-grass-interaction` | 注册当前场景独占的鼠标压草输入和渲染前更新。要求 `renderer.content.grass` 为 `true`；不加载它的场景仍保留玩家脚步、远端玩家和玩法效果对草地的通用交互。 |
+| `ability-lab` | 加载能力实验室输入、模拟、线稿表现与 UI 流程。要求 `camera.mode` 为 `topdown`，以保证玩家实体存在。 |
+
+示例：
+
+```json
+"sceneComponents": [
+  { "type": "mouse-grass-interaction" }
+]
+```
+
+流式大世界的组件不得按世界总面积分配纹理、缓存或扫描全部 chunk；应依赖活动 chunk、
+AOI 或跟随焦点的固定窗口，并在组件停用/销毁时释放监听、GPU 资源和局部状态。
 
 ### `renderer.ocean`：动态海面
 
@@ -146,7 +172,7 @@ Transform。危险物碰撞只由 DS 根据权威 Transform 计算。
 - `fog.far` 必须大于 `fog.near`。
 - 出生中心必须位于玩法边界内；当前校验不检查整个出生圆是否越界，作者仍应自行保证。
 - 海洋开关、`renderer.ocean`、`gameplay.water` 三者应成组出现。
-- `renderer.grassInteraction.mouse` 必须在每张场景中显式填写；只有 `content.grass` 为 `true` 时才能开启。切换场景时鼠标监听随旧场景销毁，不得用场景 id 硬编码例外。
+- `sceneComponents` 必须在每张场景中显式填写，可为空数组；组件类型不得重复，且必须满足各自的跨字段依赖。
 - `actors[].archetype` 必须能在 `config/actors/*.actor.json` 中找到，Actor id 在同一场景内必须唯一。
 - `actors[].parentActorId` 必须引用同场景 Actor，且层级不得自挂或形成循环。
 - JSON Schema 声明 `additionalProperties: false`，不要加入未定义字段。运行时会净化并只下发已知字段，但不应依赖静默丢弃拼写错误。
@@ -157,7 +183,7 @@ Transform。危险物碰撞只由 DS 根据权威 Transform 计算。
 
 1. 从 `grassland.scene.json`、`open-meadow.scene.json` 或 `water.scene.json` 中选择最接近的模板。
 2. 设置唯一文件名、`id`、名称、说明和容量。
-3. 设置内容开关、`grassInteraction.mouse`、配色和雾效；海域补齐 `renderer.ocean`。
+3. 设置 `sceneComponents`、内容开关、配色和雾效；海域补齐 `renderer.ocean`。
 4. 设置玩法边界、出生区域；海域补齐 `gameplay.water`。
 5. 选择 `topdown` 玩法模式或 `fly` 展示模式并调整初始相机。
 6. 若摆放可交互物，确认它与初始可控 Actor 的距离不超过 `interactable.maximumDistance`；危险物还要核对半径与边界。
@@ -173,5 +199,6 @@ Transform。危险物碰撞只由 DS 根据权威 Transform 计算。
 2. `server/scenes/SceneCatalog.mjs`：运行时校验、默认拒绝策略和净化后的返回结构。
 3. `src/scenes/data/SceneDefinition.ts`：客户端契约。
 4. `src/scene/createLineArtScene.ts` 或新的场景工厂：把配置转成视觉内容。
-5. `src/models/`：程序化几何；有逐帧状态的系统放在独立视觉系统模块中。
-6. 服务端目录校验测试、客户端逻辑测试和构建检查。
+5. `src/scene/components/`：新增场景特化逻辑时实现生命周期组件并加入注册表，禁止新增场景 id 分支。
+6. `src/models/`：程序化几何；有逐帧状态的系统放在独立视觉系统模块中。
+7. 服务端目录校验测试、组件生命周期测试、客户端逻辑测试和构建检查。

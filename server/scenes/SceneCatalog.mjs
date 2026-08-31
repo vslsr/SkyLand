@@ -109,20 +109,38 @@ function validateActorPlacements(rawActors, filename, actorCatalog) {
   return { actors, actorArchetypes: Array.from(archetypes.values()) };
 }
 
+function validateSceneComponents(rawComponents, filename) {
+  if (!Array.isArray(rawComponents) || rawComponents.length > 16) {
+    throw new TypeError(`${filename}.sceneComponents 必须是最多包含 16 项的数组`);
+  }
+  const supportedTypes = new Set(['mouse-grass-interaction', 'ability-lab']);
+  const seenTypes = new Set();
+  return rawComponents.map((rawComponent, index) => {
+    const path = `${filename}.sceneComponents[${index}]`;
+    const component = requireObject(rawComponent, path);
+    const type = requireString(component.type, `${path}.type`, 48);
+    if (!supportedTypes.has(type)) throw new TypeError(`${path}.type 不受支持：${type}`);
+    if (seenTypes.has(type)) throw new TypeError(`${filename}.sceneComponents 重复加载：${type}`);
+    const unknownKeys = Object.keys(component).filter((key) => key !== 'type');
+    if (unknownKeys.length > 0) {
+      throw new TypeError(`${path} 包含未知字段：${unknownKeys.join(', ')}`);
+    }
+    seenTypes.add(type);
+    return { type };
+  });
+}
+
 function validateSceneDefinition(raw, filename, actorCatalog) {
   const scene = requireObject(raw, filename);
   if (scene.schemaVersion !== 1) throw new TypeError(`${filename}.schemaVersion 必须是 1`);
   const id = requireString(scene.id, `${filename}.id`, 48);
   if (!SCENE_ID_PATTERN.test(id)) throw new TypeError(`${filename}.id 格式无效`);
+  const sceneComponents = validateSceneComponents(scene.sceneComponents, filename);
 
   const renderer = requireObject(scene.renderer, `${filename}.renderer`);
   if (renderer.type !== 'line-art') throw new TypeError(`${filename}.renderer.type 暂只支持 line-art`);
   const fog = requireObject(renderer.fog, `${filename}.renderer.fog`);
   const content = requireObject(renderer.content, `${filename}.renderer.content`);
-  const grassInteraction = requireObject(
-    renderer.grassInteraction,
-    `${filename}.renderer.grassInteraction`,
-  );
   const palette = requireObject(renderer.palette, `${filename}.renderer.palette`);
   const fogNear = requireNumber(fog.near, `${filename}.renderer.fog.near`);
   const fogFar = requireNumber(fog.far, `${filename}.renderer.fog.far`);
@@ -130,13 +148,12 @@ function validateSceneDefinition(raw, filename, actorCatalog) {
   for (const key of ['ground', 'trees', 'grass', 'ocean']) {
     requireBoolean(content[key], `${filename}.renderer.content.${key}`);
   }
-  const mouseGrassInteraction = requireBoolean(
-    grassInteraction.mouse,
-    `${filename}.renderer.grassInteraction.mouse`,
-  );
-  if (mouseGrassInteraction && !content.grass) {
+  if (
+    sceneComponents.some((component) => component.type === 'mouse-grass-interaction')
+    && !content.grass
+  ) {
     throw new TypeError(
-      `${filename}.renderer.grassInteraction.mouse 只能在 content.grass 开启时使用`,
+      `${filename}.sceneComponents 的 mouse-grass-interaction 需要开启 renderer.content.grass`,
     );
   }
 
@@ -228,6 +245,12 @@ function validateSceneDefinition(raw, filename, actorCatalog) {
   if (camera.mode !== 'topdown' && camera.mode !== 'fly') {
     throw new TypeError(`${filename}.camera.mode 必须是 topdown 或 fly`);
   }
+  if (
+    sceneComponents.some((component) => component.type === 'ability-lab')
+    && camera.mode !== 'topdown'
+  ) {
+    throw new TypeError(`${filename}.sceneComponents 的 ability-lab 需要 topdown 相机模式`);
+  }
   if (!Array.isArray(camera.position) || camera.position.length !== 3) {
     throw new TypeError(`${filename}.camera.position 必须包含 3 个数字`);
   }
@@ -245,6 +268,7 @@ function validateSceneDefinition(raw, filename, actorCatalog) {
     displayName: requireString(scene.displayName, `${filename}.displayName`, 32),
     description: requireString(scene.description, `${filename}.description`, 120),
     capacity: requireInteger(scene.capacity, `${filename}.capacity`, 1, 64),
+    sceneComponents,
     ...actorComposition,
     renderer: {
       type: 'line-art',
@@ -256,7 +280,6 @@ function validateSceneDefinition(raw, filename, actorCatalog) {
         grass: content.grass,
         ocean: content.ocean,
       },
-      grassInteraction: { mouse: mouseGrassInteraction },
       palette: {
         ground: requireColor(palette.ground, `${filename}.renderer.palette.ground`),
         grass: requireColor(palette.grass, `${filename}.renderer.palette.grass`),
