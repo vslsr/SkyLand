@@ -12,6 +12,43 @@ export interface SceneSummary {
   capacity: number;
 }
 
+export interface ActorBuoyancyPartDefinition {
+  id: string;
+  mass: number;
+  buoyancy: number;
+  integrity: number;
+  localX: number;
+  localZ: number;
+}
+
+export interface ActorArchetypeDefinition {
+  schemaVersion: 1;
+  id: string;
+  components: {
+    buoyancy: {
+      minimumBeam: number;
+      minimumLength: number;
+      maximumTrimRadians: number;
+      minimumDraft: number;
+      maximumDraft: number;
+      parts: ActorBuoyancyPartDefinition[];
+    };
+    render: {
+      model: 'line-art-raft';
+      foamColor: string;
+      length: number;
+      width: number;
+    };
+  };
+}
+
+export interface SceneActorDefinition {
+  id: string;
+  archetypeId: string;
+  position: [number, number, number];
+  yaw: number;
+}
+
 export interface OceanVisualDefinition {
   size: number;
   segments: number;
@@ -24,8 +61,6 @@ export interface OceanVisualDefinition {
   secondaryColor: string;
   gridLineColor: string;
   gridLineOpacity: number;
-  foamColor: string;
-  demoRaft: boolean;
 }
 
 /**
@@ -47,6 +82,8 @@ export interface WorldStreamingDefinition {
 
 export interface SceneDefinition extends SceneSummary {
   schemaVersion: 1;
+  actors: SceneActorDefinition[];
+  actorArchetypes: ActorArchetypeDefinition[];
   renderer: {
     type: 'line-art';
     background: string;

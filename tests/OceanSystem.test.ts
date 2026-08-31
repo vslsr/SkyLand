@@ -16,8 +16,6 @@ const definition: OceanVisualDefinition = {
   secondaryColor: '#c6dcdb',
   gridLineColor: '#617f82',
   gridLineOpacity: 0.28,
-  foamColor: '#fffdf7',
-  demoRaft: true,
 };
 
 function createSystem(): OceanSystem {
@@ -28,20 +26,18 @@ function createSystem(): OceanSystem {
   });
 }
 
-test('海域系统从 JSON 等价配置创建低多边形水面、同拓扑线框和浮台', () => {
+test('海域系统只创建低多边形水面与同拓扑线框', () => {
   const system = createSystem();
   const surface = system.root.getObjectByName('ocean-surface') as THREE.Mesh;
   const grid = system.root.getObjectByName('ocean-low-poly-grid') as THREE.LineSegments;
-  const raft = system.root.getObjectByName('buoyancy-demo-visual-root');
 
   assert.ok(surface);
   assert.ok(grid);
-  assert.ok(raft);
   assert.equal((surface.geometry.getAttribute('position') as THREE.BufferAttribute).count, 384);
   assert.ok((grid.geometry.getAttribute('position') as THREE.BufferAttribute).count > 0);
 });
 
-test('客户端更新只推进 Shader 时间且浮台姿态保持在低波浪限制内', () => {
+test('客户端更新只推进海面与线框 Shader 时间', () => {
   const system = createSystem();
   const surface = system.root.getObjectByName('ocean-surface') as THREE.Mesh;
   const position = surface.geometry.getAttribute('position') as THREE.BufferAttribute;
@@ -52,7 +48,6 @@ test('客户端更新只推进 Shader 时间且浮台姿态保持在低波浪限
 
   system.update(1 / 60, 1.25);
 
-  const visualRoot = system.root.getObjectByName('buoyancy-demo-visual-root');
   assert.equal(position.getY(0), before);
   assert.equal(surfaceMaterial.uniforms.uTime.value, 1.25);
   assert.equal(gridMaterial.uniforms.uTime.value, 1.25);
@@ -60,8 +55,4 @@ test('客户端更新只推进 Shader 时间且浮台姿态保持在低波浪限
   assert.equal(surfaceMaterial.uniforms.uNoiseStrength.value, definition.noiseStrength);
   assert.equal(surfaceMaterial.uniforms.uInterlaceStrength.value, definition.interlaceStrength);
   assert.equal(gridMaterial.uniforms.uInterlaceStrength.value, definition.interlaceStrength);
-  assert.ok(visualRoot);
-  assert.ok(Number.isFinite(visualRoot.position.y));
-  assert.ok(Math.abs(visualRoot.rotation.x) <= 0.07 + Number.EPSILON);
-  assert.ok(Math.abs(visualRoot.rotation.z) <= 0.09 + Number.EPSILON);
 });

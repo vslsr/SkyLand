@@ -1,6 +1,6 @@
 # SkyLand 场景配置参考
 
-场景配置位于 `config/scenes/*.scene.json`。服务端启动时由 `SceneCatalog` 扫描、校验并净化数据；大厅 API 只下发摘要，玩家加入房间后，DS 再把该房间实际使用的完整配置随 `room:joined` 返回给客户端。
+场景配置位于 `config/scenes/*.scene.json`，Actor 原型位于 `config/actors/*.actor.json`。服务端启动时由 `SceneCatalog` 与 `ActorCatalog` 扫描、校验并净化数据；大厅 API 只下发摘要，玩家加入房间后，DS 再把该房间实际使用的完整配置随 `room:joined` 返回给客户端。
 
 `scene.schema.json` 为编辑器补全和静态结构说明，`server/scenes/SceneCatalog.mjs` 是运行时接受配置的最终入口。修改配置契约时必须同步两者，并同步 `src/scenes/data/SceneDefinition.ts`。
 
@@ -14,6 +14,7 @@
 | `displayName` | 1–32 个字符 | 大厅地图选择器和房间信息中显示的名称。 |
 | `description` | 1–120 个字符 | 大厅中的地图说明，帮助玩家理解玩法或视觉特征。 |
 | `capacity` | 1–64 的整数 | 使用该场景创建的房间人数上限，由房间/DS 权威限制。 |
+| `actors` | 0–256 项的数组 | 场景内服务端权威 Actor 的摆放列表；每项引用 `config/actors` 中的原型。 |
 | `renderer` | 对象 | 客户端如何构建和表现这个场景。 |
 | `gameplay` | 对象 | DS 和客户端共同使用的可活动区域、出生规则与环境基准。 |
 | `camera` | 对象 | 加入房间后的初始视角、控制模式和移动速度。 |
@@ -48,14 +49,27 @@
 | `segments` | 8–128 的整数 | 海面网格细分数。越高，波形更平滑，但每帧更新的顶点和渲染成本越高。 |
 | `waveHeight` | 0–1 | 波浪垂直振幅。`0` 表示平面；也会影响木筏取样到的浮力高度。 |
 | `waveSpeed` | 0–4 | 波形随时间变化的速度。`0` 保留波形但停止动画。 |
-| `waveLines` | 4–64 的整数 | 海面线稿波纹数量。越高画面越密，几何和每帧顶点更新量也增加。 |
-| `crestLines` | 0–32 的整数 | 浪峰强调线数量。`0` 可关闭浪峰线。 |
+| `noiseScale` | 大于 0 且不超过 1 | 客户端波形噪声的空间尺度。 |
+| `noiseStrength` | 0–3 | 方向波相位受到噪声扰动的强度。 |
+| `interlaceStrength` | 0–0.75 | 相邻低多边形网格顶点反相起伏所占的比例。 |
 | `surfaceColor` | `#RRGGBB` | 海面主要填充色。 |
 | `secondaryColor` | `#RRGGBB` | 海面的次级色，用于丰富纸绘水面层次。 |
-| `waveLineColor` | `#RRGGBB` | 普通波纹线颜色。 |
-| `crestLineColor` | `#RRGGBB` | 浪峰强调线颜色。 |
-| `foamColor` | `#RRGGBB` | 泡沫以及演示木筏相关浅色细节的颜色。 |
-| `demoRaft` | 布尔值 | 是否生成随波形起伏、俯仰和横滚的演示木筏；这是客户端视觉演示，不代表服务器船只实体。 |
+| `gridLineColor` | `#RRGGBB` | 低多边形三角网格的线稿颜色。 |
+| `gridLineOpacity` | 0–1 | 三角网格线稿的不透明度。 |
+
+## `actors`：场景 Actor 摆放
+
+每项必须包含唯一的 `id`、已注册的 `archetype`、三维 `position` 和弧度制 `yaw`。
+场景文件不重复填写 Component 参数；服务端从 `config/actors/<id>.actor.json` 解析原型，
+将使用到的净化后原型随 `room:joined.scene.actorArchetypes` 下发。
+
+当前 `raft` 原型包含：
+
+- `buoyancy`：质量/浮力部件、船体尺寸、最大静态倾斜和吃水范围；由 DS 创建 Component。
+- `render`：客户端模型类型、泡沫色和视觉采样尺寸；客户端只有收到 Actor 快照后才实例化。
+
+权威流为：`scene actors -> ActorCatalog -> room worker ActorWorld -> actors snapshot -> client Replica`。
+Shader 波浪和木筏微小起伏只修改 Replica 的 VisualRoot，不回写权威 Transform。
 
 ## `gameplay`：权威玩法空间
 
@@ -104,6 +118,7 @@
 - `fog.far` 必须大于 `fog.near`。
 - 出生中心必须位于玩法边界内；当前校验不检查整个出生圆是否越界，作者仍应自行保证。
 - 海洋开关、`renderer.ocean`、`gameplay.water` 三者应成组出现。
+- `actors[].archetype` 必须能在 `config/actors/*.actor.json` 中找到，Actor id 在同一场景内必须唯一。
 - JSON Schema 声明 `additionalProperties: false`，不要加入未定义字段。运行时会净化并只下发已知字段，但不应依赖静默丢弃拼写错误。
 - 新场景文件或配置改动需要重启 Node 主服务；目录只在 `SceneCatalog.load()` 时扫描一次。
 - 大厅只显示场景摘要且保持空场景。客户端必须等待 `room:joined.scene`，不能把浏览器选择值当成权威配置直接加载。

@@ -1,0 +1,134 @@
+{
+  "$schema": "./input-profile.schema.json",
+  "schemaVersion": 1,
+  "id": "InputScheme.Player.Default",
+  "inputActions": [
+    {
+      "id": "IA_Player_Move",
+      "valueType": "axis2D",
+      "modifiers": [{ "type": "deadZone", "minimum": 0.12 }],
+      "trigger": { "type": "pressed" }
+    },
+    {
+      "id": "IA_Player_Sprint",
+      "valueType": "digital",
+      "trigger": { "type": "pressed" }
+    },
+    {
+      "id": "IA_Player_Primary",
+      "valueType": "digital",
+      "trigger": { "type": "pressed" }
+    },
+    {
+      "id": "IA_Player_Interact",
+      "valueType": "digital",
+      "trigger": { "type": "hold", "thresholdMs": 350 }
+    },
+    {
+      "id": "IA_Player_Dodge",
+      "valueType": "digital",
+      "trigger": { "type": "doubleTap", "maximumGapMs": 260, "maximumTapMs": 220 }
+    }
+  ],
+  "inputConfig": {
+    "bindings": [
+      { "tag": "Input.Player.Move", "actionId": "IA_Player_Move" },
+      { "tag": "Input.Player.Sprint", "actionId": "IA_Player_Sprint" },
+      { "tag": "Input.Player.Primary", "actionId": "IA_Player_Primary" },
+      { "tag": "Input.Player.Interact", "actionId": "IA_Player_Interact" },
+      { "tag": "Input.Player.Dodge", "actionId": "IA_Player_Dodge" }
+    ]
+  },
+  "inputMappingContexts": [
+    {
+      "id": "IMC.Gameplay",
+      "priority": 100,
+      "activeByDefault": true,
+      "mappings": [
+        { "id": "Move.Keyboard.Up", "deviceKind": "keyboardMouse", "control": "Keyboard.KeyW", "actionId": "IA_Player_Move", "axis2D": { "x": 0, "y": 1 } },
+        { "id": "Move.Keyboard.UpAlternate", "deviceKind": "keyboardMouse", "control": "Keyboard.ArrowUp", "actionId": "IA_Player_Move", "axis2D": { "x": 0, "y": 1 } },
+        { "id": "Move.Keyboard.Down", "deviceKind": "keyboardMouse", "control": "Keyboard.KeyS", "actionId": "IA_Player_Move", "axis2D": { "x": 0, "y": -1 } },
+        { "id": "Move.Keyboard.DownAlternate", "deviceKind": "keyboardMouse", "control": "Keyboard.ArrowDown", "actionId": "IA_Player_Move", "axis2D": { "x": 0, "y": -1 } },
+        { "id": "Move.Keyboard.Left", "deviceKind": "keyboardMouse", "control": "Keyboard.KeyA", "actionId": "IA_Player_Move", "axis2D": { "x": -1, "y": 0 } },
+        { "id": "Move.Keyboard.LeftAlternate", "deviceKind": "keyboardMouse", "control": "Keyboard.ArrowLeft", "actionId": "IA_Player_Move", "axis2D": { "x": -1, "y": 0 } },
+        { "id": "Move.Keyboard.Right", "deviceKind": "keyboardMouse", "control": "Keyboard.KeyD", "actionId": "IA_Player_Move", "axis2D": { "x": 1, "y": 0 } },
+        { "id": "Move.Keyboard.RightAlternate", "deviceKind": "keyboardMouse", "control": "Keyboard.ArrowRight", "actionId": "IA_Player_Move", "axis2D": { "x": 1, "y": 0 } },
+        { "id": "Move.Touch.Stick", "deviceKind": "touch", "control": "Virtual.MoveStick", "actionId": "IA_Player_Move" },
+        { "id": "Move.Gamepad.Stick", "deviceKind": "gamepad", "control": "Gamepad.LeftStick", "actionId": "IA_Player_Move", "modifiers": [{ "type": "negate", "axes": "y" }] },
+        { "id": "Move.Gamepad.Up", "deviceKind": "gamepad", "control": "Gamepad.DPadUp", "actionId": "IA_Player_Move", "axis2D": { "x": 0, "y": 1 } },
+        { "id": "Move.Gamepad.Down", "deviceKind": "gamepad", "control": "Gamepad.DPadDown", "actionId": "IA_Player_Move", "axis2D": { "x": 0, "y": -1 } },
+        { "id": "Move.Gamepad.Left", "deviceKind": "gamepad", "control": "Gamepad.DPadLeft", "actionId": "IA_Player_Move", "axis2D": { "x": -1, "y": 0 } },
+        { "id": "Move.Gamepad.Right", "deviceKind": "gamepad", "control": "Gamepad.DPadRight", "actionId": "IA_Player_Move", "axis2D": { "x": 1, "y": 0 } },
+
+        { "id": "Sprint.Keyboard.Primary", "deviceKind": "keyboardMouse", "control": "Keyboard.ShiftLeft", "actionId": "IA_Player_Sprint" },
+        { "id": "Sprint.Keyboard.Alternate", "deviceKind": "keyboardMouse", "control": "Keyboard.ShiftRight", "actionId": "IA_Player_Sprint" },
+        { "id": "Sprint.Touch.Button", "deviceKind": "touch", "control": "Virtual.SprintButton", "actionId": "IA_Player_Sprint" },
+        { "id": "Sprint.Gamepad.Button", "deviceKind": "gamepad", "control": "Gamepad.LeftStickButton", "actionId": "IA_Player_Sprint" },
+
+        { "id": "Primary.Mouse.Button", "deviceKind": "keyboardMouse", "control": "Mouse.Button0", "actionId": "IA_Player_Primary" },
+        { "id": "Primary.Gamepad.Button", "deviceKind": "gamepad", "control": "Gamepad.ButtonSouth", "actionId": "IA_Player_Primary" },
+        { "id": "Primary.Gamepad.Trigger", "deviceKind": "gamepad", "control": "Gamepad.RightTrigger", "actionId": "IA_Player_Primary" },
+        { "id": "Interact.Keyboard.Primary", "deviceKind": "keyboardMouse", "control": "Keyboard.KeyF", "actionId": "IA_Player_Interact" },
+        { "id": "Interact.Touch.Button", "deviceKind": "touch", "control": "Virtual.InteractButton", "actionId": "IA_Player_Interact" },
+        { "id": "Interact.Gamepad.Button", "deviceKind": "gamepad", "control": "Gamepad.ButtonWest", "actionId": "IA_Player_Interact" },
+        { "id": "Dodge.Keyboard.Primary", "deviceKind": "keyboardMouse", "control": "Keyboard.Space", "actionId": "IA_Player_Dodge" },
+        { "id": "Dodge.Touch.Button", "deviceKind": "touch", "control": "Virtual.DodgeButton", "actionId": "IA_Player_Dodge" },
+        { "id": "Dodge.Gamepad.Button", "deviceKind": "gamepad", "control": "Gamepad.ButtonEast", "actionId": "IA_Player_Dodge" }
+      ]
+    }
+  ],
+  "devicePrompts": {
+    "controlLabels": {
+      "Keyboard.KeyW": "W",
+      "Keyboard.KeyA": "A",
+      "Keyboard.KeyS": "S",
+      "Keyboard.KeyD": "D",
+      "Keyboard.ShiftLeft": "Shift",
+      "Mouse.Button0": "鼠标左键",
+      "Virtual.MoveStick": "触摸摇杆",
+      "Virtual.SprintButton": "RUN",
+      "Gamepad.LeftStick": "左摇杆",
+      "Gamepad.LeftStickButton": "L3"
+    },
+    "prompts": [
+      {
+        "mode": "fly",
+        "deviceKind": "keyboardMouse",
+        "state": "unlocked",
+        "text": "点击画面 · WASD 自由镜头"
+      },
+      {
+        "mode": "fly",
+        "deviceKind": "keyboardMouse",
+        "state": "locked",
+        "text": "WASD · 移动　空格/C · 升降　Shift · 加速　Esc · 释放鼠标"
+      },
+      {
+        "mode": "topdown",
+        "deviceKind": "keyboardMouse",
+        "entries": [
+          { "label": "移动", "mappingIds": ["Move.Keyboard.Up", "Move.Keyboard.Left", "Move.Keyboard.Down", "Move.Keyboard.Right"], "joinWith": "/" },
+          { "label": "朝向", "text": "鼠标" },
+          { "label": "加速", "mappingIds": ["Sprint.Keyboard.Primary"] }
+        ]
+      },
+      {
+        "mode": "topdown",
+        "deviceKind": "touch",
+        "entries": [
+          { "label": "移动", "mappingIds": ["Move.Touch.Stick"] },
+          { "label": "加速", "mappingIds": ["Sprint.Touch.Button"] }
+        ]
+      },
+      {
+        "mode": "topdown",
+        "deviceKind": "gamepad",
+        "entries": [
+          { "label": "移动", "mappingIds": ["Move.Gamepad.Stick"] },
+          { "label": "加速", "mappingIds": ["Sprint.Gamepad.Button"] }
+        ]
+      }
+    ]
+  }
+}
+

@@ -20,6 +20,7 @@ function createSceneFile(overrides = {}) {
     displayName: '流式探针',
     description: '用于校验流式场景约束的测试地图。',
     capacity: 8,
+    actors: [],
     renderer: {
       type: 'line-art',
       background: '#fdfbf6',

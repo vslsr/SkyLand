@@ -5,6 +5,7 @@
   "displayName": "无边草原",
   "description": "由世界种子确定性生成、按 chunk 流式加载的 512 米大世界。",
   "capacity": 16,
+  "actors": [],
   "renderer": {
     "type": "line-art",
     "background": "#fdfbf6",

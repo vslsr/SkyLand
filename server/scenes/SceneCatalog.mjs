@@ -1,6 +1,7 @@
 import { readdir, readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { join } from 'node:path';
+import { ActorCatalog } from '../actors/ActorCatalog.mjs';
 import { CHUNK_SIZE, WORLD_PLAY_AREA } from '../../shared/world/worldConfig.mjs';
 
 export const DEFAULT_SCENE_DIRECTORY = fileURLToPath(new URL('../../config/scenes/', import.meta.url));
@@ -46,7 +47,38 @@ function requireColor(value, path) {
   return value;
 }
 
-function validateSceneDefinition(raw, filename) {
+function validateActorPlacements(rawActors, filename, actorCatalog) {
+  if (!Array.isArray(rawActors) || rawActors.length > 256) {
+    throw new TypeError(`${filename}.actors 必须是最多包含 256 项的数组`);
+  }
+  const actorIds = new Set();
+  const archetypes = new Map();
+  const actors = rawActors.map((rawActor, index) => {
+    const path = `${filename}.actors[${index}]`;
+    const actor = requireObject(rawActor, path);
+    const id = requireString(actor.id, `${path}.id`, 48);
+    const archetypeId = requireString(actor.archetype, `${path}.archetype`, 48);
+    if (!SCENE_ID_PATTERN.test(id)) throw new TypeError(`${path}.id 格式无效`);
+    if (!SCENE_ID_PATTERN.test(archetypeId)) throw new TypeError(`${path}.archetype 格式无效`);
+    if (actorIds.has(id)) throw new TypeError(`${filename} Actor id 重复：${id}`);
+    actorIds.add(id);
+    const archetype = actorCatalog.require(archetypeId);
+    archetypes.set(archetype.id, archetype);
+    if (!Array.isArray(actor.position) || actor.position.length !== 3) {
+      throw new TypeError(`${path}.position 必须包含 3 个数字`);
+    }
+    const position = actor.position.map((value, axis) => requireNumber(value, `${path}.position[${axis}]`));
+    return {
+      id,
+      archetypeId,
+      position,
+      yaw: requireNumber(actor.yaw, `${path}.yaw`),
+    };
+  });
+  return { actors, actorArchetypes: Array.from(archetypes.values()) };
+}
+
+function validateSceneDefinition(raw, filename, actorCatalog) {
   const scene = requireObject(raw, filename);
   if (scene.schemaVersion !== 1) throw new TypeError(`${filename}.schemaVersion 必须是 1`);
   const id = requireString(scene.id, `${filename}.id`, 48);
@@ -79,8 +111,6 @@ function validateSceneDefinition(raw, filename) {
       secondaryColor: requireColor(rawOcean.secondaryColor, `${filename}.renderer.ocean.secondaryColor`),
       gridLineColor: requireColor(rawOcean.gridLineColor, `${filename}.renderer.ocean.gridLineColor`),
       gridLineOpacity: requireNumber(rawOcean.gridLineOpacity, `${filename}.renderer.ocean.gridLineOpacity`),
-      foamColor: requireColor(rawOcean.foamColor, `${filename}.renderer.ocean.foamColor`),
-      demoRaft: requireBoolean(rawOcean.demoRaft, `${filename}.renderer.ocean.demoRaft`),
     };
     if (ocean.size < 16 || ocean.size > 1024) throw new TypeError(`${filename}.renderer.ocean.size 范围无效`);
     if (ocean.waveHeight < 0 || ocean.waveHeight > 1) throw new TypeError(`${filename}.renderer.ocean.waveHeight 范围无效`);
@@ -163,6 +193,7 @@ function validateSceneDefinition(raw, filename) {
   const moveSpeed = requireNumber(camera.moveSpeed, `${filename}.camera.moveSpeed`);
   if (pitch < -1.5 || pitch > 1.5) throw new TypeError(`${filename}.camera.pitch 范围无效`);
   if (moveSpeed <= 0 || moveSpeed > 100) throw new TypeError(`${filename}.camera.moveSpeed 范围无效`);
+  const actorComposition = validateActorPlacements(scene.actors, filename, actorCatalog);
 
   return {
     schemaVersion: 1,
@@ -170,6 +201,7 @@ function validateSceneDefinition(raw, filename) {
     displayName: requireString(scene.displayName, `${filename}.displayName`, 32),
     description: requireString(scene.description, `${filename}.description`, 120),
     capacity: requireInteger(scene.capacity, `${filename}.capacity`, 1, 64),
+    ...actorComposition,
     renderer: {
       type: 'line-art',
       background: requireColor(renderer.background, `${filename}.renderer.background`),
@@ -210,14 +242,15 @@ function validateSceneDefinition(raw, filename) {
 }
 
 export class SceneCatalog {
-  static async load(directory = DEFAULT_SCENE_DIRECTORY) {
+  static async load(directory = DEFAULT_SCENE_DIRECTORY, actorCatalog) {
+    const resolvedActorCatalog = actorCatalog ?? await ActorCatalog.load();
     const filenames = (await readdir(directory)).filter((name) => name.endsWith('.scene.json')).sort();
     if (filenames.length === 0) throw new Error(`没有找到场景配置：${directory}`);
 
     const definitions = [];
     for (const filename of filenames) {
       const raw = JSON.parse(await readFile(join(directory, filename), 'utf8'));
-      definitions.push(validateSceneDefinition(raw, filename));
+      definitions.push(validateSceneDefinition(raw, filename, resolvedActorCatalog));
     }
     return new SceneCatalog(definitions);
   }

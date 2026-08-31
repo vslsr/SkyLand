@@ -1,0 +1,28 @@
+{
+  "$schema": "./actor.schema.json",
+  "schemaVersion": 1,
+  "id": "raft",
+  "components": {
+    "buoyancy": {
+      "minimumBeam": 3.2,
+      "minimumLength": 4.8,
+      "maximumTrimRadians": 0.09,
+      "minimumDraft": 0.08,
+      "maximumDraft": 0.28,
+      "parts": [
+        { "id": "hull", "mass": 80, "buoyancy": 0, "integrity": 1, "localX": 0, "localZ": 0 },
+        { "id": "rear-left-float", "mass": 12, "buoyancy": 80, "integrity": 1, "localX": -1.15, "localZ": -1.35 },
+        { "id": "rear-right-float", "mass": 12, "buoyancy": 80, "integrity": 1, "localX": 1.15, "localZ": -1.35 },
+        { "id": "front-left-float", "mass": 12, "buoyancy": 80, "integrity": 1, "localX": -1.15, "localZ": 1.35 },
+        { "id": "front-right-float", "mass": 12, "buoyancy": 80, "integrity": 1, "localX": 1.15, "localZ": 1.35 },
+        { "id": "cargo", "mass": 92, "buoyancy": 0, "integrity": 1, "localX": 0.68, "localZ": 0.12 }
+      ]
+    },
+    "render": {
+      "model": "line-art-raft",
+      "foamColor": "#fffdf7",
+      "length": 4.8,
+      "width": 3.2
+    }
+  }
+}

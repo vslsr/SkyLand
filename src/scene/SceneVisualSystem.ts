@@ -1,4 +1,6 @@
 import type * as THREE from 'three';
+import type { GrassInteractionTarget } from '../grass';
+import type { SnapshotActor } from '../network/protocol';
 
 /**
  * 每帧传给场景系统的上下文。
@@ -14,11 +16,18 @@ export interface SceneUpdateContext {
 export interface SceneVisualSystem {
   readonly root: THREE.Object3D;
   update(deltaSeconds: number, elapsedSeconds: number, context?: SceneUpdateContext): void;
+  beforeRender?(renderer: THREE.WebGLRenderer, camera: THREE.Camera): void;
   /** 场景被换掉时释放这个系统独占的资源。 */
   dispose?(): void;
+}
+
+export interface ActorSnapshotTarget {
+  syncSnapshots(snapshots: readonly SnapshotActor[]): void;
 }
 
 export interface SceneComposition {
   scene: THREE.Scene;
   visualSystems: SceneVisualSystem[];
+  grassInteraction?: GrassInteractionTarget;
+  actorSnapshotTarget?: ActorSnapshotTarget;
 }

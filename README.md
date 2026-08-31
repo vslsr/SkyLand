@@ -150,7 +150,34 @@ npm run build:wasm  # 只有改了 native/ 下的 Rust 源码才需要
 `chunkgen.wasm` 是签入仓库的，日常开发不需要安装 Rust 工具链。
 
 `tests/` 下的客户端测试通过项目内的轻量 TypeScript 测试加载器运行，只覆盖不依赖
-DOM 与 Three.js 的纯逻辑（标签、和解、快照插值），因此不参与 `tsc` 构建。
+DOM 的纯逻辑（标签、输入配置、和解、快照插值等），因此不参与 `tsc` 构建。
+
+## 配置驱动输入与运行时重绑定
+
+玩家输入方案位于 `config/input/player.input.json`，并由
+`config/input/input-profile.schema.json` 描述格式。Action、标签关系、Mapping Context、
+设备控制名称和 HUD 操作提示都来自同一份配置：
+
+- `inputActions`：`digital` / `axis2D`、Pressed / Hold / DoubleTap 和 Modifier。
+- `inputConfig.bindings`：把 `Input.Player.Move` 这类层级标签关联到 Action。
+- `inputMappingContexts`：Context 优先级及键鼠、触摸、Gamepad Mapping。
+- `devicePrompts`：控制路径显示名，以及按模式、设备和状态生成的 HUD 提示。
+
+每条 Mapping 必须提供全局稳定的 `id` 和 `deviceKind`。运行时按 Mapping id 重绑定，
+因此方向、Action 和 Modifier 不会随按键变化。默认冲突策略会交换同一 Context 中的
+两个控制，也可使用 `reject` 拒绝冲突或 `allow` 保留重复绑定：
+
+```ts
+const bindings = scene.inputBindings;
+bindings.rebind('Move.Keyboard.Up', 'Keyboard.KeyI');
+bindings.rebind('Dodge.Keyboard.Primary', 'Keyboard.KeyQ', { conflict: 'reject' });
+bindings.resetBinding('Move.Keyboard.Up');
+bindings.resetAllBindings();
+```
+
+变化会立即替换 `InputSubsystem` 的 Context、刷新浏览器默认行为拦截列表和 HUD 提示。
+浏览器默认把非默认绑定以差异形式保存到 `localStorage`；配置升级或本地数据损坏时，
+无法识别的单条覆盖会被忽略，不影响默认输入方案加载。
 
 ## 大世界与 Chunk 系统
 
@@ -209,6 +236,12 @@ draw call，视野内 25 个 chunk 合计 75 次。
 `renderer.content` 的 `ground` / `trees` / `grass` 开关在流式场景里改为决定 chunk
 里放什么：关掉某一类就注册一个空模板。放置结果本身不受影响——放置算法在 WASM 与
 JS 两个后端之间必须逐位一致，所以它不接受任何逐场景的开关。
+
+草有两条路：固定场景用 `GrassFieldSystem`，按整块活动区一次性铺满并支持踩踏
+交互；流式场景用 chunk 里的草丛模板，随 chunk 进出。前者暂时不服务流式场景——
+它的草叶总数封顶 12000 株，摊到 384 米见方的活动区上约等于每 12 平方米一株，
+稀疏到看不见，要接进大世界得先让它跟着焦点做滑动窗口。两条路的叶片形状取自
+同一个 `createGrassBladeGeometry`，观感是一致的。
 
 顶点已经是世界坐标，承载它们的对象留在原点，Three.js 自动算出的包围球就落在
 正确位置上，视锥剔除按 chunk 生效。
@@ -271,10 +304,12 @@ const page: CommonUIPage = {
 
 - `grassland.scene.json`：完整线稿草地、树林和草丛
 - `open-meadow.scene.json`：移除树林的暖色开阔原野
+- `water.scene.json`：低多边形线稿海面和服务端权威木筏 Actor
 
 `config/scenes/scene.schema.json` 描述可编辑字段。场景配置包括：
 
 - 地图 id、显示名称、描述和人数上限
+- 场景 Actor 的原型引用、初始位置和朝向
 - 渲染器类型、背景、雾效、内容开关和颜色表
 - 服务端权威活动边界与出生点规则
 - 默认观察相机参数
@@ -282,6 +317,11 @@ const page: CommonUIPage = {
 新增地图时复制一个 `.scene.json` 并使用新的唯一 `id`；Node.js 组合服务器启动时会
 扫描并严格校验全部配置。配置无效或 id 重复会阻止服务器启动，避免客户端与 DS 使用
 不同的地图数据。修改配置后需要重启 Node.js 服务器。
+
+可复用 Actor 原型位于 `config/actors/*.actor.json`。场景的 `actors` 只负责摆放；
+`ActorCatalog` 会解析浮力和渲染 Component，DS 使用相同的净化结果创建 ActorWorld。
+木筏的权威吃水、漂浮状态和静态倾斜进入 `actors` 快照，客户端收到快照后才创建
+对应 Replica；海浪造成的上下浮动仅作用于视觉子节点，不改写服务端 Transform。
 
 创建房间与加载顺序：
 
@@ -412,7 +452,11 @@ HTTP Server；WebSocket 网关再把玩家输入路由到对应的房间 DS：
 - `server/http/`：API 路由、HTTP 响应和生产静态站点服务
 - `server/rooms/`：房间进程管理器与 worker
 - `server/scene/`：服务端权威场景状态
+- `server/actors/`：Actor 原型目录、服务端工厂、浮力与快照逻辑
 - `server/scenes/`：JSON 场景目录加载、校验与查询
+- `shared/actor/`：浏览器与房间 DS 共用的 Actor、Component、ActorWorld 核心
+- `src/actors/`：客户端 Actor Replica、渲染 Component 与视觉 System
+- `config/actors/`：可复用 Actor 原型 JSON 与 Schema
 - `config/scenes/`：每张地图的独立 JSON 与 Schema
 - `shared/`：前后端共用的移动模拟与同步常量
 - `shared/world/`：世界配置、chunk 坐标、确定性生成与两种生成后端

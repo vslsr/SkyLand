@@ -5,6 +5,7 @@
   "displayName": "风吹原野",
   "description": "移除树林、视野更开阔的暖色草地，适合观察多人移动。",
   "capacity": 8,
+  "actors": [],
   "renderer": {
     "type": "line-art",
     "background": "#f8f3e7",

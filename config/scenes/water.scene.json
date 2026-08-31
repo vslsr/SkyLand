@@ -5,6 +5,14 @@
   "displayName": "线稿海域",
   "description": "低多边形线稿、交错起伏与客户端浮力演示构成的纸绘海域。",
   "capacity": 8,
+  "actors": [
+    {
+      "id": "demo-raft-01",
+      "archetype": "raft",
+      "position": [0, 0, 0],
+      "yaw": 0.24
+    }
+  ],
   "renderer": {
     "type": "line-art",
     "background": "#f5f2e9",
@@ -27,9 +35,7 @@
       "surfaceColor": "#d7e7e5",
       "secondaryColor": "#c6dcdb",
       "gridLineColor": "#617f82",
-      "gridLineOpacity": 0.28,
-      "foamColor": "#fffdf7",
-      "demoRaft": true
+      "gridLineOpacity": 0.28
     }
   },
   "gameplay": {

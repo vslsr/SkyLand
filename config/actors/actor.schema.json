@@ -1,0 +1,64 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://skyland.local/schema/actor.schema.json",
+  "title": "SkyLand Actor Archetype",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "id", "components"],
+  "properties": {
+    "$schema": { "type": "string" },
+    "schemaVersion": { "const": 1 },
+    "id": { "type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$" },
+    "components": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["buoyancy", "render"],
+      "properties": {
+        "buoyancy": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["minimumBeam", "minimumLength", "maximumTrimRadians", "minimumDraft", "maximumDraft", "parts"],
+          "properties": {
+            "minimumBeam": { "type": "number", "exclusiveMinimum": 0 },
+            "minimumLength": { "type": "number", "exclusiveMinimum": 0 },
+            "maximumTrimRadians": { "type": "number", "minimum": 0, "maximum": 0.25 },
+            "minimumDraft": { "type": "number", "minimum": 0 },
+            "maximumDraft": { "type": "number", "minimum": 0 },
+            "parts": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 64,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["id", "mass", "buoyancy", "integrity", "localX", "localZ"],
+                "properties": {
+                  "id": { "type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$" },
+                  "mass": { "type": "number", "minimum": 0 },
+                  "buoyancy": { "type": "number", "minimum": 0 },
+                  "integrity": { "type": "number", "minimum": 0, "maximum": 1 },
+                  "localX": { "type": "number" },
+                  "localZ": { "type": "number" }
+                }
+              }
+            }
+          }
+        },
+        "render": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["model", "foamColor", "length", "width"],
+          "properties": {
+            "model": { "const": "line-art-raft" },
+            "foamColor": { "$ref": "#/$defs/color" },
+            "length": { "type": "number", "exclusiveMinimum": 0 },
+            "width": { "type": "number", "exclusiveMinimum": 0 }
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "color": { "type": "string", "pattern": "^#[0-9A-Fa-f]{6}$" }
+  }
+}
