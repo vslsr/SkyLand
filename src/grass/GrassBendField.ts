@@ -1,10 +1,10 @@
 import * as THREE from 'three';
-import type { GrassFieldBounds } from '../models/grass';
 import {
   GRASS_BEND_FRAGMENT_SHADER,
   GRASS_BEND_VERTEX_SHADER,
 } from '../shaders/grass';
 import type { NormalizedGrassBendImpulse } from './GrassInteraction';
+import type { GrassBendFieldView } from './GrassLayout';
 
 const BEND_TEXTURE_SIZE = 256;
 const DECAY_PER_60HZ_FRAME = 0.965;
@@ -18,12 +18,12 @@ export class GrassBendField {
   private readIndex = 0;
   private initialized = false;
 
-  public constructor(bounds: GrassFieldBounds) {
+  public constructor(view: GrassBendFieldView) {
     const fieldBounds = new THREE.Vector4(
-      bounds.minimumX,
-      bounds.minimumZ,
-      bounds.maximumX,
-      bounds.maximumZ,
+      view.origin.x,
+      view.origin.y,
+      view.origin.x + view.size.x,
+      view.origin.y + view.size.y,
     );
     this.targets = [createBendTarget(), createBendTarget()];
     this.material = new THREE.ShaderMaterial({

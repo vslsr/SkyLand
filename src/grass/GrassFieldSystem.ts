@@ -1,21 +1,14 @@
 import * as THREE from 'three';
 import type { FillMaterialEnvironment } from '../materials/createFillMaterial';
-import {
-  createGrassFieldGeometry,
-  type GrassFieldBounds,
-} from '../models/grass';
-import type { SceneVisualSystem } from '../scene/SceneVisualSystem';
-import {
-  GRASS_FILL_FRAGMENT_SHADER,
-  GRASS_FILL_VERTEX_SHADER,
-  GRASS_OUTLINE_FRAGMENT_SHADER,
-  GRASS_OUTLINE_VERTEX_SHADER,
-} from '../shaders/grass';
+import type { SceneUpdateContext, SceneVisualSystem } from '../scene/SceneVisualSystem';
+import { GRASS_FILL_FRAGMENT_SHADER, GRASS_OUTLINE_FRAGMENT_SHADER } from '../shaders/grass';
 import { GrassBendField } from './GrassBendField';
 import { GrassInteractionQueue, type GrassInteractionTarget } from './GrassInteraction';
+import type { GrassLayout } from './GrassLayout';
 
 export interface GrassFieldSystemOptions {
-  bounds: GrassFieldBounds;
+  /** 实例的分布方式。系统接管它的生命周期。 */
+  layout: GrassLayout;
   color: THREE.ColorRepresentation;
   environment: FillMaterialEnvironment;
 }
@@ -24,6 +17,7 @@ export class GrassFieldSystem implements SceneVisualSystem {
   public readonly root = new THREE.Group();
   public readonly interaction: GrassInteractionTarget;
   private readonly interactionQueue = new GrassInteractionQueue();
+  private readonly layout: GrassLayout;
   private readonly bendField: GrassBendField;
   private readonly sharedUniforms: Record<string, THREE.IUniform>;
   private pendingDeltaSeconds = 0;
@@ -31,17 +25,18 @@ export class GrassFieldSystem implements SceneVisualSystem {
   public constructor(options: GrassFieldSystemOptions) {
     this.root.name = 'grass-field-system';
     this.interaction = this.interactionQueue;
-    this.bendField = new GrassBendField(options.bounds);
-    const field = createGrassFieldGeometry({ bounds: options.bounds });
+    this.layout = options.layout;
+    this.bendField = new GrassBendField(this.layout.bendField);
+    const field = this.layout.geometry;
     this.sharedUniforms = {
       uTime: { value: 0 },
       uBendTexture: { value: this.bendField.texture },
       uFieldBounds: {
         value: new THREE.Vector4(
-          options.bounds.minimumX,
-          options.bounds.minimumZ,
-          options.bounds.maximumX,
-          options.bounds.maximumZ,
+          this.layout.bendField.origin.x,
+          this.layout.bendField.origin.y,
+          this.layout.bendField.origin.x + this.layout.bendField.size.x,
+          this.layout.bendField.origin.y + this.layout.bendField.size.y,
         ),
       },
       uFogColor: { value: new THREE.Color(options.environment.fogColor) },
@@ -50,7 +45,7 @@ export class GrassFieldSystem implements SceneVisualSystem {
     };
 
     const fillMaterial = new THREE.ShaderMaterial({
-      vertexShader: GRASS_FILL_VERTEX_SHADER,
+      vertexShader: this.layout.shaders.fillVertex,
       fragmentShader: GRASS_FILL_FRAGMENT_SHADER,
       uniforms: {
         ...this.sharedUniforms,
@@ -62,7 +57,7 @@ export class GrassFieldSystem implements SceneVisualSystem {
       polygonOffsetUnits: 1,
     });
     const outlineMaterial = new THREE.ShaderMaterial({
-      vertexShader: GRASS_OUTLINE_VERTEX_SHADER,
+      vertexShader: this.layout.shaders.outlineVertex,
       fragmentShader: GRASS_OUTLINE_FRAGMENT_SHADER,
       uniforms: {
         ...this.sharedUniforms,
@@ -80,9 +75,14 @@ export class GrassFieldSystem implements SceneVisualSystem {
     this.root.add(fill, outline);
   }
 
-  public update(deltaSeconds: number, elapsedSeconds: number): void {
+  public update(
+    deltaSeconds: number,
+    elapsedSeconds: number,
+    context?: SceneUpdateContext,
+  ): void {
     this.pendingDeltaSeconds += deltaSeconds;
     this.sharedUniforms.uTime.value = elapsedSeconds;
+    this.layout.update(context);
   }
 
   public beforeRender(renderer: THREE.WebGLRenderer): void {
@@ -102,5 +102,6 @@ export class GrassFieldSystem implements SceneVisualSystem {
   public dispose(): void {
     this.interactionQueue.clear();
     this.bendField.dispose();
+    this.layout.dispose();
   }
 }

@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { ClientActorSystem } from '../actors/ClientActorSystem';
-import { GrassFieldSystem, type GrassInteractionTarget } from '../grass';
+import { FixedGrassLayout, GrassFieldSystem, type GrassInteractionTarget } from '../grass';
 import { createGroundModel } from '../models/ground';
 import { createTreeField } from '../models/tree';
 import { OceanSystem } from '../ocean/OceanSystem';
@@ -58,7 +58,7 @@ export function createLineArtScene(
     }
     if (renderer.content.grass) {
       const grass = new GrassFieldSystem({
-        bounds: definition.gameplay.bounds,
+        layout: new FixedGrassLayout({ bounds: definition.gameplay.bounds }),
         color: renderer.palette.grass,
         environment,
       });
