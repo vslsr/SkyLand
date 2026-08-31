@@ -4,7 +4,10 @@ import {
   type GrassFieldBounds,
   type GrassFieldGeometry,
 } from '../models/grass';
-import { GRASS_FILL_VERTEX_SHADER, GRASS_OUTLINE_VERTEX_SHADER } from '../shaders/grass';
+import {
+  GRASS_FIXED_FILL_VERTEX_SHADER,
+  GRASS_FIXED_OUTLINE_VERTEX_SHADER,
+} from '../shaders/grass';
 import type { GrassBendFieldView, GrassLayout, GrassLayoutShaders } from './GrassLayout';
 
 export interface FixedGrassLayoutOptions {
@@ -23,9 +26,10 @@ export interface FixedGrassLayoutOptions {
 export class FixedGrassLayout implements GrassLayout {
   public readonly geometry: GrassFieldGeometry;
   public readonly shaders: GrassLayoutShaders = {
-    fillVertex: GRASS_FILL_VERTEX_SHADER,
-    outlineVertex: GRASS_OUTLINE_VERTEX_SHADER,
+    fillVertex: GRASS_FIXED_FILL_VERTEX_SHADER,
+    outlineVertex: GRASS_FIXED_OUTLINE_VERTEX_SHADER,
   };
+  public readonly uniforms: Record<string, THREE.IUniform> = {};
   public readonly bendField: GrassBendFieldView;
 
   public constructor(options: FixedGrassLayoutOptions) {
@@ -42,6 +46,7 @@ export class FixedGrassLayout implements GrassLayout {
         bounds.maximumZ - bounds.minimumZ,
       ),
       wrap: false,
+      textureSize: 256,
     };
   }
 

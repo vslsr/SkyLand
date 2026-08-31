@@ -1,6 +1,11 @@
 import * as THREE from 'three';
 import { ClientActorSystem } from '../actors/ClientActorSystem';
-import { FixedGrassLayout, GrassFieldSystem, type GrassInteractionTarget } from '../grass';
+import {
+  FixedGrassLayout,
+  GrassFieldSystem,
+  RollingGrassLayout,
+  type GrassInteractionTarget,
+} from '../grass';
 import { createGroundModel } from '../models/ground';
 import { createTreeField } from '../models/tree';
 import { OceanSystem } from '../ocean/OceanSystem';
@@ -25,17 +30,17 @@ export function createLineArtScene(
   scene.background = new THREE.Color(renderer.background);
   scene.fog = new THREE.Fog(renderer.fog.color, renderer.fog.near, renderer.fog.far);
   if (renderer.world) {
-    // 流式世界接管地面、树、草与岩石：内容由世界种子推导、随焦点进出，
+    // 流式世界接管地面、树与岩石：内容由世界种子推导、随焦点进出，
     // content 的开关在这里改为决定 chunk 里放什么。
     //
-    // 可交互草地（GrassFieldSystem）暂时只服务固定尺寸的场景：它按整块活动区
-    // 一次性铺满，草叶总数又有上限，套到 384 米的大世界上会稀疏到看不见。
+    // 草由下面的滚动草地负责，所以 chunk 里不再摆草丛——两套叠在一起
+    // 既重复又会互相穿插。
     const streamer = new ChunkStreamer({
       world: renderer.world,
       worldSeed,
       environment,
       templates: {
-        content: renderer.content,
+        content: { ...renderer.content, grass: false },
         environment,
         palette: {
           ground: renderer.palette.ground,
@@ -48,6 +53,19 @@ export function createLineArtScene(
     });
     scene.add(streamer.root);
     visualSystems.push(streamer);
+
+    if (renderer.content.grass) {
+      // 滚动草地只覆盖焦点周围固定的一块，密度与固定场景相当，
+      // 实例总数与世界大小无关。
+      const grass = new GrassFieldSystem({
+        layout: new RollingGrassLayout(),
+        color: renderer.palette.grass,
+        environment,
+      });
+      scene.add(grass.root);
+      visualSystems.push(grass);
+      grassInteraction = grass.interaction;
+    }
   } else {
     if (renderer.content.ground) scene.add(createGroundModel(renderer.palette.ground, environment));
     if (renderer.content.trees) {

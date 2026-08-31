@@ -38,6 +38,7 @@ export class GrassFieldSystem implements SceneVisualSystem {
       uFogColor: { value: new THREE.Color(options.environment.fogColor) },
       uFogNear: { value: options.environment.fogNear },
       uFogFar: { value: options.environment.fogFar },
+      ...this.layout.uniforms,
     };
 
     const fillMaterial = new THREE.ShaderMaterial({

@@ -7,4 +7,6 @@ export {
   type NormalizedGrassBendImpulse,
 } from './GrassInteraction';
 export type { GrassBendFieldView, GrassLayout, GrassLayoutShaders } from './GrassLayout';
+export { RollingGrassLayout, type RollingGrassLayoutOptions } from './RollingGrassLayout';
+export { alignFieldOriginCell, cellToWorld, worldToCell } from './rollingGrassField';
 export { MouseGrassInteractor } from './MouseGrassInteractor';

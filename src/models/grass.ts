@@ -122,6 +122,47 @@ function createInstanceAttributeArrays(
   return { offsets, scales, rotations, phases, tones };
 }
 
+/**
+ * 滚动草地的实例几何体。
+ *
+ * 实例属性只有一个网格下标，位置与形态全部由着色器按世界格哈希导出，
+ * 因此这份缓冲一次上传之后永不更新——玩家跑再远也只是改一个 uniform。
+ * @param gridSize 每个轴向的格数，实例总数是它的平方
+ */
+export function createRollingGrassFieldGeometry(gridSize: number): GrassFieldGeometry {
+  const instanceCount = gridSize * gridSize;
+  const cells = new Float32Array(instanceCount * 2);
+  for (let index = 0; index < instanceCount; index += 1) {
+    cells[index * 2] = index % gridSize;
+    cells[index * 2 + 1] = Math.floor(index / gridSize);
+  }
+
+  const blade = createGrassBladeGeometry();
+  const edges = new THREE.EdgesGeometry(blade, 20);
+  const fill = createCellIndexedGeometry(blade, cells, instanceCount);
+  const outline = createCellIndexedGeometry(edges, cells, instanceCount);
+
+  blade.dispose();
+  edges.dispose();
+
+  return { fill, outline, instanceCount };
+}
+
+function createCellIndexedGeometry(
+  source: THREE.BufferGeometry,
+  cells: Float32Array,
+  instanceCount: number,
+): THREE.InstancedBufferGeometry {
+  const geometry = new THREE.InstancedBufferGeometry();
+  if (source.index) geometry.setIndex(source.index.clone());
+  for (const [name, attribute] of Object.entries(source.attributes)) {
+    geometry.setAttribute(name, attribute.clone());
+  }
+  geometry.setAttribute('aCell', new THREE.InstancedBufferAttribute(cells.slice(), 2));
+  geometry.instanceCount = instanceCount;
+  return geometry;
+}
+
 function createInstancedGeometry(
   source: THREE.BufferGeometry,
   attributes: InstanceAttributeArrays,

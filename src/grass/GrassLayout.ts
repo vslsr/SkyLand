@@ -20,6 +20,13 @@ export interface GrassBendFieldView {
    * `true` 是环形寻址，滚动视野必须用它：形变场不动、世界在其中回绕。
    */
   readonly wrap: boolean;
+  /**
+   * 形变场的纹理边长。
+   *
+   * 视野越大，同样的分辨率下每个纹素代表的世界范围越粗，脚印会变成方块。
+   * 所以它随布局走，而不是写死一个常量。
+   */
+  readonly textureSize: number;
 }
 
 /**
@@ -46,6 +53,8 @@ export interface GrassLayout {
   readonly geometry: GrassFieldGeometry;
   readonly shaders: GrassLayoutShaders;
   readonly bendField: GrassBendFieldView;
+  /** 布局自己的着色器需要、而渲染系统不认识的 uniform。 */
+  readonly uniforms: Record<string, THREE.IUniform>;
   /** 每帧调用。滚动布局据此移动形变场原点；固定布局什么都不做。 */
   update(context?: SceneUpdateContext): void;
   dispose(): void;
