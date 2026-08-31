@@ -1,7 +1,9 @@
 const GRASS_VERTEX_DEFORMATION = /* glsl */ `
   uniform float uTime;
   uniform sampler2D uBendTexture;
-  uniform vec4 uFieldBounds;
+  uniform vec2 uFieldOrigin;
+  uniform vec2 uFieldSize;
+  uniform float uFieldWrap;
 
   attribute vec3 aOffset;
   attribute vec2 aScale;
@@ -58,8 +60,11 @@ const GRASS_VERTEX_DEFORMATION = /* glsl */ `
       * aScale.y
       * heightSquared;
 
-    vec2 fieldSize = max(uFieldBounds.zw - uFieldBounds.xy, vec2(0.0001));
-    vec2 bendUv = clamp((aOffset.xz - uFieldBounds.xy) / fieldSize, 0.0, 1.0);
+    // uFieldWrap 为 0 时钳制到边界：形变场覆盖整块活动区，草长不到区外。
+    // 为 1 时环形寻址：形变场跟着玩家滚动，世界在这张图里回绕，
+    // 接缝永远落在离玩家最远的地方。
+    vec2 rawUv = (aOffset.xz - uFieldOrigin) / max(uFieldSize, vec2(0.0001));
+    vec2 bendUv = mix(clamp(rawUv, 0.0, 1.0), fract(rawUv), uFieldWrap);
     vec3 bendSample = texture2D(uBendTexture, bendUv).rgb;
     vec2 bendDirection = bendSample.rg * 2.0 - 1.0;
     float bendStrength = bendSample.b;
@@ -150,7 +155,8 @@ export const GRASS_BEND_VERTEX_SHADER = /* glsl */ `
 
 export const GRASS_BEND_FRAGMENT_SHADER = /* glsl */ `
   uniform sampler2D uPreviousTexture;
-  uniform vec4 uFieldBounds;
+  uniform vec2 uFieldOrigin;
+  uniform vec2 uFieldSize;
   uniform vec2 uImpulsePosition;
   uniform vec2 uImpulseDirection;
   uniform float uImpulseRadius;
@@ -164,7 +170,7 @@ export const GRASS_BEND_FRAGMENT_SHADER = /* glsl */ `
     float previousStrength = previous.b * uDecay;
     vec2 bendVector = (previous.rg * 2.0 - 1.0) * previousStrength;
 
-    vec2 worldPosition = mix(uFieldBounds.xy, uFieldBounds.zw, vUv);
+    vec2 worldPosition = uFieldOrigin + vUv * uFieldSize;
     float distanceToImpulse = distance(worldPosition, uImpulsePosition);
     float weight = (1.0 - smoothstep(0.0, uImpulseRadius, distanceToImpulse))
       * uImpulseStrength;

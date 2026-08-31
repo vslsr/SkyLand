@@ -31,14 +31,10 @@ export class GrassFieldSystem implements SceneVisualSystem {
     this.sharedUniforms = {
       uTime: { value: 0 },
       uBendTexture: { value: this.bendField.texture },
-      uFieldBounds: {
-        value: new THREE.Vector4(
-          this.layout.bendField.origin.x,
-          this.layout.bendField.origin.y,
-          this.layout.bendField.origin.x + this.layout.bendField.size.x,
-          this.layout.bendField.origin.y + this.layout.bendField.size.y,
-        ),
-      },
+      // 与布局共享同一个原点向量：滚动布局移动它，草叶取样自动跟上。
+      uFieldOrigin: { value: this.layout.bendField.origin },
+      uFieldSize: { value: this.layout.bendField.size },
+      uFieldWrap: { value: this.layout.bendField.wrap ? 1 : 0 },
       uFogColor: { value: new THREE.Color(options.environment.fogColor) },
       uFogNear: { value: options.environment.fogNear },
       uFogFar: { value: options.environment.fogFar },

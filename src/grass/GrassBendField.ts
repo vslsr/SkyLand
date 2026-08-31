@@ -19,19 +19,16 @@ export class GrassBendField {
   private initialized = false;
 
   public constructor(view: GrassBendFieldView) {
-    const fieldBounds = new THREE.Vector4(
-      view.origin.x,
-      view.origin.y,
-      view.origin.x + view.size.x,
-      view.origin.y + view.size.y,
-    );
-    this.targets = [createBendTarget(), createBendTarget()];
+    // 直接引用布局持有的向量，而不是拷贝：滚动布局每帧移动原点，
+    // 共享同一个实例就不需要再往下同步一遍。
+    this.targets = [createBendTarget(view.wrap), createBendTarget(view.wrap)];
     this.material = new THREE.ShaderMaterial({
       vertexShader: GRASS_BEND_VERTEX_SHADER,
       fragmentShader: GRASS_BEND_FRAGMENT_SHADER,
       uniforms: {
         uPreviousTexture: { value: this.targets[0].texture },
-        uFieldBounds: { value: fieldBounds },
+        uFieldOrigin: { value: view.origin },
+        uFieldSize: { value: view.size },
         uImpulsePosition: { value: new THREE.Vector2() },
         uImpulseDirection: { value: new THREE.Vector2(1, 0) },
         uImpulseRadius: { value: 0.65 },
@@ -99,8 +96,15 @@ export class GrassBendField {
   }
 }
 
-function createBendTarget(): THREE.WebGLRenderTarget {
+/**
+ * 环形寻址的形变场必须让纹理本身也回绕，否则着色器 fract 出来的 UV
+ * 在接缝处会被钳制，踩踏痕迹会在边缘拖出一道条纹。
+ */
+function createBendTarget(wrap: boolean): THREE.WebGLRenderTarget {
+  const wrapping = wrap ? THREE.RepeatWrapping : THREE.ClampToEdgeWrapping;
   const target = new THREE.WebGLRenderTarget(BEND_TEXTURE_SIZE, BEND_TEXTURE_SIZE, {
+    wrapS: wrapping,
+    wrapT: wrapping,
     minFilter: THREE.LinearFilter,
     magFilter: THREE.LinearFilter,
     format: THREE.RGBAFormat,
