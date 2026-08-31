@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { createOutlinedObject } from './outlinedObject';
 
 const BLADE_VERTEX_COUNT = 7;
 const BLADE_INDEX_COUNT = 15;
@@ -171,3 +172,38 @@ export const GRASS_BLADE_GEOMETRY_STATS = {
   vertexCount: BLADE_VERTEX_COUNT,
   indexCount: BLADE_INDEX_COUNT,
 } as const;
+
+const CLUSTER_BLADE_COUNT = 3;
+const CLUSTER_RADIUS = 0.09;
+const CLUSTER_BLADE_WIDTH = 0.3;
+
+/**
+ * 一丛草，供 chunk 流式生成使用。
+ *
+ * 与 GrassFieldSystem 是两条路：那一套按整块活动区一次性铺满并支持踩踏交互，
+ * 适合固定尺寸的场景；流式世界里草随 chunk 进出，每一丛都由这个模板实例化，
+ * 朝向与缩放的差异由放置算法给出，所以这里只定义「一丛草长什么样」。
+ * 叶片形状取自同一个 createGrassBladeGeometry，两条路的观感保持一致。
+ */
+export function createGrassClusterModel(material: THREE.Material): THREE.Group {
+  const cluster = new THREE.Group();
+  const blade = createGrassBladeGeometry();
+
+  for (let index = 0; index < CLUSTER_BLADE_COUNT; index += 1) {
+    const angle = (index / CLUSTER_BLADE_COUNT) * Math.PI * 2;
+    const height = 0.34 + index * 0.055;
+    const leaf = createOutlinedObject(blade, material);
+    leaf.position.set(
+      Math.cos(angle) * CLUSTER_RADIUS,
+      0,
+      Math.sin(angle) * CLUSTER_RADIUS,
+    );
+    leaf.scale.set(CLUSTER_BLADE_WIDTH, height, CLUSTER_BLADE_WIDTH);
+    leaf.rotation.x = Math.sin(angle) * 0.18;
+    leaf.rotation.z = Math.cos(angle) * 0.18;
+    leaf.rotation.y = angle;
+    cluster.add(leaf);
+  }
+
+  return cluster;
+}

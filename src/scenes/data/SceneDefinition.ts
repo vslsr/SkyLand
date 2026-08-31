@@ -63,6 +63,23 @@ export interface OceanVisualDefinition {
   gridLineOpacity: number;
 }
 
+/**
+ * 流式大世界的渲染参数。
+ *
+ * 出现这个块就表示场景的地面与物件不再是固定摆好的，而是由世界种子确定性
+ * 生成、按 chunk 流式加载。世界本身的尺寸是生成算法的固有属性，写在
+ * shared/world/worldConfig.mjs 里，对所有流式场景都一样；这里只配置
+ * 每个场景可以自己决定的部分。
+ */
+export interface WorldStreamingDefinition {
+  /** 以焦点所在 chunk 为中心，向外加载几圈。 */
+  loadRadius: number;
+  /** 走出几圈之外才卸载。必须大于 loadRadius，否则会在边界上反复建了拆。 */
+  keepRadius: number;
+  /** 岩石的填充色。地面、草、树的颜色沿用 palette。 */
+  rockColor: string;
+}
+
 export interface SceneDefinition extends SceneSummary {
   schemaVersion: 1;
   actors: SceneActorDefinition[];
@@ -79,6 +96,7 @@ export interface SceneDefinition extends SceneSummary {
       treeNeedles: string;
     };
     ocean?: OceanVisualDefinition;
+    world?: WorldStreamingDefinition;
   };
   gameplay: {
     bounds: SceneBounds;

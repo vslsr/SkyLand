@@ -2,6 +2,7 @@ import { readdir, readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { join } from 'node:path';
 import { ActorCatalog } from '../actors/ActorCatalog.mjs';
+import { CHUNK_SIZE, WORLD_PLAY_AREA } from '../../shared/world/worldConfig.mjs';
 
 export const DEFAULT_SCENE_DIRECTORY = fileURLToPath(new URL('../../config/scenes/', import.meta.url));
 
@@ -120,6 +121,29 @@ function validateSceneDefinition(raw, filename, actorCatalog) {
     if (ocean.gridLineOpacity < 0 || ocean.gridLineOpacity > 1) throw new TypeError(`${filename}.renderer.ocean.gridLineOpacity 范围无效`);
   }
 
+  let world;
+  if (renderer.world !== undefined) {
+    const rawWorld = requireObject(renderer.world, `${filename}.renderer.world`);
+    world = {
+      loadRadius: requireInteger(rawWorld.loadRadius, `${filename}.renderer.world.loadRadius`, 1, 6),
+      keepRadius: requireInteger(rawWorld.keepRadius, `${filename}.renderer.world.keepRadius`, 2, 8),
+      rockColor: requireColor(rawWorld.rockColor, `${filename}.renderer.world.rockColor`),
+    };
+    // 加载半径与保留半径相等时，站在 chunk 边界上来回走会让同一批 chunk
+    // 反复构建又销毁，比不做流式加载还糟。
+    if (world.keepRadius <= world.loadRadius) {
+      throw new TypeError(`${filename}.renderer.world.keepRadius 必须大于 loadRadius`);
+    }
+    // 玩家站在自己 chunk 的边缘时，最近的未加载内容就在这么远的地方。
+    // 雾必须在那之前收拢，否则 chunk 的出现与消失会被直接看见。
+    if (fogFar > world.loadRadius * CHUNK_SIZE) {
+      throw new TypeError(
+        `${filename}.renderer.fog.far 必须不大于 ${world.loadRadius * CHUNK_SIZE}，` +
+          '否则视野会越过最近的未加载 chunk',
+      );
+    }
+  }
+
   const gameplay = requireObject(scene.gameplay, `${filename}.gameplay`);
   const bounds = requireObject(gameplay.bounds, `${filename}.gameplay.bounds`);
   const spawn = requireObject(gameplay.spawn, `${filename}.gameplay.spawn`);
@@ -128,6 +152,20 @@ function validateSceneDefinition(raw, filename, actorCatalog) {
   const minimumZ = requireNumber(bounds.minimumZ, `${filename}.gameplay.bounds.minimumZ`);
   const maximumZ = requireNumber(bounds.maximumZ, `${filename}.gameplay.bounds.maximumZ`);
   if (minimumX >= maximumX || minimumZ >= maximumZ) throw new TypeError(`${filename}.gameplay.bounds 范围无效`);
+  // 流式场景的活动范围必须落在生成范围向内收过的安全区里，
+  // 否则玩家能走到还没有内容的世界边缘旁边。
+  if (
+    world &&
+    (minimumX < WORLD_PLAY_AREA.minimumX ||
+      maximumX > WORLD_PLAY_AREA.maximumX ||
+      minimumZ < WORLD_PLAY_AREA.minimumZ ||
+      maximumZ > WORLD_PLAY_AREA.maximumZ)
+  ) {
+    throw new TypeError(
+      `${filename}.gameplay.bounds 超出了流式世界的活动范围 ` +
+        `[${WORLD_PLAY_AREA.minimumX}, ${WORLD_PLAY_AREA.maximumX}]`,
+    );
+  }
 
   const centerX = requireNumber(spawn.centerX, `${filename}.gameplay.spawn.centerX`);
   const centerZ = requireNumber(spawn.centerZ, `${filename}.gameplay.spawn.centerZ`);
@@ -181,6 +219,7 @@ function validateSceneDefinition(raw, filename, actorCatalog) {
         treeNeedles: requireColor(palette.treeNeedles, `${filename}.renderer.palette.treeNeedles`),
       },
       ...(ocean ? { ocean } : {}),
+      ...(world ? { world } : {}),
     },
     gameplay: {
       bounds: { minimumX, maximumX, minimumZ, maximumZ },

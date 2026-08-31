@@ -110,6 +110,17 @@
             "gridLineColor": { "$ref": "#/$defs/color" },
             "gridLineOpacity": { "type": "number", "minimum": 0, "maximum": 1 }
           }
+        },
+        "world": {
+          "type": "object",
+          "description": "出现这个块表示场景的地面与物件由世界种子确定性生成并按 chunk 流式加载",
+          "additionalProperties": false,
+          "required": ["loadRadius", "keepRadius", "rockColor"],
+          "properties": {
+            "loadRadius": { "type": "integer", "minimum": 1, "maximum": 6 },
+            "keepRadius": { "type": "integer", "minimum": 2, "maximum": 8 },
+            "rockColor": { "$ref": "#/$defs/color" }
+          }
         }
       }
     },

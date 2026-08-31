@@ -5,9 +5,13 @@ import { createGroundModel } from '../models/ground';
 import { createTreeField } from '../models/tree';
 import { OceanSystem } from '../ocean/OceanSystem';
 import type { SceneDefinition } from '../scenes/data/SceneDefinition';
+import { ChunkStreamer } from '../world';
 import type { SceneComposition, SceneVisualSystem } from './SceneVisualSystem';
 
-export function createLineArtScene(definition: SceneDefinition): SceneComposition {
+export function createLineArtScene(
+  definition: SceneDefinition,
+  worldSeed?: number,
+): SceneComposition {
   const { renderer } = definition;
   const environment = {
     fogColor: renderer.fog.color,
@@ -20,22 +24,48 @@ export function createLineArtScene(definition: SceneDefinition): SceneCompositio
   let actorSnapshotTarget: ClientActorSystem | undefined;
   scene.background = new THREE.Color(renderer.background);
   scene.fog = new THREE.Fog(renderer.fog.color, renderer.fog.near, renderer.fog.far);
-  if (renderer.content.ground) scene.add(createGroundModel(renderer.palette.ground, environment));
-  if (renderer.content.trees) {
-    scene.add(createTreeField(
-      { trunk: renderer.palette.treeTrunk, needles: renderer.palette.treeNeedles },
+  if (renderer.world) {
+    // 流式世界接管地面、树、草与岩石：内容由世界种子推导、随焦点进出，
+    // content 的开关在这里改为决定 chunk 里放什么。
+    //
+    // 可交互草地（GrassFieldSystem）暂时只服务固定尺寸的场景：它按整块活动区
+    // 一次性铺满，草叶总数又有上限，套到 384 米的大世界上会稀疏到看不见。
+    const streamer = new ChunkStreamer({
+      world: renderer.world,
+      worldSeed,
       environment,
-    ));
-  }
-  if (renderer.content.grass) {
-    const grass = new GrassFieldSystem({
-      bounds: definition.gameplay.bounds,
-      color: renderer.palette.grass,
-      environment,
+      templates: {
+        content: renderer.content,
+        environment,
+        palette: {
+          ground: renderer.palette.ground,
+          grass: renderer.palette.grass,
+          treeTrunk: renderer.palette.treeTrunk,
+          treeNeedles: renderer.palette.treeNeedles,
+          rock: renderer.world.rockColor,
+        },
+      },
     });
-    scene.add(grass.root);
-    visualSystems.push(grass);
-    grassInteraction = grass.interaction;
+    scene.add(streamer.root);
+    visualSystems.push(streamer);
+  } else {
+    if (renderer.content.ground) scene.add(createGroundModel(renderer.palette.ground, environment));
+    if (renderer.content.trees) {
+      scene.add(createTreeField(
+        { trunk: renderer.palette.treeTrunk, needles: renderer.palette.treeNeedles },
+        environment,
+      ));
+    }
+    if (renderer.content.grass) {
+      const grass = new GrassFieldSystem({
+        bounds: definition.gameplay.bounds,
+        color: renderer.palette.grass,
+        environment,
+      });
+      scene.add(grass.root);
+      visualSystems.push(grass);
+      grassInteraction = grass.interaction;
+    }
   }
   if (renderer.content.ocean) {
     if (!renderer.ocean || !definition.gameplay.water) {

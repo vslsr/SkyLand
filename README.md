@@ -4,7 +4,9 @@
 
 当前包含：
 
-- Three.js 淡色填充与 `EdgesGeometry` 线稿草地场景
+- Three.js 淡色填充与 `EdgesGeometry` 线稿场景
+- 512 × 512 米的大世界：地形与物件由世界种子确定性生成，按 chunk 流式加载
+- Rust 编译的 WebAssembly 生成后端，附行为一致的纯 JS 降级实现
 - `Scene` / `SceneManager` 场景生命周期
 - 每个 Scene 独立的 `CommonUIManager` 栈
 - 房间大厅、Grid 房间卡片和通用弹出窗体
@@ -142,7 +144,10 @@ npm run dev
 ```bash
 npm test          # 服务端与客户端纯逻辑测试
 npm run build
+npm run build:wasm  # 只有改了 native/ 下的 Rust 源码才需要
 ```
+
+`chunkgen.wasm` 是签入仓库的，日常开发不需要安装 Rust 工具链。
 
 `tests/` 下的客户端测试通过项目内的轻量 TypeScript 测试加载器运行，只覆盖不依赖
 DOM 的纯逻辑（标签、输入配置、和解、快照插值等），因此不参与 `tsc` 构建。
@@ -173,6 +178,100 @@ bindings.resetAllBindings();
 变化会立即替换 `InputSubsystem` 的 Context、刷新浏览器默认行为拦截列表和 HUD 提示。
 浏览器默认把非默认绑定以差异形式保存到 `localStorage`；配置升级或本地数据损坏时，
 无法识别的单条覆盖会被忽略，不影响默认输入方案加载。
+
+## 大世界与 Chunk 系统
+
+场景配置里出现 `renderer.world` 就表示这张地图是流式大世界：地面与物件不再是
+摆好的固定内容，而是由世界种子确定性生成、按 chunk 加载。`config/scenes/open-world.scene.json`
+是内置的这样一张地图，`grassland` 与 `open-meadow` 保持原来的固定场景。
+
+世界是 16 × 16 个 chunk，每个 chunk 32 米见方，合计 512 × 512 米。世界尺寸是
+生成算法的固有属性，写在 `shared/world/worldConfig.mjs` 里，对所有流式场景都一样；
+场景配置只决定加载半径、保留半径和岩石配色。
+
+玩家的活动范围比生成范围向内收两个 chunk（384 × 384 米），因此永远走不到没有
+内容的世界边缘旁边。`SceneCatalog` 在启动时校验这两条约束：
+
+- `gameplay.bounds` 必须落在这个安全区内；
+- `renderer.fog.far` 必须不大于 `loadRadius × 32`，否则视野会越过最近的未加载
+  chunk，玩家会直接看到地块凭空出现。
+
+配错了服务器起不来，并会指出是哪一个场景文件的哪一项。
+
+### 静态物件永远不走网络
+
+树、草、岩石不是数据，而是一个函数的输出：
+
+```text
+(世界种子, chunk 坐标) ──确定性算法──▶ 物件列表
+```
+
+房间进程在创建房间时分配一个 32 位世界种子，随房间摘要下发。客户端拿到种子后
+自己算出每个 chunk 里有哪些物件，服务端算出的是同一批。网络上因此只需要传活动
+实体，静态内容一个字节都不用同步——这也是后续做范围同步（AOI）的前提。
+
+跨端一致靠的是**整数域运算**：`shared/world/hash.mjs` 与 `chunkContent.mjs` 全程
+只用 32 位整数，坐标用毫米、朝向用毫弧度、缩放用千分数，最后才统一除以 1000。
+JS 的 `Math.imul` 与 Rust 的 `wrapping_mul` 在位级等价，所以浏览器、房间进程和
+WASM 算出的世界必然逐位相同。一旦这里引入浮点，就可能出现「你看得见那棵树、
+我看不见」的分裂。`server/tests/chunkGenerator.test.mjs` 守着这条不变量。
+
+### 流式加载
+
+`ChunkStreamer` 是一个 `SceneVisualSystem`，随场景创建、随场景销毁。它以焦点
+（有玩家时是玩家，没有玩家时是相机）所在的 chunk 为中心加载周围 `loadRadius` 圈，
+走出 `keepRadius` 圈之外才卸载。两个半径不同是刻意的：相等的话，站在 chunk 边界上
+来回走会让同一批 chunk 反复构建又销毁，`SceneCatalog` 因此拒绝相等的配置。
+
+计划本身是纯函数（`shared/world/chunkStream.mjs`），只在跨过 chunk 边界时重算一次；
+每帧最多构建一个 chunk，玩家高速穿越时补齐会晚几帧，但这段延迟被雾效盖住了。
+
+### 每个 chunk 三次 draw call
+
+一个 chunk 的地面、树、草、岩石被合批成**一份**填充几何体和**一份**轮廓线几何体，
+颜色随顶点走（`createFillMaterial` 的 `vertexTint`），所以树干与树冠仍是各自的配色，
+但整块地只用一种材质。加上同场景全部 chunk 共用的地面网格线，一个 chunk 固定三次
+draw call，视野内 25 个 chunk 合计 75 次。
+
+`renderer.content` 的 `ground` / `trees` / `grass` 开关在流式场景里改为决定 chunk
+里放什么：关掉某一类就注册一个空模板。放置结果本身不受影响——放置算法在 WASM 与
+JS 两个后端之间必须逐位一致，所以它不接受任何逐场景的开关。
+
+草有两条路：固定场景用 `GrassFieldSystem`，按整块活动区一次性铺满并支持踩踏
+交互；流式场景用 chunk 里的草丛模板，随 chunk 进出。前者暂时不服务流式场景——
+它的草叶总数封顶 12000 株，摊到 384 米见方的活动区上约等于每 12 平方米一株，
+稀疏到看不见，要接进大世界得先让它跟着焦点做滑动窗口。两条路的叶片形状取自
+同一个 `createGrassBladeGeometry`，观感是一致的。
+
+顶点已经是世界坐标，承载它们的对象留在原点，Three.js 自动算出的包围球就落在
+正确位置上，视锥剔除按 chunk 生效。
+
+### WASM 生成后端
+
+`native/chunkgen` 是一个 `no_std` 的 Rust crate，编译到 `wasm32-unknown-unknown`，
+产物 3.4 KB。它做两件事：放置算法，以及把模板几何体按每个物件的位置、朝向、
+缩放变换后写进一整块连续的顶点缓冲。模板几何体仍由 Three.js 在 JS 侧生成后
+一次性上传，所以线稿模型的定义只有 `src/models/` 一处，Rust 不重复实现三角化。
+
+`shared/world/chunkGenerator.mjs` 里有一份行为完全一致的 JS 实现。WASM 加载失败
+时自动降级，世界照样是同一个；用 `?chunkgen=js` 打开页面可以强制走 JS 后端做对照。
+
+模板是注册进实例线性内存的，而每个场景的配色不同，所以 wasm 模块只编译一次、
+每个流式场景实例化一份。
+
+实测在当前密度（约 4700 顶点／chunk）下，两条路径的差距并不大：
+
+| 路径 | 单个 chunk |
+| --- | --- |
+| WASM 生成 + 合批（不含拷贝） | 45 µs |
+| WASM 全流程（含切片拷贝） | 74 µs |
+| JS 全流程 | 82 µs |
+
+V8 对这种紧凑的 TypedArray 循环优化得很好，所以端到端只快约 10%。WASM 的价值
+更多在于把逐顶点的工作彻底移出 JS 堆——没有 JIT 预热和 GC 抖动，帧时间更平——
+以及为之后调大视距、加大物件密度、引入地形高度留出余量。剩下 39% 的开销是两条
+路径都要付的切片拷贝，真要继续压缩，下一步是把位置、法线、颜色交错进同一份
+`InterleavedBuffer`，把三次拷贝并成一次。
 
 ## CommonUI 事件栈
 
@@ -280,6 +379,9 @@ HTTP Server；WebSocket 网关再把玩家输入路由到对应的房间 DS：
 
 每个房间进程拥有自己的 `ServerScene`、玩家集合、输入队列和 20 Hz 更新循环。房间异常退出不会拖垮其他房间。
 
+创建房间时会分配一个 32 位世界种子，随房间摘要一起下发。流式场景的客户端据此
+生成与服务端一致的地形与物件，换房间就是换一个世界。
+
 房间创建后如果没有玩家，或最后一名玩家离开后，会启动 60 秒空置回收计时；期间有玩家加入会立即取消计时。大厅接口通过 `idleExpiresAt` 返回服务端截止时间，房间卡片据此显示倒计时，归零后自动刷新列表。计时到期仍为空房间时，主进程会关闭并移除对应 DS 子进程。
 
 收到 `SIGINT` 或 `SIGTERM` 时，组合服务器会关闭 WebSocket 网关、通知所有房间 DS
@@ -312,7 +414,7 @@ HTTP Server；WebSocket 网关再把玩家输入路由到对应的房间 DS：
 | --- | --- | --- |
 | 方向向量归一化到 ≤ 1 | `sanitizeMoveInput` | 放大向量换不来速度 |
 | 速度与倍率写死在服务端 | `applyPlayerMovement` | 上限恒为 3.2 × 1.65 m/s |
-| 活动范围钳制 | `clampToPlayArea` | 走不出草地 |
+| 活动范围钳制 | `clampToPlayArea` | 走不出大世界的活动区 |
 | 单条输入时长上限 | `ServerScene.applyInput` | 一条消息最多推进 0.1 s |
 | 服务器时钟维护的时间预算 | `ServerScene.update` | 谎报时长只会提前花光预算 |
 | 序号严格递增 | `ServerScene.applyInput` | 重放与乱序输入被丢弃 |
@@ -336,6 +438,7 @@ HTTP Server；WebSocket 网关再把玩家输入路由到对应的房间 DS：
 ## 模块结构
 
 - `src/scenes/`：Scene 基类、SceneManager 与草地场景
+- `src/world/`：chunk 流式加载、ChunkView 与生成后端的加载
 - `src/ui/common/`：CommonUI 栈和通用窗体
 - `src/ui/pages/`：房间大厅、创建房间页面
 - `src/interaction/`：最底层游戏交互事件路由
@@ -343,7 +446,7 @@ HTTP Server；WebSocket 网关再把玩家输入路由到对应的房间 DS：
 - `src/player/`：玩家实体和史莱姆动画
 - `src/network/`：浏览器房间客户端、消息协议与快照插值
 - `src/scenes/data/`：客户端场景 JSON 类型
-- `src/models/`：程序化平地、树木和草丛
+- `src/models/`：程序化地面、树木、草丛、岩石与 chunk 模板/合批
 - `src/materials/`：填充 Shader 与轮廓线材质
 - `server/network/`：WebSocket 网关
 - `server/http/`：API 路由、HTTP 响应和生产静态站点服务
@@ -356,4 +459,6 @@ HTTP Server；WebSocket 网关再把玩家输入路由到对应的房间 DS：
 - `config/actors/`：可复用 Actor 原型 JSON 与 Schema
 - `config/scenes/`：每张地图的独立 JSON 与 Schema
 - `shared/`：前后端共用的移动模拟与同步常量
+- `shared/world/`：世界配置、chunk 坐标、确定性生成与两种生成后端
+- `native/chunkgen/`：编译为 WebAssembly 的 Rust 生成与合批实现
 - `tests/`：不依赖浏览器的客户端逻辑测试

@@ -114,7 +114,7 @@ export class GrasslandScene extends Scene {
   public update(deltaSeconds: number, elapsedSeconds: number): void {
     this.input.update();
     this.controls.update(deltaSeconds, elapsedSeconds);
-    this.renderer.update(deltaSeconds, elapsedSeconds);
+    this.renderer.update(deltaSeconds, elapsedSeconds, this.currentFocus());
     this.player?.update(deltaSeconds, elapsedSeconds);
     this.sendPlayerInput(deltaSeconds);
     if (this.joinedRoom?.scene.camera.mode === 'topdown') {
@@ -127,6 +127,17 @@ export class GrasslandScene extends Scene {
 
   public render(): void {
     this.renderer.render(this.controls.frame);
+  }
+
+  /**
+   * 世界应该围绕谁展开：有玩家时是玩家，还没有玩家时是相机。
+   * 流式加载靠它决定加载哪些 chunk，大厅背后看到的因此也是一片正常的世界。
+   */
+  private currentFocus(): { focusX: number; focusZ: number } {
+    const player = this.player?.controller.position;
+    if (player) return { focusX: player.x, focusZ: player.z };
+    const [cameraX, , cameraZ] = this.controls.frame.position;
+    return { focusX: cameraX, focusZ: cameraZ };
   }
 
   protected onEnter(): void {
@@ -197,7 +208,7 @@ export class GrasslandScene extends Scene {
     }
     this.joinedRoom = joined;
     this.snapshots.clear();
-    this.renderer.loadScene(joined.scene);
+    this.renderer.loadScene(joined.scene, joined.room.worldSeed);
     this.flyController.configure(joined.scene.camera);
     if (joined.scene.camera.mode === 'topdown') {
       this.createPlayer(joined.player.spawn, joined.scene.gameplay.bounds);

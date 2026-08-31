@@ -6,7 +6,11 @@ import {
   type GrassInteractionTarget,
 } from '../grass';
 import { createLineArtScene } from '../scene/createLineArtScene';
-import type { ActorSnapshotTarget, SceneVisualSystem } from '../scene/SceneVisualSystem';
+import type {
+  ActorSnapshotTarget,
+  SceneUpdateContext,
+  SceneVisualSystem,
+} from '../scene/SceneVisualSystem';
 import type { SnapshotActor } from '../network/protocol';
 import type { SceneDefinition } from '../scenes/data/SceneDefinition';
 
@@ -83,19 +87,27 @@ export class SceneRenderer {
     this.grassInteraction?.applyImpulse(impulse);
   }
 
-  public update(deltaSeconds: number, elapsedSeconds: number): void {
-    for (const system of this.visualSystems) system.update(deltaSeconds, elapsedSeconds);
+  public update(
+    deltaSeconds: number,
+    elapsedSeconds: number,
+    context?: SceneUpdateContext,
+  ): void {
+    for (const system of this.visualSystems) system.update(deltaSeconds, elapsedSeconds, context);
   }
 
   public syncActors(snapshots: readonly SnapshotActor[]): void {
     this.actorSnapshotTarget?.syncSnapshots(snapshots);
   }
 
-  public loadScene(definition: SceneDefinition): void {
+  /**
+   * 加载场景。worldSeed 来自房间，决定流式世界长什么样；
+   * 不做流式加载的场景会忽略它。
+   */
+  public loadScene(definition: SceneDefinition, worldSeed?: number): void {
     if (definition.renderer.type !== 'line-art') {
       throw new Error(`不支持的场景渲染器：${definition.renderer.type as string}`);
     }
-    const composition = createLineArtScene(definition);
+    const composition = createLineArtScene(definition, worldSeed);
     this.replaceScene(
       composition.scene,
       composition.visualSystems,
