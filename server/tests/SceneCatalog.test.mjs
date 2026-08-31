@@ -6,7 +6,7 @@ test('loads every selectable map from an independent scene JSON', async () => {
   const catalog = await SceneCatalog.load();
   const scenes = catalog.list();
 
-  assert.deepEqual(scenes.map((scene) => scene.id), ['grassland', 'open-meadow', 'water']);
+  assert.deepEqual(scenes.map((scene) => scene.id), ['grassland', 'open-meadow', 'open-world', 'water']);
   assert.equal(catalog.require('grassland').renderer.type, 'line-art');
   assert.equal(catalog.require('open-meadow').renderer.content.trees, false);
   const water = catalog.require('water');
@@ -21,4 +21,13 @@ test('loads every selectable map from an independent scene JSON', async () => {
 test('rejects unknown scene ids instead of silently selecting another map', async () => {
   const catalog = await SceneCatalog.load();
   assert.throws(() => catalog.require('missing-map'), /请选择有效的地图/);
+});
+
+test('流式场景带上 world 配置，固定场景没有', async () => {
+  const catalog = await SceneCatalog.load();
+  const openWorld = catalog.require('open-world');
+
+  assert.equal(openWorld.renderer.world.loadRadius, 2);
+  assert.equal(openWorld.renderer.world.keepRadius, 3);
+  assert.equal(catalog.require('grassland').renderer.world, undefined);
 });
