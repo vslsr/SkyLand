@@ -1,5 +1,15 @@
 import { FlyController } from '../camera/FlyController';
 import { GameInteractionLayer } from '../interaction/GameInteractionLayer';
+import {
+  GameplayInputContext,
+  InputSubsystem,
+  KeyboardMouseInputDevice,
+  PlayerInputActions,
+  PlayerInputConfig,
+  PREVENT_DEFAULT_GAMEPLAY_CONTROLS,
+  VirtualControls,
+  VirtualInputDevice,
+} from '../input/index';
 import { SceneControlRouter } from '../controllers/SceneControlRouter';
 import { RoomClient, type JoinedRoom, type RoomSummary } from '../network/RoomClient';
 import { SnapshotBuffer } from '../network/SnapshotBuffer';
@@ -12,6 +22,7 @@ import { HudController } from '../ui/HudController';
 import { CreateRoomPage, type CreateRoomFormValue } from '../ui/pages/CreateRoomPage';
 import { RoomLobbyPage } from '../ui/pages/RoomLobbyPage';
 import { Scene, type SceneUIContext } from './Scene';
+import type { SceneSummary } from './data/SceneDefinition';
 
 export interface GrasslandSceneOptions extends SceneUIContext {
   canvas: HTMLCanvasElement;
@@ -19,6 +30,8 @@ export interface GrasslandSceneOptions extends SceneUIContext {
 
 export class GrasslandScene extends Scene {
   private readonly canvas: HTMLCanvasElement;
+  private readonly input: InputSubsystem;
+  private readonly virtualControls: VirtualControls;
   private readonly renderer: SceneRenderer;
   private readonly flyController: FlyController;
   private readonly controls: SceneControlRouter;
@@ -29,12 +42,27 @@ export class GrasslandScene extends Scene {
   private readonly snapshots = new SnapshotBuffer();
   private readonly remotePlayers = new RemotePlayerGroup();
   private joinedRoom?: JoinedRoom;
+  private availableScenes: SceneSummary[] = [];
   private player?: PlayerEntity;
   private timeSinceInputSent = 0;
 
   public constructor(options: GrasslandSceneOptions) {
     super('grassland', options);
     this.canvas = options.canvas;
+    const virtualInput = new VirtualInputDevice();
+    this.input = new InputSubsystem({
+      actions: PlayerInputActions,
+      config: PlayerInputConfig,
+      contexts: [GameplayInputContext],
+      devices: [
+        new KeyboardMouseInputDevice({
+          pointerTarget: options.canvas,
+          preventDefaultControls: PREVENT_DEFAULT_GAMEPLAY_CONTROLS,
+        }),
+        virtualInput,
+      ],
+    });
+    this.virtualControls = new VirtualControls({ root: options.baseLayer, device: virtualInput });
     this.renderer = new SceneRenderer(options.canvas);
     this.flyController = new FlyController(options.canvas, {
       position: [0, 4.2, 13.5],
@@ -47,7 +75,10 @@ export class GrasslandScene extends Scene {
     this.controls.onModeChange((mode) => this.hud.setControlMode(mode));
 
     this.commonUI.onStackChange(() => {
-      this.controls.setInputEnabled(this.commonUI.allowsGameInteraction);
+      const allowsGameInteraction = this.commonUI.allowsGameInteraction;
+      if (!allowsGameInteraction) this.virtualControls.reset();
+      this.input.setEnabled(allowsGameInteraction);
+      this.controls.setInputEnabled(allowsGameInteraction);
     });
     this.commonUI.setBaseEventHandler((event) => this.gameInteractions.dispatch(event));
     this.lobbyPage.onRefresh(() => void this.refreshRooms());
@@ -60,6 +91,7 @@ export class GrasslandScene extends Scene {
   }
 
   public update(deltaSeconds: number, elapsedSeconds: number): void {
+    this.input.update();
     this.controls.update(deltaSeconds, elapsedSeconds);
     this.player?.update(deltaSeconds, elapsedSeconds);
     this.sendPlayerInput(deltaSeconds);
@@ -79,6 +111,8 @@ export class GrasslandScene extends Scene {
   }
 
   protected onLeave(): void {
+    this.virtualControls.reset();
+    this.input.setEnabled(false);
     this.controls.setInputEnabled(false);
     if (document.pointerLockElement === this.canvas) document.exitPointerLock();
   }
@@ -86,14 +120,23 @@ export class GrasslandScene extends Scene {
   private async refreshRooms(): Promise<void> {
     this.lobbyPage.setLoading(true);
     try {
-      this.lobbyPage.setRooms(await this.roomClient.listRooms());
+      const [rooms, scenes] = await Promise.all([
+        this.roomClient.listRooms(),
+        this.roomClient.listScenes(),
+      ]);
+      this.availableScenes = scenes;
+      this.lobbyPage.setRooms(rooms);
     } catch (error) {
       this.lobbyPage.setError(this.getErrorMessage(error));
     }
   }
 
   private openCreateRoom(temporaryName: string): void {
-    const page = new CreateRoomPage(temporaryName);
+    if (this.availableScenes.length === 0) {
+      this.lobbyPage.setError('没有可用地图，请检查 config/scenes 配置。');
+      return;
+    }
+    const page = new CreateRoomPage(temporaryName, this.availableScenes);
     page.onRequestClose(() => this.commonUI.pop(page));
     page.onSubmit((value) => void this.createAndJoinRoom(page, value));
     this.commonUI.push(page);
@@ -102,7 +145,7 @@ export class GrasslandScene extends Scene {
   private async createAndJoinRoom(page: CreateRoomPage, value: CreateRoomFormValue): Promise<void> {
     page.setBusy(true);
     try {
-      const room = await this.roomClient.createRoom(value.roomName);
+      const room = await this.roomClient.createRoom(value.roomName, value.sceneId);
       const joined = await this.roomClient.joinRoom(room.id, value.temporaryName);
       this.completeJoin(joined);
     } catch (error) {
@@ -128,7 +171,8 @@ export class GrasslandScene extends Scene {
     }
     this.joinedRoom = joined;
     this.snapshots.clear();
-    this.createPlayer(joined.player.spawn);
+    this.renderer.loadScene(joined.scene);
+    this.createPlayer(joined.player.spawn, joined.scene.gameplay.bounds);
     this.hud.setRoom(joined.room);
     this.commonUI.clear();
   }
@@ -163,9 +207,12 @@ export class GrasslandScene extends Scene {
     return error instanceof Error ? error.message : '发生了未知错误';
   }
 
-  private createPlayer(spawn: { x: number; z: number }): void {
+  private createPlayer(
+    spawn: { x: number; z: number },
+    bounds: JoinedRoom['scene']['gameplay']['bounds'],
+  ): void {
     if (this.player) return;
-    this.player = new PlayerEntity(this.canvas, spawn);
+    this.player = new PlayerEntity(this.canvas, spawn, this.input, bounds);
     this.renderer.addWorldObject(this.player.object3D);
     this.controls.setPlayerController(this.player.controller);
     this.timeSinceInputSent = 0;
@@ -174,11 +221,13 @@ export class GrasslandScene extends Scene {
   private destroyPlayer(): void {
     this.snapshots.clear();
     this.remotePlayers.clear();
-    if (!this.player) return;
-    this.controls.setPlayerController(undefined);
-    this.renderer.removeWorldObject(this.player.object3D);
-    this.player.dispose();
-    this.player = undefined;
+    if (this.player) {
+      this.controls.setPlayerController(undefined);
+      this.renderer.removeWorldObject(this.player.object3D);
+      this.player.dispose();
+      this.player = undefined;
+    }
+    this.renderer.showEmptyScene();
   }
 
   /**

@@ -25,6 +25,12 @@ export const PLAYER_BOUNDS = {
 export const SPAWN_SLOT_COUNT = 8;
 const SPAWN_CENTER_Z = 4.5;
 const SPAWN_RADIUS = 1.8;
+const DEFAULT_SPAWN_CONFIG = {
+  centerX: 0,
+  centerZ: SPAWN_CENTER_Z,
+  radius: SPAWN_RADIUS,
+  slots: SPAWN_SLOT_COUNT,
+};
 
 /**
  * @param {unknown} value
@@ -122,13 +128,19 @@ export function applyPlayerMovement(position, input, deltaSeconds, bounds = PLAY
 /**
  * 按房间座位号分配出生点，避免所有玩家叠在同一个坐标上。
  * @param {number} slot
+ * @param {{ centerX: number, centerZ: number, radius: number, slots: number }} [spawn]
+ * @param {PlayerBounds} [bounds]
  * @returns {PlayerPoint}
  */
-export function createSpawnPoint(slot) {
-  const index = Math.abs(Math.floor(toFiniteNumber(slot))) % SPAWN_SLOT_COUNT;
-  const angle = (index / SPAWN_SLOT_COUNT) * Math.PI * 2;
+export function createSpawnPoint(slot, spawn = DEFAULT_SPAWN_CONFIG, bounds = PLAYER_BOUNDS) {
+  const slotCount = Math.max(1, Math.floor(toFiniteNumber(spawn.slots, SPAWN_SLOT_COUNT)));
+  const index = Math.abs(Math.floor(toFiniteNumber(slot))) % slotCount;
+  const angle = (index / slotCount) * Math.PI * 2;
+  const centerX = toFiniteNumber(spawn.centerX);
+  const centerZ = toFiniteNumber(spawn.centerZ, SPAWN_CENTER_Z);
+  const radius = Math.max(0, toFiniteNumber(spawn.radius, SPAWN_RADIUS));
   return clampToPlayArea({
-    x: Math.sin(angle) * SPAWN_RADIUS,
-    z: SPAWN_CENTER_Z + Math.cos(angle) * SPAWN_RADIUS,
-  });
+    x: centerX + Math.sin(angle) * radius,
+    z: centerZ + Math.cos(angle) * radius,
+  }, bounds);
 }

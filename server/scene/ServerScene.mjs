@@ -1,4 +1,5 @@
 import {
+  PLAYER_BOUNDS,
   applyPlayerMovement,
   createSpawnPoint,
   normalizeAngle,
@@ -23,8 +24,11 @@ function roundCoordinate(value) {
  * 和朝向范围都握在服务端手上。
  */
 export class ServerScene {
-  constructor(id = 'grassland', options = {}) {
-    this.id = id;
+  constructor(sceneDefinition = { id: 'grassland' }, options = {}) {
+    const definition = typeof sceneDefinition === 'string' ? { id: sceneDefinition } : sceneDefinition;
+    this.id = definition.id;
+    this.bounds = definition.gameplay?.bounds ?? PLAYER_BOUNDS;
+    this.spawn = definition.gameplay?.spawn;
     this.tick = 0;
     this.players = new Map();
     this.now = options.now ?? (() => Date.now());
@@ -32,7 +36,7 @@ export class ServerScene {
   }
 
   addPlayer(player) {
-    const spawn = createSpawnPoint(player.slot ?? this.players.size);
+    const spawn = createSpawnPoint(player.slot ?? this.players.size, this.spawn, this.bounds);
     this.players.set(player.id, {
       id: player.id,
       name: player.name,
@@ -75,7 +79,7 @@ export class ServerScene {
     player.yaw = normalizeAngle(toFiniteNumber(message?.yaw, player.yaw));
 
     const move = sanitizeMoveInput({ ...message?.move, sprint: message?.sprint === true });
-    const next = applyPlayerMovement({ x: player.x, z: player.z }, move, granted);
+    const next = applyPlayerMovement({ x: player.x, z: player.z }, move, granted, this.bounds);
     const distance = Math.hypot(next.x - player.x, next.z - player.z);
     player.x = next.x;
     player.z = next.z;

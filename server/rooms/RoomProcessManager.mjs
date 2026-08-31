@@ -14,18 +14,23 @@ function sanitizeText(value, fallback, maximumLength) {
 export class RoomProcessManager extends EventEmitter {
   constructor(options = {}) {
     super();
-    this.capacity = options.capacity ?? 8;
+    this.capacity = options.capacity;
+    this.sceneCatalog = options.sceneCatalog;
     this.rooms = new Map();
     this.shuttingDown = false;
   }
 
-  async createRoom(name) {
+  async createRoom(name, requestedSceneId) {
+    if (!this.sceneCatalog) throw new Error('场景目录尚未配置');
+    const fallbackSceneId = this.sceneCatalog.list()[0]?.id;
+    const sceneDefinition = this.sceneCatalog.require(requestedSceneId || fallbackSceneId);
     const id = randomUUID();
     const record = {
       id,
       name: sanitizeText(name, `草地房间 ${this.rooms.size + 1}`, 28),
-      capacity: this.capacity,
-      sceneId: 'grassland',
+      capacity: this.capacity ?? sceneDefinition.capacity,
+      sceneId: sceneDefinition.id,
+      sceneDefinition,
       createdAt: new Date().toISOString(),
       child: undefined,
       players: new Map(),
@@ -38,7 +43,6 @@ export class RoomProcessManager extends EventEmitter {
         SKYLAND_ROOM_ID: record.id,
         SKYLAND_ROOM_NAME: record.name,
         SKYLAND_ROOM_CAPACITY: String(record.capacity),
-        SKYLAND_SCENE_ID: record.sceneId,
       },
       stdio: ['ignore', 'inherit', 'inherit', 'ipc'],
     });
@@ -69,6 +73,11 @@ export class RoomProcessManager extends EventEmitter {
 
       child.on('message', handleMessage);
       child.once('exit', handleExit);
+      child.send({
+        type: 'room:initialize',
+        room: { id: record.id, name: record.name, capacity: record.capacity },
+        scene: record.sceneDefinition,
+      });
     }).catch((error) => {
       this.rooms.delete(id);
       child.kill('SIGTERM');
@@ -100,13 +109,13 @@ export class RoomProcessManager extends EventEmitter {
       id: randomUUID(),
       name: sanitizeText(requestedName, `旅人-${Math.floor(1000 + Math.random() * 9000)}`, 20),
       slot,
-      spawn: createSpawnPoint(slot),
+      spawn: createSpawnPoint(slot, record.sceneDefinition.gameplay.spawn, record.sceneDefinition.gameplay.bounds),
     };
     record.players.set(player.id, player);
     record.child.send({ type: 'player:join', player });
     const room = this.toSummary(record);
     this.emit('summary', room);
-    return { room, player };
+    return { room, player, scene: record.sceneDefinition };
   }
 
   leaveRoom(roomId, playerId) {
@@ -167,6 +176,7 @@ export class RoomProcessManager extends EventEmitter {
       playerCount: record.players.size,
       capacity: record.capacity,
       sceneId: record.sceneId,
+      sceneName: record.sceneDefinition.displayName,
       createdAt: record.createdAt,
     };
   }

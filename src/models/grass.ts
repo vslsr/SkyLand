@@ -1,8 +1,7 @@
 import * as THREE from 'three';
-import { createFillMaterial } from '../materials/createFillMaterial';
+import { createFillMaterial, type FillMaterialEnvironment } from '../materials/createFillMaterial';
 import { createOutlinedObject } from './outlinedObject';
 
-const GRASS_MATERIAL = createFillMaterial(0xc1d7a6);
 const BLADE_GEOMETRY = new THREE.ConeGeometry(0.035, 1, 4, 1, false);
 
 interface GrassPatch {
@@ -28,7 +27,7 @@ const GRASS_PATCHES: readonly GrassPatch[] = [
   { position: [9.6, -12.0], bladeCount: 3, scale: 0.92, rotation: 1.5 },
 ];
 
-function createGrassPatch(patch: GrassPatch): THREE.Group {
+function createGrassPatch(patch: GrassPatch, material: THREE.Material): THREE.Group {
   const group = new THREE.Group();
   group.position.set(patch.position[0], 0, patch.position[1]);
   group.rotation.y = patch.rotation;
@@ -36,7 +35,7 @@ function createGrassPatch(patch: GrassPatch): THREE.Group {
   for (let index = 0; index < patch.bladeCount; index += 1) {
     const angle = (index / patch.bladeCount) * Math.PI * 2 + patch.rotation * 0.35;
     const height = (0.34 + index * 0.055) * patch.scale;
-    const blade = createOutlinedObject(BLADE_GEOMETRY, GRASS_MATERIAL);
+    const blade = createOutlinedObject(BLADE_GEOMETRY, material);
     blade.position.set(Math.cos(angle) * 0.09, height * 0.48, Math.sin(angle) * 0.09);
     blade.scale.set(1, height, 1);
     blade.rotation.x = Math.sin(angle) * 0.18;
@@ -47,8 +46,12 @@ function createGrassPatch(patch: GrassPatch): THREE.Group {
   return group;
 }
 
-export function createGrassField(): THREE.Group {
+export function createGrassField(
+  color: THREE.ColorRepresentation = 0xc1d7a6,
+  environment?: FillMaterialEnvironment,
+): THREE.Group {
   const grass = new THREE.Group();
-  for (const patch of GRASS_PATCHES) grass.add(createGrassPatch(patch));
+  const material = createFillMaterial(color, environment);
+  for (const patch of GRASS_PATCHES) grass.add(createGrassPatch(patch, material));
   return grass;
 }

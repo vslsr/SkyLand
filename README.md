@@ -8,23 +8,85 @@
 - `Scene` / `SceneManager` 场景生命周期
 - 每个 Scene 独立的 `CommonUIManager` 栈
 - 房间大厅、Grid 房间卡片和通用弹出窗体
-- Node.js 大厅进程、WebSocket 网关和每房间独立子进程
+- Node.js 单端口 Web/API/WebSocket 组合服务器和每房间独立 DS 子进程
 - 参考项目风格的透明软体史莱姆玩家
 - Fly / TopDown 双控制器自动切换
 - 服务端权威的移动同步：输入上行、快照广播、客户端预测与和解
 
 ## 运行与联机测试
 
-当前项目不需要额外开启“联机模式”。同时启动 Node.js 房间服务器和 Vite
-客户端后，创建或加入房间即可开始联机。
+环境要求：Node.js 20 或更高版本、npm。
+
+### 生产模式：一个 Node.js 同时提供 Web 与游戏 DS
+
+构建客户端并启动组合服务器：
+
+```powershell
+cd E:\h5\SkyLand
+npm run start:prod
+```
+
+`start:prod` 会先执行 TypeScript 检查和 Vite 生产构建，再启动 Node.js。已经存在
+最新 `dist/` 时，可以跳过重复构建：
+
+```powershell
+npm start
+```
+
+浏览器访问 `http://127.0.0.1:3090/`。同一个 Node.js HTTP Server 会同时提供：
+
+- `dist/` 下的 Web 客户端静态文件
+- `/api/*` 房间大厅接口
+- `/ws` WebSocket 游戏连接
+- 每个房间对应的独立 Node.js DS 子进程
+
+如果直接执行 `npm start` 但没有 `dist/index.html`，大厅 API 和 DS 仍会启动，Web
+页面返回 `503` 并提示先执行 `npm run build`。
+
+组合服务器默认监听 `0.0.0.0:3090`，局域网设备可直接使用服务器电脑的 IPv4
+地址访问。可以通过环境变量覆盖监听地址、端口和 Web 根目录：
+
+```powershell
+$env:SKYLAND_SERVER_HOST = '127.0.0.1'
+$env:SKYLAND_SERVER_PORT = '3090'
+$env:SKYLAND_WEB_ROOT = 'E:\h5\SkyLand\dist'
+npm start
+```
+
+组合服务入口：
+
+| 地址 | 用途 |
+| --- | --- |
+| `/` | Vite 构建后的 Web 客户端；无扩展名的客户端路由回退到 `index.html` |
+| `/api/health` | 服务角色、房间数量和 Web 构建状态 |
+| `/api/rooms` | 查询或创建房间 |
+| `/api/rooms/:id` | 删除指定房间 |
+| `/ws` | WebSocket 游戏会话、输入上行和快照广播 |
+
+健康检查示例：
+
+```json
+{
+  "ok": true,
+  "role": "web-and-dedicated-server",
+  "roomCount": 0,
+  "webReady": true
+}
+```
+
+### 开发模式：Vite 热更新 + Node.js DS
+
+当前项目不需要额外开启“联机模式”。开发时同时启动 Node.js 服务器和 Vite
+客户端，创建或加入房间即可开始联机。
 
 打开两个终端，并都进入项目目录：
 
 ```powershell
-cd D:\html5\SkyLand
+cd E:\h5\SkyLand
 ```
 
-第一个终端启动房间服务器：
+第一个终端启动 Node.js 组合服务器。开发模式下它负责 API、WebSocket 和 DS，静态
+页面由 Vite 提供：
 
 ```powershell
 npm run server
@@ -33,7 +95,7 @@ npm run server
 看到下面的信息表示服务器已经就绪：
 
 ```text
-SkyLand room server listening on http://127.0.0.1:3090
+SkyLand web + DS server listening on http://0.0.0.0:3090
 ```
 
 第二个终端启动网页客户端：
@@ -65,8 +127,9 @@ npm run kill-port
 npm run dev
 ```
 
-- 客户端：`http://127.0.0.1:5180`
-- 房间服务端：`http://127.0.0.1:3090`
+- 生产组合服务：`http://127.0.0.1:3090`
+- 开发客户端：`http://127.0.0.1:5180`
+- 开发房间服务端：`http://127.0.0.1:3090`
 - 生产预览：`http://127.0.0.1:4180`
 
 测试与构建：
@@ -76,8 +139,8 @@ npm test          # 服务端与客户端纯逻辑测试
 npm run build
 ```
 
-`tests/` 下的客户端测试由 Node.js 的类型剥离直接运行，只覆盖不依赖 DOM 与
-Three.js 的纯逻辑（和解、快照插值），因此不参与 `tsc` 构建。
+`tests/` 下的客户端测试通过项目内的轻量 TypeScript 测试加载器运行，只覆盖不依赖
+DOM 与 Three.js 的纯逻辑（标签、和解、快照插值），因此不参与 `tsc` 构建。
 
 ## CommonUI 事件栈
 
@@ -108,13 +171,33 @@ const page: CommonUIPage = {
 - Shift：加速移动。
 - 鼠标：通过透视射线投影到玩法 XY 平面，并让史莱姆面向投影点。玩法坐标的 Y 在 Three.js 世界中映射为地面的 Z 轴。
 
-史莱姆参考 `.cursor/line-art-style-magic-cabin-main/index.html`，使用三层透明材质、内部核心、气泡、阴影、顶点波动和移动压缩回弹。该参考路径也记录在 `.cursor/rules/line-art-reference.mdc` 中，作为项目始终生效的规范。
+史莱姆参考 `.cursor/demo/line-art-style-magic-cabin-main/index.html`，使用三层透明材质、内部核心、气泡、阴影、顶点波动和移动压缩回弹。`.cursor/demo/` 用于集中存放只读参考案例；该参考路径也记录在 `.cursor/rules/line-art-reference.mdc` 中，作为项目始终生效的规范。
 
 ## 房间进程
 
-客户端通过 HTTP 获取或创建房间，通过 `/ws` WebSocket 加入房间。大厅进程只管理连接和路由；`RoomProcessManager` 每创建一个房间都会使用 `child_process.fork()` 启动独立的 `room-worker.mjs`。
+生产环境只有一个对外端口。客户端页面、HTTP API 和 WebSocket 都进入同一个 Node.js
+HTTP Server；WebSocket 网关再把玩家输入路由到对应的房间 DS：
+
+```text
+浏览器 / PC WebView
+        │
+        ├── GET /、/assets/* ─────────→ StaticWebServer → dist/
+        ├── HTTP /api/* ──────────────→ ApiRouter → RoomProcessManager
+        └── WebSocket /ws ────────────→ WebSocketGateway
+                                                │ IPC
+                         ┌──────────────────────┼──────────────────────┐
+                         ↓                      ↓                      ↓
+                    room-worker A         room-worker B         room-worker C
+                    ServerScene           ServerScene           ServerScene
+```
+
+大厅进程只管理静态资源、连接与路由，不直接执行房间模拟。`RoomProcessManager` 每创建
+一个房间都会使用 `child_process.fork()` 启动独立的 `room-worker.mjs`。
 
 每个房间进程拥有自己的 `ServerScene`、玩家集合、输入队列和 20 Hz 更新循环。房间异常退出不会拖垮其他房间。
+
+收到 `SIGINT` 或 `SIGTERM` 时，组合服务器会关闭 WebSocket 网关、通知所有房间 DS
+退出，并在 HTTP Server 停止监听后结束主进程。
 
 ## 移动同步
 
@@ -176,6 +259,7 @@ const page: CommonUIPage = {
 - `src/models/`：程序化平地、树木和草丛
 - `src/materials/`：填充 Shader 与轮廓线材质
 - `server/network/`：WebSocket 网关
+- `server/http/`：API 路由、HTTP 响应和生产静态站点服务
 - `server/rooms/`：房间进程管理器与 worker
 - `server/scene/`：服务端权威场景状态
 - `shared/`：前后端共用的移动模拟与同步常量

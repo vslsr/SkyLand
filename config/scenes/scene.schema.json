@@ -1,0 +1,115 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://skyland.local/schema/scene.schema.json",
+  "title": "SkyLand Scene Definition",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "id",
+    "displayName",
+    "description",
+    "capacity",
+    "renderer",
+    "gameplay",
+    "camera"
+  ],
+  "properties": {
+    "$schema": { "type": "string" },
+    "schemaVersion": { "const": 1 },
+    "id": { "type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$" },
+    "displayName": { "type": "string", "minLength": 1, "maxLength": 32 },
+    "description": { "type": "string", "minLength": 1, "maxLength": 120 },
+    "capacity": { "type": "integer", "minimum": 1, "maximum": 64 },
+    "renderer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "background", "fog", "content", "palette"],
+      "properties": {
+        "type": { "const": "line-art" },
+        "background": { "$ref": "#/$defs/color" },
+        "fog": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["color", "near", "far"],
+          "properties": {
+            "color": { "$ref": "#/$defs/color" },
+            "near": { "type": "number", "minimum": 0 },
+            "far": { "type": "number", "exclusiveMinimum": 0 }
+          }
+        },
+        "content": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["ground", "trees", "grass"],
+          "properties": {
+            "ground": { "type": "boolean" },
+            "trees": { "type": "boolean" },
+            "grass": { "type": "boolean" }
+          }
+        },
+        "palette": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["ground", "grass", "treeTrunk", "treeNeedles"],
+          "properties": {
+            "ground": { "$ref": "#/$defs/color" },
+            "grass": { "$ref": "#/$defs/color" },
+            "treeTrunk": { "$ref": "#/$defs/color" },
+            "treeNeedles": { "$ref": "#/$defs/color" }
+          }
+        }
+      }
+    },
+    "gameplay": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["bounds", "spawn"],
+      "properties": {
+        "bounds": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["minimumX", "maximumX", "minimumZ", "maximumZ"],
+          "properties": {
+            "minimumX": { "type": "number" },
+            "maximumX": { "type": "number" },
+            "minimumZ": { "type": "number" },
+            "maximumZ": { "type": "number" }
+          }
+        },
+        "spawn": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["centerX", "centerZ", "radius", "slots"],
+          "properties": {
+            "centerX": { "type": "number" },
+            "centerZ": { "type": "number" },
+            "radius": { "type": "number", "minimum": 0 },
+            "slots": { "type": "integer", "minimum": 1, "maximum": 64 }
+          }
+        }
+      }
+    },
+    "camera": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["position", "yaw", "pitch"],
+      "properties": {
+        "position": {
+          "type": "array",
+          "minItems": 3,
+          "maxItems": 3,
+          "items": { "type": "number" }
+        },
+        "yaw": { "type": "number" },
+        "pitch": { "type": "number" }
+      }
+    }
+  },
+  "$defs": {
+    "color": {
+      "type": "string",
+      "pattern": "^#[0-9A-Fa-f]{6}$"
+    }
+  }
+}

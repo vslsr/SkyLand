@@ -122,7 +122,7 @@ export class RoomLobbyPage extends ModalWindow {
 
     const meta = document.createElement('span');
     meta.className = 'room-card__meta';
-    meta.textContent = `${room.playerCount} / ${room.capacity} 人`;
+    meta.textContent = `${room.sceneName} · ${room.playerCount} / ${room.capacity} 人`;
 
     const action = document.createElement('span');
     action.className = 'room-card__action';

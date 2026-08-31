@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { createFillMaterial } from '../materials/createFillMaterial';
+import { createFillMaterial, type FillMaterialEnvironment } from '../materials/createFillMaterial';
 import { GROUND_GRID_MATERIAL } from '../materials/lineMaterials';
 import { createOutlinedObject } from './outlinedObject';
 
@@ -25,12 +25,15 @@ function createGroundGrid(): THREE.LineSegments {
   return new THREE.LineSegments(geometry, GROUND_GRID_MATERIAL);
 }
 
-export function createGroundModel(): THREE.Group {
+export function createGroundModel(
+  color: THREE.ColorRepresentation = 0xf1eddf,
+  environment?: FillMaterialEnvironment,
+): THREE.Group {
   const ground = new THREE.Group();
   ground.position.z = GROUND_CENTER_Z;
 
   const planeGeometry = new THREE.PlaneGeometry(GROUND_WIDTH, GROUND_DEPTH);
-  const plane = createOutlinedObject(planeGeometry, createFillMaterial(0xf1eddf));
+  const plane = createOutlinedObject(planeGeometry, createFillMaterial(color, environment));
   plane.rotation.x = -Math.PI / 2;
   ground.add(plane);
   ground.add(createGroundGrid());

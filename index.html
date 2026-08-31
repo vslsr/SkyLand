@@ -12,10 +12,6 @@
         <canvas id="scene" aria-label="SkyLand 线稿树林场景"></canvas>
 
         <header class="hud hud--header">
-          <div class="brand">
-            <span class="brand__eyebrow">THREE.JS LINE STUDY · 01</span>
-            <h1>SkyLand</h1>
-          </div>
           <span class="style-badge">
             <strong id="room-label">未连接房间</strong>
             <i></i>
@@ -24,11 +20,43 @@
         </header>
 
         <div class="hud hud--footer">
-          <span><i class="status-dot"></i> THREE.JS · EDGES GEOMETRY</span>
           <span id="lock-hint">点击画面控制镜头</span>
         </div>
 
         <div id="crosshair" class="crosshair" aria-hidden="true"></div>
+
+        <div id="virtual-controls" class="virtual-controls" aria-label="触摸控制">
+          <div
+            id="virtual-move-stick"
+            class="virtual-stick"
+            role="group"
+            aria-label="移动摇杆"
+          >
+            <span class="virtual-stick__guide" aria-hidden="true"></span>
+            <span id="virtual-move-stick-knob" class="virtual-stick__knob" aria-hidden="true"></span>
+          </div>
+
+          <div class="virtual-buttons">
+            <button
+              id="virtual-sprint-button"
+              class="virtual-button virtual-button--sprint"
+              type="button"
+              aria-label="加速"
+            >RUN</button>
+            <button
+              id="virtual-interact-button"
+              class="virtual-button"
+              type="button"
+              aria-label="长按交互"
+            >HOLD</button>
+            <button
+              id="virtual-dodge-button"
+              class="virtual-button"
+              type="button"
+              aria-label="双击闪避"
+            >2×</button>
+          </div>
+        </div>
       </section>
 
       <div id="common-ui-root" class="common-ui-root" aria-label="通用界面层"></div>

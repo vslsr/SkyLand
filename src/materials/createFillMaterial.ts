@@ -1,5 +1,11 @@
 import * as THREE from 'three';
 
+export interface FillMaterialEnvironment {
+  fogColor: THREE.ColorRepresentation;
+  fogNear: number;
+  fogFar: number;
+}
+
 const VERTEX_SHADER = /* glsl */ `
   varying vec3 vWorldNormal;
   varying vec3 vWorldPosition;
@@ -40,16 +46,19 @@ const FRAGMENT_SHADER = /* glsl */ `
   }
 `;
 
-export function createFillMaterial(color: number): THREE.ShaderMaterial {
+export function createFillMaterial(
+  color: THREE.ColorRepresentation,
+  environment: FillMaterialEnvironment = { fogColor: 0xfdfbf6, fogNear: 22, fogFar: 52 },
+): THREE.ShaderMaterial {
   return new THREE.ShaderMaterial({
     vertexShader: VERTEX_SHADER,
     fragmentShader: FRAGMENT_SHADER,
     uniforms: {
       uColor: { value: new THREE.Color(color) },
       uSunDirection: { value: new THREE.Vector3(-0.55, 0.9, 0.35).normalize() },
-      uFogColor: { value: new THREE.Color(0xfdfbf6) },
-      uFogNear: { value: 22 },
-      uFogFar: { value: 52 },
+      uFogColor: { value: new THREE.Color(environment.fogColor) },
+      uFogNear: { value: environment.fogNear },
+      uFogFar: { value: environment.fogFar },
     },
     side: THREE.DoubleSide,
     polygonOffset: true,
