@@ -24,7 +24,9 @@ export const OCEAN_SURFACE_VERTEX_SHADER = /* glsl */ `
   uniform float uGridStep;
   uniform float uInterlaceStrength;
 
-  attribute vec3 color;
+  // color 由 Three.js 注入：材质设了 vertexColors，编译时会自动加上
+  // attribute vec3 color 的声明。这里再写一遍会得到 'color' : redefinition，
+  // 顶点着色器编译失败，整个海面就不会被画出来。
   varying vec3 vColor;
   varying vec3 vWorldPosition;
   varying float vWaveLight;
