@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>DRIFT — a poly ocean</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300;0,9..144,500;1,9..144,300&family=IBM+Plex+Mono:wght@300;400&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --ink: #eaf6f8;
+    --ink-dim: rgba(234, 246, 248, 0.55);
+    --accent: #ffd9a0;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; overflow: hidden; background: #04222f; }
+  canvas { display: block; }
+
+  /* ---------- atmosphere overlays ---------- */
+  .vignette {
+    position: fixed; inset: 0; pointer-events: none; z-index: 5;
+    background: radial-gradient(ellipse at 50% 45%, transparent 52%, rgba(2, 16, 24, 0.42) 100%);
+  }
+  .waterline {
+    position: fixed; inset: 0; pointer-events: none; z-index: 4;
+    background: linear-gradient(180deg, rgba(120, 220, 255, 0.07) 0%, transparent 18%);
+    mix-blend-mode: screen;
+  }
+  .grain {
+    position: fixed; inset: -50%; width: 200%; height: 200%;
+    pointer-events: none; z-index: 6; opacity: 0.05;
+    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+    animation: grain 7s steps(10) infinite;
+  }
+  @keyframes grain {
+    0%,100% { transform: translate(0,0); } 10% { transform: translate(-4%,-3%); }
+    30% { transform: translate(3%,-5%); } 50% { transform: translate(-5%,4%); }
+    70% { transform: translate(5%,2%); } 90% { transform: translate(-3%,5%); }
+  }
+
+  /* ---------- HUD ---------- */
+  .hud {
+    position: fixed; inset: 0; pointer-events: none; z-index: 10;
+    font-family: 'IBM Plex Mono', monospace; color: var(--ink);
+  }
+  .title {
+    position: absolute; top: 44px; left: 52px;
+    opacity: 0; animation: fadein 2.2s ease 0.6s forwards;
+  }
+  .title h1 {
+    font-family: 'Fraunces', serif; font-weight: 300; font-style: italic;
+    font-size: 34px; letter-spacing: 0.42em; text-indent: 0.42em;
+    color: var(--ink); text-shadow: 0 2px 24px rgba(0, 40, 60, 0.6);
+  }
+  .title p {
+    margin-top: 8px; font-size: 10px; font-weight: 300;
+    letter-spacing: 0.34em; text-transform: uppercase; color: var(--ink-dim);
+  }
+  .gauge {
+    position: absolute; bottom: 46px; left: 52px;
+    font-weight: 300; font-size: 12px; letter-spacing: 0.18em;
+    color: var(--ink-dim);
+    opacity: 0; animation: fadein 2.2s ease 1.2s forwards;
+  }
+  .gauge .depth {
+    display: block; font-size: 30px; font-weight: 400; letter-spacing: 0.08em;
+    color: var(--ink); margin-top: 4px;
+    font-variant-numeric: tabular-nums;
+  }
+  .gauge .depth small { font-size: 14px; color: var(--ink-dim); margin-left: 2px; }
+  .compass {
+    position: absolute; bottom: 46px; right: 52px; text-align: right;
+    font-weight: 300; font-size: 11px; letter-spacing: 0.3em;
+    color: var(--ink-dim);
+    opacity: 0; animation: fadein 2.2s ease 1.4s forwards;
+  }
+  .compass .hdg { font-size: 18px; color: var(--ink); letter-spacing: 0.12em; }
+
+  /* ---------- start prompt ---------- */
+  .prompt {
+    position: absolute; left: 50%; bottom: 72px; transform: translateX(-50%);
+    text-align: center; transition: opacity 0.6s ease;
+    opacity: 0; animation: fadein 2.2s ease 1.8s forwards;
+  }
+  .prompt .dive {
+    font-family: 'Fraunces', serif; font-style: italic; font-weight: 300;
+    font-size: 17px; letter-spacing: 0.22em; color: var(--accent);
+    animation: breathe 3.4s ease-in-out infinite;
+  }
+  .prompt .keys {
+    margin-top: 10px; font-size: 10px; letter-spacing: 0.26em;
+    text-transform: uppercase; color: var(--ink-dim);
+  }
+  .hud.diving .prompt { opacity: 0 !important; }
+  @keyframes breathe { 0%,100% { opacity: 0.55; } 50% { opacity: 1; } }
+  @keyframes fadein { to { opacity: 1; } }
+
+  /* ---------- intro fade ---------- */
+  .curtain {
+    position: fixed; inset: 0; background: #021018; z-index: 20;
+    pointer-events: none; animation: lift 3s ease 0.2s forwards;
+  }
+  @keyframes lift { to { opacity: 0; } }
+</style>
+</head>
+<body>
+  <div class="waterline"></div>
+  <div class="vignette"></div>
+  <div class="grain"></div>
+
+  <div class="hud" id="hud">
+    <div class="title">
+      <h1>DRIFT</h1>
+      <p>a poly ocean &mdash; somewhere shallow</p>
+    </div>
+    <div class="gauge">
+      DEPTH
+      <span class="depth"><span id="depthVal">0.0</span><small>m</small></span>
+    </div>
+    <div class="compass">
+      HEADING
+      <div class="hdg" id="hdgVal">N 000&deg;</div>
+    </div>
+    <div class="prompt" id="prompt">
+      <div class="dive">press W to engage</div>
+      <div class="keys">w s throttle &nbsp;&middot;&nbsp; a d steer &nbsp;&middot;&nbsp; space / c ballast &nbsp;&middot;&nbsp; shift boost &nbsp;&middot;&nbsp; drag orbit &nbsp;&middot;&nbsp; scroll zoom &nbsp;&middot;&nbsp; m sound</div>
+    </div>
+  </div>
+
+  <div class="curtain"></div>
+
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
+      "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/"
+    }
+  }
+  </script>
+  <script type="module" src="./main.js"></script>
+</body>
+</html>

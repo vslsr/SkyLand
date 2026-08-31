@@ -1,0 +1,36 @@
+{
+  "$schema": "./scene.schema.json",
+  "schemaVersion": 1,
+  "id": "open-world",
+  "displayName": "无边草原",
+  "description": "由世界种子确定性生成、按 chunk 流式加载的 512 米大世界。",
+  "capacity": 16,
+  "renderer": {
+    "type": "line-art",
+    "background": "#fdfbf6",
+    "fog": { "color": "#fdfbf6", "near": 22, "far": 52 },
+    "content": { "ground": true, "trees": true, "grass": true, "ocean": false },
+    "palette": {
+      "ground": "#f1eddf",
+      "grass": "#c1d7a6",
+      "treeTrunk": "#d6bea3",
+      "treeNeedles": "#cbdcbc"
+    },
+    "world": {
+      "loadRadius": 2,
+      "keepRadius": 3,
+      "rockColor": "#d4d0c6"
+    }
+  },
+  "gameplay": {
+    "bounds": { "minimumX": -192, "maximumX": 192, "minimumZ": -192, "maximumZ": 192 },
+    "spawn": { "centerX": 0, "centerZ": 0, "radius": 6, "slots": 16 }
+  },
+  "camera": {
+    "mode": "topdown",
+    "position": [0, 4.2, 13.5],
+    "yaw": 0,
+    "pitch": -0.12,
+    "moveSpeed": 6.5
+  }
+}

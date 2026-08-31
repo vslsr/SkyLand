@@ -7,7 +7,15 @@ import {
   DEFAULT_WORLD_SEED,
   toWorldSeed,
 } from '../../shared/world/worldConfig.mjs';
+import type { FillMaterialEnvironment } from '../materials/createFillMaterial';
+import { OUTLINE_MATERIAL, GROUND_GRID_MATERIAL } from '../materials/lineMaterials';
+import { createChunkFillMaterial } from '../models/chunkMesh';
+import { registerChunkTemplates, type ChunkTemplateOptions } from '../models/chunkTemplates';
+import { createChunkGridGeometry } from '../models/ground';
+import type { SceneUpdateContext, SceneVisualSystem } from '../scene/SceneVisualSystem';
+import type { WorldStreamingDefinition } from '../scenes/data/SceneDefinition';
 import { ChunkView } from './ChunkView';
+import { createChunkGenerator } from './loadChunkGenerator';
 
 interface PendingChunk {
   chunkX: number;
@@ -15,8 +23,16 @@ interface PendingChunk {
   key: string;
 }
 
+export interface ChunkStreamerOptions {
+  world: WorldStreamingDefinition;
+  templates: ChunkTemplateOptions;
+  environment: FillMaterialEnvironment;
+  /** 房间分配的世界种子。种子决定这一局的世界，缺省时退回默认种子。 */
+  worldSeed?: number;
+}
+
 /**
- * 按焦点位置流式加载 chunk。
+ * 按焦点位置流式加载 chunk 的场景系统。
  *
  * 两条纪律决定了它能不能扛住大世界：
  *
@@ -25,18 +41,34 @@ interface PendingChunk {
  * 2. **每帧只建有限个 chunk。** 玩家高速穿越时一次要补十几个 chunk，
  *    不限额就是一次明显的卡顿；限额之后补齐会晚几帧，但雾效盖住了这段延迟。
  */
-export class ChunkStreamer {
+export class ChunkStreamer implements SceneVisualSystem {
   public readonly root = new THREE.Group();
 
+  private readonly world: WorldStreamingDefinition;
   private readonly views = new Map<string, ChunkView>();
+  private readonly fillMaterial: THREE.Material;
+  private readonly gridGeometry: THREE.BufferGeometry;
   private pending: PendingChunk[] = [];
   private generator?: ChunkGenerator;
-  private worldSeed = toWorldSeed(DEFAULT_WORLD_SEED);
+  private readonly worldSeed: number;
   private centerX?: number;
   private centerZ?: number;
+  private disposed = false;
 
-  public constructor() {
+  public constructor(options: ChunkStreamerOptions) {
     this.root.name = 'chunk-streamer';
+    this.world = options.world;
+    this.worldSeed = toWorldSeed(options.worldSeed ?? DEFAULT_WORLD_SEED);
+    this.fillMaterial = createChunkFillMaterial(options.environment);
+    this.gridGeometry = createChunkGridGeometry();
+
+    // 生成后端是异步取回来的；在它就位之前 update 不建任何东西，
+    // 世界会晚一两帧出现，这比先用一套参数铺一遍再重铺要划算。
+    void createChunkGenerator().then((generator) => {
+      if (this.disposed) return;
+      registerChunkTemplates(generator, options.templates);
+      this.setGenerator(generator);
+    });
   }
 
   /** 当前用的是哪个生成后端，用于 HUD 与排查问题。 */
@@ -53,37 +85,24 @@ export class ChunkStreamer {
   }
 
   /**
-   * 接入生成后端。WASM 是异步加载的，接入之前 update 不做任何事，
-   * 世界会晚一帧出现——比先用 JS 建一遍再用 WASM 重建一遍要划算。
+   * 每帧调用。焦点通常是玩家位置；还没有玩家时是相机位置，
+   * 这样大厅背后看到的也是一片正常的世界。
    */
-  public setGenerator(generator: ChunkGenerator): void {
-    this.generator = generator;
-    generator.setSeed(this.worldSeed);
-    this.rebuild();
-  }
+  public update(_deltaSeconds: number, _elapsedSeconds: number, context?: SceneUpdateContext): void {
+    if (!this.generator || !context) return;
 
-  /** 切换世界种子。种子变了就是另一个世界，已经建好的 chunk 全部作废。 */
-  public setWorldSeed(seed: number): void {
-    const next = toWorldSeed(seed);
-    if (next === this.worldSeed) return;
-    this.worldSeed = next;
-    this.generator?.setSeed(next);
-    this.rebuild();
-  }
-
-  /**
-   * 每帧调用，focus 通常是玩家位置；还没有玩家时用飞行相机的位置，
-   * 这样大厅里看到的也是一片正常的世界。
-   */
-  public update(focusX: number, focusZ: number): void {
-    if (!this.generator) return;
-
-    const centerX = toChunkCoordinate(focusX);
-    const centerZ = toChunkCoordinate(focusZ);
+    const centerX = toChunkCoordinate(context.focusX);
+    const centerZ = toChunkCoordinate(context.focusZ);
     if (centerX !== this.centerX || centerZ !== this.centerZ) {
       this.centerX = centerX;
       this.centerZ = centerZ;
-      const plan = planChunkStream({ focusX, focusZ, loadedKeys: this.views.keys() });
+      const plan = planChunkStream({
+        focusX: context.focusX,
+        focusZ: context.focusZ,
+        loadedKeys: this.views.keys(),
+        loadRadius: this.world.loadRadius,
+        keepRadius: this.world.keepRadius,
+      });
       for (const key of plan.unload) this.unmount(key);
       this.pending = plan.load;
     }
@@ -91,9 +110,19 @@ export class ChunkStreamer {
     this.drainBuildBudget();
   }
 
+  /** 场景卸载时释放这个流式世界独占的显存。 */
   public dispose(): void {
-    this.rebuild();
+    this.disposed = true;
+    this.clearChunks();
+    this.gridGeometry.dispose();
+    this.fillMaterial.dispose();
     this.generator = undefined;
+  }
+
+  private setGenerator(generator: ChunkGenerator): void {
+    this.generator = generator;
+    generator.setSeed(this.worldSeed);
+    this.clearChunks();
   }
 
   private drainBuildBudget(): void {
@@ -114,6 +143,8 @@ export class ChunkStreamer {
         chunk.chunkX,
         chunk.chunkZ,
         this.generator.buildChunk(chunk.chunkX, chunk.chunkZ),
+        { fill: this.fillMaterial, outline: OUTLINE_MATERIAL, grid: GROUND_GRID_MATERIAL },
+        this.gridGeometry,
       );
       this.views.set(chunk.key, view);
       this.root.add(view.root);
@@ -133,7 +164,7 @@ export class ChunkStreamer {
   }
 
   /** 清空全部 chunk 并让下一次 update 重新规划。 */
-  private rebuild(): void {
+  private clearChunks(): void {
     for (const key of Array.from(this.views.keys())) this.unmount(key);
     this.pending = [];
     this.centerX = undefined;

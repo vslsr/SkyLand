@@ -6,8 +6,6 @@
  * 这里只依赖纯数学，不引入 Three.js 或任何浏览器 API。
  */
 
-import { WORLD_PLAY_AREA } from './world/worldConfig.mjs';
-
 /** @typedef {{ x: number, z: number }} PlayerPoint */
 /** @typedef {{ x: number, z: number, sprint: boolean }} PlayerMoveInput */
 /** @typedef {{ minimumX: number, maximumX: number, minimumZ: number, maximumZ: number }} PlayerBounds */
@@ -16,23 +14,23 @@ export const PLAYER_MOVE_SPEED = 3.2;
 export const PLAYER_SPRINT_MULTIPLIER = 1.65;
 export const PLAYER_MAXIMUM_SPEED = PLAYER_MOVE_SPEED * PLAYER_SPRINT_MULTIPLIER;
 
-/**
- * 玩法平面的活动范围。
- *
- * 大世界的地形由 chunk 按种子生成，活动范围比生成范围向内收了一圈，
- * 玩家因此永远走不到没有内容的世界边缘旁边。
- * @type {PlayerBounds}
- */
+/** 玩法平面的活动范围，与草地模型的尺寸对应。 @type {PlayerBounds} */
 export const PLAYER_BOUNDS = {
-  minimumX: WORLD_PLAY_AREA.minimumX,
-  maximumX: WORLD_PLAY_AREA.maximumX,
-  minimumZ: WORLD_PLAY_AREA.minimumZ,
-  maximumZ: WORLD_PLAY_AREA.maximumZ,
+  minimumX: -16,
+  maximumX: 16,
+  minimumZ: -21,
+  maximumZ: 11,
 };
 
 export const SPAWN_SLOT_COUNT = 8;
-const SPAWN_CENTER_Z = 0;
-const SPAWN_RADIUS = 6;
+const SPAWN_CENTER_Z = 4.5;
+const SPAWN_RADIUS = 1.8;
+const DEFAULT_SPAWN_CONFIG = {
+  centerX: 0,
+  centerZ: SPAWN_CENTER_Z,
+  radius: SPAWN_RADIUS,
+  slots: SPAWN_SLOT_COUNT,
+};
 
 /**
  * @param {unknown} value
@@ -130,13 +128,19 @@ export function applyPlayerMovement(position, input, deltaSeconds, bounds = PLAY
 /**
  * 按房间座位号分配出生点，避免所有玩家叠在同一个坐标上。
  * @param {number} slot
+ * @param {{ centerX: number, centerZ: number, radius: number, slots: number }} [spawn]
+ * @param {PlayerBounds} [bounds]
  * @returns {PlayerPoint}
  */
-export function createSpawnPoint(slot) {
-  const index = Math.abs(Math.floor(toFiniteNumber(slot))) % SPAWN_SLOT_COUNT;
-  const angle = (index / SPAWN_SLOT_COUNT) * Math.PI * 2;
+export function createSpawnPoint(slot, spawn = DEFAULT_SPAWN_CONFIG, bounds = PLAYER_BOUNDS) {
+  const slotCount = Math.max(1, Math.floor(toFiniteNumber(spawn.slots, SPAWN_SLOT_COUNT)));
+  const index = Math.abs(Math.floor(toFiniteNumber(slot))) % slotCount;
+  const angle = (index / slotCount) * Math.PI * 2;
+  const centerX = toFiniteNumber(spawn.centerX);
+  const centerZ = toFiniteNumber(spawn.centerZ, SPAWN_CENTER_Z);
+  const radius = Math.max(0, toFiniteNumber(spawn.radius, SPAWN_RADIUS));
   return clampToPlayArea({
-    x: Math.sin(angle) * SPAWN_RADIUS,
-    z: SPAWN_CENTER_Z + Math.cos(angle) * SPAWN_RADIUS,
-  });
+    x: centerX + Math.sin(angle) * radius,
+    z: centerZ + Math.cos(angle) * radius,
+  }, bounds);
 }

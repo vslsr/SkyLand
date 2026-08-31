@@ -1,0 +1,31 @@
+{
+  "$schema": "./scene.schema.json",
+  "schemaVersion": 1,
+  "id": "open-meadow",
+  "displayName": "风吹原野",
+  "description": "移除树林、视野更开阔的暖色草地，适合观察多人移动。",
+  "capacity": 8,
+  "renderer": {
+    "type": "line-art",
+    "background": "#f8f3e7",
+    "fog": { "color": "#f8f3e7", "near": 18, "far": 46 },
+    "content": { "ground": true, "trees": false, "grass": true, "ocean": false },
+    "palette": {
+      "ground": "#eee5cf",
+      "grass": "#d4c99d",
+      "treeTrunk": "#d6bea3",
+      "treeNeedles": "#cbdcbc"
+    }
+  },
+  "gameplay": {
+    "bounds": { "minimumX": -16, "maximumX": 16, "minimumZ": -21, "maximumZ": 11 },
+    "spawn": { "centerX": 0, "centerZ": 3.5, "radius": 2.4, "slots": 8 }
+  },
+  "camera": {
+    "mode": "topdown",
+    "position": [0, 5.2, 15],
+    "yaw": 0,
+    "pitch": -0.18,
+    "moveSpeed": 6.5
+  }
+}

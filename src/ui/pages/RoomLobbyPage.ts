@@ -1,11 +1,8 @@
 import type { RoomSummary } from '../../network/RoomClient';
+import { createTemporaryName } from '../../../shared/temporaryName.mjs';
 import { ModalWindow } from '../common/ModalWindow';
 
 type JoinHandler = (room: RoomSummary, temporaryName: string) => void;
-
-function createTemporaryName(): string {
-  return `旅人-${Math.floor(1000 + Math.random() * 9000)}`;
-}
 
 export class RoomLobbyPage extends ModalWindow {
   private readonly roomGrid = document.createElement('div');
@@ -16,6 +13,7 @@ export class RoomLobbyPage extends ModalWindow {
   private joinHandler?: JoinHandler;
   private createHandler?: (temporaryName: string) => void;
   private refreshHandler?: () => void;
+  private readonly expiredRoomRefreshes = new Set<string>();
 
   public constructor() {
     super({
@@ -58,6 +56,7 @@ export class RoomLobbyPage extends ModalWindow {
     this.createButton.innerHTML = '<span>＋</span> 创建新房间';
     this.createButton.addEventListener('click', () => this.createHandler?.(this.getTemporaryName()));
     this.footerElement.append(this.createButton);
+    window.setInterval(() => this.updateIdleCountdowns(), 250);
   }
 
   public onJoin(handler: JoinHandler): void {
@@ -84,6 +83,7 @@ export class RoomLobbyPage extends ModalWindow {
   }
 
   public setRooms(rooms: RoomSummary[]): void {
+    this.expiredRoomRefreshes.clear();
     this.statusElement.classList.remove('is-error');
     this.statusElement.textContent = rooms.length === 0 ? '现在还没有房间，创建第一个吧。' : '';
     this.roomGrid.replaceChildren(...rooms.map((room) => this.createRoomCard(room)));
@@ -122,13 +122,39 @@ export class RoomLobbyPage extends ModalWindow {
 
     const meta = document.createElement('span');
     meta.className = 'room-card__meta';
-    meta.textContent = `${room.playerCount} / ${room.capacity} 人`;
+    meta.textContent = `${room.sceneName} · ${room.playerCount} / ${room.capacity} 人`;
+
+    const countdown = document.createElement('span');
+    countdown.className = 'room-card__countdown';
+    countdown.dataset.roomId = room.id;
+    if (room.idleExpiresAt) countdown.dataset.idleExpiresAt = room.idleExpiresAt;
+    countdown.textContent = room.idleExpiresAt ? this.formatIdleCountdown(room.idleExpiresAt) : '房间使用中';
 
     const action = document.createElement('span');
     action.className = 'room-card__action';
     action.textContent = full ? '已满' : '加入 →';
-    card.append(index, name, meta, action);
+    card.append(index, name, meta, countdown, action);
     card.addEventListener('click', () => this.joinHandler?.(room, this.getTemporaryName()));
     return card;
+  }
+
+  private updateIdleCountdowns(): void {
+    for (const element of this.roomGrid.querySelectorAll<HTMLElement>('[data-idle-expires-at]')) {
+      const expiresAt = element.dataset.idleExpiresAt;
+      const roomId = element.dataset.roomId;
+      if (!expiresAt || !roomId) continue;
+      element.textContent = this.formatIdleCountdown(expiresAt);
+      if (Date.parse(expiresAt) <= Date.now() && !this.expiredRoomRefreshes.has(roomId)) {
+        this.expiredRoomRefreshes.add(roomId);
+        this.refreshHandler?.();
+      }
+    }
+  }
+
+  private formatIdleCountdown(expiresAt: string): string {
+    const remainingSeconds = Math.max(0, Math.ceil((Date.parse(expiresAt) - Date.now()) / 1000));
+    const minutes = Math.floor(remainingSeconds / 60);
+    const seconds = String(remainingSeconds % 60).padStart(2, '0');
+    return remainingSeconds > 0 ? `空置回收 ${minutes}:${seconds}` : '正在回收…';
   }
 }

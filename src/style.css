@@ -26,7 +26,8 @@ body {
 }
 
 button,
-input {
+input,
+select {
   color: inherit;
   font: inherit;
 }
@@ -67,33 +68,43 @@ button:disabled {
   right: 0;
   left: 0;
   align-items: flex-start;
-  justify-content: space-between;
+  justify-content: flex-end;
   padding: clamp(22px, 4vw, 54px) clamp(22px, 4.6vw, 72px);
 }
 
-.brand__eyebrow,
+.game-menu-launcher {
+  position: fixed;
+  top: clamp(22px, 4vw, 54px);
+  left: clamp(22px, 4.6vw, 72px);
+  z-index: 4;
+  width: 38px;
+  height: 30px;
+  padding: 0 0 6px;
+  color: rgba(28, 26, 23, 0.44);
+  font-size: 15px;
+  letter-spacing: 0.08em;
+  background: rgba(253, 251, 246, 0.45);
+  border: 1px solid rgba(28, 26, 23, 0.16);
+  transition: color 140ms ease, background 140ms ease, border-color 140ms ease;
+}
+
+.game-menu-launcher[hidden] {
+  display: none;
+}
+
+.game-menu-launcher:hover,
+.game-menu-launcher:focus-visible {
+  color: rgba(28, 26, 23, 0.86);
+  background: rgba(253, 251, 246, 0.88);
+  border-color: rgba(28, 26, 23, 0.38);
+}
+
 .modal-window__kicker,
 .style-badge,
 .hud--footer,
 .room-card__index {
   letter-spacing: 0.18em;
   text-transform: uppercase;
-}
-
-.brand__eyebrow {
-  display: block;
-  margin-bottom: 5px;
-  color: rgba(28, 26, 23, 0.52);
-  font-size: 9px;
-  font-weight: 700;
-}
-
-.brand h1 {
-  margin: 0;
-  font-family: Georgia, "Times New Roman", serif;
-  font-size: clamp(26px, 3vw, 42px);
-  font-style: italic;
-  line-height: 1;
 }
 
 .style-badge {
@@ -126,19 +137,10 @@ button:disabled {
   right: clamp(22px, 4.6vw, 72px);
   bottom: 24px;
   left: clamp(22px, 4.6vw, 72px);
-  justify-content: space-between;
+  justify-content: flex-end;
   color: rgba(28, 26, 23, 0.48);
   font-size: 8px;
   font-weight: 700;
-}
-
-.status-dot {
-  display: inline-block;
-  width: 5px;
-  height: 5px;
-  margin-right: 8px;
-  background: #7b9a62;
-  border-radius: 50%;
 }
 
 .crosshair {
@@ -157,6 +159,80 @@ button:disabled {
 
 body.is-locked .crosshair {
   opacity: 0.8;
+}
+
+.virtual-controls {
+  position: fixed;
+  inset: 0;
+  z-index: 4;
+  display: none;
+  align-items: flex-end;
+  justify-content: space-between;
+  padding: 24px;
+  pointer-events: none;
+}
+
+.virtual-stick {
+  position: relative;
+  display: grid;
+  width: 132px;
+  height: 132px;
+  touch-action: none;
+  pointer-events: auto;
+  place-items: center;
+  border: 1px solid rgba(28, 26, 23, 0.32);
+  border-radius: 50%;
+  background: rgba(253, 251, 246, 0.42);
+}
+
+.virtual-stick__guide {
+  width: 72%;
+  height: 72%;
+  border: 1px dashed rgba(28, 26, 23, 0.2);
+  border-radius: 50%;
+}
+
+.virtual-stick__knob {
+  position: absolute;
+  width: 46px;
+  height: 46px;
+  border: 1px solid rgba(28, 26, 23, 0.72);
+  border-radius: 50%;
+  background: rgba(220, 230, 202, 0.86);
+  box-shadow: 4px 5px 0 rgba(28, 26, 23, 0.09);
+}
+
+.virtual-stick.is-active,
+.virtual-button.is-active {
+  border-color: #1c1a17;
+  background: rgba(220, 230, 202, 0.94);
+}
+
+.virtual-buttons {
+  display: grid;
+  grid-template-columns: repeat(2, 58px);
+  gap: 10px;
+  align-items: end;
+  pointer-events: auto;
+}
+
+.virtual-button {
+  width: 58px;
+  height: 58px;
+  padding: 0;
+  touch-action: none;
+  color: rgba(28, 26, 23, 0.76);
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  background: rgba(253, 251, 246, 0.62);
+  border: 1px solid rgba(28, 26, 23, 0.4);
+  border-radius: 50%;
+}
+
+.virtual-button--sprint {
+  grid-row: span 2;
+  align-self: center;
 }
 
 .common-ui-root {
@@ -339,7 +415,8 @@ body.is-locked .crosshair {
   letter-spacing: 0.12em;
 }
 
-.field-control input {
+.field-control input,
+.field-control select {
   width: 100%;
   height: 40px;
   padding: 0 12px;
@@ -349,7 +426,8 @@ body.is-locked .crosshair {
   outline: 0;
 }
 
-.field-control input:focus {
+.field-control input:focus,
+.field-control select:focus {
   background: #fffef9;
   border-color: #6f855c;
   box-shadow: 0 0 0 2px rgba(111, 133, 92, 0.15);
@@ -473,6 +551,30 @@ body.is-locked .crosshair {
   .style-badge i,
   #room-population {
     display: none;
+  }
+}
+
+.room-card__countdown {
+  margin-top: 5px;
+  color: rgba(111, 48, 40, 0.7);
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+}
+
+.paper-button--danger {
+  color: #6f3028;
+  border-color: rgba(111, 48, 40, 0.5);
+}
+
+.paper-button--danger:not(:disabled):hover {
+  color: #fdfbf6;
+  background: #6f3028;
+}
+
+@media (hover: none), (pointer: coarse) {
+  body.is-topdown .virtual-controls {
+    display: flex;
   }
 }
 

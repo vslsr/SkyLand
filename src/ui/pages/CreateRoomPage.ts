@@ -1,18 +1,21 @@
 import { ModalWindow } from '../common/ModalWindow';
+import type { SceneSummary } from '../../scenes/data/SceneDefinition';
 
 export interface CreateRoomFormValue {
   roomName: string;
   temporaryName: string;
+  sceneId: string;
 }
 
 export class CreateRoomPage extends ModalWindow {
   private readonly roomNameInput = document.createElement('input');
   private readonly temporaryNameInput = document.createElement('input');
+  private readonly sceneSelect = document.createElement('select');
   private readonly submitButton = document.createElement('button');
   private readonly errorElement = document.createElement('p');
   private submitHandler?: (value: CreateRoomFormValue) => void;
 
-  public constructor(temporaryName: string) {
+  public constructor(temporaryName: string, scenes: readonly SceneSummary[]) {
     super({
       id: 'create-room',
       kicker: 'NEW ROOM PROCESS',
@@ -33,8 +36,16 @@ export class CreateRoomPage extends ModalWindow {
     this.temporaryNameInput.value = temporaryName;
     this.temporaryNameInput.autocomplete = 'off';
 
+    for (const scene of scenes) {
+      const option = document.createElement('option');
+      option.value = scene.id;
+      option.textContent = `${scene.displayName} · ${scene.description}`;
+      this.sceneSelect.append(option);
+    }
+
     form.append(
       this.createField('房间名称', this.roomNameInput),
+      this.createField('地图', this.sceneSelect),
       this.createField('你的临时名称', this.temporaryNameInput),
     );
     form.addEventListener('submit', (event) => {
@@ -46,7 +57,12 @@ export class CreateRoomPage extends ModalWindow {
         this.roomNameInput.focus();
         return;
       }
-      this.submitHandler?.({ roomName, temporaryName: playerName });
+      if (!this.sceneSelect.value) {
+        this.setError('请选择地图。');
+        this.sceneSelect.focus();
+        return;
+      }
+      this.submitHandler?.({ roomName, temporaryName: playerName, sceneId: this.sceneSelect.value });
     });
     this.bodyElement.append(form, this.errorElement);
 
@@ -68,6 +84,7 @@ export class CreateRoomPage extends ModalWindow {
   public setBusy(busy: boolean): void {
     this.roomNameInput.disabled = busy;
     this.temporaryNameInput.disabled = busy;
+    this.sceneSelect.disabled = busy;
     this.submitButton.disabled = busy;
     this.submitButton.textContent = busy ? '正在启动房间进程…' : '创建并加入 →';
   }
@@ -77,7 +94,7 @@ export class CreateRoomPage extends ModalWindow {
     this.errorElement.textContent = message;
   }
 
-  private createField(label: string, input: HTMLInputElement): HTMLLabelElement {
+  private createField(label: string, input: HTMLInputElement | HTMLSelectElement): HTMLLabelElement {
     const field = document.createElement('label');
     field.className = 'field-control';
     const caption = document.createElement('span');

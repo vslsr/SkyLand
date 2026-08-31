@@ -1,3 +1,3 @@
-export { ChunkStreamer } from './ChunkStreamer';
+export { ChunkStreamer, type ChunkStreamerOptions } from './ChunkStreamer';
 export { ChunkView } from './ChunkView';
-export { loadChunkGenerator } from './loadChunkGenerator';
+export { createChunkGenerator } from './loadChunkGenerator';

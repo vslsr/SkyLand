@@ -1,0 +1,31 @@
+{
+  "$schema": "./scene.schema.json",
+  "schemaVersion": 1,
+  "id": "grassland",
+  "displayName": "线稿草地",
+  "description": "树木、草丛与纸张色雾气构成的经典 SkyLand 草地。",
+  "capacity": 8,
+  "renderer": {
+    "type": "line-art",
+    "background": "#fdfbf6",
+    "fog": { "color": "#fdfbf6", "near": 22, "far": 52 },
+    "content": { "ground": true, "trees": true, "grass": true, "ocean": false },
+    "palette": {
+      "ground": "#f1eddf",
+      "grass": "#c1d7a6",
+      "treeTrunk": "#d6bea3",
+      "treeNeedles": "#cbdcbc"
+    }
+  },
+  "gameplay": {
+    "bounds": { "minimumX": -16, "maximumX": 16, "minimumZ": -21, "maximumZ": 11 },
+    "spawn": { "centerX": 0, "centerZ": 4.5, "radius": 1.8, "slots": 8 }
+  },
+  "camera": {
+    "mode": "topdown",
+    "position": [0, 4.2, 13.5],
+    "yaw": 0,
+    "pitch": -0.12,
+    "moveSpeed": 6.5
+  }
+}

@@ -1,0 +1,47 @@
+{
+  "$schema": "./scene.schema.json",
+  "schemaVersion": 1,
+  "id": "water",
+  "displayName": "线稿海域",
+  "description": "低多边形线稿、交错起伏与客户端浮力演示构成的纸绘海域。",
+  "capacity": 8,
+  "renderer": {
+    "type": "line-art",
+    "background": "#f5f2e9",
+    "fog": { "color": "#f5f2e9", "near": 34, "far": 82 },
+    "content": { "ground": false, "trees": false, "grass": false, "ocean": true },
+    "palette": {
+      "ground": "#eee5cf",
+      "grass": "#c1d7a6",
+      "treeTrunk": "#d6bea3",
+      "treeNeedles": "#cbdcbc"
+    },
+    "ocean": {
+      "size": 112,
+      "segments": 28,
+      "waveHeight": 0.32,
+      "waveSpeed": 0.82,
+      "noiseScale": 0.085,
+      "noiseStrength": 1.15,
+      "interlaceStrength": 0.42,
+      "surfaceColor": "#d7e7e5",
+      "secondaryColor": "#c6dcdb",
+      "gridLineColor": "#617f82",
+      "gridLineOpacity": 0.28,
+      "foamColor": "#fffdf7",
+      "demoRaft": true
+    }
+  },
+  "gameplay": {
+    "bounds": { "minimumX": -48, "maximumX": 48, "minimumZ": -48, "maximumZ": 48 },
+    "spawn": { "centerX": 0, "centerZ": 0, "radius": 3, "slots": 8 },
+    "water": { "seaLevel": 0 }
+  },
+  "camera": {
+    "mode": "fly",
+    "position": [10, 6.5, 16],
+    "yaw": -0.45,
+    "pitch": -0.24,
+    "moveSpeed": 9
+  }
+}

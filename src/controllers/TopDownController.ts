@@ -4,6 +4,11 @@ import { createCameraViewMatrix } from '../camera/cameraMath';
 import type { Vec3 } from '../math/vec3';
 import { cross, normalize } from '../math/vec3';
 import {
+  PlayerInputTags,
+  type InputActionEvent,
+  type InputSubsystem,
+} from '../input/index';
+import {
   PLAYER_BOUNDS,
   PLAYER_MOVE_SPEED,
   PLAYER_SPRINT_MULTIPLIER,
@@ -13,21 +18,25 @@ import {
   normalizeAngle,
 } from '../../shared/playerMovement.mjs';
 import type { PlayerInputFrame } from '../network/protocol';
+import type { SceneBounds } from '../scenes/data/SceneDefinition';
 import type * as THREE from 'three';
 
 export interface TopDownControllerOptions {
   enabled?: boolean;
   cameraOffset?: Vec3;
   fieldOfViewDegrees?: number;
+  bounds?: SceneBounds;
 }
 
 export class TopDownController {
   private readonly canvas: HTMLCanvasElement;
   private readonly player: THREE.Object3D;
-  private readonly pressedKeys = new Set<string>();
+  private readonly inputDisposers: Array<() => void> = [];
   private readonly cameraOffset: Vec3;
   private readonly fieldOfViewRadians: number;
   private readonly pointer = { x: 0, y: 0, available: false };
+  private readonly movementInput = { x: 0, y: 0 };
+  private readonly bounds: SceneBounds;
   private enabled: boolean;
   private facingYaw = Math.PI;
   private currentSpeed = 0;
@@ -35,13 +44,20 @@ export class TopDownController {
   private moveZ = 0;
   private sprinting = false;
 
-  public constructor(canvas: HTMLCanvasElement, player: THREE.Object3D, options: TopDownControllerOptions = {}) {
+  public constructor(
+    canvas: HTMLCanvasElement,
+    player: THREE.Object3D,
+    input: InputSubsystem,
+    options: TopDownControllerOptions = {},
+  ) {
     this.canvas = canvas;
     this.player = player;
     this.enabled = options.enabled ?? true;
     this.cameraOffset = options.cameraOffset ?? [5.5, 7.5, 8.5];
+    this.bounds = options.bounds ?? PLAYER_BOUNDS;
     this.fieldOfViewRadians = ((options.fieldOfViewDegrees ?? 50) * Math.PI) / 180;
-    this.bindEvents();
+    this.bindInput(input);
+    this.bindPointerEvents();
   }
 
   public get frame(): CameraFrame {
@@ -82,7 +98,8 @@ export class TopDownController {
   public setInputEnabled(enabled: boolean): void {
     this.enabled = enabled;
     if (!enabled) {
-      this.pressedKeys.clear();
+      this.movementInput.x = 0;
+      this.movementInput.y = 0;
       this.currentSpeed = 0;
       this.moveX = 0;
       this.moveZ = 0;
@@ -91,8 +108,8 @@ export class TopDownController {
   }
 
   public setPosition(x: number, z: number): void {
-    this.player.position.x = clampToRange(x, PLAYER_BOUNDS.minimumX, PLAYER_BOUNDS.maximumX);
-    this.player.position.z = clampToRange(z, PLAYER_BOUNDS.minimumZ, PLAYER_BOUNDS.maximumZ);
+    this.player.position.x = clampToRange(x, this.bounds.minimumX, this.bounds.maximumX);
+    this.player.position.z = clampToRange(z, this.bounds.minimumZ, this.bounds.maximumZ);
   }
 
   public translate(deltaX: number, deltaZ: number): void {
@@ -102,8 +119,8 @@ export class TopDownController {
   public update(deltaSeconds: number): void {
     if (!this.enabled) return;
 
-    const localX = Number(this.pressedKeys.has('KeyD')) - Number(this.pressedKeys.has('KeyA'));
-    const localY = Number(this.pressedKeys.has('KeyW')) - Number(this.pressedKeys.has('KeyS'));
+    const localX = this.movementInput.x;
+    const localY = this.movementInput.y;
     const inputLength = Math.hypot(localX, localY);
     const axes = this.frame.axes;
     const cameraForwardLength = Math.hypot(axes.forward[0], axes.forward[2]) || 1;
@@ -114,7 +131,6 @@ export class TopDownController {
 
     this.moveX = 0;
     this.moveZ = 0;
-    this.sprinting = this.pressedKeys.has('ShiftLeft') || this.pressedKeys.has('ShiftRight');
     if (inputLength > 0) {
       const normalizedX = localX / inputLength;
       const normalizedY = localY / inputLength;
@@ -125,6 +141,7 @@ export class TopDownController {
         this.position,
         { x: this.moveX, z: this.moveZ, sprint: this.sprinting },
         deltaSeconds,
+        this.bounds,
       );
       this.player.position.x = next.x;
       this.player.position.z = next.z;
@@ -151,12 +168,10 @@ export class TopDownController {
   }
 
   public dispose(): void {
-    document.removeEventListener('keydown', this.handleKeyDown);
-    document.removeEventListener('keyup', this.handleKeyUp);
+    for (const dispose of this.inputDisposers.splice(0)) dispose();
     this.canvas.removeEventListener('pointermove', this.handlePointerMove);
     this.canvas.removeEventListener('pointerenter', this.handlePointerMove);
     this.canvas.removeEventListener('pointerleave', this.handlePointerLeave);
-    window.removeEventListener('blur', this.clearInput);
   }
 
   private projectPointerToGameplayPlane(): { x: number; y: number } | undefined {
@@ -184,18 +199,6 @@ export class TopDownController {
     };
   }
 
-  private readonly handleKeyDown = (event: KeyboardEvent): void => {
-    if (!this.enabled || this.isTextEntry(event.target)) return;
-    if (['KeyW', 'KeyA', 'KeyS', 'KeyD', 'ShiftLeft', 'ShiftRight'].includes(event.code)) {
-      this.pressedKeys.add(event.code);
-      event.preventDefault();
-    }
-  };
-
-  private readonly handleKeyUp = (event: KeyboardEvent): void => {
-    this.pressedKeys.delete(event.code);
-  };
-
   private readonly handlePointerMove = (event: PointerEvent): void => {
     if (!this.enabled) return;
     this.pointer.x = event.clientX;
@@ -207,18 +210,34 @@ export class TopDownController {
     this.pointer.available = false;
   };
 
-  private readonly clearInput = (): void => this.pressedKeys.clear();
+  private bindInput(input: InputSubsystem): void {
+    this.inputDisposers.push(
+      input.bind(PlayerInputTags.Move, (event) => this.handleMoveInput(event)),
+      input.bind(PlayerInputTags.Sprint, (event) => this.handleSprintInput(event)),
+    );
+  }
 
-  private bindEvents(): void {
-    document.addEventListener('keydown', this.handleKeyDown);
-    document.addEventListener('keyup', this.handleKeyUp);
+  private bindPointerEvents(): void {
     this.canvas.addEventListener('pointermove', this.handlePointerMove);
     this.canvas.addEventListener('pointerenter', this.handlePointerMove);
     this.canvas.addEventListener('pointerleave', this.handlePointerLeave);
-    window.addEventListener('blur', this.clearInput);
   }
 
-  private isTextEntry(target: EventTarget | null): boolean {
-    return target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || target instanceof HTMLSelectElement;
+  private handleMoveInput(event: InputActionEvent): void {
+    if (!this.enabled || event.phase === 'completed' || event.phase === 'canceled') {
+      this.movementInput.x = 0;
+      this.movementInput.y = 0;
+      return;
+    }
+    if (typeof event.value === 'boolean') return;
+    this.movementInput.x = event.value.x;
+    this.movementInput.y = event.value.y;
+  }
+
+  private handleSprintInput(event: InputActionEvent): void {
+    this.sprinting = this.enabled
+      && event.phase !== 'completed'
+      && event.phase !== 'canceled'
+      && event.value === true;
   }
 }

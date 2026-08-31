@@ -11,7 +11,7 @@ export class FlyController {
   private readonly canvas: HTMLCanvasElement;
   private readonly camera: CameraTransform;
   private readonly pressedKeys = new Set<string>();
-  private readonly moveSpeed: number;
+  private moveSpeed: number;
   private readonly lookSpeed: number;
   private readonly onLockChange?: (locked: boolean) => void;
   private inputEnabled: boolean;
@@ -53,6 +53,14 @@ export class FlyController {
       [localRight, localUp, localForward],
       this.moveSpeed * sprint * deltaSeconds,
     );
+  }
+
+  public configure(options: CameraTransformOptions & { moveSpeed?: number }): void {
+    this.camera.setPose(options);
+    if (options.moveSpeed !== undefined && options.moveSpeed > 0) {
+      this.moveSpeed = options.moveSpeed;
+    }
+    this.pressedKeys.clear();
   }
 
   public requestLock(): void {

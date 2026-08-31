@@ -10,23 +10,90 @@
 - `Scene` / `SceneManager` 场景生命周期
 - 每个 Scene 独立的 `CommonUIManager` 栈
 - 房间大厅、Grid 房间卡片和通用弹出窗体
-- Node.js 大厅进程、WebSocket 网关和每房间独立子进程
+- 游戏内低存在感菜单，可主动退出当前房间并返回空场景大厅
+- 空房间 60 秒后自动回收，房间卡片显示服务端回收倒计时
+- Node.js 单端口 Web/API/WebSocket 组合服务器和每房间独立 DS 子进程
 - 参考项目风格的透明软体史莱姆玩家
 - Fly / TopDown 双控制器自动切换
+- 大厅空场景、JSON 地图目录与创建房间时的地图选择
 - 服务端权威的移动同步：输入上行、快照广播、客户端预测与和解
 
 ## 运行与联机测试
 
-当前项目不需要额外开启“联机模式”。同时启动 Node.js 房间服务器和 Vite
-客户端后，创建或加入房间即可开始联机。
+环境要求：Node.js 20 或更高版本、npm。
+
+### 生产模式：一个 Node.js 同时提供 Web 与游戏 DS
+
+构建客户端并启动组合服务器：
+
+```powershell
+cd E:\h5\SkyLand
+npm run start:prod
+```
+
+`start:prod` 会先执行 TypeScript 检查和 Vite 生产构建，再启动 Node.js。已经存在
+最新 `dist/` 时，可以跳过重复构建：
+
+```powershell
+npm start
+```
+
+浏览器访问 `http://127.0.0.1:3090/`。同一个 Node.js HTTP Server 会同时提供：
+
+- `dist/` 下的 Web 客户端静态文件
+- `/api/*` 房间大厅接口
+- `/ws` WebSocket 游戏连接
+- 每个房间对应的独立 Node.js DS 子进程
+
+如果直接执行 `npm start` 但没有 `dist/index.html`，大厅 API 和 DS 仍会启动，Web
+页面返回 `503` 并提示先执行 `npm run build`。
+
+组合服务器默认监听 `0.0.0.0:3090`，局域网设备可直接使用服务器电脑的 IPv4
+地址访问。可以通过环境变量覆盖监听地址、端口和 Web 根目录：
+
+```powershell
+$env:SKYLAND_SERVER_HOST = '127.0.0.1'
+$env:SKYLAND_SERVER_PORT = '3090'
+$env:SKYLAND_WEB_ROOT = 'E:\h5\SkyLand\dist'
+npm start
+```
+
+组合服务入口：
+
+| 地址 | 用途 |
+| --- | --- |
+| `/` | Vite 构建后的 Web 客户端；无扩展名的客户端路由回退到 `index.html` |
+| `/api/health` | 服务角色、房间数量和 Web 构建状态 |
+| `/api/rooms` | 查询或创建房间 |
+| `/api/rooms/:id` | 删除指定房间 |
+| `/api/scenes` | 查询所有可选择地图的摘要 |
+| `/api/scenes/:id` | 查询服务器校验后的完整场景 JSON |
+| `/ws` | WebSocket 游戏会话、输入上行和快照广播 |
+
+健康检查示例：
+
+```json
+{
+  "ok": true,
+  "role": "web-and-dedicated-server",
+  "roomCount": 0,
+  "webReady": true
+}
+```
+
+### 开发模式：Vite 热更新 + Node.js DS
+
+当前项目不需要额外开启“联机模式”。开发时同时启动 Node.js 服务器和 Vite
+客户端，创建或加入房间即可开始联机。
 
 打开两个终端，并都进入项目目录：
 
 ```powershell
-cd D:\html5\SkyLand
+cd E:\h5\SkyLand
 ```
 
-第一个终端启动房间服务器：
+第一个终端启动 Node.js 组合服务器。开发模式下它负责 API、WebSocket 和 DS，静态
+页面由 Vite 提供：
 
 ```powershell
 npm run server
@@ -35,7 +102,7 @@ npm run server
 看到下面的信息表示服务器已经就绪：
 
 ```text
-SkyLand room server listening on http://127.0.0.1:3090
+SkyLand web + DS server listening on http://0.0.0.0:3090
 ```
 
 第二个终端启动网页客户端：
@@ -67,8 +134,9 @@ npm run kill-port
 npm run dev
 ```
 
-- 客户端：`http://127.0.0.1:5180`
-- 房间服务端：`http://127.0.0.1:3090`
+- 生产组合服务：`http://127.0.0.1:3090`
+- 开发客户端：`http://127.0.0.1:5180`
+- 开发房间服务端：`http://127.0.0.1:3090`
 - 生产预览：`http://127.0.0.1:4180`
 
 测试与构建：
@@ -81,14 +149,27 @@ npm run build:wasm  # 只有改了 native/ 下的 Rust 源码才需要
 
 `chunkgen.wasm` 是签入仓库的，日常开发不需要安装 Rust 工具链。
 
-`tests/` 下的客户端测试由 Node.js 的类型剥离直接运行，只覆盖不依赖 DOM 与
-Three.js 的纯逻辑（和解、快照插值），因此不参与 `tsc` 构建。
+`tests/` 下的客户端测试通过项目内的轻量 TypeScript 测试加载器运行，只覆盖不依赖
+DOM 与 Three.js 的纯逻辑（标签、和解、快照插值），因此不参与 `tsc` 构建。
 
 ## 大世界与 Chunk 系统
 
-世界是 16 × 16 个 chunk，每个 chunk 32 米见方，合计 512 × 512 米。玩家的活动
-范围比生成范围向内收两个 chunk（384 × 384 米），因此永远走不到没有内容的世界
-边缘旁边，视野尽头始终是雾而不是虚空。
+场景配置里出现 `renderer.world` 就表示这张地图是流式大世界：地面与物件不再是
+摆好的固定内容，而是由世界种子确定性生成、按 chunk 加载。`config/scenes/open-world.scene.json`
+是内置的这样一张地图，`grassland` 与 `open-meadow` 保持原来的固定场景。
+
+世界是 16 × 16 个 chunk，每个 chunk 32 米见方，合计 512 × 512 米。世界尺寸是
+生成算法的固有属性，写在 `shared/world/worldConfig.mjs` 里，对所有流式场景都一样；
+场景配置只决定加载半径、保留半径和岩石配色。
+
+玩家的活动范围比生成范围向内收两个 chunk（384 × 384 米），因此永远走不到没有
+内容的世界边缘旁边。`SceneCatalog` 在启动时校验这两条约束：
+
+- `gameplay.bounds` 必须落在这个安全区内；
+- `renderer.fog.far` 必须不大于 `loadRadius × 32`，否则视野会越过最近的未加载
+  chunk，玩家会直接看到地块凭空出现。
+
+配错了服务器起不来，并会指出是哪一个场景文件的哪一项。
 
 ### 静态物件永远不走网络
 
@@ -110,9 +191,10 @@ WASM 算出的世界必然逐位相同。一旦这里引入浮点，就可能出
 
 ### 流式加载
 
-`ChunkStreamer` 以玩家（没有玩家时是飞行相机）所在的 chunk 为中心加载周围
-2 圈，走出 3 圈之外才卸载。两个半径不同是刻意的：相等的话，站在 chunk 边界上
-来回走会让同一批 chunk 反复构建又销毁。
+`ChunkStreamer` 是一个 `SceneVisualSystem`，随场景创建、随场景销毁。它以焦点
+（有玩家时是玩家，没有玩家时是相机）所在的 chunk 为中心加载周围 `loadRadius` 圈，
+走出 `keepRadius` 圈之外才卸载。两个半径不同是刻意的：相等的话，站在 chunk 边界上
+来回走会让同一批 chunk 反复构建又销毁，`SceneCatalog` 因此拒绝相等的配置。
 
 计划本身是纯函数（`shared/world/chunkStream.mjs`），只在跨过 chunk 边界时重算一次；
 每帧最多构建一个 chunk，玩家高速穿越时补齐会晚几帧，但这段延迟被雾效盖住了。
@@ -121,8 +203,12 @@ WASM 算出的世界必然逐位相同。一旦这里引入浮点，就可能出
 
 一个 chunk 的地面、树、草、岩石被合批成**一份**填充几何体和**一份**轮廓线几何体，
 颜色随顶点走（`createFillMaterial` 的 `vertexTint`），所以树干与树冠仍是各自的配色，
-但整块地只用一种材质。加上所有 chunk 共用的地面网格线，一个 chunk 固定三次
+但整块地只用一种材质。加上同场景全部 chunk 共用的地面网格线，一个 chunk 固定三次
 draw call，视野内 25 个 chunk 合计 75 次。
+
+`renderer.content` 的 `ground` / `trees` / `grass` 开关在流式场景里改为决定 chunk
+里放什么：关掉某一类就注册一个空模板。放置结果本身不受影响——放置算法在 WASM 与
+JS 两个后端之间必须逐位一致，所以它不接受任何逐场景的开关。
 
 顶点已经是世界坐标，承载它们的对象留在原点，Three.js 自动算出的包围球就落在
 正确位置上，视锥剔除按 chunk 生效。
@@ -136,6 +222,9 @@ draw call，视野内 25 个 chunk 合计 75 次。
 
 `shared/world/chunkGenerator.mjs` 里有一份行为完全一致的 JS 实现。WASM 加载失败
 时自动降级，世界照样是同一个；用 `?chunkgen=js` 打开页面可以强制走 JS 后端做对照。
+
+模板是注册进实例线性内存的，而每个场景的配色不同，所以 wasm 模块只编译一次、
+每个流式场景实例化一份。
 
 实测在当前密度（约 4700 顶点／chunk）下，两条路径的差距并不大：
 
@@ -172,6 +261,50 @@ const page: CommonUIPage = {
 
 切换 Scene 时，`Scene.leave()` 会停用并清空该 Scene 的全部 CommonUI。
 
+## 数据化场景
+
+大厅阶段只创建一个带纸张色背景的空 Three.js Scene，不加载地面、树木、草丛、玩家
+或远端玩家模型。创建或加入房间并收到服务器的 `room:joined` 后，客户端才按照响应中
+的场景 JSON 构建地图；断开房间后会释放地图资源并恢复空场景。
+
+可选择地图位于 `config/scenes/*.scene.json`，每个文件定义一张独立地图。当前示例：
+
+- `grassland.scene.json`：完整线稿草地、树林和草丛
+- `open-meadow.scene.json`：移除树林的暖色开阔原野
+
+`config/scenes/scene.schema.json` 描述可编辑字段。场景配置包括：
+
+- 地图 id、显示名称、描述和人数上限
+- 渲染器类型、背景、雾效、内容开关和颜色表
+- 服务端权威活动边界与出生点规则
+- 默认观察相机参数
+
+新增地图时复制一个 `.scene.json` 并使用新的唯一 `id`；Node.js 组合服务器启动时会
+扫描并严格校验全部配置。配置无效或 id 重复会阻止服务器启动，避免客户端与 DS 使用
+不同的地图数据。修改配置后需要重启 Node.js 服务器。
+
+创建房间与加载顺序：
+
+```text
+大厅空场景
+   │ GET /api/scenes
+   ↓
+选择地图并 POST /api/rooms { name, sceneId }
+   ↓
+RoomProcessManager fork 新 room-worker
+   │ IPC: room:initialize + 服务器校验后的 Scene JSON
+   ↓
+DS 初始化 ServerScene、边界、出生规则并回复 room:ready
+   ↓
+客户端连接 /ws 并加入房间
+   │ room:joined { room, player, scene }
+   ↓
+客户端根据服务器返回的 scene JSON 构建地图并生成玩家
+```
+
+客户端不会使用本地选择结果直接加载地图；最终始终以服务器在 `room:joined` 中返回的
+场景定义为准。
+
 ## 玩家控制
 
 - 玩家实体不存在：使用原有 `FlyController` 自由飞行镜头。
@@ -179,17 +312,40 @@ const page: CommonUIPage = {
 - W / A / S / D：按俯视镜头的屏幕方向移动。
 - Shift：加速移动。
 - 鼠标：通过透视射线投影到玩法 XY 平面，并让史莱姆面向投影点。玩法坐标的 Y 在 Three.js 世界中映射为地面的 Z 轴。
+- 左上角 `•••`：打开游戏菜单；“退出房间”会发送离开消息、清理当前地图与玩家，并返回大厅空场景。WebSocket 保持可复用，之后可以直接加入其他房间。
 
-史莱姆参考 `.cursor/line-art-style-magic-cabin-main/index.html`，使用三层透明材质、内部核心、气泡、阴影、顶点波动和移动压缩回弹。该参考路径也记录在 `.cursor/rules/line-art-reference.mdc` 中，作为项目始终生效的规范。
+史莱姆参考 `.cursor/demo/line-art-style-magic-cabin-main/index.html`，使用三层透明材质、内部核心、气泡、阴影、顶点波动和移动压缩回弹。`.cursor/demo/` 用于集中存放只读参考案例；该参考路径也记录在 `.cursor/rules/line-art-reference.mdc` 中，作为项目始终生效的规范。
 
 ## 房间进程
 
-客户端通过 HTTP 获取或创建房间，通过 `/ws` WebSocket 加入房间。大厅进程只管理连接和路由；`RoomProcessManager` 每创建一个房间都会使用 `child_process.fork()` 启动独立的 `room-worker.mjs`。
+生产环境只有一个对外端口。客户端页面、HTTP API 和 WebSocket 都进入同一个 Node.js
+HTTP Server；WebSocket 网关再把玩家输入路由到对应的房间 DS：
+
+```text
+浏览器 / PC WebView
+        │
+        ├── GET /、/assets/* ─────────→ StaticWebServer → dist/
+        ├── HTTP /api/* ──────────────→ ApiRouter → RoomProcessManager
+        └── WebSocket /ws ────────────→ WebSocketGateway
+                                                │ IPC
+                         ┌──────────────────────┼──────────────────────┐
+                         ↓                      ↓                      ↓
+                    room-worker A         room-worker B         room-worker C
+                    ServerScene           ServerScene           ServerScene
+```
+
+大厅进程只管理静态资源、连接与路由，不直接执行房间模拟。`RoomProcessManager` 每创建
+一个房间都会使用 `child_process.fork()` 启动独立的 `room-worker.mjs`。
 
 每个房间进程拥有自己的 `ServerScene`、玩家集合、输入队列和 20 Hz 更新循环。房间异常退出不会拖垮其他房间。
 
-创建房间时会分配一个 32 位世界种子，随房间摘要一起下发。客户端据此生成与服务端
-一致的地形与物件，换房间就是换一个世界。
+创建房间时会分配一个 32 位世界种子，随房间摘要一起下发。流式场景的客户端据此
+生成与服务端一致的地形与物件，换房间就是换一个世界。
+
+房间创建后如果没有玩家，或最后一名玩家离开后，会启动 60 秒空置回收计时；期间有玩家加入会立即取消计时。大厅接口通过 `idleExpiresAt` 返回服务端截止时间，房间卡片据此显示倒计时，归零后自动刷新列表。计时到期仍为空房间时，主进程会关闭并移除对应 DS 子进程。
+
+收到 `SIGINT` 或 `SIGTERM` 时，组合服务器会关闭 WebSocket 网关、通知所有房间 DS
+退出，并在 HTTP Server 停止监听后结束主进程。
 
 ## 移动同步
 
@@ -249,11 +405,15 @@ const page: CommonUIPage = {
 - `src/controllers/`：TopDown 控制器与 Fly/TopDown 控制路由
 - `src/player/`：玩家实体和史莱姆动画
 - `src/network/`：浏览器房间客户端、消息协议与快照插值
+- `src/scenes/data/`：客户端场景 JSON 类型
 - `src/models/`：程序化地面、树木、草丛、岩石与 chunk 模板/合批
 - `src/materials/`：填充 Shader 与轮廓线材质
 - `server/network/`：WebSocket 网关
+- `server/http/`：API 路由、HTTP 响应和生产静态站点服务
 - `server/rooms/`：房间进程管理器与 worker
 - `server/scene/`：服务端权威场景状态
+- `server/scenes/`：JSON 场景目录加载、校验与查询
+- `config/scenes/`：每张地图的独立 JSON 与 Schema
 - `shared/`：前后端共用的移动模拟与同步常量
 - `shared/world/`：世界配置、chunk 坐标、确定性生成与两种生成后端
 - `native/chunkgen/`：编译为 WebAssembly 的 Rust 生成与合批实现

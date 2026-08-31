@@ -1,4 +1,5 @@
 import type { PlayerInputFrame, RoomSnapshot } from './protocol';
+import type { SceneDefinition, SceneSummary } from '../scenes/data/SceneDefinition';
 
 export interface RoomSummary {
   id: string;
@@ -6,13 +7,16 @@ export interface RoomSummary {
   playerCount: number;
   capacity: number;
   sceneId: string;
+  sceneName: string;
   /** 房间的世界种子，客户端据此生成与服务端一致的地形与物件。 */
   worldSeed: number;
   createdAt: string;
+  idleExpiresAt: string | null;
 }
 
 export interface JoinedRoom {
   room: RoomSummary;
+  scene: SceneDefinition;
   player: {
     id: string;
     name: string;
@@ -26,6 +30,7 @@ interface ServerMessage {
   room?: RoomSummary;
   player?: JoinedRoom['player'];
   snapshot?: RoomSnapshot;
+  scene?: SceneDefinition;
   message?: string;
 }
 
@@ -50,11 +55,18 @@ export class RoomClient {
     return payload.rooms;
   }
 
-  public async createRoom(name: string): Promise<RoomSummary> {
+  public async listScenes(): Promise<SceneSummary[]> {
+    const response = await fetch('/api/scenes');
+    if (!response.ok) throw new Error('地图配置暂时不可用');
+    const payload = (await response.json()) as { scenes: SceneSummary[] };
+    return payload.scenes;
+  }
+
+  public async createRoom(name: string, sceneId: string): Promise<RoomSummary> {
     const response = await fetch('/api/rooms', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name }),
+      body: JSON.stringify({ name, sceneId }),
     });
     const payload = (await response.json()) as { room?: RoomSummary; error?: string };
     if (!response.ok || !payload.room) throw new Error(payload.error ?? '创建房间失败');
@@ -73,10 +85,10 @@ export class RoomClient {
       const handleMessage = (event: MessageEvent<string>): void => {
         const message = this.parseMessage(event.data);
         if (!message) return;
-        if (message.type === 'room:joined' && message.room && message.player) {
+        if (message.type === 'room:joined' && message.room && message.player && message.scene) {
           this.inputSequence = 0;
           cleanup();
-          resolve({ room: message.room, player: message.player });
+          resolve({ room: message.room, player: message.player, scene: message.scene });
         } else if (message.type === 'error') {
           cleanup();
           reject(new Error(message.message ?? '加入房间失败'));
@@ -101,6 +113,7 @@ export class RoomClient {
   }
 
   public leaveRoom(): void {
+    this.inputSequence = 0;
     if (this.socket?.readyState === WebSocket.OPEN) {
       this.socket.send(JSON.stringify({ type: 'room:leave' }));
     }

@@ -1,19 +1,30 @@
 import { FlyController } from '../camera/FlyController';
 import { GameInteractionLayer } from '../interaction/GameInteractionLayer';
+import {
+  GameplayInputContext,
+  GamepadInputDevice,
+  InputSubsystem,
+  KeyboardMouseInputDevice,
+  PlayerInputActions,
+  PlayerInputConfig,
+  PREVENT_DEFAULT_GAMEPLAY_CONTROLS,
+  VirtualControls,
+  VirtualInputDevice,
+} from '../input/index';
 import { SceneControlRouter } from '../controllers/SceneControlRouter';
 import { RoomClient, type JoinedRoom, type RoomSummary } from '../network/RoomClient';
 import { SnapshotBuffer } from '../network/SnapshotBuffer';
 import type { RoomSnapshot } from '../network/protocol';
-import { registerChunkTemplates } from '../models/chunkTemplates';
 import { PlayerEntity } from '../player/PlayerEntity';
 import { RemotePlayerGroup } from '../player/RemotePlayerGroup';
 import { SceneRenderer } from '../rendering/SceneRenderer';
-import { ChunkStreamer, loadChunkGenerator } from '../world';
 import { INPUT_SEND_INTERVAL_SECONDS } from '../../shared/networkTuning.mjs';
 import { HudController } from '../ui/HudController';
 import { CreateRoomPage, type CreateRoomFormValue } from '../ui/pages/CreateRoomPage';
+import { GameMenuPage } from '../ui/pages/GameMenuPage';
 import { RoomLobbyPage } from '../ui/pages/RoomLobbyPage';
 import { Scene, type SceneUIContext } from './Scene';
+import type { SceneSummary } from './data/SceneDefinition';
 
 export interface GrasslandSceneOptions extends SceneUIContext {
   canvas: HTMLCanvasElement;
@@ -21,6 +32,8 @@ export interface GrasslandSceneOptions extends SceneUIContext {
 
 export class GrasslandScene extends Scene {
   private readonly canvas: HTMLCanvasElement;
+  private readonly input: InputSubsystem;
+  private readonly virtualControls: VirtualControls;
   private readonly renderer: SceneRenderer;
   private readonly flyController: FlyController;
   private readonly controls: SceneControlRouter;
@@ -28,16 +41,32 @@ export class GrasslandScene extends Scene {
   private readonly hud = new HudController();
   private readonly roomClient = new RoomClient();
   private readonly lobbyPage = new RoomLobbyPage();
+  private readonly gameMenuPage = new GameMenuPage();
   private readonly snapshots = new SnapshotBuffer();
   private readonly remotePlayers = new RemotePlayerGroup();
-  private readonly chunks = new ChunkStreamer();
   private joinedRoom?: JoinedRoom;
+  private availableScenes: SceneSummary[] = [];
   private player?: PlayerEntity;
   private timeSinceInputSent = 0;
 
   public constructor(options: GrasslandSceneOptions) {
     super('grassland', options);
     this.canvas = options.canvas;
+    const virtualInput = new VirtualInputDevice();
+    this.input = new InputSubsystem({
+      actions: PlayerInputActions,
+      config: PlayerInputConfig,
+      contexts: [GameplayInputContext],
+      devices: [
+        new KeyboardMouseInputDevice({
+          pointerTarget: options.canvas,
+          preventDefaultControls: PREVENT_DEFAULT_GAMEPLAY_CONTROLS,
+        }),
+        new GamepadInputDevice(),
+        virtualInput,
+      ],
+    });
+    this.virtualControls = new VirtualControls({ root: options.baseLayer, device: virtualInput });
     this.renderer = new SceneRenderer(options.canvas);
     this.flyController = new FlyController(options.canvas, {
       position: [0, 4.2, 13.5],
@@ -48,64 +77,54 @@ export class GrasslandScene extends Scene {
     });
     this.controls = new SceneControlRouter(this.flyController);
     this.controls.onModeChange((mode) => this.hud.setControlMode(mode));
+    this.input.onActiveDeviceChanged((deviceKind) => this.hud.setInputDevice(deviceKind));
 
     this.commonUI.onStackChange(() => {
-      this.controls.setInputEnabled(this.commonUI.allowsGameInteraction);
+      const allowsGameInteraction = this.commonUI.allowsGameInteraction;
+      if (!allowsGameInteraction) this.virtualControls.reset();
+      this.input.setEnabled(allowsGameInteraction);
+      this.controls.setInputEnabled(allowsGameInteraction);
     });
     this.commonUI.setBaseEventHandler((event) => this.gameInteractions.dispatch(event));
     this.lobbyPage.onRefresh(() => void this.refreshRooms());
     this.lobbyPage.onCreate((temporaryName) => this.openCreateRoom(temporaryName));
     this.lobbyPage.onJoin((room, temporaryName) => void this.joinRoom(room, temporaryName));
+    this.hud.onMenuRequest(() => this.openGameMenu());
+    this.gameMenuPage.onRequestClose(() => this.commonUI.pop(this.gameMenuPage));
+    this.gameMenuPage.onExit(() => this.exitCurrentRoom());
     this.roomClient.onRoomUpdate((room) => this.handleRoomUpdate(room));
     this.roomClient.onSnapshot((snapshot) => this.handleSnapshot(snapshot));
     this.roomClient.onDisconnect(() => this.handleDisconnect());
     this.renderer.addWorldObject(this.remotePlayers.root);
-    this.renderer.addWorldObject(this.chunks.root);
-    void this.initializeChunkStreaming();
-  }
-
-  /**
-   * 接上 chunk 生成后端。
-   *
-   * WASM 是异步取回来的，在它就位之前 ChunkStreamer 不建任何东西，
-   * 世界会晚一两帧出现；这比先用 JS 铺一遍再用 WASM 重铺一遍划算。
-   * WASM 取不到时 loadChunkGenerator 会降级成 JS 实现，世界照样是同一个。
-   */
-  private async initializeChunkStreaming(): Promise<void> {
-    try {
-      const generator = await loadChunkGenerator();
-      registerChunkTemplates(generator);
-      this.chunks.setGenerator(generator);
-    } catch (error) {
-      console.error('[world] chunk 生成后端初始化失败', error);
-    }
   }
 
   public update(deltaSeconds: number, elapsedSeconds: number): void {
+    this.input.update();
     this.controls.update(deltaSeconds, elapsedSeconds);
+    this.renderer.update(deltaSeconds, elapsedSeconds, this.currentFocus());
     this.player?.update(deltaSeconds, elapsedSeconds);
     this.sendPlayerInput(deltaSeconds);
-    this.remotePlayers.sync(this.snapshots.sample(), this.joinedRoom?.player.id);
-    this.remotePlayers.update(deltaSeconds, elapsedSeconds);
-    this.streamWorldAroundFocus();
-  }
-
-  /**
-   * 以玩家为中心流式加载世界；还没有玩家时跟着飞行相机，
-   * 这样大厅背后看到的也是一片正常的世界，而不是空白。
-   */
-  private streamWorldAroundFocus(): void {
-    const player = this.player?.controller.position;
-    if (player) {
-      this.chunks.update(player.x, player.z);
-      return;
+    if (this.joinedRoom?.scene.camera.mode === 'topdown') {
+      this.remotePlayers.sync(this.snapshots.sample(), this.joinedRoom.player.id);
+      this.remotePlayers.update(deltaSeconds, elapsedSeconds);
+    } else {
+      this.remotePlayers.clear();
     }
-    const [cameraX, , cameraZ] = this.controls.frame.position;
-    this.chunks.update(cameraX, cameraZ);
   }
 
   public render(): void {
     this.renderer.render(this.controls.frame);
+  }
+
+  /**
+   * 世界应该围绕谁展开：有玩家时是玩家，还没有玩家时是相机。
+   * 流式加载靠它决定加载哪些 chunk，大厅背后看到的因此也是一片正常的世界。
+   */
+  private currentFocus(): { focusX: number; focusZ: number } {
+    const player = this.player?.controller.position;
+    if (player) return { focusX: player.x, focusZ: player.z };
+    const [cameraX, , cameraZ] = this.controls.frame.position;
+    return { focusX: cameraX, focusZ: cameraZ };
   }
 
   protected onEnter(): void {
@@ -116,6 +135,8 @@ export class GrasslandScene extends Scene {
   }
 
   protected onLeave(): void {
+    this.virtualControls.reset();
+    this.input.setEnabled(false);
     this.controls.setInputEnabled(false);
     if (document.pointerLockElement === this.canvas) document.exitPointerLock();
   }
@@ -123,14 +144,23 @@ export class GrasslandScene extends Scene {
   private async refreshRooms(): Promise<void> {
     this.lobbyPage.setLoading(true);
     try {
-      this.lobbyPage.setRooms(await this.roomClient.listRooms());
+      const [rooms, scenes] = await Promise.all([
+        this.roomClient.listRooms(),
+        this.roomClient.listScenes(),
+      ]);
+      this.availableScenes = scenes;
+      this.lobbyPage.setRooms(rooms);
     } catch (error) {
       this.lobbyPage.setError(this.getErrorMessage(error));
     }
   }
 
   private openCreateRoom(temporaryName: string): void {
-    const page = new CreateRoomPage(temporaryName);
+    if (this.availableScenes.length === 0) {
+      this.lobbyPage.setError('没有可用地图，请检查 config/scenes 配置。');
+      return;
+    }
+    const page = new CreateRoomPage(temporaryName, this.availableScenes);
     page.onRequestClose(() => this.commonUI.pop(page));
     page.onSubmit((value) => void this.createAndJoinRoom(page, value));
     this.commonUI.push(page);
@@ -139,7 +169,7 @@ export class GrasslandScene extends Scene {
   private async createAndJoinRoom(page: CreateRoomPage, value: CreateRoomFormValue): Promise<void> {
     page.setBusy(true);
     try {
-      const room = await this.roomClient.createRoom(value.roomName);
+      const room = await this.roomClient.createRoom(value.roomName, value.sceneId);
       const joined = await this.roomClient.joinRoom(room.id, value.temporaryName);
       this.completeJoin(joined);
     } catch (error) {
@@ -164,12 +194,35 @@ export class GrasslandScene extends Scene {
       return;
     }
     this.joinedRoom = joined;
-    // 房间的种子决定了这一局的世界，换房间就要换掉已经建好的 chunk。
-    this.chunks.setWorldSeed(joined.room.worldSeed);
     this.snapshots.clear();
-    this.createPlayer(joined.player.spawn);
+    this.renderer.loadScene(joined.scene, joined.room.worldSeed);
+    this.flyController.configure(joined.scene.camera);
+    if (joined.scene.camera.mode === 'topdown') {
+      this.createPlayer(joined.player.spawn, joined.scene.gameplay.bounds);
+    } else {
+      this.controls.setPlayerController(undefined);
+      this.remotePlayers.clear();
+    }
     this.hud.setRoom(joined.room);
     this.commonUI.clear();
+  }
+
+  private openGameMenu(): void {
+    if (!this.joinedRoom || this.commonUI.size > 0) return;
+    this.commonUI.push(this.gameMenuPage);
+  }
+
+  private exitCurrentRoom(): void {
+    if (!this.joinedRoom) return;
+    this.roomClient.leaveRoom();
+    this.joinedRoom = undefined;
+    this.destroyPlayer();
+    this.hud.setDisconnected();
+    this.commonUI.clear();
+    if (this.isActive) {
+      this.commonUI.push(this.lobbyPage);
+      void this.refreshRooms();
+    }
   }
 
   private handleRoomUpdate(room: RoomSummary): void {
@@ -202,9 +255,12 @@ export class GrasslandScene extends Scene {
     return error instanceof Error ? error.message : '发生了未知错误';
   }
 
-  private createPlayer(spawn: { x: number; z: number }): void {
+  private createPlayer(
+    spawn: { x: number; z: number },
+    bounds: JoinedRoom['scene']['gameplay']['bounds'],
+  ): void {
     if (this.player) return;
-    this.player = new PlayerEntity(this.canvas, spawn);
+    this.player = new PlayerEntity(this.canvas, spawn, this.input, bounds);
     this.renderer.addWorldObject(this.player.object3D);
     this.controls.setPlayerController(this.player.controller);
     this.timeSinceInputSent = 0;
@@ -213,11 +269,13 @@ export class GrasslandScene extends Scene {
   private destroyPlayer(): void {
     this.snapshots.clear();
     this.remotePlayers.clear();
-    if (!this.player) return;
-    this.controls.setPlayerController(undefined);
-    this.renderer.removeWorldObject(this.player.object3D);
-    this.player.dispose();
-    this.player = undefined;
+    if (this.player) {
+      this.controls.setPlayerController(undefined);
+      this.renderer.removeWorldObject(this.player.object3D);
+      this.player.dispose();
+      this.player = undefined;
+    }
+    this.renderer.showEmptyScene();
   }
 
   /**

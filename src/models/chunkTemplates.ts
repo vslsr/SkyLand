@@ -7,10 +7,32 @@ import {
 } from '../../shared/world/chunkGenerator.mjs';
 import type { ChunkGenerator, ChunkTemplate } from '../../shared/world/chunkGenerator.mjs';
 import { MAXIMUM_PROPS_PER_CHUNK, PROP_KIND } from '../../shared/world/worldConfig.mjs';
-import { GROUND_COLOR, createChunkGroundGeometry } from './ground';
+import { createFillMaterial, type FillMaterialEnvironment } from '../materials/createFillMaterial';
+import { createChunkGroundGeometry } from './ground';
 import { createGrassClusterModel } from './grass';
 import { createRockModel } from './rock';
 import { createTreeModel } from './tree';
+
+/** chunk 模板要用到的配色，来自场景配置。 */
+export interface ChunkPalette {
+  ground: THREE.ColorRepresentation;
+  grass: THREE.ColorRepresentation;
+  treeTrunk: THREE.ColorRepresentation;
+  treeNeedles: THREE.ColorRepresentation;
+  rock: THREE.ColorRepresentation;
+}
+
+export interface ChunkTemplateOptions {
+  palette: ChunkPalette;
+  /**
+   * 关掉某一类内容时注册空模板：放置结果不变，只是不产生顶点。
+   * 放置算法在两个后端之间必须逐位一致，所以它不接受任何逐场景的开关。
+   */
+  content: { ground: boolean; trees: boolean; grass: boolean };
+  environment: FillMaterialEnvironment;
+}
+
+const EMPTY_TEMPLATE: ChunkTemplate = { fill: new Float32Array(0), line: new Float32Array(0) };
 
 /**
  * chunk 模板。
@@ -106,11 +128,11 @@ function createTemplateFromObject(object: THREE.Object3D): ChunkTemplate {
 }
 
 /** 地面铺块。它不描边，否则世界上会浮现出一张 chunk 的网格。 */
-function createGroundTemplate(): ChunkTemplate {
+function createGroundTemplate(groundColor: THREE.ColorRepresentation): ChunkTemplate {
   const source = createChunkGroundGeometry();
   const geometry = source.index ? source.toNonIndexed() : source;
   const positions = geometry.attributes.position;
-  const color = new THREE.Color(GROUND_COLOR);
+  const color = new THREE.Color(groundColor);
   const fill: number[] = [];
 
   for (let index = 0; index < positions.count; index += 1) {
@@ -150,18 +172,38 @@ function warnIfTemplatesOverflow(templates: ChunkTemplate[], ground: ChunkTempla
 }
 
 /**
- * 建好全部模板并注册进生成后端。只在启动时调用一次；
- * 换生成后端（比如 WASM 加载完成后接管）时需要为新后端重新注册。
+ * 按场景配色建好全部模板并注册进生成后端。
+ *
+ * 每个流式场景有自己的生成后端实例，所以这里每个场景调用一次；
+ * 用来读取顶点色的材质是临时的，抽完模板就释放。
  */
-export function registerChunkTemplates(generator: ChunkGenerator): void {
-  const tree = createTemplateFromObject(createTreeModel());
-  const grass = createTemplateFromObject(createGrassClusterModel());
-  const rock = createTemplateFromObject(createRockModel());
-  const ground = createGroundTemplate();
+export function registerChunkTemplates(
+  generator: ChunkGenerator,
+  options: ChunkTemplateOptions,
+): void {
+  const { palette, content, environment } = options;
+  const materials = [
+    createFillMaterial(palette.treeTrunk, environment),
+    createFillMaterial(palette.treeNeedles, environment),
+    createFillMaterial(palette.grass, environment),
+    createFillMaterial(palette.rock, environment),
+  ];
+  const [trunkMaterial, needleMaterial, grassMaterial, rockMaterial] = materials;
+
+  const tree = content.trees
+    ? createTemplateFromObject(createTreeModel(trunkMaterial, needleMaterial))
+    : EMPTY_TEMPLATE;
+  const grass = content.grass
+    ? createTemplateFromObject(createGrassClusterModel(grassMaterial))
+    : EMPTY_TEMPLATE;
+  const rock = createTemplateFromObject(createRockModel(rockMaterial));
+  const ground = content.ground ? createGroundTemplate(palette.ground) : EMPTY_TEMPLATE;
   warnIfTemplatesOverflow([tree, grass, rock], ground);
 
   generator.registerTemplate(PROP_KIND.TREE, tree);
   generator.registerTemplate(PROP_KIND.GRASS, grass);
   generator.registerTemplate(PROP_KIND.ROCK, rock);
   generator.registerTemplate(GROUND_TEMPLATE_INDEX, ground);
+
+  for (const material of materials) material.dispose();
 }

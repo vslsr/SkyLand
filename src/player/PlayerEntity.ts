@@ -1,5 +1,7 @@
 import type * as THREE from 'three';
 import { TopDownController } from '../controllers/TopDownController';
+import type { InputSubsystem } from '../input/index';
+import type { SceneBounds } from '../scenes/data/SceneDefinition';
 import { createPlayerSlimeModel } from '../models/playerSlime';
 import { PlayerReconciler } from './PlayerReconciler';
 import { SlimeAnimator } from './SlimeAnimator';
@@ -10,10 +12,15 @@ export class PlayerEntity {
   private readonly animator = new SlimeAnimator(this.model);
   private readonly reconciler = new PlayerReconciler();
 
-  public constructor(canvas: HTMLCanvasElement, spawn: { x: number; z: number }) {
+  public constructor(
+    canvas: HTMLCanvasElement,
+    spawn: { x: number; z: number },
+    input: InputSubsystem,
+    bounds: SceneBounds,
+  ) {
     this.model.root.name = 'local-player-slime';
     this.model.root.position.set(spawn.x, 0, spawn.z);
-    this.controller = new TopDownController(canvas, this.model.root, { enabled: false });
+    this.controller = new TopDownController(canvas, this.model.root, input, { enabled: false, bounds });
   }
 
   public get object3D(): THREE.Object3D {

@@ -153,3 +153,28 @@ test('非法数值不会污染权威状态', () => {
   assert.ok(Number.isFinite(player.z));
   assert.ok(Number.isFinite(player.yaw));
 });
+
+test('场景 JSON 的边界与出生配置参与权威模拟', () => {
+  const scene = new ServerScene({
+    id: 'tiny-map',
+    gameplay: {
+      bounds: { minimumX: -2, maximumX: 2, minimumZ: -3, maximumZ: 3 },
+      spawn: { centerX: 1, centerZ: 1, radius: 0, slots: 2 },
+    },
+  });
+  scene.addPlayer({ id: 'player-1', name: '旅人', slot: 0 });
+  assert.deepEqual(
+    { x: scene.createSnapshot().players[0].x, z: scene.createSnapshot().players[0].z },
+    { x: 1, z: 1 },
+  );
+
+  scene.applyInput('player-1', {
+    sequence: 1,
+    deltaSeconds: 1,
+    move: { x: 1, z: 1 },
+    sprint: true,
+  });
+  const player = scene.createSnapshot().players[0];
+  assert.ok(player.x <= 2);
+  assert.ok(player.z <= 3);
+});
