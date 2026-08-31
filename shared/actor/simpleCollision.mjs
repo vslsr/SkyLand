@@ -5,8 +5,9 @@
 
 /** @typedef {{ centerX: number, centerZ: number, halfWidth: number, halfLength: number, minimumY: number, maximumY: number }} SimpleCollisionDefinition */
 /** @typedef {{ x: number, z: number }} CollisionPoint */
-/** @typedef {{ x: number, z: number, yaw: number }} CollisionTransform */
+/** @typedef {{ x: number, y?: number, z: number, yaw: number }} CollisionTransform */
 /** @typedef {{ collision: SimpleCollisionDefinition, transform: CollisionTransform }} SimpleCollisionInstance */
+/** @typedef {{ minimumY: number, maximumY: number, maximumStepHeight?: number }} CollisionVerticalProfile */
 
 const COLLISION_EPSILON = 1e-7;
 
@@ -28,6 +29,15 @@ function positiveNumber(value, fallback) {
  */
 export function createSimpleCollisionFromRender(render) {
   const model = String(render?.model ?? '');
+  if (model === 'line-art-player-slime') {
+    const radius = positiveNumber(render.radius, 0.42);
+    return createSimpleCollisionDefinition({
+      halfWidth: radius,
+      halfLength: radius,
+      minimumY: 0,
+      maximumY: radius * 2,
+    });
+  }
   if (model === 'line-art-raft') {
     return createSimpleCollisionDefinition({
       halfWidth: positiveNumber(render.width, 1) * 0.5,
@@ -106,13 +116,34 @@ export function createSimpleCollisionDefinition(definition) {
 }
 
 /**
+ * 先做垂直轴筛选：不相交的悬空物不会形成隐形墙；顶部不高于可跨越高度的
+ * 低矮 Actor 也不会参与 XZ 推出。坐标均为世界空间。
+ * @param {SimpleCollisionInstance} instance
+ * @param {CollisionVerticalProfile | undefined} profile
+ */
+function blocksVerticalProfile(instance, profile) {
+  if (!profile) return true;
+  const transformY = finiteNumber(instance.transform.y);
+  const obstacleMinimumY = transformY + instance.collision.minimumY;
+  const obstacleMaximumY = transformY + instance.collision.maximumY;
+  const moverMinimumY = finiteNumber(profile.minimumY);
+  const moverMaximumY = Math.max(moverMinimumY, finiteNumber(profile.maximumY, moverMinimumY));
+  const maximumStepHeight = Math.max(0, finiteNumber(profile.maximumStepHeight));
+  if (obstacleMaximumY <= moverMinimumY + maximumStepHeight + COLLISION_EPSILON) return false;
+  return obstacleMinimumY < moverMaximumY - COLLISION_EPSILON
+    && obstacleMaximumY > moverMinimumY + COLLISION_EPSILON;
+}
+
+/**
  * 圆形移动体与单个有向盒的最近点推出。完全位于盒内时选择最近侧面，避免零向量。
  * @param {CollisionPoint} point
  * @param {number} radius
  * @param {SimpleCollisionInstance} instance
+ * @param {CollisionVerticalProfile} [verticalProfile]
  * @returns {CollisionPoint}
  */
-export function resolveCircleAgainstSimpleCollision(point, radius, instance) {
+export function resolveCircleAgainstSimpleCollision(point, radius, instance, verticalProfile) {
+  if (!blocksVerticalProfile(instance, verticalProfile)) return { ...point };
   const safeRadius = Math.max(0, finiteNumber(radius));
   const transform = instance.transform;
   const collision = instance.collision;
@@ -160,15 +191,16 @@ export function resolveCircleAgainstSimpleCollision(point, radius, instance) {
  * @param {CollisionPoint} point
  * @param {number} radius
  * @param {readonly SimpleCollisionInstance[]} instances
+ * @param {CollisionVerticalProfile} [verticalProfile]
  * @returns {CollisionPoint}
  */
-export function resolveCircleAgainstSimpleCollisions(point, radius, instances) {
+export function resolveCircleAgainstSimpleCollisions(point, radius, instances, verticalProfile) {
   let resolved = { x: finiteNumber(point.x), z: finiteNumber(point.z) };
   for (let pass = 0; pass < 2; pass += 1) {
     const beforeX = resolved.x;
     const beforeZ = resolved.z;
     for (const instance of instances) {
-      resolved = resolveCircleAgainstSimpleCollision(resolved, radius, instance);
+      resolved = resolveCircleAgainstSimpleCollision(resolved, radius, instance, verticalProfile);
     }
     if (Math.abs(resolved.x - beforeX) < COLLISION_EPSILON
       && Math.abs(resolved.z - beforeZ) < COLLISION_EPSILON) break;

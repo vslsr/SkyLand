@@ -20,6 +20,7 @@
     }
   },
   "gameplay": {
+    "playerActor": { "archetype": "player-slime" },
     "bounds": { "minimumX": -16, "maximumX": 16, "minimumZ": -21, "maximumZ": 11 },
     "spawn": { "centerX": 0, "centerZ": 3.5, "radius": 2.4, "slots": 8 }
   },

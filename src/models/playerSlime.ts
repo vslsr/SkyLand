@@ -1,5 +1,11 @@
 import * as THREE from 'three';
-import { PLAYER_COLLISION_RADIUS } from '../../shared/playerMovement.mjs';
+import type { ActorRenderDefinition } from '../scenes/data/SceneDefinition';
+import type { ActorVisualModel } from './actors/ActorVisualModel';
+
+export type PlayerSlimeRenderDefinition = Extract<
+  ActorRenderDefinition,
+  { model: 'line-art-player-slime' }
+>;
 
 export interface SlimeBubble {
   mesh: THREE.Mesh<THREE.SphereGeometry, THREE.MeshBasicMaterial>;
@@ -8,8 +14,7 @@ export interface SlimeBubble {
   radius: number;
 }
 
-export interface PlayerSlimeModel {
-  root: THREE.Group;
+export interface PlayerSlimeModel extends ActorVisualModel {
   body: THREE.Group;
   geometry: THREE.SphereGeometry;
   originalPositions: Float32Array;
@@ -39,6 +44,17 @@ export const LOCAL_SLIME_PALETTE: SlimePalette = {
   ink: 0x173a2b,
   shadow: 0x1e5a40,
 };
+
+function createConfiguredPalette(definition: PlayerSlimeRenderDefinition): SlimePalette {
+  return {
+    membrane: definition.membraneColor,
+    middle: definition.middleColor,
+    core: definition.coreColor,
+    bubble: definition.bubbleColor,
+    ink: definition.inkColor,
+    shadow: definition.shadowColor,
+  };
+}
 
 // 避开本地玩家的绿色，让同房间的史莱姆一眼能分开。
 const REMOTE_HUES = [0.02, 0.09, 0.14, 0.55, 0.62, 0.72, 0.86] as const;
@@ -103,8 +119,11 @@ function createFace(radius: number, palette: SlimePalette): THREE.Group {
   return face;
 }
 
-export function createPlayerSlimeModel(palette: SlimePalette = LOCAL_SLIME_PALETTE): PlayerSlimeModel {
-  const radius = PLAYER_COLLISION_RADIUS;
+export function createPlayerSlimeModel(
+  definition: PlayerSlimeRenderDefinition,
+  palette: SlimePalette = createConfiguredPalette(definition),
+): PlayerSlimeModel {
+  const radius = definition.radius;
   const membraneMaterial = new THREE.MeshBasicMaterial({
     color: palette.membrane,
     transparent: true,
@@ -135,8 +154,11 @@ export function createPlayerSlimeModel(palette: SlimePalette = LOCAL_SLIME_PALET
 
   const root = new THREE.Group();
   root.name = 'player-slime';
+  const visualRoot = new THREE.Group();
+  visualRoot.name = 'player-slime-visual';
+  root.add(visualRoot);
   const body = new THREE.Group();
-  root.add(body);
+  visualRoot.add(body);
 
   const geometry = new THREE.SphereGeometry(radius, 26, 18);
   const positionAttribute = geometry.getAttribute('position');
@@ -173,7 +195,27 @@ export function createPlayerSlimeModel(palette: SlimePalette = LOCAL_SLIME_PALET
   const shadow = new THREE.Mesh(new THREE.CircleGeometry(radius * 0.8, 24), shadowMaterial);
   shadow.rotation.x = -Math.PI / 2;
   shadow.position.y = 0.012;
-  root.add(shadow);
+  visualRoot.add(shadow);
 
-  return { root, body, geometry, originalPositions, core, bubbles, shadow, radius };
+  return {
+    root,
+    visualRoot,
+    body,
+    geometry,
+    originalPositions,
+    core,
+    bubbles,
+    shadow,
+    radius,
+    length: radius * 2,
+    width: radius * 2,
+    simpleCollision: {
+      centerX: 0,
+      centerZ: 0,
+      halfWidth: radius,
+      halfLength: radius,
+      minimumY: 0,
+      maximumY: radius * 2,
+    },
+  };
 }

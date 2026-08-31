@@ -60,6 +60,7 @@
     }
   },
   "gameplay": {
+    "playerActor": { "archetype": "player-slime" },
     "bounds": { "minimumX": -48, "maximumX": 48, "minimumZ": -48, "maximumZ": 48 },
     "spawn": { "centerX": 0, "centerZ": 0, "radius": 3, "slots": 8 },
     "water": { "seaLevel": 0 }

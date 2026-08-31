@@ -8,11 +8,15 @@ import { createElasticMushroomModel } from './createElasticMushroomModel';
 import { createFloorPlaqueModel } from './createFloorPlaqueModel';
 import { createFocusObeliskModel } from './createFocusObeliskModel';
 import { createTrainingDummyModel } from './createTrainingDummyModel';
+import { createPlayerSlimeModel } from '../playerSlime';
 
 export function createActorVisualModel(
   environment: FillMaterialEnvironment,
   definition: ActorRenderDefinition,
 ): ActorVisualModel {
+  if (definition.model === 'line-art-player-slime') {
+    return createPlayerSlimeModel(definition);
+  }
   if (definition.model === 'line-art-raft') {
     return createBuoyancyRaftModel(environment, definition);
   }

@@ -43,6 +43,16 @@ export type SceneComponentDefinition =
 
 export type ActorRenderDefinition =
   | {
+      model: 'line-art-player-slime';
+      radius: number;
+      membraneColor: string;
+      middleColor: string;
+      coreColor: string;
+      bubbleColor: string;
+      inkColor: string;
+      shadowColor: string;
+    }
+  | {
       model: 'line-art-raft';
       foamColor: string;
       length: number;
@@ -98,6 +108,11 @@ export interface ActorArchetypeDefinition {
   schemaVersion: 1;
   id: string;
   components: {
+    playerMovement?: {
+      walkSpeed: number;
+      sprintMultiplier: number;
+      maximumStepHeight: number;
+    };
     buoyancy?: {
       minimumBeam: number;
       minimumLength: number;
@@ -204,6 +219,7 @@ export interface SceneDefinition extends SceneSummary {
     world?: WorldStreamingDefinition;
   };
   gameplay: {
+    playerActor: { archetypeId: string };
     bounds: SceneBounds;
     spawn: { centerX: number; centerZ: number; radius: number; slots: number };
     water?: { seaLevel: number };

@@ -107,6 +107,31 @@ Rebinding is device-slot preserving. A keyboard Mapping cannot be assigned a `Ga
 
 Use `mappingIds` for rebindable prompt entries. `controlLabels` provides curated display names; unknown but valid controls use a readable fallback. Call `HudController.refreshInputPrompt()` after runtime binding changes.
 
+### Action-level HUD and world prompts
+
+Mode-level help text uses `InputSchemeRuntime.getPrompt`. A prompt for one gameplay Action—such as a world-space interaction marker—must instead resolve the semantic tag against the currently effective Contexts and active device:
+
+```ts
+const [control] = input.getMappedControls(PlayerInputTags.WorldInteract);
+const inputLabel = control ? scheme.getControlLabel(control) : undefined;
+interactionMarker.setLabel(inputLabel);
+```
+
+Keep the ownership split explicit:
+
+- `InputSubsystem.getMappedControls` owns active Context priority, consume behavior and the most recently active `InputDeviceKind`.
+- `InputSchemeRuntime.getControlLabel` owns curated names and readable fallback formatting, including live rebinding results.
+- Gameplay controllers consume tags and may request a resolved label for prompt composition; they do not embed `E`, `Y`, `ACT` or Mapping ids.
+- HUD and Actor visual Components receive only the resolved label. A reusable world marker remains an input-agnostic visual Component and does not import `InputSubsystem`.
+
+Do not resolve an action prompt by scanning every raw scheme Context: that can expose an inactive or priority-shadowed Mapping. Do not fall back to a keyboard label when the current device has no Mapping for that Action; hide the actionable marker or show an explicit unbound state instead.
+
+Every device advertised by an action prompt needs a usable Mapping and a `controlLabels` entry. For touch, add a distinct `Virtual.*` button when reusing another semantic button would fire two unrelated Actions. The virtual button definition, touch Mapping and label must name the same control path.
+
+Standard Gamepad control paths describe logical button positions, not controller artwork. A single `gamepad` device kind can use a generic label such as `Y`/`△`; exact Xbox, PlayStation and Switch glyphs require a separate device-layout profile selected from the connected Gamepad identity, while the Action Mapping remains unchanged.
+
+Device activity and binding replacement can change the label between frames. Re-resolve while the interaction candidate is active, or cache the result behind both active-device and binding-change invalidation. Dynamic texture/icon resources in world markers must be replaced only when the label changes and disposed when the marker is cleared, keeping resource use bounded by visible prompts rather than world size.
+
 ## Virtual input contract
 
 `VirtualControls` converts pointer gestures into the same input pipeline as physical devices:
@@ -114,6 +139,7 @@ Use `mappingIds` for rebindable prompt entries. `controlLabels` provides curated
 - joystick -> `Virtual.MoveStick` axis2D;
 - run button -> `Virtual.SprintButton` digital;
 - hold button -> `Virtual.InteractButton` digital;
+- world interaction button -> `Virtual.WorldInteractButton` digital;
 - double-tap button -> `Virtual.DodgeButton` digital.
 
 The Action trigger, not the button widget, decides whether a press becomes Pressed, Hold, or DoubleTap. Keep that semantic in JSON/Action runtime so keyboard, touch, and Gamepad behave consistently.
@@ -141,6 +167,9 @@ Every joystick/button control must have a touch Mapping in the same input scheme
 | New key appears in storage but has no effect | Live scene did not call `replaceMappingContexts` after the change |
 | Movement remains active after rebinding | Context replacement did not clear device state and cancel Actions |
 | HUD shows the old key | Prompt used literal text, omitted the Mapping id, or was not refreshed |
+| World marker stays on `E` after device switch or rebind | Controller or marker owns a literal glyph instead of resolving tag -> effective Mapping -> control label |
+| World marker shows a key from an inactive Context | Prompt scanned raw scheme Contexts instead of `InputSubsystem.getMappedControls` |
+| Touch marker is visible but cannot interact | A touch label exists without a matching virtual button and touch Mapping, or one virtual control was unintentionally shared by unrelated Actions |
 | Touch input changes movement but HUD stays on keyboard | Device events were not emitted with `deviceKind: touch` or activity was below threshold |
 | Virtual joystick is absent on desktop | It is gated by `topdown`; add the configured debug query parameter, currently `?virtual-controls=1` |
 | Virtual-control JSON fails during startup | A `Virtual.*` control lacks a touch Mapping, dimensions are out of bounds, or ids/controls are duplicated |

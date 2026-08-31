@@ -69,6 +69,11 @@ function validateActorPlacements(rawActors, filename, actorCatalog) {
     if (actorIds.has(id)) throw new TypeError(`${filename} Actor id 重复：${id}`);
     actorIds.add(id);
     const archetype = actorCatalog.require(archetypeId);
+    if (archetype.components.playerMovement) {
+      throw new TypeError(
+        `${path}.archetype 是玩家原型；玩家由 gameplay.playerActor 按连接动态创建`,
+      );
+    }
     archetypes.set(archetype.id, archetype);
     const localTransform = requireObject(actor.localTransform, `${path}.localTransform`);
     if (!Array.isArray(localTransform.position) || localTransform.position.length !== 3) {
@@ -285,6 +290,24 @@ function validateSceneDefinition(raw, filename, actorCatalog) {
   }
 
   const gameplay = requireObject(scene.gameplay, `${filename}.gameplay`);
+  const playerActor = requireObject(gameplay.playerActor, `${filename}.gameplay.playerActor`);
+  const playerActorArchetypeId = requireString(
+    playerActor.archetype,
+    `${filename}.gameplay.playerActor.archetype`,
+    48,
+  );
+  if (!SCENE_ID_PATTERN.test(playerActorArchetypeId)) {
+    throw new TypeError(`${filename}.gameplay.playerActor.archetype 格式无效`);
+  }
+  const playerActorArchetype = actorCatalog.require(playerActorArchetypeId);
+  if (
+    !playerActorArchetype.components.playerMovement
+    || playerActorArchetype.components.render.model !== 'line-art-player-slime'
+  ) {
+    throw new TypeError(
+      `${filename}.gameplay.playerActor 需要 playerMovement + line-art-player-slime 原型`,
+    );
+  }
   const bounds = requireObject(gameplay.bounds, `${filename}.gameplay.bounds`);
   const spawn = requireObject(gameplay.spawn, `${filename}.gameplay.spawn`);
   const minimumX = requireNumber(bounds.minimumX, `${filename}.gameplay.bounds.minimumX`);
@@ -340,6 +363,9 @@ function validateSceneDefinition(raw, filename, actorCatalog) {
   if (pitch < -1.5 || pitch > 1.5) throw new TypeError(`${filename}.camera.pitch 范围无效`);
   if (moveSpeed <= 0 || moveSpeed > 100) throw new TypeError(`${filename}.camera.moveSpeed 范围无效`);
   const actorComposition = validateActorPlacements(scene.actors, filename, actorCatalog);
+  if (!actorComposition.actorArchetypes.some((definition) => definition.id === playerActorArchetype.id)) {
+    actorComposition.actorArchetypes.push(playerActorArchetype);
+  }
   for (const component of sceneComponents) {
     if (component.type !== 'ability-lab') continue;
     const target = actorComposition.actors.find((actor) => actor.id === component.targetActorId);
@@ -386,6 +412,7 @@ function validateSceneDefinition(raw, filename, actorCatalog) {
       ...(world ? { world } : {}),
     },
     gameplay: {
+      playerActor: { archetypeId: playerActorArchetype.id },
       bounds: { minimumX, maximumX, minimumZ, maximumZ },
       spawn: {
         centerX,

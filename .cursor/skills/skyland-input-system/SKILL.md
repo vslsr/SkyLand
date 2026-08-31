@@ -37,6 +37,7 @@ KeyboardMouse / Gamepad / Virtual device
 - Let `InputSubsystem` own live input state. Replacing Context definitions must reset device state and cancel active Actions so held controls cannot become stuck.
 - Let device adapters emit stable control paths. They do not decide gameplay tags, Action triggers, or Context priority.
 - Bind gameplay behavior through `Input.Player.*` tags or use `getDigital` / `getAxis2D`; do not add a second key-event route in gameplay code.
+- Treat HUD and world-space action markers as input-prompt consumers. Resolve their control from the live `InputSubsystem`, format it through `InputSchemeRuntime`, then pass only the final label into UI or Actor visual Components; those consumers must not know physical controls or Mapping ids.
 
 ## Choose the smallest change
 
@@ -58,13 +59,16 @@ Control namespaces and device slots must agree:
 
 Prompt entries should reference Mapping ids for controls that can be rebound. Use literal prompt text only for behavior outside the configurable input pipeline, such as pointer-lock instructions. A prompt may only reference Mappings from its own device kind.
 
+For an action-level prompt, configure a Mapping and display label for every supported device. A touch label is not enough by itself: its `Virtual.*` control also needs a real virtual button and a touch Mapping to the same Action.
+
 ## Integrate and rebind
 
-Construct one `InputSchemeRuntime` per live input subsystem, then pass its `actions`, `config`, and `contexts` into `InputSubsystem`. Subscribe to binding changes and apply all three observable consequences:
+Construct one `InputSchemeRuntime` per live input subsystem, then pass its `actions`, `config`, and `contexts` into `InputSubsystem`. Subscribe to binding changes and apply all four observable consequences:
 
 1. call `replaceMappingContexts(runtime.contexts)`;
 2. refresh keyboard default-prevention controls;
-3. refresh the HUD prompt.
+3. refresh cached HUD prompts;
+4. invalidate or re-resolve action-level HUD/world prompts so they read the replacement Context on the next update.
 
 Use `rebind(mappingId, control, { conflict })` for changes. `swap` is the default and preserves both bindings, `reject` reports an occupied control, and `allow` intentionally permits duplicates. Use `resetBinding` or `resetAllBindings` instead of rebuilding defaults manually.
 
@@ -86,4 +90,4 @@ For configuration, prompt, or rebinding changes:
 3. Run `npm run build` to exercise TypeScript, JSON import, and bundling.
 4. Run `git diff --check`.
 
-For virtual joystick math or layout configuration, update `tests/VirtualJoystick.test.ts` and the virtual-controls cases in `tests/InputSchemeRuntime.test.ts`. For core trigger, Context, arbitration, or cancellation changes, also update `tests/InputSubsystem.test.ts` and run `npm test`. For Gamepad adapter changes, update `tests/GamepadInputDevice.test.ts`. A change is complete only when invalid references fail deterministically, old bindings stop producing values after hot replacement, new bindings work immediately, prompts reflect the live binding, and full build/tests pass.
+For virtual joystick math or layout configuration, update `tests/VirtualJoystick.test.ts` and the virtual-controls cases in `tests/InputSchemeRuntime.test.ts`. For core trigger, Context, arbitration, cancellation, or effective-Mapping prompt queries, also update `tests/InputSubsystem.test.ts` and run `npm test`. For action-level interaction markers, cover device switching and rebinding in the owning interaction test. For Gamepad adapter changes, update `tests/GamepadInputDevice.test.ts`. A change is complete only when invalid references fail deterministically, old bindings stop producing values after hot replacement, new bindings work immediately, HUD and world prompts reflect the active device and live binding, and full build/tests pass.
