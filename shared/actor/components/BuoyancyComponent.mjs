@@ -6,6 +6,7 @@ export class BuoyancyComponent extends ActorComponent {
   constructor(definition) {
     super(BUOYANCY_COMPONENT);
     this.parts = definition.parts.map((part) => ({ ...part }));
+    this.loads = [];
     this.minimumBeam = definition.minimumBeam;
     this.minimumLength = definition.minimumLength;
     this.maximumTrimRadians = definition.maximumTrimRadians;
@@ -17,6 +18,10 @@ export class BuoyancyComponent extends ActorComponent {
     this.staticPitch = 0;
     this.speedFactor = 1;
     this.revision = 0;
+    this.eventRevision = 0;
+    this.lastEvent = undefined;
+    this.cargoMass = 0;
+    this.damagedPartCount = 0;
     this.dirty = true;
   }
 

@@ -32,17 +32,32 @@ export class ActorWorld {
     return actor;
   }
 
-  removeActor(actorId) {
+  removeActor(actorId, options = {}) {
+    const removalOptions = this.validateRemovalOptions(options);
     if (this.updating) {
       const exists = this.actorMap.has(actorId);
-      this.pendingMutations.push(() => this.removeActorNow(actorId));
+      this.pendingMutations.push(() => this.removeActorNow(actorId, removalOptions));
       return exists;
     }
-    return this.removeActorNow(actorId);
+    return this.removeActorNow(actorId, removalOptions);
+  }
+
+  removeActorTree(actorId) {
+    return this.removeActor(actorId, { childPolicy: 'cascade' });
   }
 
   getActor(actorId) {
     return this.actorMap.get(actorId);
+  }
+
+  setActorParent(actorId, parentActorId, options = {}) {
+    const actor = this.getActor(actorId);
+    if (!actor) throw new Error(`不存在 Actor：${actorId}`);
+    const parent = parentActorId ? this.getActor(parentActorId) : undefined;
+    if (parentActorId && !parent) throw new Error(`不存在父 Actor：${parentActorId}`);
+    const changed = actor.setParent(parent, options);
+    this.resolveTransforms();
+    return changed;
   }
 
   actors() {
@@ -60,6 +75,20 @@ export class ActorWorld {
     } finally {
       this.updating = false;
       this.flushMutations();
+    }
+  }
+
+  resolveTransforms() {
+    const visit = (actor, parentTransform) => {
+      const transform = actor.getComponent('transform');
+      if (transform) {
+        if (parentTransform) transform.updateWorldFromParent(parentTransform);
+        else transform.updateLocalFromParent(undefined);
+      }
+      for (const child of actor.children) visit(child, transform ?? parentTransform);
+    };
+    for (const actor of this.actorMap.values()) {
+      if (!actor.parent) visit(actor, undefined);
     }
   }
 
@@ -81,12 +110,34 @@ export class ActorWorld {
     actor.beginPlay(this);
   }
 
-  removeActorNow(actorId) {
+  removeActorNow(actorId, options) {
     const actor = this.actorMap.get(actorId);
     if (!actor) return false;
-    this.actorMap.delete(actorId);
-    actor.dispose();
+    if (options.childPolicy === 'detach') {
+      for (const child of actor.children) {
+        child.setParent(undefined, { worldPositionStays: true });
+      }
+      this.actorMap.delete(actor.id);
+      actor.dispose();
+      return true;
+    }
+    const subtree = [];
+    const collect = (current) => {
+      for (const child of current.children) collect(child);
+      subtree.push(current);
+    };
+    collect(actor);
+    for (const current of subtree) this.actorMap.delete(current.id);
+    for (const current of subtree) current.dispose();
     return true;
+  }
+
+  validateRemovalOptions(options) {
+    const childPolicy = options.childPolicy ?? 'detach';
+    if (childPolicy !== 'detach' && childPolicy !== 'cascade') {
+      throw new TypeError('Actor 删除策略 childPolicy 只能是 detach 或 cascade');
+    }
+    return { childPolicy };
   }
 
   flushMutations() {

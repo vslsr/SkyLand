@@ -5,17 +5,42 @@ import { parseInputSchemeDefinition } from './InputSchemeParser';
 
 export const PlayerInputSchemeDefinition = parseInputSchemeDefinition(rawPlayerInputScheme);
 
+export interface PlayerInputSchemeOptions extends InputSchemeRuntimeOptions {
+  /** 测试可显式覆盖；产品构建默认移除开发 Context，F8 不会占用浏览器按键。 */
+  readonly includeDevelopmentMappings?: boolean;
+}
+
 export function createPlayerInputScheme(
-  options: InputSchemeRuntimeOptions = {},
+  options: PlayerInputSchemeOptions = {},
 ): InputSchemeRuntime {
-  return new InputSchemeRuntime(PlayerInputSchemeDefinition, options);
+  const {
+    includeDevelopmentMappings = import.meta.env?.DEV === true,
+    ...runtimeOptions
+  } = options;
+  const definition = includeDevelopmentMappings
+    ? PlayerInputSchemeDefinition
+    : {
+        ...PlayerInputSchemeDefinition,
+        inputMappingContexts: PlayerInputSchemeDefinition.inputMappingContexts.filter((context) => (
+          context.id !== 'IMC.Development'
+        )),
+      };
+  return new InputSchemeRuntime(definition, runtimeOptions);
 }
 
 export const PlayerInputActionIds = {
   Move: 'IA_Player_Move',
+  VesselMove: 'IA_Vessel_Move',
   Sprint: 'IA_Player_Sprint',
   Primary: 'IA_Player_Primary',
   Interact: 'IA_Player_Interact',
+  WorldInteract: 'IA_World_Interact',
+  AbilityArcane: 'IA_AbilityLab_Arcane',
+  AbilityBurn: 'IA_AbilityLab_Burn',
+  AbilityRage: 'IA_AbilityLab_Rage',
+  AbilitySilence: 'IA_AbilityLab_Silence',
+  AbilityReset: 'IA_AbilityLab_Reset',
+  DebugMenu: 'IA_Debug_Menu',
   Dodge: 'IA_Player_Dodge',
 } as const;
 
@@ -29,9 +54,17 @@ const tagForAction = (actionId: string): string => {
 
 export const PlayerInputTags = {
   Move: defineTag(tagForAction(PlayerInputActionIds.Move)),
+  VesselMove: defineTag(tagForAction(PlayerInputActionIds.VesselMove)),
   Sprint: defineTag(tagForAction(PlayerInputActionIds.Sprint)),
   Primary: defineTag(tagForAction(PlayerInputActionIds.Primary)),
   Interact: defineTag(tagForAction(PlayerInputActionIds.Interact)),
+  WorldInteract: defineTag(tagForAction(PlayerInputActionIds.WorldInteract)),
+  AbilityArcane: defineTag(tagForAction(PlayerInputActionIds.AbilityArcane)),
+  AbilityBurn: defineTag(tagForAction(PlayerInputActionIds.AbilityBurn)),
+  AbilityRage: defineTag(tagForAction(PlayerInputActionIds.AbilityRage)),
+  AbilitySilence: defineTag(tagForAction(PlayerInputActionIds.AbilitySilence)),
+  AbilityReset: defineTag(tagForAction(PlayerInputActionIds.AbilityReset)),
+  DebugMenu: defineTag(tagForAction(PlayerInputActionIds.DebugMenu)),
   Dodge: defineTag(tagForAction(PlayerInputActionIds.Dodge)),
 } as const;
 

@@ -32,6 +32,7 @@
 | `content.trees` | 布尔值 | 是否创建树木群。 |
 | `content.grass` | 布尔值 | 是否创建草丛。 |
 | `content.ocean` | 布尔值 | 是否创建动态海面系统。为 `true` 时必须配置 `renderer.ocean` 和 `gameplay.water`。 |
+| `grassInteraction.mouse` | 布尔值 | 是否允许鼠标移动压弯当前场景的草。该开关只控制鼠标输入源；玩家脚步、远端玩家和玩法效果仍可通过场景草地交互目标压草。没有草地时必须为 `false`。 |
 | `palette.ground` | `#RRGGBB` | 地面的填充主色。 |
 | `palette.grass` | `#RRGGBB` | 草丛的填充主色。 |
 | `palette.treeTrunk` | `#RRGGBB` | 树干填充色。 |
@@ -59,17 +60,44 @@
 
 ## `actors`：场景 Actor 摆放
 
-每项必须包含唯一的 `id`、已注册的 `archetype`、三维 `position` 和弧度制 `yaw`。
+每项必须包含唯一的 `id`、已注册的 `archetype` 和 `localTransform`；子 Actor 额外设置
+`parentActorId`。根 Actor 的局部坐标等于世界坐标，子 Actor 的局部坐标相对父 Actor。
 场景文件不重复填写 Component 参数；服务端从 `config/actors/<id>.actor.json` 解析原型，
 将使用到的净化后原型随 `room:joined.scene.actorArchetypes` 下发。
 
-当前 `raft` 原型包含：
+```json
+{
+  "id": "deck-prop-01",
+  "archetype": "deck-prop",
+  "parentActorId": "raft-01",
+  "localTransform": {
+    "position": [0.72, 0.62, -0.55],
+    "yaw": -0.1
+  }
+}
+```
+
+服务端会先创建全部 Actor，再解析父子关系，因此父 Actor 可以后声明；无效父节点、自己挂
+自己和循环引用都会让场景加载失败。
+
+当前原型可组合以下 Component：
 
 - `buoyancy`：质量/浮力部件、船体尺寸、最大静态倾斜和吃水范围；由 DS 创建 Component。
-- `render`：客户端模型类型、泡沫色和视觉采样尺寸；客户端只有收到 Actor 快照后才实例化。
+- `vesselMotor`：前进/倒车速度、加减速、阻力、转向速度与输入超时；由 DS 固定 tick 推进。
+- `interactable`：交互动作、提示名称、最大权威交互距离和启用状态。
+- `cargo`：货物质量、装载到承载 Actor 后的局部挂点，以及运行态承载关系。
+- `hazard`：服务端碰撞半径、伤害量、冷却时间和受损浮力部件 id。
+- `render`：客户端线稿模型类型和视觉参数；目前支持 `line-art-raft`、`line-art-cargo-crate` 与 `line-art-reef`。
+
+`cargo-crate` 使用 `interactable + cargo + render`，`reef` 使用 `hazard + render`，`raft`
+使用 `buoyancy + vesselMotor + render`。新增组合时要同步 Actor Schema、`ActorCatalog`、共享
+Component、服务端工厂、快照协议、客户端类型与模型工厂，不能只在场景 JSON 中增加字段。
 
 权威流为：`scene actors -> ActorCatalog -> room worker ActorWorld -> actors snapshot -> client Replica`。
-Shader 波浪和木筏微小起伏只修改 Replica 的 VisualRoot，不回写权威 Transform。
+控制权、船舶输入、货箱交互、载重和损伤事件都先经过房间 DS 校验；Actor Transform 在
+客户端快照缓冲中只插值最终世界坐标；`parentActorId` 与 `localTransform` 是离散状态。
+Shader 波浪、木筏和自由货箱的微小起伏只修改 Replica 的 VisualRoot，不回写权威
+Transform。危险物碰撞只由 DS 根据权威 Transform 计算。
 
 ## `gameplay`：权威玩法空间
 
@@ -118,7 +146,9 @@ Shader 波浪和木筏微小起伏只修改 Replica 的 VisualRoot，不回写�
 - `fog.far` 必须大于 `fog.near`。
 - 出生中心必须位于玩法边界内；当前校验不检查整个出生圆是否越界，作者仍应自行保证。
 - 海洋开关、`renderer.ocean`、`gameplay.water` 三者应成组出现。
+- `renderer.grassInteraction.mouse` 必须在每张场景中显式填写；只有 `content.grass` 为 `true` 时才能开启。切换场景时鼠标监听随旧场景销毁，不得用场景 id 硬编码例外。
 - `actors[].archetype` 必须能在 `config/actors/*.actor.json` 中找到，Actor id 在同一场景内必须唯一。
+- `actors[].parentActorId` 必须引用同场景 Actor，且层级不得自挂或形成循环。
 - JSON Schema 声明 `additionalProperties: false`，不要加入未定义字段。运行时会净化并只下发已知字段，但不应依赖静默丢弃拼写错误。
 - 新场景文件或配置改动需要重启 Node 主服务；目录只在 `SceneCatalog.load()` 时扫描一次。
 - 大厅只显示场景摘要且保持空场景。客户端必须等待 `room:joined.scene`，不能把浏览器选择值当成权威配置直接加载。
@@ -127,12 +157,13 @@ Shader 波浪和木筏微小起伏只修改 Replica 的 VisualRoot，不回写�
 
 1. 从 `grassland.scene.json`、`open-meadow.scene.json` 或 `water.scene.json` 中选择最接近的模板。
 2. 设置唯一文件名、`id`、名称、说明和容量。
-3. 设置内容开关、配色、雾效；海域补齐 `renderer.ocean`。
+3. 设置内容开关、`grassInteraction.mouse`、配色和雾效；海域补齐 `renderer.ocean`。
 4. 设置玩法边界、出生区域；海域补齐 `gameplay.water`。
 5. 选择 `topdown` 玩法模式或 `fly` 展示模式并调整初始相机。
-6. 用编辑器/Schema 检查 JSON，再以 `SceneCatalog` 测试确认运行时校验。
-7. 运行 `npm run test:server` 和 `npm run build`。
-8. 重启服务，确认 `/api/scenes` 出现新条目；创建房间并加入，确认 DS 返回并加载正确场景。
+6. 若摆放可交互物，确认它与初始可控 Actor 的距离不超过 `interactable.maximumDistance`；危险物还要核对半径与边界。
+7. 用编辑器/Schema 检查 JSON，再以 `SceneCatalog` 和 `ActorCatalog` 测试确认运行时校验。
+8. 运行 `npm run test:server`、`npm run test:client` 和 `npm run build`。
+9. 重启服务，确认 `/api/scenes` 出现新条目；创建房间并加入，确认 DS 返回并加载正确场景。
 
 ## 何时需要扩展代码
 

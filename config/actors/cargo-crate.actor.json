@@ -1,0 +1,26 @@
+{
+  "$schema": "./actor.schema.json",
+  "schemaVersion": 1,
+  "id": "cargo-crate",
+  "components": {
+    "interactable": {
+      "action": "cargo-toggle",
+      "label": "漂流货箱",
+      "maximumDistance": 7
+    },
+    "cargo": {
+      "mass": 55,
+      "mountLocalX": -0.55,
+      "mountLocalY": 0.62,
+      "mountLocalZ": 0.55
+    },
+    "render": {
+      "model": "line-art-cargo-crate",
+      "color": "#a07850",
+      "accentColor": "#6f5138",
+      "length": 0.9,
+      "width": 0.9,
+      "height": 0.72
+    }
+  }
+}

@@ -1,6 +1,6 @@
 ---
 name: skyland-scene-authoring
-description: Add, duplicate, revise, or debug SkyLand data-driven selectable scenes under config/scenes, including scene JSON authoring, renderer/gameplay/camera configuration, server catalog validation, DS initialization, and client loading. Use for SkyLand map or scene configuration work; do not use for unrelated Three.js model work or generic scene lifecycle changes.
+description: Add, duplicate, revise, or debug SkyLand data-driven selectable scenes under config/scenes, including scene JSON authoring, renderer/gameplay/camera configuration, server catalog validation, DS initialization, and client loading. Use for SkyLand map or scene configuration work; use skyland-actor-component for new Component, System, snapshot, ownership, or Actor interaction architecture; do not use for unrelated Three.js model work or generic scene lifecycle changes.
 ---
 
 # Skyland Scene Authoring
@@ -18,6 +18,8 @@ Create scenes as server-authoritative JSON data. Keep the lobby on its empty sce
    - `src/scenes/data/SceneDefinition.ts`
    - `src/scene/createLineArtScene.ts`
    - the relevant module under `src/models/` or visual system under `src/`
+
+If the request adds or changes Actor Component state, server Systems, ownership, interactions, snapshot fields, or client Replica behavior, use `skyland-actor-component`. This skill only owns placement of already-supported archetypes and the surrounding scene contract.
 
 ## Choose the change scope
 

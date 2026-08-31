@@ -10,6 +10,7 @@
     "displayName",
     "description",
     "capacity",
+    "sceneComponents",
     "actors",
     "renderer",
     "gameplay",
@@ -22,23 +23,53 @@
     "displayName": { "type": "string", "minLength": 1, "maxLength": 32 },
     "description": { "type": "string", "minLength": 1, "maxLength": 120 },
     "capacity": { "type": "integer", "minimum": 1, "maximum": 64 },
+    "sceneComponents": {
+      "type": "array",
+      "description": "按声明顺序加载的场景级逻辑组件，类似场景专属 GameMode",
+      "maxItems": 16,
+      "uniqueItems": true,
+      "items": {
+        "oneOf": [
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["type"],
+            "properties": { "type": { "const": "mouse-grass-interaction" } }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["type"],
+            "properties": { "type": { "const": "ability-lab" } }
+          }
+        ]
+      }
+    },
     "actors": {
       "type": "array",
       "maxItems": 256,
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["id", "archetype", "position", "yaw"],
+        "required": ["id", "archetype", "localTransform"],
         "properties": {
           "id": { "type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$" },
           "archetype": { "type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$" },
-          "position": {
-            "type": "array",
-            "minItems": 3,
-            "maxItems": 3,
-            "items": { "type": "number" }
-          },
-          "yaw": { "type": "number" }
+          "parentActorId": { "type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$" },
+          "localTransform": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["position", "yaw"],
+            "properties": {
+              "position": {
+                "type": "array",
+                "minItems": 3,
+                "maxItems": 3,
+                "items": { "type": "number" }
+              },
+              "yaw": { "type": "number" }
+            }
+          }
         }
       }
     },
@@ -179,6 +210,56 @@
       }
     }
   },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "sceneComponents": {
+            "contains": {
+              "type": "object",
+              "properties": { "type": { "const": "mouse-grass-interaction" } },
+              "required": ["type"]
+            }
+          }
+        },
+        "required": ["sceneComponents"]
+      },
+      "then": {
+        "properties": {
+          "renderer": {
+            "properties": {
+              "content": {
+                "properties": { "grass": { "const": true } },
+                "required": ["grass"]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "sceneComponents": {
+            "contains": {
+              "type": "object",
+              "properties": { "type": { "const": "ability-lab" } },
+              "required": ["type"]
+            }
+          }
+        },
+        "required": ["sceneComponents"]
+      },
+      "then": {
+        "properties": {
+          "camera": {
+            "properties": { "mode": { "const": "topdown" } },
+            "required": ["mode"]
+          }
+        }
+      }
+    }
+  ],
   "$defs": {
     "color": {
       "type": "string",

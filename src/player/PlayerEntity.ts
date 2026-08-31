@@ -1,26 +1,54 @@
 import type * as THREE from 'three';
+import { Actor } from '../../shared/actor/Actor.mjs';
+import {
+  GrassDisplacementComponent,
+} from '../actors/components/GrassDisplacementComponent';
 import { TopDownController } from '../controllers/TopDownController';
+import type { GrassInteractionTarget } from '../grass';
 import type { InputSubsystem } from '../input/index';
 import type { SceneBounds } from '../scenes/data/SceneDefinition';
 import { createPlayerSlimeModel } from '../models/playerSlime';
 import { PlayerReconciler } from './PlayerReconciler';
 import { SlimeAnimator } from './SlimeAnimator';
 
-export class PlayerEntity {
+interface PlayerWorldInteraction extends GrassInteractionTarget {
+  resolveSimpleCollision?(
+    position: { x: number; z: number },
+    radius: number,
+  ): { x: number; z: number };
+}
+
+export class PlayerEntity extends Actor {
   public readonly model = createPlayerSlimeModel();
   public readonly controller: TopDownController;
   private readonly animator = new SlimeAnimator(this.model);
   private readonly reconciler = new PlayerReconciler();
+  private readonly grassDisplacement: GrassDisplacementComponent;
 
   public constructor(
+    playerId: string,
     canvas: HTMLCanvasElement,
     spawn: { x: number; z: number },
     input: InputSubsystem,
     bounds: SceneBounds,
+    grassInteraction: PlayerWorldInteraction,
   ) {
+    super(playerId, 'player-slime');
     this.model.root.name = 'local-player-slime';
     this.model.root.position.set(spawn.x, 0, spawn.z);
-    this.controller = new TopDownController(canvas, this.model.root, input, { enabled: false, bounds });
+    this.controller = new TopDownController(canvas, this.model.root, input, {
+      enabled: false,
+      bounds,
+      collisionRadius: this.model.radius,
+      resolveCollision: (position, radius) => (
+        grassInteraction.resolveSimpleCollision?.(position, radius) ?? position
+      ),
+    });
+    this.grassDisplacement = this.addComponent(new GrassDisplacementComponent(
+      this.model.root,
+      grassInteraction,
+      { radius: this.model.radius * 1.65 },
+    )) as GrassDisplacementComponent;
   }
 
   public get object3D(): THREE.Object3D {
@@ -41,11 +69,13 @@ export class PlayerEntity {
   public update(deltaSeconds: number, elapsedSeconds: number): void {
     this.reconciler.update(deltaSeconds, this.controller);
     this.animator.update(deltaSeconds, elapsedSeconds, this.controller.movementSpeed);
+    this.grassDisplacement.update(deltaSeconds);
   }
 
-  public dispose(): void {
+  public override dispose(): void {
     this.controller.dispose();
     this.reconciler.reset();
+    super.dispose();
     this.model.root.parent?.remove(this.model.root);
   }
 }

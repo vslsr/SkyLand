@@ -1,13 +1,16 @@
 import * as THREE from 'three';
 import { createFillMaterial, type FillMaterialEnvironment } from '../../materials/createFillMaterial';
 import { createOutlinedObject } from '../outlinedObject';
-import type { ActorArchetypeDefinition } from '../../scenes/data/SceneDefinition';
+import type { ActorRenderDefinition } from '../../scenes/data/SceneDefinition';
+import { createSimpleCollisionFromRender } from '../../../shared/actor/simpleCollision.mjs';
+import type { ActorSimpleCollision } from '../actors/ActorVisualModel';
 
 export interface BuoyancyRaftModel {
   readonly root: THREE.Group;
   readonly visualRoot: THREE.Group;
   readonly length: number;
   readonly width: number;
+  readonly simpleCollision: ActorSimpleCollision;
 }
 
 function addOutlinedBox(
@@ -30,7 +33,7 @@ function addOutlinedBox(
 
 export function createBuoyancyRaftModel(
   environment: FillMaterialEnvironment,
-  definition: ActorArchetypeDefinition['components']['render'],
+  definition: Extract<ActorRenderDefinition, { model: 'line-art-raft' }>,
 ): BuoyancyRaftModel {
   const root = new THREE.Group();
   root.name = 'raft-authoritative-root';
@@ -80,5 +83,6 @@ export function createBuoyancyRaftModel(
     visualRoot,
     length,
     width,
+    simpleCollision: createSimpleCollisionFromRender(definition),
   };
 }

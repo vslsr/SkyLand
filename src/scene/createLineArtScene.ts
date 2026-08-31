@@ -28,8 +28,6 @@ export function createLineArtScene(
     // 流式世界接管地面、树、草与岩石：内容由世界种子推导、随焦点进出，
     // content 的开关在这里改为决定 chunk 里放什么。
     //
-    // 可交互草地（GrassFieldSystem）暂时只服务固定尺寸的场景：它按整块活动区
-    // 一次性铺满，草叶总数又有上限，套到 384 米的大世界上会稀疏到看不见。
     const streamer = new ChunkStreamer({
       world: renderer.world,
       worldSeed,
@@ -48,6 +46,7 @@ export function createLineArtScene(
     });
     scene.add(streamer.root);
     visualSystems.push(streamer);
+    grassInteraction = streamer.grassInteraction;
   } else {
     if (renderer.content.ground) scene.add(createGroundModel(renderer.palette.ground, environment));
     if (renderer.content.trees) {

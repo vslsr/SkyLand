@@ -9,8 +9,28 @@
     {
       "id": "demo-raft-01",
       "archetype": "raft",
-      "position": [0, 0, 0],
-      "yaw": 0.24
+      "localTransform": { "position": [0, 0, 0], "yaw": 0.24 }
+    },
+    {
+      "id": "raft-deck-prop-01",
+      "archetype": "deck-prop",
+      "parentActorId": "demo-raft-01",
+      "localTransform": { "position": [0.72, 0.62, -0.55], "yaw": -0.1 }
+    },
+    {
+      "id": "cargo-crate-01",
+      "archetype": "cargo-crate",
+      "localTransform": { "position": [3, 0, 1.5], "yaw": -0.18 }
+    },
+    {
+      "id": "cargo-crate-02",
+      "archetype": "cargo-crate",
+      "localTransform": { "position": [-4.5, 0, -2.5], "yaw": 0.42 }
+    },
+    {
+      "id": "reef-01",
+      "archetype": "reef",
+      "localTransform": { "position": [1.2, -0.45, 5.2], "yaw": 0.31 }
     }
   ],
   "renderer": {
@@ -18,6 +38,7 @@
     "background": "#f5f2e9",
     "fog": { "color": "#f5f2e9", "near": 34, "far": 82 },
     "content": { "ground": false, "trees": false, "grass": false, "ocean": true },
+    "grassInteraction": { "mouse": false },
     "palette": {
       "ground": "#eee5cf",
       "grass": "#c1d7a6",

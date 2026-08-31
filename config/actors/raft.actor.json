@@ -18,6 +18,15 @@
         { "id": "cargo", "mass": 92, "buoyancy": 0, "integrity": 1, "localX": 0.68, "localZ": 0.12 }
       ]
     },
+    "vesselMotor": {
+      "maximumForwardSpeed": 4.2,
+      "maximumReverseSpeed": 1.6,
+      "acceleration": 2.4,
+      "deceleration": 3.2,
+      "drag": 1.1,
+      "turnSpeed": 0.85,
+      "inputTimeoutMs": 300
+    },
     "render": {
       "model": "line-art-raft",
       "foamColor": "#fffdf7",

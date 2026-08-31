@@ -1,0 +1,266 @@
+.ability-lab-panel {
+  position: fixed;
+  top: clamp(70px, 9vw, 104px);
+  left: clamp(18px, 4.6vw, 72px);
+  z-index: 4;
+  display: grid;
+  width: min(390px, calc(100vw - 36px));
+  max-height: calc(100vh - 128px);
+  overflow: auto;
+  pointer-events: auto;
+  color: #332e29;
+  background: rgba(253, 249, 239, 0.94);
+  border: 1px solid rgba(51, 46, 41, 0.48);
+  box-shadow: 9px 11px 0 rgba(51, 46, 41, 0.08);
+  backdrop-filter: blur(5px);
+}
+
+.ability-lab-panel[hidden] {
+  display: none;
+}
+
+.ability-lab-panel button {
+  color: inherit;
+  background: transparent;
+  border: 1px solid rgba(51, 46, 41, 0.28);
+}
+
+.ability-lab-panel button:hover,
+.ability-lab-panel button:focus-visible {
+  background: #e6edd9;
+  border-color: #332e29;
+  outline: 0;
+}
+
+.ability-lab-panel__header {
+  display: flex;
+  gap: 16px;
+  align-items: flex-start;
+  justify-content: space-between;
+  padding: 15px 16px 14px;
+  border-bottom: 1px solid rgba(51, 46, 41, 0.2);
+}
+
+.ability-lab-panel__heading {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.ability-lab-kicker,
+.ability-lab-unit__kicker,
+.ability-lab-log-title,
+.ability-lab-stat__caption {
+  color: rgba(51, 46, 41, 0.55);
+  font-size: 7px;
+  font-weight: 800;
+  letter-spacing: 0.16em;
+}
+
+.ability-lab-title {
+  margin: 0;
+  font: 500 23px/1.08 Georgia, "Times New Roman", serif;
+}
+
+.ability-lab-summary {
+  margin: 2px 0 0;
+  color: rgba(51, 46, 41, 0.62);
+  font-size: 8px;
+  line-height: 1.5;
+}
+
+.ability-lab-reset {
+  flex: none;
+  min-height: 30px;
+  padding: 0 9px;
+  font-size: 9px;
+}
+
+.ability-lab-units {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1px;
+  padding: 1px;
+  background: rgba(51, 46, 41, 0.16);
+}
+
+.ability-lab-unit {
+  display: grid;
+  min-width: 0;
+  align-content: start;
+  gap: 9px;
+  padding: 12px;
+  background: rgba(253, 249, 239, 0.98);
+}
+
+.ability-lab-unit__heading {
+  display: grid;
+  gap: 2px;
+}
+
+.ability-lab-unit__name {
+  font: 500 16px/1 Georgia, "Times New Roman", serif;
+}
+
+.ability-lab-stat {
+  display: grid;
+  grid-template-columns: 36px minmax(0, 1fr);
+  gap: 5px 7px;
+  align-items: center;
+}
+
+.ability-lab-stat__value {
+  justify-self: end;
+  font: 600 10px/1 Georgia, "Times New Roman", serif;
+}
+
+.ability-lab-stat--inline {
+  padding-top: 2px;
+}
+
+.ability-lab-bar {
+  grid-column: 1 / -1;
+  height: 4px;
+  overflow: hidden;
+  background: rgba(51, 46, 41, 0.12);
+}
+
+.ability-lab-bar__fill {
+  display: block;
+  width: var(--ability-lab-ratio, 100%);
+  height: 100%;
+  background: #8ca273;
+  transition: width 120ms linear;
+}
+
+.ability-lab-bar__fill--mana {
+  background: #8877a7;
+}
+
+.ability-lab-bar__fill--target {
+  background: #bc694f;
+}
+
+.ability-lab-tags {
+  display: flex;
+  min-height: 20px;
+  flex-wrap: wrap;
+  gap: 4px;
+  align-content: flex-start;
+}
+
+.ability-lab-tag {
+  max-width: 100%;
+  padding: 3px 5px;
+  overflow: hidden;
+  color: rgba(51, 46, 41, 0.68);
+  font-size: 7px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  background: rgba(126, 110, 151, 0.08);
+  border: 1px solid rgba(93, 79, 116, 0.2);
+}
+
+.ability-lab-actions {
+  display: grid;
+  gap: 7px;
+  padding: 12px 14px;
+}
+
+.ability-lab-action {
+  display: grid;
+  grid-template-columns: 26px minmax(0, 1fr) auto;
+  gap: 9px;
+  align-items: center;
+  min-height: 43px;
+  padding: 6px 9px;
+  text-align: left;
+}
+
+.ability-lab-action.is-cooling-down {
+  background: rgba(136, 119, 167, 0.08);
+}
+
+.ability-lab-action__key {
+  display: grid;
+  width: 24px;
+  height: 24px;
+  place-items: center;
+  font: 700 10px/1 inherit;
+  background: rgba(51, 46, 41, 0.06);
+  border: 1px solid rgba(51, 46, 41, 0.24);
+}
+
+.ability-lab-action__copy {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.ability-lab-action__name {
+  font-size: 10px;
+}
+
+.ability-lab-action__description {
+  overflow: hidden;
+  color: rgba(51, 46, 41, 0.58);
+  font-size: 8px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ability-lab-action__status {
+  color: #71845f;
+  font-size: 8px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+}
+
+.ability-lab-log-section {
+  display: grid;
+  gap: 6px;
+  padding: 10px 14px 12px;
+  border-top: 1px solid rgba(51, 46, 41, 0.18);
+}
+
+.ability-lab-log-title {
+  margin: 0;
+}
+
+.ability-lab-log {
+  display: grid;
+  min-height: 38px;
+  max-height: 104px;
+  gap: 4px;
+  margin: 0;
+  padding: 0 0 0 17px;
+  overflow: auto;
+  color: rgba(51, 46, 41, 0.68);
+  font-size: 8px;
+  line-height: 1.45;
+}
+
+body.is-ability-lab .hud--footer {
+  opacity: 0.72;
+}
+
+@media (max-width: 640px) {
+  .ability-lab-panel {
+    top: 62px;
+    left: 12px;
+    width: min(360px, calc(100vw - 24px));
+    max-height: calc(100vh - 76px);
+  }
+
+  .ability-lab-actions {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .ability-lab-action {
+    grid-template-columns: 24px minmax(0, 1fr);
+  }
+
+  .ability-lab-action__status {
+    grid-column: 2;
+  }
+}

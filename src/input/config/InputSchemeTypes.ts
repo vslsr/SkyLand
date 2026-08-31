@@ -38,6 +38,48 @@ export interface InputDevicePromptConfigDefinition {
   readonly prompts: readonly InputDevicePromptDefinition[];
 }
 
+export type VirtualJoystickMode = 'fixed' | 'floating';
+
+export interface VirtualJoystickDefinition {
+  readonly control: string;
+  readonly mode: VirtualJoystickMode;
+  readonly baseRadiusPx: number;
+  readonly travelRadiusPx: number;
+  readonly knobRadiusPx: number;
+  readonly deadZone: number;
+  readonly sensitivity: number;
+  readonly activationWidthRatio: number;
+  readonly activationHeightRatio: number;
+}
+
+export interface VirtualButtonDefinition {
+  readonly id: string;
+  readonly control: string;
+  readonly label: string;
+  readonly ariaLabel: string;
+  readonly sizePx: number;
+  readonly gridColumn: number;
+  readonly gridRow: number;
+  readonly rowSpan?: number;
+}
+
+export interface VirtualControlLayoutDefinition {
+  readonly edgeInsetPx: number;
+  readonly bottomInsetPx: number;
+  readonly buttonGapPx: number;
+  readonly scale: number;
+}
+
+export interface VirtualControlsDefinition {
+  readonly desktopDebugQueryParameter: string;
+  readonly joystick: VirtualJoystickDefinition;
+  readonly buttons: readonly VirtualButtonDefinition[];
+  readonly layouts: {
+    readonly landscape: VirtualControlLayoutDefinition;
+    readonly portrait: VirtualControlLayoutDefinition;
+  };
+}
+
 export interface InputSchemeDefinition {
   readonly schemaVersion: 1;
   readonly id: string;
@@ -45,6 +87,7 @@ export interface InputSchemeDefinition {
   readonly inputConfig: InputConfigDefinition;
   readonly inputMappingContexts: readonly ConfigurableInputMappingContextDefinition[];
   readonly devicePrompts: InputDevicePromptConfigDefinition;
+  readonly virtualControls: VirtualControlsDefinition;
 }
 
 export type InputRebindConflictPolicy = 'swap' | 'reject' | 'allow';
@@ -65,4 +108,3 @@ export interface StoredInputBindingOverrides {
   readonly schemeId: string;
   readonly bindings: Readonly<Record<string, string>>;
 }
-

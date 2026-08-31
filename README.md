@@ -162,6 +162,7 @@ DOM 的纯逻辑（标签、输入配置、和解、快照插值等），因此�
 - `inputConfig.bindings`：把 `Input.Player.Move` 这类层级标签关联到 Action。
 - `inputMappingContexts`：Context 优先级及键鼠、触摸、Gamepad Mapping。
 - `devicePrompts`：控制路径显示名，以及按模式、设备和状态生成的 HUD 提示。
+- `virtualControls`：固定/浮动摇杆、半径、死区、灵敏度、按钮网格和横竖屏布局。
 
 每条 Mapping 必须提供全局稳定的 `id` 和 `deviceKind`。运行时按 Mapping id 重绑定，
 因此方向、Action 和 Modifier 不会随按键变化。默认冲突策略会交换同一 Context 中的
@@ -178,6 +179,11 @@ bindings.resetAllBindings();
 变化会立即替换 `InputSubsystem` 的 Context、刷新浏览器默认行为拦截列表和 HUD 提示。
 浏览器默认把非默认绑定以差异形式保存到 `localStorage`；配置升级或本地数据损坏时，
 无法识别的单条覆盖会被忽略，不影响默认输入方案加载。
+
+虚拟摇杆默认使用浮动模式：在屏幕左侧触控区域按下时生成基座，拖动输出
+`Virtual.MoveStick`，释放或触摸中断后归零。布局会叠加浏览器安全区，并为横屏、
+竖屏分别应用缩放与边距。桌面调试时在地址后添加 `?virtual-controls=1`；进入
+`topdown` 场景后即可用鼠标检查摇杆和按钮，正式桌面布局仍保持隐藏。
 
 ## 大世界与 Chunk 系统
 
@@ -237,11 +243,14 @@ draw call，视野内 25 个 chunk 合计 75 次。
 里放什么：关掉某一类就注册一个空模板。放置结果本身不受影响——放置算法在 WASM 与
 JS 两个后端之间必须逐位一致，所以它不接受任何逐场景的开关。
 
-草有两条路：固定场景用 `GrassFieldSystem`，按整块活动区一次性铺满并支持踩踏
-交互；流式场景用 chunk 里的草丛模板，随 chunk 进出。前者暂时不服务流式场景——
-它的草叶总数封顶 12000 株，摊到 384 米见方的活动区上约等于每 12 平方米一株，
-稀疏到看不见，要接进大世界得先让它跟着焦点做滑动窗口。两条路的叶片形状取自
-同一个 `createGrassBladeGeometry`，观感是一致的。
+草有两条路：固定场景用 `GrassFieldSystem`，按整块活动区一次性铺满；流式场景用
+`StreamingGrassSystem`，只为当前加载的 chunk 创建草叶。流式系统直接读取生成器原有的
+草簇坐标、朝向和缩放，每簇仍保持三片叶子，因此替换不会改变位置或密度；所有已加载
+chunk 共用一张跟随玩家焦点、按固定步长滑动的 32 米局部弯曲纹理。玩家踩踏始终可写入
+当前场景的草地交互目标，鼠标输入则由各场景的 `renderer.grassInteraction.mouse` 独立控制；
+`open-world` 明确关闭鼠标压草。窗口移动时会按世界坐标重投影仍在重叠区内的草痕，快速传送到不重叠区域则
+自动回到中性状态；纹理成本因此不随世界尺寸增长。两条路的叶片形状都取自
+`createGrassBladeGeometry`，观感保持一致。
 
 顶点已经是世界坐标，承载它们的对象留在原点，Three.js 自动算出的包围球就落在
 正确位置上，视锥剔除按 chunk 生效。
@@ -294,6 +303,10 @@ const page: CommonUIPage = {
 
 切换 Scene 时，`Scene.leave()` 会停用并清空该 Scene 的全部 CommonUI。
 
+开发构建额外启用 `IMC.Development`。按 F8 会通过数据化 InputAction 打开 CommonUI
+调试页；页面仍遵守栈顶输入、焦点、Escape/F8 关闭和 Scene 清理规则。调试页可以切换
+Actor 简易碰撞边框，产品构建会移除该 Mapping，不占用 F8。
+
 ## 数据化场景
 
 大厅阶段只创建一个带纸张色背景的空 Three.js Scene，不加载地面、树木、草丛、玩家
@@ -304,13 +317,13 @@ const page: CommonUIPage = {
 
 - `grassland.scene.json`：完整线稿草地、树林和草丛
 - `open-meadow.scene.json`：移除树林的暖色开阔原野
-- `water.scene.json`：低多边形线稿海面和服务端权威木筏 Actor
+- `water.scene.json`：低多边形线稿海面，以及木筏、漂流货箱和礁石 Actor 的交互示例
 
 `config/scenes/scene.schema.json` 描述可编辑字段。场景配置包括：
 
 - 地图 id、显示名称、描述和人数上限
 - 场景 Actor 的原型引用、初始位置和朝向
-- 渲染器类型、背景、雾效、内容开关和颜色表
+- 渲染器类型、背景、雾效、内容开关、场景级鼠标草地交互开关和颜色表
 - 服务端权威活动边界与出生点规则
 - 默认观察相机参数
 
@@ -319,9 +332,18 @@ const page: CommonUIPage = {
 不同的地图数据。修改配置后需要重启 Node.js 服务器。
 
 可复用 Actor 原型位于 `config/actors/*.actor.json`。场景的 `actors` 只负责摆放；
-`ActorCatalog` 会解析浮力和渲染 Component，DS 使用相同的净化结果创建 ActorWorld。
-木筏的权威吃水、漂浮状态和静态倾斜进入 `actors` 快照，客户端收到快照后才创建
-对应 Replica；海浪造成的上下浮动仅作用于视觉子节点，不改写服务端 Transform。
+`ActorCatalog` 会解析浮力、船舶动力、交互、货物、危险物和渲染 Component，DS 使用相同
+的净化结果创建 ActorWorld。木筏的权威位置、控制者、航速、吃水、漂浮状态和静态倾斜，
+以及货箱的承载关系和礁石危险范围都会进入 `actors` 快照。客户端收到快照后才创建对应
+Replica。Actor 使用服务端校验的 `parentActorId + localTransform` 构成层级，DS 在父 Actor
+移动后由 `AttachmentSystem` 按拓扑解算子 Actor 的最终世界坐标。客户端只对最终世界
+Transform 回退 120 ms 插值；父子关系不插值，海浪造成的上下浮动仍只作用于视觉子节点，
+不改写权威 Transform。
+
+每个受支持的 Actor 模型在创建时会从 `render` 的 authoring 尺寸自动生成一个简易有向盒，
+无需再维护重复碰撞配置。玩家圆形碰撞、可控 Actor 推出和客户端预测共用
+`shared/actor/simpleCollision.mjs`；房间 DS 仍是最终权威。碰撞查询只遍历当前房间最多
+256 个 Actor，不随流式大世界面积增长。
 
 创建房间与加载顺序：
 
@@ -352,27 +374,45 @@ DS 初始化 ServerScene、边界、出生规则并回复 room:ready
 - W / A / S / D：按俯视镜头的屏幕方向移动。
 - Shift：加速移动。
 - 鼠标：通过透视射线投影到玩法 XY 平面，并让史莱姆面向投影点。玩法坐标的 Y 在 Three.js 世界中映射为地面的 Z 轴。
+- 水域自由镜头仍使用 WASD；按 F 接管/释放当前可用木筏，方向键发送船舶油门与转向意图。客户端不预测船舶坐标。
+- 准星对准线稿货箱时会出现高亮与交互提示；控制木筏后按 E 装载或卸载。距离、控制权、载重和附着位置都由 DS 校验并广播。
+- 驶入礁石危险半径会由 DS 按冷却时间造成浮筒损伤；HUD 显示航速、载重、漂浮状态、损伤数和最新事件。
 - 左上角 `•••`：打开游戏菜单；“退出房间”会发送离开消息、清理当前地图与玩家，并返回大厅空场景。WebSocket 保持可复用，之后可以直接加入其他房间。
 
 史莱姆参考 `.cursor/demo/line-art-style-magic-cabin-main/index.html`，使用三层透明材质、内部核心、气泡、阴影、顶点波动和移动压缩回弹。`.cursor/demo/` 用于集中存放只读参考案例；该参考路径也记录在 `.cursor/rules/line-art-reference.mdc` 中，作为项目始终生效的规范。
 
 ## 房间进程
 
-生产环境只有一个对外端口。客户端页面、HTTP API 和 WebSocket 都进入同一个 Node.js
-HTTP Server；WebSocket 网关再把玩家输入路由到对应的房间 DS：
+生产环境目前只有一个对外端口。客户端页面、HTTP API 和 WebSocket 都进入同一个 Node.js
+HTTP Server；WebSocket 网关只负责连接和数据帧，`RoomConnectionHub` 再把传输无关的
+房间消息路由到对应的房间 DS：
 
 ```text
 浏览器 / PC WebView
         │
         ├── GET /、/assets/* ─────────→ StaticWebServer → dist/
         ├── HTTP /api/* ──────────────→ ApiRouter → RoomProcessManager
-        └── WebSocket /ws ────────────→ WebSocketGateway
-                                                │ IPC
-                         ┌──────────────────────┼──────────────────────┐
-                         ↓                      ↓                      ↓
-                    room-worker A         room-worker B         room-worker C
-                    ServerScene           ServerScene           ServerScene
+        └── WebSocket /ws ────────────→ WebSocketGateway ──┐
+                                                           ↓
+                                                   RoomConnectionHub
+                                                           │
+                                                   RoomProcessManager
+                                                           │ IPC
+                                    ┌──────────────────────┼──────────────────────┐
+                                    ↓                      ↓                      ↓
+                               room-worker A         room-worker B         room-worker C
+                               ServerScene           ServerScene           ServerScene
 ```
+
+客户端的 `RoomClient` 同样不直接依赖 WebSocket：大厅列表与建房由 `HttpRoomDirectory`
+负责，游戏消息先经过 `MessageCodec`，再交给注入的 `GameTransport`。传输接口提供
+`control` 与 `realtime` 两种用途，并通过 `capabilities` 明示实际投递保证。当前
+`WebSocketTransport` 把两者都映射为可靠有序传输；后续 Electron 可注入混合实现，
+保留 WebSocket 控制通道并把实时输入与快照交给主进程 UDP，而无需修改场景与玩法层。
+
+服务端的 `RoomConnectionHub` 持有逻辑会话、房间归属、输入限流和广播通道选择。
+未来增加 `UdpGateway` 时，它与 `WebSocketGateway` 共享这个枢纽，避免复制加入房间、
+Actor 控制和断线清理逻辑。
 
 大厅进程只管理静态资源、连接与路由，不直接执行房间模拟。`RoomProcessManager` 每创建
 一个房间都会使用 `child_process.fork()` 启动独立的 `room-worker.mjs`。
@@ -384,8 +424,8 @@ HTTP Server；WebSocket 网关再把玩家输入路由到对应的房间 DS：
 
 房间创建后如果没有玩家，或最后一名玩家离开后，会启动 60 秒空置回收计时；期间有玩家加入会立即取消计时。大厅接口通过 `idleExpiresAt` 返回服务端截止时间，房间卡片据此显示倒计时，归零后自动刷新列表。计时到期仍为空房间时，主进程会关闭并移除对应 DS 子进程。
 
-收到 `SIGINT` 或 `SIGTERM` 时，组合服务器会关闭 WebSocket 网关、通知所有房间 DS
-退出，并在 HTTP Server 停止监听后结束主进程。
+收到 `SIGINT` 或 `SIGTERM` 时，组合服务器会关闭 WebSocket 网关和连接枢纽、通知
+所有房间 DS 退出，并在 HTTP Server 停止监听后结束主进程。
 
 ## 移动同步
 
@@ -418,11 +458,31 @@ HTTP Server；WebSocket 网关再把玩家输入路由到对应的房间 DS：
 | 单条输入时长上限 | `ServerScene.applyInput` | 一条消息最多推进 0.1 s |
 | 服务器时钟维护的时间预算 | `ServerScene.update` | 谎报时长只会提前花光预算 |
 | 序号严格递增 | `ServerScene.applyInput` | 重放与乱序输入被丢弃 |
-| 输入消息令牌桶 | `WebSocketGateway` | 单个连接刷不爆房间进程 |
+| 输入消息令牌桶 | `RoomConnectionHub` | 任意传输上的单个逻辑会话都刷不爆房间进程 |
 | 非法数值过滤 | `toFiniteNumber` | NaN / Infinity 不会污染权威状态 |
 
 客户端时间不可信是这里最容易踩的坑：`deltaSeconds` 由客户端提供，但服务端按自己的
 时钟给每名玩家补充时间预算，谎报时长最多只能提前用完预算，换不到额外位移。
+
+### 服务端权威船舶
+
+`ActorControlComponent` 为可控 Actor 保存排他的 `ownerPlayerId`、输入序号和事件序号；
+同一玩家只能占用一艘船，断开或离开房间会自动释放。`VesselMotorComponent` 保存原型配置
+与运行态，`VesselMotorSystem` 在 DS 20 Hz tick 中根据油门、转向、浮力降速系数和玩法
+边界推进 Transform。超过 300 ms 没有新输入会自动把油门归零，因此丢包不会造成持续失控。
+
+底层载重和损伤变更仍使用统一的 Component mutation；调试入口走 `actor:event`，场景货箱
+则走语义更明确的 `actor:interact`。两者都要求序号严格递增，且最终由 DS 做权限与状态校验：
+
+- `cargo:add` / `cargo:remove` 修改 `BuoyancyComponent.loads`，下一 tick 只重算标脏的浮力。
+- `damage` 降低原型浮力部件的完整度，可使木筏从正常、超载进入进水或沉没状态。
+- 动态载重总量、受损部件数、事件版本和最后事件随 Actor 快照广播。
+- 装载货箱通过通用 Actor 父子关系挂到木筏，`AttachmentSystem` 在服务端统一解算 Transform；卸载时解除挂载、保持世界坐标并把它放到船侧。
+- `VesselHazardSystem` 在服务端检测木筏与礁石半径，不接受客户端主动上报“已碰撞”。
+
+客户端 `RoomClient` 提供 `sendActorCargoAdd`、`sendActorCargoRemove` 和 `sendActorDamage`
+作为底层事件入口，并提供 `interactWithActor` 给准星交互控制器；服务端仍会重新校验所有权、
+序号、交互距离、承载关系、数值范围和目标 id。
 
 ### 客户端的两条路径
 
@@ -455,7 +515,7 @@ HTTP Server；WebSocket 网关再把玩家输入路由到对应的房间 DS：
 - `server/actors/`：Actor 原型目录、服务端工厂、浮力与快照逻辑
 - `server/scenes/`：JSON 场景目录加载、校验与查询
 - `shared/actor/`：浏览器与房间 DS 共用的 Actor、Component、ActorWorld 核心
-- `src/actors/`：客户端 Actor Replica、渲染 Component 与视觉 System
+- `src/actors/`：客户端 Actor Replica、Actor 快照缓冲、渲染 Component 与视觉 System
 - `config/actors/`：可复用 Actor 原型 JSON 与 Schema
 - `config/scenes/`：每张地图的独立 JSON 与 Schema
 - `shared/`：前后端共用的移动模拟与同步常量

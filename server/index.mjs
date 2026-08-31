@@ -5,6 +5,7 @@ import { ApiRouter } from './http/ApiRouter.mjs';
 import { sendJson } from './http/HttpResponses.mjs';
 import { StaticWebServer } from './http/StaticWebServer.mjs';
 import { RoomProcessManager } from './rooms/RoomProcessManager.mjs';
+import { RoomConnectionHub } from './network/RoomConnectionHub.mjs';
 import { WebSocketGateway } from './network/WebSocketGateway.mjs';
 import { SceneCatalog } from './scenes/SceneCatalog.mjs';
 
@@ -37,7 +38,8 @@ const server = http.createServer(async (request, response) => {
   }
 });
 
-const gateway = new WebSocketGateway(server, roomManager);
+const connectionHub = new RoomConnectionHub(roomManager);
+const gateway = new WebSocketGateway(server, connectionHub);
 
 server.listen(port, host, async () => {
   const webReady = await staticWebServer.isReady();
@@ -47,6 +49,7 @@ server.listen(port, host, async () => {
 
 function shutdown() {
   gateway.close();
+  connectionHub.close();
   roomManager.shutdown();
   server.close(() => process.exit(0));
 }

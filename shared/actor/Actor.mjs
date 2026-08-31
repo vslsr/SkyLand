@@ -14,6 +14,38 @@ export class Actor {
     this.components = new Map();
     this.world = undefined;
     this.started = false;
+    this.parentActor = undefined;
+    this.childActors = new Set();
+  }
+
+  get parent() {
+    return this.parentActor;
+  }
+
+  get children() {
+    return Array.from(this.childActors);
+  }
+
+  setParent(parent, options = {}) {
+    if (parent === this.parentActor) return false;
+    if (parent === this) throw new Error(`Actor ${this.id} 不能成为自己的父节点`);
+    for (let ancestor = parent; ancestor; ancestor = ancestor.parent) {
+      if (ancestor === this) throw new Error(`Actor ${this.id} 的父子关系形成了循环`);
+    }
+    if (this.started && parent && (!parent.started || parent.world !== this.world)) {
+      throw new Error('父子 Actor 必须属于同一个 ActorWorld');
+    }
+
+    const transform = this.getComponent('transform');
+    this.parentActor?.childActors.delete(this);
+    this.parentActor = parent;
+    parent?.childActors.add(this);
+    const parentTransform = parent?.getComponent('transform');
+    if (transform) {
+      if (options.worldPositionStays === false) transform.updateWorldFromParent(parentTransform);
+      else transform.updateLocalFromParent(parentTransform);
+    }
+    return true;
   }
 
   addComponent(component) {
@@ -67,6 +99,8 @@ export class Actor {
   }
 
   dispose() {
+    for (const child of this.children) child.setParent(undefined, { worldPositionStays: true });
+    this.setParent(undefined, { worldPositionStays: true });
     this.endPlay();
     const components = Array.from(this.components.values()).reverse();
     this.components.clear();

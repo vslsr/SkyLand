@@ -10,12 +10,21 @@ export interface SnapshotPlayer {
 }
 
 export type ActorFloatState = 'afloat' | 'overloaded' | 'flooding' | 'sinking';
+export type ActorEventType = 'cargo:add' | 'cargo:remove' | 'damage';
 
 export interface SnapshotActor {
   id: string;
   archetypeId: string;
+  /** 离散复制状态；切换父节点时不做插值。 */
+  parentActorId?: string | null;
   revision: number;
   transform: {
+    x: number;
+    y: number;
+    z: number;
+    yaw: number;
+  };
+  localTransform?: {
     x: number;
     y: number;
     z: number;
@@ -27,6 +36,33 @@ export interface SnapshotActor {
     staticRoll: number;
     staticPitch: number;
     speedFactor: number;
+    cargoMass: number;
+    damagedPartCount: number;
+    eventRevision: number;
+    lastEvent: { type: ActorEventType; targetId: string } | null;
+  };
+  vessel?: {
+    speed: number;
+    throttle: number;
+    steering: number;
+  };
+  control?: {
+    ownerPlayerId: string | null;
+    revision: number;
+  };
+  interactable?: {
+    action: 'cargo-toggle';
+    label: string;
+    enabled: boolean;
+    revision: number;
+  };
+  cargo?: {
+    mass: number;
+    carrierActorId: string | null;
+    revision: number;
+  };
+  hazard?: {
+    radius: number;
   };
 }
 

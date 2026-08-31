@@ -1,17 +1,19 @@
 import * as THREE from 'three';
 import type { CameraFrame } from '../camera/CameraTransform';
 import {
-  MouseGrassInteractor,
   type GrassBendImpulse,
   type GrassInteractionTarget,
 } from '../grass';
 import { createLineArtScene } from '../scene/createLineArtScene';
 import type {
+  ActorInteractionCandidate,
   ActorSnapshotTarget,
   SceneUpdateContext,
   SceneVisualSystem,
+  VesselHudState,
 } from '../scene/SceneVisualSystem';
 import type { SnapshotActor } from '../network/protocol';
+import type { SceneBeforeRenderListener } from '../scene/components';
 import type { SceneDefinition } from '../scenes/data/SceneDefinition';
 
 const EMPTY_SCENE_COLOR = 0xfdfbf6;
@@ -34,16 +36,17 @@ function disposeScene(scene: THREE.Scene): void {
   });
 }
 
-export class SceneRenderer {
+export class SceneRenderer implements GrassInteractionTarget {
   private readonly renderer: THREE.WebGLRenderer;
   private readonly camera = new THREE.PerspectiveCamera(50, 1, 0.1, 100);
   private scene = createEmptyScene();
   private visualSystems: SceneVisualSystem[] = [];
-  private mouseGrassInteractor?: MouseGrassInteractor;
   private grassInteraction?: GrassInteractionTarget;
   private actorSnapshotTarget?: ActorSnapshotTarget;
+  private simpleCollisionVisible = false;
   private readonly dynamicWorld = new THREE.Group();
   private readonly lookTarget = new THREE.Vector3();
+  private readonly beforeRenderListeners = new Set<SceneBeforeRenderListener>();
 
   public constructor(canvas: HTMLCanvasElement) {
     this.renderer = new THREE.WebGLRenderer({
@@ -67,7 +70,7 @@ export class SceneRenderer {
       frame.position[2] + frame.axes.forward[2],
     );
     this.camera.lookAt(this.lookTarget);
-    this.mouseGrassInteractor?.update(this.camera);
+    for (const listener of this.beforeRenderListeners) listener(this.camera);
     for (const system of this.visualSystems) {
       system.beforeRender?.(this.renderer, this.camera);
     }
@@ -83,8 +86,17 @@ export class SceneRenderer {
   }
 
   /** Shared entry point for mouse tests, footsteps, touch input, or gameplay effects. */
-  public applyGrassImpulse(impulse: GrassBendImpulse): void {
+  public applyImpulse(impulse: GrassBendImpulse): void {
     this.grassInteraction?.applyImpulse(impulse);
+  }
+
+  public get grassInteractionTarget(): GrassInteractionTarget | undefined {
+    return this.grassInteraction;
+  }
+
+  public onBeforeRender(listener: SceneBeforeRenderListener): () => void {
+    this.beforeRenderListeners.add(listener);
+    return () => this.beforeRenderListeners.delete(listener);
   }
 
   public update(
@@ -95,8 +107,47 @@ export class SceneRenderer {
     for (const system of this.visualSystems) system.update(deltaSeconds, elapsedSeconds, context);
   }
 
-  public syncActors(snapshots: readonly SnapshotActor[]): void {
-    this.actorSnapshotTarget?.syncSnapshots(snapshots);
+  public syncActors(snapshots: readonly SnapshotActor[], serverTime: number): void {
+    this.actorSnapshotTarget?.syncSnapshots(snapshots, serverTime);
+  }
+
+  public findOwnedActorId(playerId: string): string | undefined {
+    return this.actorSnapshotTarget?.findOwnedActorId(playerId);
+  }
+
+  public findControllableActorId(): string | undefined {
+    return this.actorSnapshotTarget?.findControllableActorId();
+  }
+
+  public pickActorInteraction(frame: CameraFrame): ActorInteractionCandidate | undefined {
+    return this.actorSnapshotTarget?.pickInteractableActor(
+      frame.position,
+      frame.axes.forward,
+    );
+  }
+
+  public setHoveredActorId(actorId?: string): void {
+    this.actorSnapshotTarget?.setHoveredActorId(actorId);
+  }
+
+  public getVesselHudState(playerId: string): VesselHudState | undefined {
+    return this.actorSnapshotTarget?.getVesselHudState(playerId);
+  }
+
+  public resolveSimpleCollision(
+    position: { x: number; z: number },
+    radius: number,
+  ): { x: number; z: number } {
+    return this.actorSnapshotTarget?.resolveSimpleCollision(position, radius) ?? position;
+  }
+
+  public setSimpleCollisionVisible(visible: boolean): void {
+    this.simpleCollisionVisible = visible;
+    this.actorSnapshotTarget?.setSimpleCollisionVisible(visible);
+  }
+
+  public get isSimpleCollisionVisible(): boolean {
+    return this.simpleCollisionVisible;
   }
 
   /**
@@ -126,7 +177,6 @@ export class SceneRenderer {
     grassInteraction?: GrassInteractionTarget,
     actorSnapshotTarget?: ActorSnapshotTarget,
   ): void {
-    this.mouseGrassInteractor?.dispose();
     for (const system of this.visualSystems) system.dispose?.();
     this.scene.remove(this.dynamicWorld);
     disposeScene(this.scene);
@@ -134,9 +184,7 @@ export class SceneRenderer {
     this.visualSystems = visualSystems;
     this.grassInteraction = grassInteraction;
     this.actorSnapshotTarget = actorSnapshotTarget;
-    this.mouseGrassInteractor = grassInteraction
-      ? new MouseGrassInteractor(this.renderer.domElement, grassInteraction)
-      : undefined;
+    this.actorSnapshotTarget?.setSimpleCollisionVisible(this.simpleCollisionVisible);
     this.scene.add(this.dynamicWorld);
   }
 

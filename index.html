@@ -32,45 +32,24 @@
           <span id="lock-hint">点击画面控制镜头</span>
         </div>
 
+        <aside id="vessel-status" class="vessel-status" aria-label="木筏状态" hidden>
+          <strong>VESSEL</strong>
+          <span id="vessel-speed">航速 0.0 m/s</span>
+          <span id="vessel-load">载重 0 kg</span>
+          <span id="vessel-condition">状态 正常</span>
+          <span id="vessel-event" class="vessel-status__event"></span>
+        </aside>
+
+        <div id="interaction-prompt" class="interaction-prompt" hidden></div>
+
         <div id="crosshair" class="crosshair" aria-hidden="true"></div>
 
-        <div id="virtual-controls" class="virtual-controls" aria-label="触摸控制">
-          <div
-            id="virtual-move-stick"
-            class="virtual-stick"
-            role="group"
-            aria-label="移动摇杆"
-          >
-            <span class="virtual-stick__guide" aria-hidden="true"></span>
-            <span id="virtual-move-stick-knob" class="virtual-stick__knob" aria-hidden="true"></span>
-          </div>
-
-          <div class="virtual-buttons">
-            <button
-              id="virtual-sprint-button"
-              class="virtual-button virtual-button--sprint"
-              type="button"
-              aria-label="加速"
-            >RUN</button>
-            <button
-              id="virtual-interact-button"
-              class="virtual-button"
-              type="button"
-              aria-label="长按交互"
-            >HOLD</button>
-            <button
-              id="virtual-dodge-button"
-              class="virtual-button"
-              type="button"
-              aria-label="双击闪避"
-            >2×</button>
-          </div>
-        </div>
+        <div id="virtual-controls" class="virtual-controls" aria-label="触摸控制"></div>
       </section>
 
       <div id="common-ui-root" class="common-ui-root" aria-label="通用界面层"></div>
       <div id="webgl-error" class="error-panel" hidden>
-        当前浏览器无法创建 WebGL 上下文，请更新显卡驱动或使用新版浏览器。
+        客户端初始化失败，请刷新页面后重试。
       </div>
     </main>
     <script type="module" src="/src/main.ts"></script>

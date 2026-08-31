@@ -1,0 +1,15 @@
+{
+  "$schema": "./actor.schema.json",
+  "schemaVersion": 1,
+  "id": "deck-prop",
+  "components": {
+    "render": {
+      "model": "line-art-cargo-crate",
+      "color": "#b68b60",
+      "accentColor": "#735239",
+      "length": 0.62,
+      "width": 0.62,
+      "height": 0.48
+    }
+  }
+}

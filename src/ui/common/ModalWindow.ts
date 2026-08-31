@@ -65,7 +65,7 @@ export class ModalWindow implements CommonUIPage {
       closeButton.type = 'button';
       closeButton.setAttribute('aria-label', options.closeLabel ?? '关闭窗口');
       closeButton.textContent = '×';
-      closeButton.addEventListener('click', () => this.closeHandler?.());
+      closeButton.addEventListener('click', () => this.requestClose());
       header.append(closeButton);
     }
 
@@ -78,5 +78,9 @@ export class ModalWindow implements CommonUIPage {
 
   public onRequestClose(handler: () => void): void {
     this.closeHandler = handler;
+  }
+
+  protected requestClose(): void {
+    this.closeHandler?.();
   }
 }

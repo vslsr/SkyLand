@@ -11,6 +11,7 @@
     "background": "#fdfbf6",
     "fog": { "color": "#fdfbf6", "near": 22, "far": 52 },
     "content": { "ground": true, "trees": true, "grass": true, "ocean": false },
+    "grassInteraction": { "mouse": false },
     "palette": {
       "ground": "#f1eddf",
       "grass": "#c1d7a6",

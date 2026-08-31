@@ -1,4 +1,5 @@
 import { FlyController } from '../camera/FlyController';
+import { AbilityLabController } from '../abilities/lab';
 import { GameInteractionLayer } from '../interaction/GameInteractionLayer';
 import {
   createPlayerInputScheme,
@@ -6,10 +7,13 @@ import {
   InputSubsystem,
   type InputSchemeRuntime,
   KeyboardMouseInputDevice,
+  PlayerInputTags,
   VirtualControls,
   VirtualInputDevice,
 } from '../input/index';
 import { SceneControlRouter } from '../controllers/SceneControlRouter';
+import { ActorInteractionController } from '../controllers/ActorInteractionController';
+import { VesselControlController } from '../controllers/VesselControlController';
 import { RoomClient, type JoinedRoom, type RoomSummary } from '../network/RoomClient';
 import { SnapshotBuffer } from '../network/SnapshotBuffer';
 import type { RoomSnapshot } from '../network/protocol';
@@ -19,6 +23,7 @@ import { SceneRenderer } from '../rendering/SceneRenderer';
 import { INPUT_SEND_INTERVAL_SECONDS } from '../../shared/networkTuning.mjs';
 import { HudController } from '../ui/HudController';
 import { CreateRoomPage, type CreateRoomFormValue } from '../ui/pages/CreateRoomPage';
+import { DebugMenuPage } from '../ui/pages/DebugMenuPage';
 import { GameMenuPage } from '../ui/pages/GameMenuPage';
 import { RoomLobbyPage } from '../ui/pages/RoomLobbyPage';
 import { Scene, type SceneUIContext } from './Scene';
@@ -34,15 +39,19 @@ export class GrasslandScene extends Scene {
   private readonly input: InputSubsystem;
   private readonly virtualControls: VirtualControls;
   private readonly renderer: SceneRenderer;
+  private readonly abilityLab: AbilityLabController;
   private readonly flyController: FlyController;
   private readonly controls: SceneControlRouter;
+  private readonly vesselControls: VesselControlController;
+  private readonly actorInteractions: ActorInteractionController;
   private readonly gameInteractions = new GameInteractionLayer();
   private readonly hud = new HudController();
   private readonly roomClient = new RoomClient();
   private readonly lobbyPage = new RoomLobbyPage();
   private readonly gameMenuPage = new GameMenuPage();
+  private readonly debugMenuPage?: DebugMenuPage;
   private readonly snapshots = new SnapshotBuffer();
-  private readonly remotePlayers = new RemotePlayerGroup();
+  private readonly remotePlayers: RemotePlayerGroup;
   private joinedRoom?: JoinedRoom;
   private availableScenes: SceneSummary[] = [];
   private player?: PlayerEntity;
@@ -71,7 +80,21 @@ export class GrasslandScene extends Scene {
         virtualInput,
       ],
     });
-    this.virtualControls = new VirtualControls({ root: options.baseLayer, device: virtualInput });
+    if (import.meta.env.DEV) {
+      this.debugMenuPage = new DebugMenuPage();
+      this.debugMenuPage.onRequestClose(() => this.commonUI.pop(this.debugMenuPage));
+      this.debugMenuPage.onCollisionToggle((visible) => {
+        this.renderer.setSimpleCollisionVisible(visible);
+      });
+      this.input.bind(PlayerInputTags.DebugMenu, () => this.toggleDebugMenu(), {
+        phases: ['triggered'],
+      });
+    }
+    this.virtualControls = new VirtualControls({
+      root: options.baseLayer,
+      device: virtualInput,
+      config: this.inputScheme.virtualControls,
+    });
     this.hud.setInputPromptResolver((mode, deviceKind, state) => (
       this.inputScheme.getPrompt(mode, deviceKind, state)
     ));
@@ -81,6 +104,7 @@ export class GrasslandScene extends Scene {
       this.hud.refreshInputPrompt();
     });
     this.renderer = new SceneRenderer(options.canvas);
+    this.remotePlayers = new RemotePlayerGroup(this.renderer);
     this.flyController = new FlyController(options.canvas, {
       position: [0, 4.2, 13.5],
       yaw: 0,
@@ -89,6 +113,28 @@ export class GrasslandScene extends Scene {
       onLockChange: (locked) => this.hud.setLocked(locked),
     });
     this.controls = new SceneControlRouter(this.flyController);
+    this.vesselControls = new VesselControlController(this.input, {
+      getPlayerId: () => this.joinedRoom?.player.id,
+      findOwnedActorId: (playerId) => this.renderer.findOwnedActorId(playerId),
+      findControllableActorId: () => this.renderer.findControllableActorId(),
+      requestControl: (actorId) => this.roomClient.requestActorControl(actorId),
+      releaseControl: (actorId) => this.roomClient.releaseActorControl(actorId),
+      sendInput: (actorId, input) => { this.roomClient.sendVesselInput(actorId, input); },
+    });
+    this.actorInteractions = new ActorInteractionController(this.input, {
+      getPlayerId: () => this.joinedRoom?.player.id,
+      findOwnedActorId: (playerId) => this.renderer.findOwnedActorId(playerId),
+      pick: (frame) => this.renderer.pickActorInteraction(frame),
+      setHoveredActorId: (actorId) => this.renderer.setHoveredActorId(actorId),
+      sendInteraction: (actorId) => { this.roomClient.interactWithActor(actorId); },
+      setPrompt: (text) => this.hud.setInteractionPrompt(text),
+    });
+    this.abilityLab = new AbilityLabController({
+      input: this.input,
+      uiRoot: options.baseLayer,
+      addWorldObject: (object) => this.renderer.addWorldObject(object),
+      removeWorldObject: (object) => this.renderer.removeWorldObject(object),
+    });
     this.controls.onModeChange((mode) => this.hud.setControlMode(mode));
     this.input.onActiveDeviceChanged((deviceKind) => this.hud.setInputDevice(deviceKind));
 
@@ -113,9 +159,14 @@ export class GrasslandScene extends Scene {
 
   public update(deltaSeconds: number, elapsedSeconds: number): void {
     this.input.update();
+    this.vesselControls.update(deltaSeconds);
     this.controls.update(deltaSeconds, elapsedSeconds);
     this.renderer.update(deltaSeconds, elapsedSeconds, this.currentFocus());
+    this.actorInteractions.update(this.controls.frame);
+    const playerId = this.joinedRoom?.player.id;
+    this.hud.setVesselStatus(playerId ? this.renderer.getVesselHudState(playerId) : undefined);
     this.player?.update(deltaSeconds, elapsedSeconds);
+    this.abilityLab.update(deltaSeconds, elapsedSeconds);
     this.sendPlayerInput(deltaSeconds);
     if (this.joinedRoom?.scene.camera.mode === 'topdown') {
       this.remotePlayers.sync(this.snapshots.sample(), this.joinedRoom.player.id);
@@ -141,13 +192,19 @@ export class GrasslandScene extends Scene {
   }
 
   protected onEnter(): void {
-    if (this.joinedRoom) return;
+    if (this.joinedRoom) {
+      if (this.joinedRoom.scene.id === 'ability-lab' && this.player) {
+        this.abilityLab.activate(this.player, this.player.object3D);
+      }
+      return;
+    }
     this.hud.setDisconnected();
     this.commonUI.push(this.lobbyPage);
     void this.refreshRooms();
   }
 
   protected onLeave(): void {
+    this.abilityLab.deactivate();
     this.virtualControls.reset();
     this.input.setEnabled(false);
     this.controls.setInputEnabled(false);
@@ -207,14 +264,20 @@ export class GrasslandScene extends Scene {
       return;
     }
     this.joinedRoom = joined;
+    this.abilityLab.deactivate();
     this.snapshots.clear();
+    this.vesselControls.reset();
+    this.actorInteractions.reset();
     this.renderer.loadScene(joined.scene, joined.room.worldSeed);
     this.flyController.configure(joined.scene.camera);
     if (joined.scene.camera.mode === 'topdown') {
-      this.createPlayer(joined.player.spawn, joined.scene.gameplay.bounds);
+      this.createPlayer(joined.player.id, joined.player.spawn, joined.scene.gameplay.bounds);
     } else {
       this.controls.setPlayerController(undefined);
       this.remotePlayers.clear();
+    }
+    if (joined.scene.id === 'ability-lab' && this.player) {
+      this.abilityLab.activate(this.player, this.player.object3D);
     }
     this.hud.setRoom(joined.room);
     this.commonUI.clear();
@@ -223,6 +286,18 @@ export class GrasslandScene extends Scene {
   private openGameMenu(): void {
     if (!this.joinedRoom || this.commonUI.size > 0) return;
     this.commonUI.push(this.gameMenuPage);
+  }
+
+  private toggleDebugMenu(): void {
+    const page = this.debugMenuPage;
+    if (!page) return;
+    if (this.commonUI.top === page) {
+      this.commonUI.pop(page);
+      return;
+    }
+    if (this.commonUI.size > 0) return;
+    page.setCollisionVisible(this.renderer.isSimpleCollisionVisible);
+    this.commonUI.push(page);
   }
 
   private exitCurrentRoom(): void {
@@ -246,7 +321,7 @@ export class GrasslandScene extends Scene {
 
   private handleSnapshot(snapshot: RoomSnapshot): void {
     if (!this.joinedRoom) return;
-    this.renderer.syncActors(snapshot.actors);
+    this.renderer.syncActors(snapshot.actors, snapshot.serverTime);
     this.snapshots.push(snapshot);
 
     // 自己的那条不走插值：直接交给和解，把预测拉回服务器的结论。
@@ -270,18 +345,29 @@ export class GrasslandScene extends Scene {
   }
 
   private createPlayer(
+    playerId: string,
     spawn: { x: number; z: number },
     bounds: JoinedRoom['scene']['gameplay']['bounds'],
   ): void {
     if (this.player) return;
-    this.player = new PlayerEntity(this.canvas, spawn, this.input, bounds);
+    this.player = new PlayerEntity(
+      playerId,
+      this.canvas,
+      spawn,
+      this.input,
+      bounds,
+      this.renderer,
+    );
     this.renderer.addWorldObject(this.player.object3D);
     this.controls.setPlayerController(this.player.controller);
     this.timeSinceInputSent = 0;
   }
 
   private destroyPlayer(): void {
+    this.abilityLab.deactivate();
     this.snapshots.clear();
+    this.vesselControls.reset();
+    this.actorInteractions.reset();
     this.remotePlayers.clear();
     if (this.player) {
       this.controls.setPlayerController(undefined);

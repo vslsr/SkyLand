@@ -14,6 +14,9 @@ import {
 import { GrassBendField } from './GrassBendField';
 import { GrassInteractionQueue, type GrassInteractionTarget } from './GrassInteraction';
 
+const GRASS_LOD_NEAR_DISTANCE = 10;
+const GRASS_LOD_FAR_DISTANCE = 28;
+
 export interface GrassFieldSystemOptions {
   bounds: GrassFieldBounds;
   color: THREE.ColorRepresentation;
@@ -47,6 +50,8 @@ export class GrassFieldSystem implements SceneVisualSystem {
       uFogColor: { value: new THREE.Color(options.environment.fogColor) },
       uFogNear: { value: options.environment.fogNear },
       uFogFar: { value: options.environment.fogFar },
+      uGrassLodNear: { value: GRASS_LOD_NEAR_DISTANCE },
+      uGrassLodFar: { value: GRASS_LOD_FAR_DISTANCE },
     };
 
     const fillMaterial = new THREE.ShaderMaterial({

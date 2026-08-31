@@ -1,0 +1,33 @@
+{
+  "$schema": "./scene.schema.json",
+  "schemaVersion": 1,
+  "id": "grass-test",
+  "displayName": "草地交互测试",
+  "description": "无树木与雾气遮挡的线稿草场，用于观察风动、移动碰撞与弯曲恢复。",
+  "capacity": 4,
+  "sceneComponents": [{ "type": "mouse-grass-interaction" }],
+  "actors": [],
+  "renderer": {
+    "type": "line-art",
+    "background": "#fbf7ec",
+    "fog": { "color": "#fbf7ec", "near": 1000, "far": 1001 },
+    "content": { "ground": true, "trees": false, "grass": true, "ocean": false },
+    "palette": {
+      "ground": "#f0ead9",
+      "grass": "#b8d39f",
+      "treeTrunk": "#d6bea3",
+      "treeNeedles": "#cbdcbc"
+    }
+  },
+  "gameplay": {
+    "bounds": { "minimumX": -16, "maximumX": 16, "minimumZ": -21, "maximumZ": 11 },
+    "spawn": { "centerX": 0, "centerZ": 4, "radius": 1.8, "slots": 4 }
+  },
+  "camera": {
+    "mode": "topdown",
+    "position": [0, 4.8, 14.5],
+    "yaw": 0,
+    "pitch": -0.16,
+    "moveSpeed": 6.5
+  }
+}

@@ -6,7 +6,7 @@ import {
 } from '../shaders/grass';
 import type { NormalizedGrassBendImpulse } from './GrassInteraction';
 
-const BEND_TEXTURE_SIZE = 256;
+const DEFAULT_BEND_TEXTURE_SIZE = 256;
 const DECAY_PER_60HZ_FRAME = 0.965;
 
 export class GrassBendField {
@@ -15,27 +15,34 @@ export class GrassBendField {
   private readonly geometry = new THREE.PlaneBufferGeometry(2, 2);
   private readonly material: THREE.ShaderMaterial;
   private readonly targets: readonly [THREE.WebGLRenderTarget, THREE.WebGLRenderTarget];
+  private readonly textureBounds: THREE.Vector4;
+  private readonly requestedBounds: THREE.Vector4;
   private readIndex = 0;
   private initialized = false;
 
-  public constructor(bounds: GrassFieldBounds) {
+  public constructor(bounds: GrassFieldBounds, textureSize = DEFAULT_BEND_TEXTURE_SIZE) {
     const fieldBounds = new THREE.Vector4(
       bounds.minimumX,
       bounds.minimumZ,
       bounds.maximumX,
       bounds.maximumZ,
     );
-    this.targets = [createBendTarget(), createBendTarget()];
+    this.textureBounds = fieldBounds.clone();
+    this.requestedBounds = fieldBounds.clone();
+    this.targets = [createBendTarget(textureSize), createBendTarget(textureSize)];
     this.material = new THREE.ShaderMaterial({
       vertexShader: GRASS_BEND_VERTEX_SHADER,
       fragmentShader: GRASS_BEND_FRAGMENT_SHADER,
       uniforms: {
         uPreviousTexture: { value: this.targets[0].texture },
-        uFieldBounds: { value: fieldBounds },
+        uPreviousFieldBounds: { value: this.textureBounds },
+        uFieldBounds: { value: this.requestedBounds },
         uImpulsePosition: { value: new THREE.Vector2() },
+        uImpulseStartPosition: { value: new THREE.Vector2() },
         uImpulseDirection: { value: new THREE.Vector2(1, 0) },
         uImpulseRadius: { value: 0.65 },
         uImpulseStrength: { value: 0 },
+        uImpulseRadial: { value: 0 },
         uDecay: { value: 1 },
       },
       depthTest: false,
@@ -46,6 +53,30 @@ export class GrassBendField {
 
   public get texture(): THREE.Texture {
     return this.targets[this.readIndex].texture;
+  }
+
+  /** 下一次 step 会把旧纹理重投影到这个局部世界窗口。 */
+  public setBounds(bounds: GrassFieldBounds): void {
+    if (
+      !Number.isFinite(bounds.minimumX)
+      || !Number.isFinite(bounds.maximumX)
+      || !Number.isFinite(bounds.minimumZ)
+      || !Number.isFinite(bounds.maximumZ)
+      || bounds.minimumX >= bounds.maximumX
+      || bounds.minimumZ >= bounds.maximumZ
+    ) {
+      throw new RangeError('草地弯曲窗口必须是有限且非空的范围');
+    }
+    this.requestedBounds.set(
+      bounds.minimumX,
+      bounds.minimumZ,
+      bounds.maximumX,
+      bounds.maximumZ,
+    );
+  }
+
+  public copyTextureBounds(target: THREE.Vector4): void {
+    target.copy(this.textureBounds);
   }
 
   public step(
@@ -65,8 +96,13 @@ export class GrassBendField {
       Math.max(0, deltaSeconds) * 60,
     );
     this.material.uniforms.uImpulseStrength.value = impulse?.strength ?? 0;
+    this.material.uniforms.uImpulseRadial.value = impulse?.radial ? 1 : 0;
     if (impulse) {
       this.material.uniforms.uImpulsePosition.value.set(impulse.positionX, impulse.positionZ);
+      this.material.uniforms.uImpulseStartPosition.value.set(
+        impulse.startPositionX,
+        impulse.startPositionZ,
+      );
       this.material.uniforms.uImpulseDirection.value.set(impulse.directionX, impulse.directionZ);
       this.material.uniforms.uImpulseRadius.value = impulse.radius;
     }
@@ -75,6 +111,7 @@ export class GrassBendField {
     renderer.render(this.scene, this.camera);
     renderer.setRenderTarget(previousTarget);
     this.readIndex = writeIndex;
+    this.textureBounds.copy(this.requestedBounds);
   }
 
   public dispose(): void {
@@ -99,8 +136,8 @@ export class GrassBendField {
   }
 }
 
-function createBendTarget(): THREE.WebGLRenderTarget {
-  const target = new THREE.WebGLRenderTarget(BEND_TEXTURE_SIZE, BEND_TEXTURE_SIZE, {
+function createBendTarget(textureSize: number): THREE.WebGLRenderTarget {
+  const target = new THREE.WebGLRenderTarget(textureSize, textureSize, {
     minFilter: THREE.LinearFilter,
     magFilter: THREE.LinearFilter,
     format: THREE.RGBAFormat,

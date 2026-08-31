@@ -26,6 +26,7 @@ function createSceneFile(overrides = {}) {
       background: '#fdfbf6',
       fog: { color: '#fdfbf6', near: 22, far: 52 },
       content: { ground: true, trees: true, grass: true, ocean: false },
+      grassInteraction: { mouse: false },
       palette: {
         ground: '#f1eddf',
         grass: '#c1d7a6',
@@ -80,4 +81,74 @@ test('固定场景不受这些约束限制', async () => {
   scene.renderer.fog.far = 82;
   const catalog = await loadSingleScene(scene);
   assert.equal(catalog.require('streaming-probe').renderer.world, undefined);
+});
+
+test('没有草地的场景不能开启鼠标草地交互', async () => {
+  const scene = createSceneFile();
+  scene.renderer.content.grass = false;
+  scene.renderer.grassInteraction.mouse = true;
+  await assert.rejects(loadSingleScene(scene), /只能在 content\.grass 开启时使用/);
+});
+
+test('Actor 父节点可后声明，且子节点坐标按局部 Transform 保留', async () => {
+  const scene = createSceneFile();
+  scene.actors = [
+    {
+      id: 'child',
+      archetype: 'deck-prop',
+      parentActorId: 'parent',
+      localTransform: { position: [1, 2, 3], yaw: 0.2 },
+    },
+    {
+      id: 'parent',
+      archetype: 'deck-prop',
+      localTransform: { position: [4, 0, 5], yaw: 0.4 },
+    },
+  ];
+  const catalog = await loadSingleScene(scene);
+  assert.deepEqual(catalog.require('streaming-probe').actors[0], {
+    id: 'child',
+    archetypeId: 'deck-prop',
+    parentActorId: 'parent',
+    localTransform: { position: [1, 2, 3], yaw: 0.2 },
+  });
+});
+
+test('Actor 层级拒绝缺失父节点和循环引用', async () => {
+  const missing = createSceneFile();
+  missing.actors = [
+    {
+      id: 'child',
+      archetype: 'deck-prop',
+      parentActorId: 'missing',
+      localTransform: { position: [0, 0, 0], yaw: 0 },
+    },
+  ];
+  await assert.rejects(loadSingleScene(missing), /不存在的父节点/);
+
+  const cyclic = createSceneFile();
+  cyclic.actors = [
+    {
+      id: 'first',
+      archetype: 'deck-prop',
+      parentActorId: 'second',
+      localTransform: { position: [0, 0, 0], yaw: 0 },
+    },
+    {
+      id: 'second',
+      archetype: 'deck-prop',
+      parentActorId: 'first',
+      localTransform: { position: [0, 0, 0], yaw: 0 },
+    },
+  ];
+  await assert.rejects(loadSingleScene(cyclic), /层级存在循环/);
+
+  const selfParented = createSceneFile();
+  selfParented.actors = [{
+    id: 'self',
+    archetype: 'deck-prop',
+    parentActorId: 'self',
+    localTransform: { position: [0, 0, 0], yaw: 0 },
+  }];
+  await assert.rejects(loadSingleScene(selfParented), /不能将自己设为父节点/);
 });

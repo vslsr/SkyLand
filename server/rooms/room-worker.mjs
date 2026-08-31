@@ -55,6 +55,26 @@ process.on('message', (message) => {
       if (!scene) break;
       scene.applyInput(message.playerId, message.input ?? {});
       break;
+    case 'actor:claim':
+      if (!scene) break;
+      scene.claimActorControl(message.playerId, message.actorId);
+      break;
+    case 'actor:release':
+      if (!scene) break;
+      scene.releaseActorControl(message.playerId, message.actorId);
+      break;
+    case 'actor:input':
+      if (!scene) break;
+      scene.applyActorInput(message.playerId, message.input ?? {});
+      break;
+    case 'actor:event':
+      if (!scene) break;
+      scene.applyActorEvent(message.playerId, message.event ?? {});
+      break;
+    case 'actor:interact':
+      if (!scene) break;
+      scene.interactWithActor(message.playerId, message.interaction ?? {});
+      break;
     case 'room:shutdown':
       shutdown();
       break;

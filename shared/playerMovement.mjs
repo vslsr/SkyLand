@@ -13,6 +13,8 @@
 export const PLAYER_MOVE_SPEED = 3.2;
 export const PLAYER_SPRINT_MULTIPLIER = 1.65;
 export const PLAYER_MAXIMUM_SPEED = PLAYER_MOVE_SPEED * PLAYER_SPRINT_MULTIPLIER;
+/** 史莱姆模型的玩法平面半径；服务端碰撞与客户端模型共用。 */
+export const PLAYER_COLLISION_RADIUS = 0.42;
 
 /** 玩法平面的活动范围，与草地模型的尺寸对应。 @type {PlayerBounds} */
 export const PLAYER_BOUNDS = {

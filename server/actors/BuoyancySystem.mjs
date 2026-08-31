@@ -15,7 +15,7 @@ export class BuoyancySystem {
       const buoyancy = actor.requireComponent(BUOYANCY_COMPONENT);
       if (!buoyancy.dirty) continue;
 
-      const result = evaluateVesselBuoyancy(buoyancy.parts, {
+      const result = evaluateVesselBuoyancy([...buoyancy.parts, ...buoyancy.loads], {
         minimumBeam: buoyancy.minimumBeam,
         minimumLength: buoyancy.minimumLength,
         maximumTrimRadians: buoyancy.maximumTrimRadians,

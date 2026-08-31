@@ -37,6 +37,7 @@ export class InputSchemeRuntime {
   public readonly id: string;
   public readonly actions: InputSchemeDefinition['inputActions'];
   public readonly config: InputSchemeDefinition['inputConfig'];
+  public readonly virtualControls: InputSchemeDefinition['virtualControls'];
 
   private readonly defaults = new Map<string, string>();
   private readonly promptDefinitions: readonly InputDevicePromptDefinition[];
@@ -52,6 +53,7 @@ export class InputSchemeRuntime {
     this.id = definition.id;
     this.actions = definition.inputActions;
     this.config = definition.inputConfig;
+    this.virtualControls = definition.virtualControls;
     this.promptDefinitions = definition.devicePrompts.prompts;
     this.controlLabels = definition.devicePrompts.controlLabels;
     this.mutableContexts = cloneContexts(definition.inputMappingContexts);
@@ -284,4 +286,3 @@ function humanizeControl(control: string): string {
   if (control.startsWith('Mouse.Button')) return `鼠标 ${value.replace('Button', '')}`;
   return value.replace(/([a-z])([A-Z])/g, '$1 $2');
 }
-

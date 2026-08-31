@@ -144,6 +144,11 @@ export class CommonUIManager {
       return;
     }
 
+    if (this.top?.handleGlobalInputEvent?.(event)) {
+      this.rejectEvent(event);
+      return;
+    }
+
     if (this.isReceivedByTopDom(event)) return;
     this.routeUnhandledEvent(event);
   };

@@ -1,0 +1,15 @@
+---
+description: Require project-drawn line-art scrollbars for every visible scroll container
+alwaysApply: true
+---
+
+# Styled scrollbars
+
+- Never ship a visible browser- or operating-system-default scrollbar. The native grey track, rounded grey thumb, arrow buttons, and other platform chrome are forbidden because they break SkyLand's paper-toned line-art language.
+- Every element that can visibly scroll through `overflow: auto` or `overflow: scroll` must use a project-owned scrollbar style, including panels, modal bodies, lists, logs, inspectors, and nested scroll regions.
+- Draw scrollbars with the same restrained visual system as the surrounding UI: a paper-toned track, dark ink outline, muted earth/ink thumb, square or nearly square geometry, and explicit hover and active states. Do not introduce glossy gradients, platform-blue accents, heavy shadows, or unrelated rounded-pill styling.
+- Remove native scrollbar arrow buttons and other platform-specific decorations. Keep the track and thumb visually quiet so they support the content rather than becoming a separate design element.
+- Implement both standards-based Firefox styling (`scrollbar-width` and `scrollbar-color`) and WebKit/Blink pseudo-elements (`::-webkit-scrollbar`, `::-webkit-scrollbar-track`, `::-webkit-scrollbar-thumb`, and `::-webkit-scrollbar-button`). A scrollbar is not considered styled if only one browser family is covered.
+- Prefer shared CSS variables and a reusable global/component scrollbar rule over ad-hoc per-panel colors. Component overrides may adjust palette values, but must preserve the common width, outline weight, states, and line-art character.
+- Do not hide a scrollbar merely to avoid styling it when mouse or keyboard users need a position cue. Preserve wheel, trackpad, dragging, keyboard scrolling, focus visibility, and sufficient thumb contrast.
+- When adding or reviewing a scrollable UI, verify the scrollbar at rest, on hover, while dragging, at both ends of the range, and inside any nested scrolling region. Check at least one Blink/WebKit browser and Firefox-compatible styling.

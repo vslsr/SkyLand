@@ -2,6 +2,8 @@ const GRASS_VERTEX_DEFORMATION = /* glsl */ `
   uniform float uTime;
   uniform sampler2D uBendTexture;
   uniform vec4 uFieldBounds;
+  uniform float uGrassLodNear;
+  uniform float uGrassLodFar;
 
   attribute vec3 aOffset;
   attribute vec2 aScale;
@@ -14,6 +16,8 @@ const GRASS_VERTEX_DEFORMATION = /* glsl */ `
   varying float vHeightRatio;
   varying float vTone;
   varying float vBendStrength;
+  varying float vDistanceLod;
+  varying float vLodRandom;
 
   float hash21(vec2 point) {
     return fract(sin(dot(point, vec2(127.1, 311.7))) * 43758.5453123);
@@ -41,9 +45,11 @@ const GRASS_VERTEX_DEFORMATION = /* glsl */ `
   vec3 deformGrassVertex(vec3 bladePosition) {
     float heightRatio = clamp(bladePosition.y, 0.0, 1.0);
     float heightSquared = heightRatio * heightRatio;
+    float cameraDistance = distance(cameraPosition, aOffset);
+    float distanceLod = smoothstep(uGrassLodNear, uGrassLodFar, cameraDistance);
     vec3 transformed = bladePosition;
     transformed.x *= aScale.x;
-    transformed.y *= aScale.y;
+    transformed.y *= aScale.y * mix(1.0, 0.62, distanceLod);
     transformed.xz = rotate2D(transformed.xz, aRotation);
 
     float broadWind = valueNoise(
@@ -59,17 +65,24 @@ const GRASS_VERTEX_DEFORMATION = /* glsl */ `
       * heightSquared;
 
     vec2 fieldSize = max(uFieldBounds.zw - uFieldBounds.xy, vec2(0.0001));
-    vec2 bendUv = clamp((aOffset.xz - uFieldBounds.xy) / fieldSize, 0.0, 1.0);
-    vec3 bendSample = texture2D(uBendTexture, bendUv).rgb;
+    vec2 rawBendUv = (aOffset.xz - uFieldBounds.xy) / fieldSize;
+    vec2 insideMinimum = step(vec2(0.0), rawBendUv);
+    vec2 insideMaximum = step(rawBendUv, vec2(1.0));
+    float insideBendField = insideMinimum.x * insideMinimum.y
+      * insideMaximum.x * insideMaximum.y;
+    vec3 bendSample = texture2D(uBendTexture, clamp(rawBendUv, 0.0, 1.0)).rgb;
     vec2 bendDirection = bendSample.rg * 2.0 - 1.0;
-    float bendStrength = bendSample.b;
-    transformed.xz += bendDirection * bendStrength * aScale.y * 0.72 * heightSquared;
-    transformed.y -= bendStrength * aScale.y * 0.18 * heightSquared;
+    float bendStrength = bendSample.b * insideBendField;
+    float bendAmount = bendStrength * heightSquared;
+    transformed.xz += bendDirection * bendAmount * aScale.y * 0.78;
+    transformed.y *= mix(1.0, 0.22, bendAmount);
     transformed += aOffset;
 
     vHeightRatio = heightRatio;
     vTone = aTone;
     vBendStrength = bendStrength;
+    vDistanceLod = distanceLod;
+    vLodRandom = hash21(aOffset.xz + vec2(aPhase, aRotation));
     return transformed;
   }
 `;
@@ -130,8 +143,16 @@ export const GRASS_OUTLINE_FRAGMENT_SHADER = /* glsl */ `
   uniform float uFogFar;
 
   varying vec3 vWorldPosition;
+  varying float vDistanceLod;
+  varying float vLodRandom;
 
   void main() {
+    float outlineLod = pow(vDistanceLod, 0.45);
+    float outlineKeepRate = mix(1.0, 0.035, outlineLod);
+    if (vLodRandom > outlineKeepRate) {
+      discard;
+    }
+
     float cameraDistance = distance(cameraPosition, vWorldPosition);
     float fogFactor = smoothstep(uFogNear, uFogFar, cameraDistance);
     gl_FragColor = vec4(mix(uLineColor, uFogColor, fogFactor), 1.0);
@@ -150,25 +171,59 @@ export const GRASS_BEND_VERTEX_SHADER = /* glsl */ `
 
 export const GRASS_BEND_FRAGMENT_SHADER = /* glsl */ `
   uniform sampler2D uPreviousTexture;
+  uniform vec4 uPreviousFieldBounds;
   uniform vec4 uFieldBounds;
   uniform vec2 uImpulsePosition;
+  uniform vec2 uImpulseStartPosition;
   uniform vec2 uImpulseDirection;
   uniform float uImpulseRadius;
   uniform float uImpulseStrength;
+  uniform float uImpulseRadial;
   uniform float uDecay;
 
   varying vec2 vUv;
 
   void main() {
-    vec3 previous = texture2D(uPreviousTexture, vUv).rgb;
+    vec2 currentFieldSize = max(uFieldBounds.zw - uFieldBounds.xy, vec2(0.0001));
+    vec2 worldPosition = uFieldBounds.xy + vUv * currentFieldSize;
+    vec2 previousFieldSize = max(
+      uPreviousFieldBounds.zw - uPreviousFieldBounds.xy,
+      vec2(0.0001)
+    );
+    vec2 previousUv = (worldPosition - uPreviousFieldBounds.xy) / previousFieldSize;
+    vec2 insidePreviousMinimum = step(vec2(0.0), previousUv);
+    vec2 insidePreviousMaximum = step(previousUv, vec2(1.0));
+    float insidePreviousField = insidePreviousMinimum.x * insidePreviousMinimum.y
+      * insidePreviousMaximum.x * insidePreviousMaximum.y;
+    vec3 sampledPrevious = texture2D(
+      uPreviousTexture,
+      clamp(previousUv, 0.0, 1.0)
+    ).rgb;
+    vec3 previous = mix(vec3(0.5, 0.5, 0.0), sampledPrevious, insidePreviousField);
     float previousStrength = previous.b * uDecay;
     vec2 bendVector = (previous.rg * 2.0 - 1.0) * previousStrength;
 
-    vec2 worldPosition = mix(uFieldBounds.xy, uFieldBounds.zw, vUv);
-    float distanceToImpulse = distance(worldPosition, uImpulsePosition);
+    vec2 sweepSegment = uImpulsePosition - uImpulseStartPosition;
+    float sweepLengthSquared = dot(sweepSegment, sweepSegment);
+    float sweepRatio = sweepLengthSquared > 0.000001
+      ? clamp(
+        dot(worldPosition - uImpulseStartPosition, sweepSegment) / sweepLengthSquared,
+        0.0,
+        1.0
+      )
+      : 1.0;
+    vec2 closestSweepPoint = mix(uImpulseStartPosition, uImpulsePosition, sweepRatio);
+    vec2 radialOffset = worldPosition - closestSweepPoint;
+    float radialDistance = length(radialOffset);
+    float directionalDistance = distance(worldPosition, uImpulsePosition);
+    float distanceToImpulse = mix(directionalDistance, radialDistance, uImpulseRadial);
+    vec2 radialDirection = radialDistance > 0.0001
+      ? radialOffset / max(radialDistance, 0.0001)
+      : uImpulseDirection;
+    vec2 impulseDirection = mix(uImpulseDirection, radialDirection, uImpulseRadial);
     float weight = (1.0 - smoothstep(0.0, uImpulseRadius, distanceToImpulse))
       * uImpulseStrength;
-    bendVector += uImpulseDirection * weight;
+    bendVector += impulseDirection * weight;
 
     float strength = clamp(length(bendVector), 0.0, 1.0);
     vec2 direction = strength > 0.0001 ? bendVector / strength : vec2(0.0);

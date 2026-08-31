@@ -1,122 +1,131 @@
+import type { SceneSummary } from '../scenes/data/SceneDefinition';
+import { JsonMessageCodec, type MessageCodec } from './MessageCodec';
+import type {
+  ActorGameplayEvent,
+  ClientMessage,
+  JoinedRoom,
+  RoomSummary,
+  VesselInputFrame,
+} from './messages';
 import type { PlayerInputFrame, RoomSnapshot } from './protocol';
-import type { SceneDefinition, SceneSummary } from '../scenes/data/SceneDefinition';
+import { HttpRoomDirectory, type RoomDirectory } from './RoomDirectory';
+import {
+  WebSocketTransport,
+  type GameTransport,
+  type TransportChannel,
+} from './transport/index';
 
-export interface RoomSummary {
-  id: string;
-  name: string;
-  playerCount: number;
-  capacity: number;
-  sceneId: string;
-  sceneName: string;
-  /** 房间的世界种子，客户端据此生成与服务端一致的地形与物件。 */
-  worldSeed: number;
-  createdAt: string;
-  idleExpiresAt: string | null;
-}
-
-export interface JoinedRoom {
-  room: RoomSummary;
-  scene: SceneDefinition;
-  player: {
-    id: string;
-    name: string;
-    slot: number;
-    spawn: { x: number; z: number };
-  };
-}
-
-interface ServerMessage {
-  type: string;
-  room?: RoomSummary;
-  player?: JoinedRoom['player'];
-  snapshot?: RoomSnapshot;
-  scene?: SceneDefinition;
-  message?: string;
-}
+export type {
+  ActorGameplayEvent,
+  JoinedRoom,
+  RoomSummary,
+  VesselInputFrame,
+} from './messages';
+export type { PlayerInputFrame, RoomSnapshot } from './protocol';
 
 type RoomUpdateListener = (room: RoomSummary) => void;
 type SnapshotListener = (snapshot: RoomSnapshot) => void;
 type DisconnectListener = () => void;
 
-export type { PlayerInputFrame, RoomSnapshot } from './protocol';
+export interface RoomClientOptions {
+  transport?: GameTransport;
+  codec?: MessageCodec;
+  roomDirectory?: RoomDirectory;
+  endpoint?: string | (() => string);
+}
 
+function defaultWebSocketEndpoint(): string {
+  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+  return `${protocol}//${window.location.host}/ws`;
+}
+
+/**
+ * 房间会话层：只处理房间语义、消息序号和事件分发。
+ * 具体使用 WebSocket、UDP 或混合通道由注入的 GameTransport 决定。
+ */
 export class RoomClient {
-  private socket?: WebSocket;
-  private socketReady?: Promise<WebSocket>;
+  private readonly transport: GameTransport;
+  private readonly codec: MessageCodec;
+  private readonly roomDirectory: RoomDirectory;
+  private readonly resolveEndpoint: () => string;
   private readonly roomListeners = new Set<RoomUpdateListener>();
   private readonly snapshotListeners = new Set<SnapshotListener>();
   private readonly disconnectListeners = new Set<DisconnectListener>();
   private inputSequence = 0;
+  private readonly actorInputSequences = new Map<string, number>();
+  private readonly actorEventSequences = new Map<string, number>();
+  private actorInteractionSequence = 0;
 
-  public async listRooms(): Promise<RoomSummary[]> {
-    const response = await fetch('/api/rooms');
-    if (!response.ok) throw new Error('房间服务暂时不可用');
-    const payload = (await response.json()) as { rooms: RoomSummary[] };
-    return payload.rooms;
-  }
+  public constructor(options: RoomClientOptions = {}) {
+    this.transport = options.transport ?? new WebSocketTransport();
+    this.codec = options.codec ?? new JsonMessageCodec();
+    this.roomDirectory = options.roomDirectory ?? new HttpRoomDirectory();
+    const endpoint = options.endpoint;
+    this.resolveEndpoint = typeof endpoint === 'function'
+      ? endpoint
+      : () => endpoint ?? defaultWebSocketEndpoint();
 
-  public async listScenes(): Promise<SceneSummary[]> {
-    const response = await fetch('/api/scenes');
-    if (!response.ok) throw new Error('地图配置暂时不可用');
-    const payload = (await response.json()) as { scenes: SceneSummary[] };
-    return payload.scenes;
-  }
-
-  public async createRoom(name: string, sceneId: string): Promise<RoomSummary> {
-    const response = await fetch('/api/rooms', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name, sceneId }),
+    this.transport.onPacket((payload) => this.handlePacket(payload));
+    this.transport.onDisconnect(() => {
+      for (const listener of this.disconnectListeners) listener();
     });
-    const payload = (await response.json()) as { room?: RoomSummary; error?: string };
-    if (!response.ok || !payload.room) throw new Error(payload.error ?? '创建房间失败');
-    return payload.room;
+  }
+
+  public listRooms(): Promise<RoomSummary[]> {
+    return this.roomDirectory.listRooms();
+  }
+
+  public listScenes(): Promise<SceneSummary[]> {
+    return this.roomDirectory.listScenes();
+  }
+
+  public createRoom(name: string, sceneId: string): Promise<RoomSummary> {
+    return this.roomDirectory.createRoom(name, sceneId);
   }
 
   public async joinRoom(roomId: string, temporaryName: string): Promise<JoinedRoom> {
-    const socket = await this.ensureSocket();
+    await this.ensureTransport();
 
     return new Promise<JoinedRoom>((resolve, reject) => {
-      const timeout = window.setTimeout(() => {
+      const timeout = globalThis.setTimeout(() => {
         cleanup();
         reject(new Error('加入房间超时'));
       }, 6000);
 
-      const handleMessage = (event: MessageEvent<string>): void => {
-        const message = this.parseMessage(event.data);
+      const stopPacket = this.transport.onPacket((payload) => {
+        const message = this.codec.decode(payload);
         if (!message) return;
         if (message.type === 'room:joined' && message.room && message.player && message.scene) {
-          this.inputSequence = 0;
+          this.resetSequences();
           cleanup();
           resolve({ room: message.room, player: message.player, scene: message.scene });
         } else if (message.type === 'error') {
           cleanup();
           reject(new Error(message.message ?? '加入房间失败'));
         }
-      };
+      });
 
-      const handleClose = (): void => {
+      const stopDisconnect = this.transport.onDisconnect(() => {
         cleanup();
         reject(new Error('房间连接已断开'));
-      };
+      });
 
       const cleanup = (): void => {
-        window.clearTimeout(timeout);
-        socket.removeEventListener('message', handleMessage);
-        socket.removeEventListener('close', handleClose);
+        globalThis.clearTimeout(timeout);
+        stopPacket();
+        stopDisconnect();
       };
 
-      socket.addEventListener('message', handleMessage);
-      socket.addEventListener('close', handleClose);
-      socket.send(JSON.stringify({ type: 'room:join', roomId, name: temporaryName }));
+      if (!this.send({ type: 'room:join', roomId, name: temporaryName }, 'control')) {
+        cleanup();
+        reject(new Error('房间连接尚未就绪'));
+      }
     });
   }
 
   public leaveRoom(): void {
-    this.inputSequence = 0;
-    if (this.socket?.readyState === WebSocket.OPEN) {
-      this.socket.send(JSON.stringify({ type: 'room:leave' }));
-    }
+    this.resetSequences();
+    this.send({ type: 'room:leave' }, 'control');
   }
 
   /**
@@ -125,19 +134,63 @@ export class RoomClient {
    * 返回本条输入的序号，调用方据此记录预测位置。
    */
   public sendPlayerInput(input: PlayerInputFrame, deltaSeconds: number): number | undefined {
-    if (this.socket?.readyState !== WebSocket.OPEN) return undefined;
-    this.inputSequence += 1;
-    this.socket.send(
-      JSON.stringify({
-        type: 'player:input',
-        sequence: this.inputSequence,
-        deltaSeconds,
-        move: input.move,
-        sprint: input.sprint,
-        yaw: input.yaw,
-      }),
-    );
-    return this.inputSequence;
+    const sequence = this.inputSequence + 1;
+    const sent = this.send({
+      type: 'player:input',
+      sequence,
+      deltaSeconds,
+      move: input.move,
+      sprint: input.sprint,
+      yaw: input.yaw,
+    }, 'realtime');
+    if (!sent) return undefined;
+    this.inputSequence = sequence;
+    return sequence;
+  }
+
+  public requestActorControl(actorId: string): void {
+    this.send({ type: 'actor:claim', actorId }, 'control');
+  }
+
+  public releaseActorControl(actorId: string): void {
+    this.send({ type: 'actor:release', actorId }, 'control');
+  }
+
+  public sendVesselInput(actorId: string, input: VesselInputFrame): number | undefined {
+    const sequence = (this.actorInputSequences.get(actorId) ?? 0) + 1;
+    const sent = this.send({ type: 'actor:input', actorId, sequence, ...input }, 'realtime');
+    if (!sent) return undefined;
+    this.actorInputSequences.set(actorId, sequence);
+    return sequence;
+  }
+
+  public sendActorCargoAdd(
+    actorId: string,
+    cargo: { cargoId: string; mass: number; localX?: number; localZ?: number },
+  ): number | undefined {
+    return this.sendActorEvent(actorId, {
+      type: 'cargo:add',
+      cargoId: cargo.cargoId,
+      mass: cargo.mass,
+      localX: cargo.localX ?? 0,
+      localZ: cargo.localZ ?? 0,
+    });
+  }
+
+  public sendActorCargoRemove(actorId: string, cargoId: string): number | undefined {
+    return this.sendActorEvent(actorId, { type: 'cargo:remove', cargoId });
+  }
+
+  public sendActorDamage(actorId: string, partId: string, amount: number): number | undefined {
+    return this.sendActorEvent(actorId, { type: 'damage', partId, amount });
+  }
+
+  public interactWithActor(actorId: string): number | undefined {
+    const sequence = this.actorInteractionSequence + 1;
+    const sent = this.send({ type: 'actor:interact', actorId, sequence }, 'control');
+    if (!sent) return undefined;
+    this.actorInteractionSequence = sequence;
+    return sequence;
   }
 
   public onRoomUpdate(listener: RoomUpdateListener): () => void {
@@ -155,47 +208,39 @@ export class RoomClient {
     return () => this.disconnectListeners.delete(listener);
   }
 
-  private ensureSocket(): Promise<WebSocket> {
-    if (this.socket?.readyState === WebSocket.OPEN) return Promise.resolve(this.socket);
-    if (this.socketReady) return this.socketReady;
-
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const url = `${protocol}//${window.location.host}/ws`;
-    this.socketReady = new Promise<WebSocket>((resolve, reject) => {
-      const socket = new WebSocket(url);
-      this.socket = socket;
-
-      socket.addEventListener('open', () => resolve(socket), { once: true });
-      socket.addEventListener('error', () => reject(new Error('无法连接房间服务器')), { once: true });
-      socket.addEventListener('message', (event: MessageEvent<string>) => this.handleMessage(event));
-      socket.addEventListener('close', () => {
-        this.socket = undefined;
-        this.socketReady = undefined;
-        for (const listener of this.disconnectListeners) listener();
-      });
-    }).catch((error: unknown) => {
-      this.socketReady = undefined;
-      throw error;
-    });
-    return this.socketReady;
+  private async ensureTransport(): Promise<void> {
+    if (this.transport.state === 'connected') return;
+    await this.transport.connect({ endpoint: this.resolveEndpoint() });
   }
 
-  private handleMessage(event: MessageEvent<string>): void {
-    const message = this.parseMessage(event.data);
+  private handlePacket(payload: string | Uint8Array): void {
+    const message = this.codec.decode(payload);
     if (message?.type === 'room:summary' && message.room) {
       for (const listener of this.roomListeners) listener(message.room);
     } else if (message?.type === 'room:snapshot' && message.snapshot) {
       for (const listener of this.snapshotListeners) listener(message.snapshot);
     } else if (message?.type === 'room:closed') {
-      this.socket?.close();
+      this.transport.close();
     }
   }
 
-  private parseMessage(data: string): ServerMessage | undefined {
-    try {
-      return JSON.parse(data) as ServerMessage;
-    } catch {
-      return undefined;
-    }
+  private sendActorEvent(actorId: string, event: ActorGameplayEvent): number | undefined {
+    const sequence = (this.actorEventSequences.get(actorId) ?? 0) + 1;
+    const sent = this.send({ type: 'actor:event', actorId, sequence, event }, 'control');
+    if (!sent) return undefined;
+    this.actorEventSequences.set(actorId, sequence);
+    return sequence;
+  }
+
+  private send(message: ClientMessage, channel: TransportChannel): boolean {
+    if (this.transport.state !== 'connected') return false;
+    return this.transport.send(this.codec.encode(message), channel);
+  }
+
+  private resetSequences(): void {
+    this.inputSequence = 0;
+    this.actorInputSequences.clear();
+    this.actorEventSequences.clear();
+    this.actorInteractionSequence = 0;
   }
 }

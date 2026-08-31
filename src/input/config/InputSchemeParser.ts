@@ -12,6 +12,9 @@ import type {
   InputDevicePromptDefinition,
   InputPromptEntryDefinition,
   InputSchemeDefinition,
+  VirtualButtonDefinition,
+  VirtualControlLayoutDefinition,
+  VirtualControlsDefinition,
 } from './InputSchemeTypes';
 
 const DEVICE_KINDS = new Set<InputDeviceKind>(['keyboardMouse', 'touch', 'gamepad']);
@@ -45,8 +48,9 @@ export function parseInputSchemeDefinition(raw: unknown): InputSchemeDefinition 
     nonEmptyString(label, `controlLabels.${control}`),
   ]));
   const prompts = array(devicePromptsRaw.prompts, 'devicePrompts.prompts').map(parsePrompt);
+  const virtualControls = parseVirtualControls(root.virtualControls);
 
-  validateReferences(inputActions, bindings, inputMappingContexts, prompts);
+  validateReferences(inputActions, bindings, inputMappingContexts, prompts, virtualControls);
   return {
     schemaVersion: 1,
     id,
@@ -54,6 +58,103 @@ export function parseInputSchemeDefinition(raw: unknown): InputSchemeDefinition 
     inputConfig: { bindings },
     inputMappingContexts,
     devicePrompts: { controlLabels, prompts },
+    virtualControls,
+  };
+}
+
+function parseVirtualControls(value: unknown): VirtualControlsDefinition {
+  const source = record(value, 'virtualControls');
+  const joystickSource = record(source.joystick, 'virtualControls.joystick');
+  const control = virtualControl(joystickSource.control, 'virtualControls.joystick.control');
+  if (joystickSource.mode !== 'fixed' && joystickSource.mode !== 'floating') {
+    throw new TypeError('virtualControls.joystick.mode 必须是 fixed 或 floating');
+  }
+  const baseRadiusPx = rangedNumber(
+    joystickSource.baseRadiusPx,
+    'virtualControls.joystick.baseRadiusPx',
+    32,
+    128,
+  );
+  const travelRadiusPx = rangedNumber(
+    joystickSource.travelRadiusPx,
+    'virtualControls.joystick.travelRadiusPx',
+    8,
+    baseRadiusPx,
+  );
+  const knobRadiusPx = rangedNumber(
+    joystickSource.knobRadiusPx,
+    'virtualControls.joystick.knobRadiusPx',
+    8,
+    baseRadiusPx,
+  );
+  const buttons = array(source.buttons, 'virtualControls.buttons').map(parseVirtualButton);
+  unique(buttons.map((button) => button.id), 'VirtualButton id');
+  unique(buttons.map((button) => button.control), 'VirtualButton control');
+
+  const layoutsSource = record(source.layouts, 'virtualControls.layouts');
+  return {
+    desktopDebugQueryParameter: nonEmptyString(
+      source.desktopDebugQueryParameter,
+      'virtualControls.desktopDebugQueryParameter',
+    ),
+    joystick: {
+      control,
+      mode: joystickSource.mode,
+      baseRadiusPx,
+      travelRadiusPx,
+      knobRadiusPx,
+      deadZone: rangedNumber(joystickSource.deadZone, 'virtualControls.joystick.deadZone', 0, 0.95),
+      sensitivity: rangedNumber(
+        joystickSource.sensitivity,
+        'virtualControls.joystick.sensitivity',
+        0.1,
+        3,
+      ),
+      activationWidthRatio: rangedNumber(
+        joystickSource.activationWidthRatio,
+        'virtualControls.joystick.activationWidthRatio',
+        0.2,
+        0.8,
+      ),
+      activationHeightRatio: rangedNumber(
+        joystickSource.activationHeightRatio,
+        'virtualControls.joystick.activationHeightRatio',
+        0.25,
+        0.9,
+      ),
+    },
+    buttons,
+    layouts: {
+      landscape: parseVirtualLayout(layoutsSource.landscape, 'virtualControls.layouts.landscape'),
+      portrait: parseVirtualLayout(layoutsSource.portrait, 'virtualControls.layouts.portrait'),
+    },
+  };
+}
+
+function parseVirtualButton(value: unknown, index: number): VirtualButtonDefinition {
+  const label = `virtualControls.buttons[${index}]`;
+  const source = record(value, label);
+  return {
+    id: nonEmptyString(source.id, `${label}.id`),
+    control: virtualControl(source.control, `${label}.control`),
+    label: nonEmptyString(source.label, `${label}.label`),
+    ariaLabel: nonEmptyString(source.ariaLabel, `${label}.ariaLabel`),
+    sizePx: rangedNumber(source.sizePx, `${label}.sizePx`, 36, 128),
+    gridColumn: positiveInteger(source.gridColumn, `${label}.gridColumn`, 4),
+    gridRow: positiveInteger(source.gridRow, `${label}.gridRow`, 6),
+    rowSpan: source.rowSpan === undefined
+      ? undefined
+      : positiveInteger(source.rowSpan, `${label}.rowSpan`, 4),
+  };
+}
+
+function parseVirtualLayout(value: unknown, label: string): VirtualControlLayoutDefinition {
+  const source = record(value, label);
+  return {
+    edgeInsetPx: rangedNumber(source.edgeInsetPx, `${label}.edgeInsetPx`, 0, 128),
+    bottomInsetPx: rangedNumber(source.bottomInsetPx, `${label}.bottomInsetPx`, 0, 192),
+    buttonGapPx: rangedNumber(source.buttonGapPx, `${label}.buttonGapPx`, 0, 48),
+    scale: rangedNumber(source.scale, `${label}.scale`, 0.5, 1.5),
   };
 }
 
@@ -196,6 +297,7 @@ function validateReferences(
   bindings: readonly { readonly tag: string; readonly actionId: string }[],
   contexts: readonly ConfigurableInputMappingContextDefinition[],
   prompts: readonly InputDevicePromptDefinition[],
+  virtualControls: VirtualControlsDefinition,
 ): void {
   const actionIds = unique(actions.map((action) => action.id), 'InputAction');
   unique(bindings.map((binding) => String(binding.tag)), 'InputConfig 标签');
@@ -224,6 +326,19 @@ function validateReferences(
           throw new Error(`设备提示 ${prompt.mode}/${prompt.deviceKind} 不能引用 ${mappingId}`);
         }
       }
+    }
+  }
+
+
+  const touchControls = new Set([...mappings.values()]
+    .filter((mapping) => mapping.deviceKind === 'touch')
+    .map((mapping) => mapping.control));
+  for (const control of [
+    virtualControls.joystick.control,
+    ...virtualControls.buttons.map((button) => button.control),
+  ]) {
+    if (!touchControls.has(control)) {
+      throw new Error(`虚拟控件引用了没有 touch Mapping 的控制路径：${control}`);
     }
   }
 }
@@ -279,9 +394,30 @@ function finiteNumber(value: unknown, label: string): number {
   return value;
 }
 
+function rangedNumber(value: unknown, label: string, minimum: number, maximum: number): number {
+  const result = finiteNumber(value, label);
+  if (result < minimum || result > maximum) {
+    throw new RangeError(`${label} 必须位于 [${minimum}, ${maximum}]`);
+  }
+  return result;
+}
+
+function positiveInteger(value: unknown, label: string, maximum: number): number {
+  const result = rangedNumber(value, label, 1, maximum);
+  if (!Number.isInteger(result)) throw new TypeError(`${label} 必须是整数`);
+  return result;
+}
+
+function virtualControl(value: unknown, label: string): string {
+  const control = nonEmptyString(value, label);
+  if (inferInputDeviceKind(control) !== 'touch') {
+    throw new TypeError(`${label} 必须使用 Virtual.* 控制路径`);
+  }
+  return control;
+}
+
 function optionalBoolean(value: unknown, label: string): boolean | undefined {
   if (value === undefined) return undefined;
   if (typeof value !== 'boolean') throw new TypeError(`${label} 必须是布尔值`);
   return value;
 }
-

@@ -12,7 +12,7 @@
     "components": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["buoyancy", "render"],
+      "required": ["render"],
       "properties": {
         "buoyancy": {
           "type": "object",
@@ -44,16 +44,91 @@
             }
           }
         },
-        "render": {
+        "vesselMotor": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["model", "foamColor", "length", "width"],
+          "required": ["maximumForwardSpeed", "maximumReverseSpeed", "acceleration", "deceleration", "drag", "turnSpeed", "inputTimeoutMs"],
           "properties": {
-            "model": { "const": "line-art-raft" },
-            "foamColor": { "$ref": "#/$defs/color" },
-            "length": { "type": "number", "exclusiveMinimum": 0 },
-            "width": { "type": "number", "exclusiveMinimum": 0 }
+            "maximumForwardSpeed": { "type": "number", "exclusiveMinimum": 0, "maximum": 30 },
+            "maximumReverseSpeed": { "type": "number", "exclusiveMinimum": 0, "maximum": 15 },
+            "acceleration": { "type": "number", "exclusiveMinimum": 0, "maximum": 30 },
+            "deceleration": { "type": "number", "exclusiveMinimum": 0, "maximum": 30 },
+            "drag": { "type": "number", "exclusiveMinimum": 0, "maximum": 30 },
+            "turnSpeed": { "type": "number", "exclusiveMinimum": 0, "maximum": 6.2832 },
+            "inputTimeoutMs": { "type": "integer", "minimum": 100, "maximum": 2000 }
           }
+        },
+        "interactable": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["action", "label", "maximumDistance"],
+          "properties": {
+            "action": { "const": "cargo-toggle" },
+            "label": { "type": "string", "minLength": 1, "maxLength": 32 },
+            "maximumDistance": { "type": "number", "minimum": 0.5, "maximum": 12 }
+          }
+        },
+        "cargo": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["mass", "mountLocalX", "mountLocalY", "mountLocalZ"],
+          "properties": {
+            "mass": { "type": "number", "exclusiveMinimum": 0, "maximum": 1000 },
+            "mountLocalX": { "type": "number", "minimum": -10, "maximum": 10 },
+            "mountLocalY": { "type": "number", "minimum": -2, "maximum": 10 },
+            "mountLocalZ": { "type": "number", "minimum": -10, "maximum": 10 }
+          }
+        },
+        "hazard": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["radius", "damage", "cooldownMs", "partId"],
+          "properties": {
+            "radius": { "type": "number", "exclusiveMinimum": 0, "maximum": 10 },
+            "damage": { "type": "number", "exclusiveMinimum": 0, "maximum": 1 },
+            "cooldownMs": { "type": "integer", "minimum": 100, "maximum": 60000 },
+            "partId": { "type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$" }
+          }
+        },
+        "render": {
+          "oneOf": [
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["model", "foamColor", "length", "width"],
+              "properties": {
+                "model": { "const": "line-art-raft" },
+                "foamColor": { "$ref": "#/$defs/color" },
+                "length": { "type": "number", "exclusiveMinimum": 0 },
+                "width": { "type": "number", "exclusiveMinimum": 0 }
+              }
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["model", "color", "accentColor", "length", "width", "height"],
+              "properties": {
+                "model": { "const": "line-art-cargo-crate" },
+                "color": { "$ref": "#/$defs/color" },
+                "accentColor": { "$ref": "#/$defs/color" },
+                "length": { "type": "number", "exclusiveMinimum": 0 },
+                "width": { "type": "number", "exclusiveMinimum": 0 },
+                "height": { "type": "number", "exclusiveMinimum": 0 }
+              }
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["model", "color", "accentColor", "radius", "height"],
+              "properties": {
+                "model": { "const": "line-art-reef" },
+                "color": { "$ref": "#/$defs/color" },
+                "accentColor": { "$ref": "#/$defs/color" },
+                "radius": { "type": "number", "exclusiveMinimum": 0 },
+                "height": { "type": "number", "exclusiveMinimum": 0 }
+              }
+            }
+          ]
         }
       }
     }

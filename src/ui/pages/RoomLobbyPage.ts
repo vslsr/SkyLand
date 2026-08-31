@@ -73,6 +73,8 @@ export class RoomLobbyPage extends ModalWindow {
 
   public setLoading(loading: boolean): void {
     this.refreshButton.disabled = loading;
+    this.createButton.disabled = loading;
+    this.statusElement.classList.remove('is-error');
     this.statusElement.textContent = loading ? '正在读取房间…' : '';
     if (loading) this.roomGrid.replaceChildren();
   }
@@ -80,6 +82,8 @@ export class RoomLobbyPage extends ModalWindow {
   public setError(message: string): void {
     this.statusElement.textContent = message;
     this.statusElement.classList.add('is-error');
+    // 请求失败后必须允许重试；创建按钮继续保持禁用，避免把连接故障误报为场景配置为空。
+    this.refreshButton.disabled = false;
   }
 
   public setRooms(rooms: RoomSummary[]): void {
@@ -88,6 +92,7 @@ export class RoomLobbyPage extends ModalWindow {
     this.statusElement.textContent = rooms.length === 0 ? '现在还没有房间，创建第一个吧。' : '';
     this.roomGrid.replaceChildren(...rooms.map((room) => this.createRoomCard(room)));
     this.refreshButton.disabled = false;
+    this.createButton.disabled = false;
   }
 
   public setBusy(busy: boolean, message = ''): void {

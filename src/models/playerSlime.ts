@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { PLAYER_COLLISION_RADIUS } from '../../shared/playerMovement.mjs';
 
 export interface SlimeBubble {
   mesh: THREE.Mesh<THREE.SphereGeometry, THREE.MeshBasicMaterial>;
@@ -103,7 +104,7 @@ function createFace(radius: number, palette: SlimePalette): THREE.Group {
 }
 
 export function createPlayerSlimeModel(palette: SlimePalette = LOCAL_SLIME_PALETTE): PlayerSlimeModel {
-  const radius = 0.42;
+  const radius = PLAYER_COLLISION_RADIUS;
   const membraneMaterial = new THREE.MeshBasicMaterial({
     color: palette.membrane,
     transparent: true,

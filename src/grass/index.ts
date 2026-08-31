@@ -6,3 +6,4 @@ export {
   type NormalizedGrassBendImpulse,
 } from './GrassInteraction';
 export { MouseGrassInteractor } from './MouseGrassInteractor';
+export { StreamingGrassSystem } from './StreamingGrassSystem';

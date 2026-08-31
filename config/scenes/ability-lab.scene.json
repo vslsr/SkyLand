@@ -1,0 +1,33 @@
+{
+  "$schema": "./scene.schema.json",
+  "schemaVersion": 1,
+  "id": "ability-lab",
+  "displayName": "能力系统实验室",
+  "description": "验证消耗、冷却、周期伤害、效果叠层、标签阻断与属性聚合的交互测试场景。",
+  "capacity": 1,
+  "sceneComponents": [{ "type": "ability-lab" }],
+  "actors": [],
+  "renderer": {
+    "type": "line-art",
+    "background": "#f7f2e8",
+    "fog": { "color": "#f7f2e8", "near": 30, "far": 64 },
+    "content": { "ground": true, "trees": false, "grass": false, "ocean": false },
+    "palette": {
+      "ground": "#eee6d5",
+      "grass": "#b8d39f",
+      "treeTrunk": "#d6bea3",
+      "treeNeedles": "#cbdcbc"
+    }
+  },
+  "gameplay": {
+    "bounds": { "minimumX": -12, "maximumX": 12, "minimumZ": -12, "maximumZ": 12 },
+    "spawn": { "centerX": 0, "centerZ": 4.5, "radius": 0, "slots": 1 }
+  },
+  "camera": {
+    "mode": "topdown",
+    "position": [0, 5, 13],
+    "yaw": 0,
+    "pitch": -0.2,
+    "moveSpeed": 6.5
+  }
+}

@@ -1,0 +1,58 @@
+export { AbilitySystem, type AbilitySystemOptions } from './AbilitySystem';
+export {
+  AttributeSet,
+  JavascriptAttributeBackend,
+  type AttributeSetOptions,
+} from './AttributeSet';
+export {
+  GrantedAbilityLoadout,
+  grantAbilityLoadout,
+  type AbilityLoadoutDefinition,
+} from './AbilityLoadout';
+export {
+  GAME_ABILITY_COMPONENT,
+  GameAbilityComponent,
+  type GameAbilityActivationOptions,
+  type GameAbilityComponentOptions,
+  type GameAbilityGrantDefinition,
+} from './GameAbilityComponent';
+export { GameAbilitySystem } from './GameAbilitySystem';
+export type {
+  AbilityActivationFailure,
+  AbilityActivationResult,
+  AbilityConcurrency,
+  AbilityCooldown,
+  AbilityCost,
+  AbilityDefinition,
+  AbilityEffectApplication,
+  AbilityEndContext,
+  AbilityExecutionContext,
+  AbilityHandle,
+  AbilityId,
+  AbilityLifecycle,
+  AbilitySystemEvent,
+  AbilitySystemListener,
+  AbilitySystemSnapshot,
+  ActiveEffectSnapshot,
+  AttributeCalculationBackend,
+  AttributeCalculationInput,
+  AttributeDefinition,
+  AttributeId,
+  AttributeSnapshot,
+  EffectApplicationFailure,
+  EffectApplicationResult,
+  EffectContext,
+  EffectDefinition,
+  EffectHandle,
+  EffectId,
+  EffectLifetime,
+  EffectMagnitude,
+  EffectModifier,
+  EffectParameters,
+  EffectPeriod,
+  EffectStacking,
+  GrantedAbilitySnapshot,
+  ModifierOperation,
+  ResolvedModifier,
+  TagRequirements,
+} from './definitions';

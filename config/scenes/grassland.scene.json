@@ -5,6 +5,7 @@
   "displayName": "线稿草地",
   "description": "树木、草丛与纸张色雾气构成的经典 SkyLand 草地。",
   "capacity": 8,
+  "sceneComponents": [{ "type": "mouse-grass-interaction" }],
   "actors": [],
   "renderer": {
     "type": "line-art",

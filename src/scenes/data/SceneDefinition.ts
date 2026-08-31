@@ -21,11 +21,34 @@ export interface ActorBuoyancyPartDefinition {
   localZ: number;
 }
 
+export type ActorRenderDefinition =
+  | {
+      model: 'line-art-raft';
+      foamColor: string;
+      length: number;
+      width: number;
+    }
+  | {
+      model: 'line-art-cargo-crate';
+      color: string;
+      accentColor: string;
+      length: number;
+      width: number;
+      height: number;
+    }
+  | {
+      model: 'line-art-reef';
+      color: string;
+      accentColor: string;
+      radius: number;
+      height: number;
+    };
+
 export interface ActorArchetypeDefinition {
   schemaVersion: 1;
   id: string;
   components: {
-    buoyancy: {
+    buoyancy?: {
       minimumBeam: number;
       minimumLength: number;
       maximumTrimRadians: number;
@@ -33,20 +56,45 @@ export interface ActorArchetypeDefinition {
       maximumDraft: number;
       parts: ActorBuoyancyPartDefinition[];
     };
-    render: {
-      model: 'line-art-raft';
-      foamColor: string;
-      length: number;
-      width: number;
+    vesselMotor?: {
+      maximumForwardSpeed: number;
+      maximumReverseSpeed: number;
+      acceleration: number;
+      deceleration: number;
+      drag: number;
+      turnSpeed: number;
+      inputTimeoutMs: number;
     };
+    interactable?: {
+      action: 'cargo-toggle';
+      label: string;
+      maximumDistance: number;
+    };
+    cargo?: {
+      mass: number;
+      mountLocalX: number;
+      mountLocalY: number;
+      mountLocalZ: number;
+    };
+    hazard?: {
+      radius: number;
+      damage: number;
+      cooldownMs: number;
+      partId: string;
+    };
+    render: ActorRenderDefinition;
   };
 }
 
 export interface SceneActorDefinition {
   id: string;
   archetypeId: string;
-  position: [number, number, number];
-  yaw: number;
+  parentActorId?: string | null;
+  /** 根 Actor 的局部坐标即世界坐标；子 Actor 的局部坐标相对父 Actor。 */
+  localTransform: {
+    position: [number, number, number];
+    yaw: number;
+  };
 }
 
 export interface OceanVisualDefinition {
@@ -89,6 +137,8 @@ export interface SceneDefinition extends SceneSummary {
     background: string;
     fog: { color: string; near: number; far: number };
     content: { ground: boolean; trees: boolean; grass: boolean; ocean: boolean };
+    /** 场景级本地输入开关；玩家脚步与玩法效果始终走独立的草地交互目标。 */
+    grassInteraction: { mouse: boolean };
     palette: {
       ground: string;
       grass: string;

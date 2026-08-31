@@ -208,6 +208,36 @@ export class RoomProcessManager extends EventEmitter {
     };
   }
 
+  claimActorControl(roomId, playerId, actorId) {
+    const record = this.rooms.get(roomId);
+    if (!record || !record.players.has(playerId)) return;
+    record.child.send({ type: 'actor:claim', playerId, actorId });
+  }
+
+  releaseActorControl(roomId, playerId, actorId) {
+    const record = this.rooms.get(roomId);
+    if (!record || !record.players.has(playerId)) return;
+    record.child.send({ type: 'actor:release', playerId, actorId });
+  }
+
+  sendActorInput(roomId, playerId, input) {
+    const record = this.rooms.get(roomId);
+    if (!record || !record.players.has(playerId)) return;
+    record.child.send({ type: 'actor:input', playerId, input });
+  }
+
+  sendActorEvent(roomId, playerId, event) {
+    const record = this.rooms.get(roomId);
+    if (!record || !record.players.has(playerId)) return;
+    record.child.send({ type: 'actor:event', playerId, event });
+  }
+
+  interactWithActor(roomId, playerId, interaction) {
+    const record = this.rooms.get(roomId);
+    if (!record || !record.players.has(playerId)) return;
+    record.child.send({ type: 'actor:interact', playerId, interaction });
+  }
+
   scheduleEmptyRoomCleanup(record) {
     this.cancelEmptyRoomCleanup(record);
     if (record.players.size > 0 || this.shuttingDown) return;

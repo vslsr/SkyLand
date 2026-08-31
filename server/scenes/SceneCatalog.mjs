@@ -58,23 +58,54 @@ function validateActorPlacements(rawActors, filename, actorCatalog) {
     const actor = requireObject(rawActor, path);
     const id = requireString(actor.id, `${path}.id`, 48);
     const archetypeId = requireString(actor.archetype, `${path}.archetype`, 48);
+    const parentActorId = actor.parentActorId === undefined
+      ? null
+      : requireString(actor.parentActorId, `${path}.parentActorId`, 48);
     if (!SCENE_ID_PATTERN.test(id)) throw new TypeError(`${path}.id 格式无效`);
     if (!SCENE_ID_PATTERN.test(archetypeId)) throw new TypeError(`${path}.archetype 格式无效`);
+    if (parentActorId && !SCENE_ID_PATTERN.test(parentActorId)) {
+      throw new TypeError(`${path}.parentActorId 格式无效`);
+    }
     if (actorIds.has(id)) throw new TypeError(`${filename} Actor id 重复：${id}`);
     actorIds.add(id);
     const archetype = actorCatalog.require(archetypeId);
     archetypes.set(archetype.id, archetype);
-    if (!Array.isArray(actor.position) || actor.position.length !== 3) {
-      throw new TypeError(`${path}.position 必须包含 3 个数字`);
+    const localTransform = requireObject(actor.localTransform, `${path}.localTransform`);
+    if (!Array.isArray(localTransform.position) || localTransform.position.length !== 3) {
+      throw new TypeError(`${path}.localTransform.position 必须包含 3 个数字`);
     }
-    const position = actor.position.map((value, axis) => requireNumber(value, `${path}.position[${axis}]`));
+    const position = localTransform.position.map((value, axis) => (
+      requireNumber(value, `${path}.localTransform.position[${axis}]`)
+    ));
     return {
       id,
       archetypeId,
-      position,
-      yaw: requireNumber(actor.yaw, `${path}.yaw`),
+      parentActorId,
+      localTransform: {
+        position,
+        yaw: requireNumber(localTransform.yaw, `${path}.localTransform.yaw`),
+      },
     };
   });
+
+  const actorsById = new Map(actors.map((actor) => [actor.id, actor]));
+  for (const actor of actors) {
+    if (actor.parentActorId === actor.id) {
+      throw new TypeError(`${filename} Actor ${actor.id} 不能将自己设为父节点`);
+    }
+    if (actor.parentActorId && !actorsById.has(actor.parentActorId)) {
+      throw new TypeError(`${filename} Actor ${actor.id} 引用了不存在的父节点：${actor.parentActorId}`);
+    }
+    const visited = new Set([actor.id]);
+    let ancestorId = actor.parentActorId;
+    while (ancestorId) {
+      if (visited.has(ancestorId)) {
+        throw new TypeError(`${filename} Actor 层级存在循环：${actor.id}`);
+      }
+      visited.add(ancestorId);
+      ancestorId = actorsById.get(ancestorId)?.parentActorId ?? null;
+    }
+  }
   return { actors, actorArchetypes: Array.from(archetypes.values()) };
 }
 
@@ -88,12 +119,25 @@ function validateSceneDefinition(raw, filename, actorCatalog) {
   if (renderer.type !== 'line-art') throw new TypeError(`${filename}.renderer.type 暂只支持 line-art`);
   const fog = requireObject(renderer.fog, `${filename}.renderer.fog`);
   const content = requireObject(renderer.content, `${filename}.renderer.content`);
+  const grassInteraction = requireObject(
+    renderer.grassInteraction,
+    `${filename}.renderer.grassInteraction`,
+  );
   const palette = requireObject(renderer.palette, `${filename}.renderer.palette`);
   const fogNear = requireNumber(fog.near, `${filename}.renderer.fog.near`);
   const fogFar = requireNumber(fog.far, `${filename}.renderer.fog.far`);
   if (fogNear < 0 || fogFar <= fogNear) throw new TypeError(`${filename}.renderer.fog 范围无效`);
   for (const key of ['ground', 'trees', 'grass', 'ocean']) {
     requireBoolean(content[key], `${filename}.renderer.content.${key}`);
+  }
+  const mouseGrassInteraction = requireBoolean(
+    grassInteraction.mouse,
+    `${filename}.renderer.grassInteraction.mouse`,
+  );
+  if (mouseGrassInteraction && !content.grass) {
+    throw new TypeError(
+      `${filename}.renderer.grassInteraction.mouse 只能在 content.grass 开启时使用`,
+    );
   }
 
   let ocean;
@@ -212,6 +256,7 @@ function validateSceneDefinition(raw, filename, actorCatalog) {
         grass: content.grass,
         ocean: content.ocean,
       },
+      grassInteraction: { mouse: mouseGrassInteraction },
       palette: {
         ground: requireColor(palette.ground, `${filename}.renderer.palette.ground`),
         grass: requireColor(palette.grass, `${filename}.renderer.palette.grass`),

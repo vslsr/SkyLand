@@ -1,6 +1,7 @@
 import type * as THREE from 'three';
 import type { GrassInteractionTarget } from '../grass';
 import type { SnapshotActor } from '../network/protocol';
+import type { ActorFloatState, ActorEventType } from '../network/protocol';
 
 /**
  * 每帧传给场景系统的上下文。
@@ -22,7 +23,38 @@ export interface SceneVisualSystem {
 }
 
 export interface ActorSnapshotTarget {
-  syncSnapshots(snapshots: readonly SnapshotActor[]): void;
+  syncSnapshots(snapshots: readonly SnapshotActor[], serverTime: number, receivedAt?: number): void;
+  findOwnedActorId(playerId: string): string | undefined;
+  findControllableActorId(): string | undefined;
+  pickInteractableActor(
+    origin: readonly [number, number, number],
+    direction: readonly [number, number, number],
+    maximumDistance?: number,
+  ): ActorInteractionCandidate | undefined;
+  setHoveredActorId(actorId?: string): void;
+  getVesselHudState(playerId: string): VesselHudState | undefined;
+  resolveSimpleCollision(
+    position: { x: number; z: number },
+    radius: number,
+  ): { x: number; z: number };
+  setSimpleCollisionVisible(visible: boolean): void;
+}
+
+export interface ActorInteractionCandidate {
+  actorId: string;
+  label: string;
+  action: 'cargo-toggle';
+  carrierActorId: string | null;
+}
+
+export interface VesselHudState {
+  actorId: string;
+  speed: number;
+  cargoMass: number;
+  damagedPartCount: number;
+  floatState: ActorFloatState;
+  eventRevision: number;
+  lastEvent: { type: ActorEventType; targetId: string } | null;
 }
 
 export interface SceneComposition {

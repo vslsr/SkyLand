@@ -1,4 +1,5 @@
 import './style.css';
+import './ui/scrollbars.css';
 import { GrasslandScene } from './scenes/GrasslandScene';
 import { SceneManager } from './scenes/SceneManager';
 
@@ -9,6 +10,24 @@ function requireElement<T extends HTMLElement>(id: string): T {
 }
 
 const errorPanel = document.getElementById('webgl-error');
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function isWebGLContextError(error: unknown): boolean {
+  const message = errorMessage(error);
+  return /webgl.*context|context.*webgl|error creating webgl/i.test(message);
+}
+
+function showStartupError(error: unknown): void {
+  console.error(error);
+  if (!errorPanel) return;
+  errorPanel.textContent = isWebGLContextError(error)
+    ? '当前浏览器无法创建 WebGL 上下文，请检查硬件加速、显卡驱动或浏览器设置。'
+    : `客户端初始化失败：${errorMessage(error)}`;
+  errorPanel.hidden = false;
+}
 
 try {
   const sceneManager = new SceneManager();
@@ -34,6 +53,5 @@ try {
 
   requestAnimationFrame(frame);
 } catch (error) {
-  console.error(error);
-  if (errorPanel) errorPanel.hidden = false;
+  showStartupError(error);
 }

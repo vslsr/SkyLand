@@ -1,4 +1,7 @@
 import * as THREE from 'three';
+import { Actor } from '../../shared/actor/Actor.mjs';
+import { GrassDisplacementComponent } from '../actors/components/GrassDisplacementComponent';
+import type { GrassInteractionTarget } from '../grass';
 import { createPlayerSlimeModel, createSlimePalette } from '../models/playerSlime';
 import type { InterpolatedPlayerState } from '../network/protocol';
 import { SlimeAnimator } from './SlimeAnimator';
@@ -14,21 +17,27 @@ function disposeSubtree(root: THREE.Object3D): void {
 }
 
 /** 同房间的另一名玩家：状态全部来自快照插值，本地不做任何模拟。 */
-export class RemotePlayer {
-  public readonly id: string;
+export class RemotePlayer extends Actor {
   public name: string;
   private readonly model: ReturnType<typeof createPlayerSlimeModel>;
   private readonly animator: SlimeAnimator;
   private speed = 0;
 
-  public constructor(state: InterpolatedPlayerState) {
-    this.id = state.id;
+  private readonly grassDisplacement: GrassDisplacementComponent;
+
+  public constructor(state: InterpolatedPlayerState, grassInteraction: GrassInteractionTarget) {
+    super(state.id, 'player-slime');
     this.name = state.name;
     this.model = createPlayerSlimeModel(createSlimePalette(state.id));
     this.model.root.name = `remote-player-${state.id}`;
     this.model.root.position.set(state.x, 0, state.z);
     this.model.root.rotation.y = state.yaw;
     this.animator = new SlimeAnimator(this.model);
+    this.grassDisplacement = this.addComponent(new GrassDisplacementComponent(
+      this.model.root,
+      grassInteraction,
+      { radius: this.model.radius * 1.65 },
+    )) as GrassDisplacementComponent;
   }
 
   public get object3D(): THREE.Object3D {
@@ -45,9 +54,11 @@ export class RemotePlayer {
 
   public update(deltaSeconds: number, elapsedSeconds: number): void {
     this.animator.update(deltaSeconds, elapsedSeconds, this.speed);
+    this.grassDisplacement.update(deltaSeconds);
   }
 
-  public dispose(): void {
+  public override dispose(): void {
+    super.dispose();
     this.model.root.parent?.remove(this.model.root);
     disposeSubtree(this.model.root);
   }

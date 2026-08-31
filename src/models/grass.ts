@@ -3,9 +3,9 @@ import { createOutlinedObject } from './outlinedObject';
 
 const BLADE_VERTEX_COUNT = 7;
 const BLADE_INDEX_COUNT = 15;
-const DEFAULT_BLADES_PER_SQUARE_UNIT = 9;
-const MIN_BLADE_COUNT = 2_500;
-const MAX_BLADE_COUNT = 12_000;
+const DEFAULT_BLADES_PER_SQUARE_UNIT = 28;
+const MIN_BLADE_COUNT = 8_000;
+const MAX_BLADE_COUNT = 32_000;
 
 export interface GrassFieldBounds {
   minimumX: number;
@@ -18,6 +18,14 @@ export interface GrassFieldGeometryOptions {
   bounds: GrassFieldBounds;
   bladeCount?: number;
   seed?: number;
+}
+
+/** 一条来自 chunk 生成器的既有草簇放置记录。 */
+export interface GrassClusterPlacement {
+  x: number;
+  z: number;
+  rotation: number;
+  scale: number;
 }
 
 export interface GrassFieldGeometry {
@@ -176,6 +184,75 @@ export const GRASS_BLADE_GEOMETRY_STATS = {
 const CLUSTER_BLADE_COUNT = 3;
 const CLUSTER_RADIUS = 0.09;
 const CLUSTER_BLADE_WIDTH = 0.3;
+
+/**
+ * 把流式世界里已有的草簇记录转换成可弯曲的实例草。
+ *
+ * 每条记录仍然只生成原模板里的三片叶子；簇中心、旋转与缩放直接沿用
+ * 整数世界生成器解码出的值，因此替换不会改变分布或把草地铺密。
+ */
+export function createPlacedGrassGeometry(
+  placements: readonly GrassClusterPlacement[],
+): GrassFieldGeometry {
+  const instanceCount = placements.length * CLUSTER_BLADE_COUNT;
+  const attributes: InstanceAttributeArrays = {
+    offsets: new Float32Array(instanceCount * 3),
+    scales: new Float32Array(instanceCount * 2),
+    rotations: new Float32Array(instanceCount),
+    phases: new Float32Array(instanceCount),
+    tones: new Float32Array(instanceCount),
+  };
+
+  let instanceIndex = 0;
+  for (const placement of placements) {
+    const sine = Math.sin(placement.rotation);
+    const cosine = Math.cos(placement.rotation);
+
+    for (let bladeIndex = 0; bladeIndex < CLUSTER_BLADE_COUNT; bladeIndex += 1) {
+      const angle = (bladeIndex / CLUSTER_BLADE_COUNT) * Math.PI * 2;
+      const localX = Math.cos(angle) * CLUSTER_RADIUS * placement.scale;
+      const localZ = Math.sin(angle) * CLUSTER_RADIUS * placement.scale;
+      const height = (0.34 + bladeIndex * 0.055) * placement.scale;
+      const offsetIndex = instanceIndex * 3;
+      const scaleIndex = instanceIndex * 2;
+
+      // 与 chunkGenerator.emitTemplate 的 Y 轴旋转约定完全一致。
+      attributes.offsets[offsetIndex] = placement.x + cosine * localX + sine * localZ;
+      attributes.offsets[offsetIndex + 1] = 0.018;
+      attributes.offsets[offsetIndex + 2] = placement.z + cosine * localZ - sine * localX;
+      attributes.scales[scaleIndex] = CLUSTER_BLADE_WIDTH * placement.scale;
+      attributes.scales[scaleIndex + 1] = height;
+      attributes.rotations[instanceIndex] = placement.rotation + angle;
+      attributes.phases[instanceIndex] =
+        hashGrassInstance(placement, bladeIndex, 0x51a9) * Math.PI * 2;
+      attributes.tones[instanceIndex] =
+        hashGrassInstance(placement, bladeIndex, 0x7f4a) * 2 - 1;
+      instanceIndex += 1;
+    }
+  }
+
+  const blade = createGrassBladeGeometry();
+  const edges = new THREE.EdgesGeometry(blade, 20);
+  const fill = createInstancedGeometry(blade, attributes, instanceCount);
+  const outline = createInstancedGeometry(edges, attributes, instanceCount);
+  blade.dispose();
+  edges.dispose();
+  return { fill, outline, instanceCount };
+}
+
+function hashGrassInstance(
+  placement: GrassClusterPlacement,
+  bladeIndex: number,
+  salt: number,
+): number {
+  let hash = Math.imul(Math.round(placement.x * 1000), 73_856_093)
+    ^ Math.imul(Math.round(placement.z * 1000), 19_349_663)
+    ^ Math.imul(bladeIndex + 1, 83_492_791)
+    ^ salt;
+  hash = Math.imul(hash ^ hash >>> 16, 0x45d9f3b);
+  hash = Math.imul(hash ^ hash >>> 16, 0x45d9f3b);
+  return ((hash ^ hash >>> 16) >>> 0) / 4_294_967_296;
+}
 
 /**
  * 一丛草，供 chunk 流式生成使用。

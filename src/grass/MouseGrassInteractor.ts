@@ -6,7 +6,7 @@ interface PendingPointer {
   clientY: number;
 }
 
-/** Test adapter only: converts pointer movement into the generic grass impulse API. */
+/** 场景组件使用的适配器：把鼠标移动转换成通用草地冲量。 */
 export class MouseGrassInteractor {
   private readonly raycaster = new THREE.Raycaster();
   private readonly groundPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);

@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import type { GrassInteractionTarget } from '../grass';
 import type { InterpolatedPlayerState } from '../network/protocol';
 import { RemotePlayer } from './RemotePlayer';
 
@@ -7,7 +8,7 @@ export class RemotePlayerGroup {
   public readonly root = new THREE.Group();
   private readonly players = new Map<string, RemotePlayer>();
 
-  public constructor() {
+  public constructor(private readonly grassInteraction: GrassInteractionTarget) {
     this.root.name = 'remote-players';
   }
 
@@ -26,7 +27,7 @@ export class RemotePlayerGroup {
         existing.applyState(state);
         continue;
       }
-      const created = new RemotePlayer(state);
+      const created = new RemotePlayer(state, this.grassInteraction);
       this.players.set(state.id, created);
       this.root.add(created.object3D);
     }

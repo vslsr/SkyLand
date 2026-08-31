@@ -35,6 +35,13 @@ function requireColor(value, path) {
   return value;
 }
 
+function requireString(value, path, maximumLength) {
+  if (typeof value !== 'string' || value.length < 1 || value.length > maximumLength) {
+    throw new TypeError(`${path} 必须是 1-${maximumLength} 个字符的字符串`);
+  }
+  return value;
+}
+
 function validateBuoyancy(raw, filename) {
   const definition = requireObject(raw, `${filename}.components.buoyancy`);
   if (!Array.isArray(definition.parts) || definition.parts.length < 1 || definition.parts.length > 64) {
@@ -71,25 +78,113 @@ function validateBuoyancy(raw, filename) {
   };
 }
 
+function validateVesselMotor(raw, filename) {
+  const path = `${filename}.components.vesselMotor`;
+  const definition = requireObject(raw, path);
+  const inputTimeoutMs = requireNumber(definition.inputTimeoutMs, `${path}.inputTimeoutMs`, 100, 2000);
+  if (!Number.isInteger(inputTimeoutMs)) throw new TypeError(`${path}.inputTimeoutMs 必须是整数`);
+  return {
+    maximumForwardSpeed: requireNumber(definition.maximumForwardSpeed, `${path}.maximumForwardSpeed`, Number.EPSILON, 30),
+    maximumReverseSpeed: requireNumber(definition.maximumReverseSpeed, `${path}.maximumReverseSpeed`, Number.EPSILON, 15),
+    acceleration: requireNumber(definition.acceleration, `${path}.acceleration`, Number.EPSILON, 30),
+    deceleration: requireNumber(definition.deceleration, `${path}.deceleration`, Number.EPSILON, 30),
+    drag: requireNumber(definition.drag, `${path}.drag`, Number.EPSILON, 30),
+    turnSpeed: requireNumber(definition.turnSpeed, `${path}.turnSpeed`, Number.EPSILON, Math.PI * 2),
+    inputTimeoutMs,
+  };
+}
+
+function validateInteractable(raw, filename) {
+  const path = `${filename}.components.interactable`;
+  const definition = requireObject(raw, path);
+  if (definition.action !== 'cargo-toggle') {
+    throw new TypeError(`${path}.action 暂只支持 cargo-toggle`);
+  }
+  return {
+    action: definition.action,
+    label: requireString(definition.label, `${path}.label`, 32),
+    maximumDistance: requireNumber(definition.maximumDistance, `${path}.maximumDistance`, 0.5, 12),
+  };
+}
+
+function validateCargo(raw, filename) {
+  const path = `${filename}.components.cargo`;
+  const definition = requireObject(raw, path);
+  return {
+    mass: requireNumber(definition.mass, `${path}.mass`, Number.EPSILON, 1000),
+    mountLocalX: requireNumber(definition.mountLocalX, `${path}.mountLocalX`, -10, 10),
+    mountLocalY: requireNumber(definition.mountLocalY, `${path}.mountLocalY`, -2, 10),
+    mountLocalZ: requireNumber(definition.mountLocalZ, `${path}.mountLocalZ`, -10, 10),
+  };
+}
+
+function validateHazard(raw, filename) {
+  const path = `${filename}.components.hazard`;
+  const definition = requireObject(raw, path);
+  const cooldownMs = requireNumber(definition.cooldownMs, `${path}.cooldownMs`, 100, 60_000);
+  if (!Number.isInteger(cooldownMs)) throw new TypeError(`${path}.cooldownMs 必须是整数`);
+  return {
+    radius: requireNumber(definition.radius, `${path}.radius`, Number.EPSILON, 10),
+    damage: requireNumber(definition.damage, `${path}.damage`, Number.EPSILON, 1),
+    cooldownMs,
+    partId: requireId(definition.partId, `${path}.partId`),
+  };
+}
+
+function validateRender(raw, filename) {
+  const path = `${filename}.components.render`;
+  const render = requireObject(raw, path);
+  if (render.model === 'line-art-raft') {
+    return {
+      model: render.model,
+      foamColor: requireColor(render.foamColor, `${path}.foamColor`),
+      length: requireNumber(render.length, `${path}.length`, Number.EPSILON, 30),
+      width: requireNumber(render.width, `${path}.width`, Number.EPSILON, 30),
+    };
+  }
+  if (render.model === 'line-art-cargo-crate') {
+    return {
+      model: render.model,
+      color: requireColor(render.color, `${path}.color`),
+      accentColor: requireColor(render.accentColor, `${path}.accentColor`),
+      length: requireNumber(render.length, `${path}.length`, Number.EPSILON, 10),
+      width: requireNumber(render.width, `${path}.width`, Number.EPSILON, 10),
+      height: requireNumber(render.height, `${path}.height`, Number.EPSILON, 10),
+    };
+  }
+  if (render.model === 'line-art-reef') {
+    return {
+      model: render.model,
+      color: requireColor(render.color, `${path}.color`),
+      accentColor: requireColor(render.accentColor, `${path}.accentColor`),
+      radius: requireNumber(render.radius, `${path}.radius`, Number.EPSILON, 10),
+      height: requireNumber(render.height, `${path}.height`, Number.EPSILON, 20),
+    };
+  }
+  throw new TypeError(`${path}.model 不受支持：${render.model}`);
+}
+
 function validateActorArchetype(raw, filename) {
   const definition = requireObject(raw, filename);
   if (definition.schemaVersion !== 1) throw new TypeError(`${filename}.schemaVersion 必须是 1`);
   const components = requireObject(definition.components, `${filename}.components`);
-  const render = requireObject(components.render, `${filename}.components.render`);
-  if (render.model !== 'line-art-raft') {
-    throw new TypeError(`${filename}.components.render.model 暂只支持 line-art-raft`);
+  const knownComponents = new Set(['buoyancy', 'vesselMotor', 'interactable', 'cargo', 'hazard', 'render']);
+  for (const componentName of Object.keys(components)) {
+    if (!knownComponents.has(componentName)) {
+      throw new TypeError(`${filename}.components 包含未知 Component：${componentName}`);
+    }
   }
+  const render = validateRender(components.render, filename);
   return {
     schemaVersion: 1,
     id: requireId(definition.id, `${filename}.id`),
     components: {
-      buoyancy: validateBuoyancy(components.buoyancy, filename),
-      render: {
-        model: render.model,
-        foamColor: requireColor(render.foamColor, `${filename}.components.render.foamColor`),
-        length: requireNumber(render.length, `${filename}.components.render.length`, Number.EPSILON),
-        width: requireNumber(render.width, `${filename}.components.render.width`, Number.EPSILON),
-      },
+      ...(components.buoyancy ? { buoyancy: validateBuoyancy(components.buoyancy, filename) } : {}),
+      ...(components.vesselMotor ? { vesselMotor: validateVesselMotor(components.vesselMotor, filename) } : {}),
+      ...(components.interactable ? { interactable: validateInteractable(components.interactable, filename) } : {}),
+      ...(components.cargo ? { cargo: validateCargo(components.cargo, filename) } : {}),
+      ...(components.hazard ? { hazard: validateHazard(components.hazard, filename) } : {}),
+      render,
     },
   };
 }

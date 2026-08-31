@@ -4,7 +4,7 @@
   "title": "SkyLand Input Scheme",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schemaVersion", "id", "inputActions", "inputConfig", "inputMappingContexts", "devicePrompts"],
+  "required": ["schemaVersion", "id", "inputActions", "inputConfig", "inputMappingContexts", "devicePrompts", "virtualControls"],
   "properties": {
     "$schema": { "type": "string" },
     "schemaVersion": { "const": 1 },
@@ -36,7 +36,8 @@
       "type": "array",
       "items": { "$ref": "#/$defs/context" }
     },
-    "devicePrompts": { "$ref": "#/$defs/devicePrompts" }
+    "devicePrompts": { "$ref": "#/$defs/devicePrompts" },
+    "virtualControls": { "$ref": "#/$defs/virtualControls" }
   },
   "$defs": {
     "deviceKind": { "enum": ["keyboardMouse", "touch", "gamepad"] },
@@ -185,7 +186,67 @@
         },
         "prompts": { "type": "array", "items": { "$ref": "#/$defs/prompt" } }
       }
+    },
+    "virtualLayout": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["edgeInsetPx", "bottomInsetPx", "buttonGapPx", "scale"],
+      "properties": {
+        "edgeInsetPx": { "type": "number", "minimum": 0, "maximum": 128 },
+        "bottomInsetPx": { "type": "number", "minimum": 0, "maximum": 192 },
+        "buttonGapPx": { "type": "number", "minimum": 0, "maximum": 48 },
+        "scale": { "type": "number", "minimum": 0.5, "maximum": 1.5 }
+      }
+    },
+    "virtualJoystick": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["control", "mode", "baseRadiusPx", "travelRadiusPx", "knobRadiusPx", "deadZone", "sensitivity", "activationWidthRatio", "activationHeightRatio"],
+      "properties": {
+        "control": { "type": "string", "pattern": "^Virtual\\..+" },
+        "mode": { "enum": ["fixed", "floating"] },
+        "baseRadiusPx": { "type": "number", "minimum": 32, "maximum": 128 },
+        "travelRadiusPx": { "type": "number", "minimum": 8, "maximum": 128 },
+        "knobRadiusPx": { "type": "number", "minimum": 8, "maximum": 128 },
+        "deadZone": { "type": "number", "minimum": 0, "maximum": 0.95 },
+        "sensitivity": { "type": "number", "minimum": 0.1, "maximum": 3 },
+        "activationWidthRatio": { "type": "number", "minimum": 0.2, "maximum": 0.8 },
+        "activationHeightRatio": { "type": "number", "minimum": 0.25, "maximum": 0.9 }
+      }
+    },
+    "virtualButton": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "control", "label", "ariaLabel", "sizePx", "gridColumn", "gridRow"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "control": { "type": "string", "pattern": "^Virtual\\..+" },
+        "label": { "type": "string", "minLength": 1 },
+        "ariaLabel": { "type": "string", "minLength": 1 },
+        "sizePx": { "type": "number", "minimum": 36, "maximum": 128 },
+        "gridColumn": { "type": "integer", "minimum": 1, "maximum": 4 },
+        "gridRow": { "type": "integer", "minimum": 1, "maximum": 6 },
+        "rowSpan": { "type": "integer", "minimum": 1, "maximum": 4 }
+      }
+    },
+    "virtualControls": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["desktopDebugQueryParameter", "joystick", "buttons", "layouts"],
+      "properties": {
+        "desktopDebugQueryParameter": { "type": "string", "minLength": 1 },
+        "joystick": { "$ref": "#/$defs/virtualJoystick" },
+        "buttons": { "type": "array", "items": { "$ref": "#/$defs/virtualButton" } },
+        "layouts": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["landscape", "portrait"],
+          "properties": {
+            "landscape": { "$ref": "#/$defs/virtualLayout" },
+            "portrait": { "$ref": "#/$defs/virtualLayout" }
+          }
+        }
+      }
     }
   }
 }
-

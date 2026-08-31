@@ -26,6 +26,11 @@ export interface TopDownControllerOptions {
   cameraOffset?: Vec3;
   fieldOfViewDegrees?: number;
   bounds?: SceneBounds;
+  collisionRadius?: number;
+  resolveCollision?: (
+    position: { x: number; z: number },
+    radius: number,
+  ) => { x: number; z: number };
 }
 
 export class TopDownController {
@@ -37,6 +42,8 @@ export class TopDownController {
   private readonly pointer = { x: 0, y: 0, available: false };
   private readonly movementInput = { x: 0, y: 0 };
   private readonly bounds: SceneBounds;
+  private readonly collisionRadius: number;
+  private readonly resolveCollision?: TopDownControllerOptions['resolveCollision'];
   private enabled: boolean;
   private facingYaw = Math.PI;
   private currentSpeed = 0;
@@ -55,6 +62,8 @@ export class TopDownController {
     this.enabled = options.enabled ?? true;
     this.cameraOffset = options.cameraOffset ?? [5.5, 7.5, 8.5];
     this.bounds = options.bounds ?? PLAYER_BOUNDS;
+    this.collisionRadius = Math.max(0, options.collisionRadius ?? 0);
+    this.resolveCollision = options.resolveCollision;
     this.fieldOfViewRadians = ((options.fieldOfViewDegrees ?? 50) * Math.PI) / 180;
     this.bindInput(input);
     this.bindPointerEvents();
@@ -108,8 +117,13 @@ export class TopDownController {
   }
 
   public setPosition(x: number, z: number): void {
-    this.player.position.x = clampToRange(x, this.bounds.minimumX, this.bounds.maximumX);
-    this.player.position.z = clampToRange(z, this.bounds.minimumZ, this.bounds.maximumZ);
+    const bounded = {
+      x: clampToRange(x, this.bounds.minimumX, this.bounds.maximumX),
+      z: clampToRange(z, this.bounds.minimumZ, this.bounds.maximumZ),
+    };
+    const resolved = this.resolveCollision?.(bounded, this.collisionRadius) ?? bounded;
+    this.player.position.x = clampToRange(resolved.x, this.bounds.minimumX, this.bounds.maximumX);
+    this.player.position.z = clampToRange(resolved.z, this.bounds.minimumZ, this.bounds.maximumZ);
   }
 
   public translate(deltaX: number, deltaZ: number): void {
@@ -143,8 +157,7 @@ export class TopDownController {
         deltaSeconds,
         this.bounds,
       );
-      this.player.position.x = next.x;
-      this.player.position.z = next.z;
+      this.setPosition(next.x, next.z);
       const speed = PLAYER_MOVE_SPEED * (this.sprinting ? PLAYER_SPRINT_MULTIPLIER : 1);
       this.currentSpeed += (speed - this.currentSpeed) * Math.min(1, deltaSeconds * 12);
     } else {

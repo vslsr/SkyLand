@@ -66,5 +66,10 @@ export type {
   InputRebindOptions,
   InputSchemeDefinition,
   StoredInputBindingOverrides,
+  VirtualButtonDefinition,
+  VirtualControlLayoutDefinition,
+  VirtualControlsDefinition,
+  VirtualJoystickDefinition,
+  VirtualJoystickMode,
 } from './config/InputSchemeTypes';
 export { VirtualControls, type VirtualControlsOptions } from './ui/VirtualControls';

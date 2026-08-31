@@ -1,5 +1,6 @@
 import type { RoomSummary } from '../network/RoomClient';
 import type { InputDeviceKind } from '../input/index';
+import type { VesselHudState } from '../scene/SceneVisualSystem';
 
 export type InputPromptResolver = (
   mode: 'fly' | 'topdown',
@@ -12,17 +13,30 @@ export class HudController {
   private readonly roomLabel: HTMLElement;
   private readonly roomPopulation: HTMLElement;
   private readonly menuButton: HTMLButtonElement;
+  private readonly vesselStatus: HTMLElement;
+  private readonly vesselSpeed: HTMLElement;
+  private readonly vesselLoad: HTMLElement;
+  private readonly vesselCondition: HTMLElement;
+  private readonly vesselEvent: HTMLElement;
+  private readonly interactionPrompt: HTMLElement;
   private menuHandler?: () => void;
   private inputDeviceKind: InputDeviceKind = 'keyboardMouse';
   private locked = false;
   private controlMode: 'fly' | 'topdown' = 'fly';
   private promptResolver?: InputPromptResolver;
+  private vesselEventRevision = 0;
 
   public constructor() {
     this.lockHint = this.requireElement<HTMLElement>('lock-hint');
     this.roomLabel = this.requireElement<HTMLElement>('room-label');
     this.roomPopulation = this.requireElement<HTMLElement>('room-population');
     this.menuButton = this.requireElement<HTMLButtonElement>('game-menu-button');
+    this.vesselStatus = this.requireElement<HTMLElement>('vessel-status');
+    this.vesselSpeed = this.requireElement<HTMLElement>('vessel-speed');
+    this.vesselLoad = this.requireElement<HTMLElement>('vessel-load');
+    this.vesselCondition = this.requireElement<HTMLElement>('vessel-condition');
+    this.vesselEvent = this.requireElement<HTMLElement>('vessel-event');
+    this.interactionPrompt = this.requireElement<HTMLElement>('interaction-prompt');
     this.menuButton.addEventListener('click', () => this.menuHandler?.());
   }
 
@@ -40,6 +54,8 @@ export class HudController {
     this.roomLabel.textContent = '未连接房间';
     this.roomPopulation.textContent = 'OFFLINE';
     this.menuButton.hidden = true;
+    this.setVesselStatus(undefined);
+    this.setInteractionPrompt(undefined);
   }
 
   public setLocked(locked: boolean): void {
@@ -70,6 +86,42 @@ export class HudController {
 
   public refreshInputPrompt(): void {
     this.refreshControlHint();
+  }
+
+  public setVesselStatus(state: VesselHudState | undefined): void {
+    this.vesselStatus.hidden = !state;
+    if (!state) {
+      this.vesselEventRevision = 0;
+      this.vesselEvent.textContent = '';
+      return;
+    }
+    const floatLabels = {
+      afloat: '正常',
+      overloaded: '超载',
+      flooding: '进水',
+      sinking: '沉没',
+    } as const;
+    this.vesselSpeed.textContent = `航速 ${Math.abs(state.speed).toFixed(1)} m/s`;
+    this.vesselLoad.textContent = `载重 ${Math.round(state.cargoMass)} kg`;
+    this.vesselCondition.textContent = `状态 ${floatLabels[state.floatState]} · 受损 ${state.damagedPartCount}`;
+    if (state.eventRevision > this.vesselEventRevision && state.lastEvent) {
+      const eventLabels = {
+        'cargo:add': '货物已装载',
+        'cargo:remove': '货物已卸载',
+        damage: '船体受到损伤',
+      } as const;
+      this.vesselEvent.textContent = eventLabels[state.lastEvent.type];
+      this.vesselEvent.classList.remove('is-updated');
+      void this.vesselEvent.offsetWidth;
+      this.vesselEvent.classList.add('is-updated');
+    }
+    this.vesselEventRevision = state.eventRevision;
+  }
+
+  public setInteractionPrompt(text: string | undefined): void {
+    this.interactionPrompt.textContent = text ?? '';
+    this.interactionPrompt.hidden = !text;
+    document.body.classList.toggle('has-interaction-target', Boolean(text));
   }
 
   private refreshControlHint(): void {

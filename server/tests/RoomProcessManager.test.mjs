@@ -4,6 +4,22 @@ import { once } from 'node:events';
 import { RoomProcessManager } from '../rooms/RoomProcessManager.mjs';
 import { SceneCatalog } from '../scenes/SceneCatalog.mjs';
 
+function waitForSnapshot(manager, roomId, predicate, timeoutMs = 2_000) {
+  return new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      manager.off('snapshot', handleSnapshot);
+      reject(new Error('等待 Actor 快照条件超时'));
+    }, timeoutMs);
+    const handleSnapshot = (receivedRoomId, snapshot) => {
+      if (receivedRoomId !== roomId || !predicate(snapshot)) return;
+      clearTimeout(timeout);
+      manager.off('snapshot', handleSnapshot);
+      resolve(snapshot);
+    };
+    manager.on('snapshot', handleSnapshot);
+  });
+}
+
 test('each room starts and stops an independent Node.js process', async () => {
   const sceneCatalog = await SceneCatalog.load();
   const manager = new RoomProcessManager({ capacity: 4, sceneCatalog });
@@ -60,20 +76,47 @@ test('房间子进程把水域 JSON Actor 作为权威快照上报', async () =>
   const manager = new RoomProcessManager({ sceneCatalog });
   const room = await manager.createRoom('Actor 快照测试房', 'water');
   const record = manager.rooms.get(room.id);
-  const snapshotReceived = new Promise((resolve, reject) => {
-    const timeout = setTimeout(() => reject(new Error('等待 Actor 快照超时')), 2_000);
-    const handleSnapshot = (roomId, snapshot) => {
-      if (roomId !== room.id) return;
-      clearTimeout(timeout);
-      manager.off('snapshot', handleSnapshot);
-      resolve(snapshot);
-    };
-    manager.on('snapshot', handleSnapshot);
-  });
+  const snapshotReceived = waitForSnapshot(manager, room.id, () => true);
 
   const snapshot = await snapshotReceived;
   assert.equal(snapshot.actors[0].id, 'demo-raft-01');
   assert.equal(snapshot.actors[0].buoyancy.state, 'afloat');
+
+  const exited = once(record.child, 'exit');
+  manager.removeRoom(room.id);
+  await exited;
+});
+
+test('房间 IPC 贯通控制权、船舶输入和载重事件', async () => {
+  const sceneCatalog = await SceneCatalog.load();
+  const manager = new RoomProcessManager({ sceneCatalog });
+  const room = await manager.createRoom('船舶 IPC 测试房', 'water');
+  const record = manager.rooms.get(room.id);
+  const joined = manager.joinRoom(room.id, '船长');
+
+  manager.claimActorControl(room.id, joined.player.id, 'demo-raft-01');
+  const claimed = await waitForSnapshot(manager, room.id, (snapshot) => (
+    snapshot.actors[0]?.control.ownerPlayerId === joined.player.id
+  ));
+  const start = claimed.actors[0].transform;
+
+  manager.sendActorInput(room.id, joined.player.id, {
+    actorId: 'demo-raft-01', sequence: 1, throttle: 1, steering: 0.5,
+  });
+  const moved = await waitForSnapshot(manager, room.id, (snapshot) => {
+    const transform = snapshot.actors[0]?.transform;
+    return transform && Math.hypot(transform.x - start.x, transform.z - start.z) > 0.0001;
+  });
+  assert.ok(moved.actors[0].vessel.speed > 0);
+
+  manager.sendActorEvent(room.id, joined.player.id, {
+    actorId: 'demo-raft-01', sequence: 1,
+    event: { type: 'cargo:add', cargoId: 'ipc-crate', mass: 40, localX: 0, localZ: 0 },
+  });
+  const loaded = await waitForSnapshot(manager, room.id, (snapshot) => (
+    snapshot.actors[0]?.buoyancy.cargoMass === 40
+  ));
+  assert.equal(loaded.actors[0].buoyancy.lastEvent.type, 'cargo:add');
 
   const exited = once(record.child, 'exit');
   manager.removeRoom(room.id);

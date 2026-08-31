@@ -7,6 +7,7 @@ import {
   DEFAULT_WORLD_SEED,
   toWorldSeed,
 } from '../../shared/world/worldConfig.mjs';
+import { StreamingGrassSystem, type GrassInteractionTarget } from '../grass';
 import type { FillMaterialEnvironment } from '../materials/createFillMaterial';
 import { OUTLINE_MATERIAL, GROUND_GRID_MATERIAL } from '../materials/lineMaterials';
 import { createChunkFillMaterial } from '../models/chunkMesh';
@@ -43,11 +44,13 @@ export interface ChunkStreamerOptions {
  */
 export class ChunkStreamer implements SceneVisualSystem {
   public readonly root = new THREE.Group();
+  public readonly grassInteraction?: GrassInteractionTarget;
 
   private readonly world: WorldStreamingDefinition;
   private readonly views = new Map<string, ChunkView>();
   private readonly fillMaterial: THREE.Material;
   private readonly gridGeometry: THREE.BufferGeometry;
+  private readonly grass?: StreamingGrassSystem;
   private pending: PendingChunk[] = [];
   private generator?: ChunkGenerator;
   private readonly worldSeed: number;
@@ -61,12 +64,25 @@ export class ChunkStreamer implements SceneVisualSystem {
     this.worldSeed = toWorldSeed(options.worldSeed ?? DEFAULT_WORLD_SEED);
     this.fillMaterial = createChunkFillMaterial(options.environment);
     this.gridGeometry = createChunkGridGeometry();
+    if (options.templates.content.grass) {
+      this.grass = new StreamingGrassSystem({
+        color: options.templates.palette.grass,
+        environment: options.environment,
+      });
+      this.grassInteraction = this.grass.interaction;
+      this.root.add(this.grass.root);
+    }
 
     // 生成后端是异步取回来的；在它就位之前 update 不建任何东西，
     // 世界会晚一两帧出现，这比先用一套参数铺一遍再重铺要划算。
     void createChunkGenerator().then((generator) => {
       if (this.disposed) return;
-      registerChunkTemplates(generator, options.templates);
+      // 草继续由生成器产出同一批放置记录，但不再烘进静态 chunk；
+      // StreamingGrassSystem 会按这些原坐标生成可交互的实例叶片。
+      registerChunkTemplates(generator, {
+        ...options.templates,
+        content: { ...options.templates.content, grass: false },
+      });
       this.setGenerator(generator);
     });
   }
@@ -88,7 +104,8 @@ export class ChunkStreamer implements SceneVisualSystem {
    * 每帧调用。焦点通常是玩家位置；还没有玩家时是相机位置，
    * 这样大厅背后看到的也是一片正常的世界。
    */
-  public update(_deltaSeconds: number, _elapsedSeconds: number, context?: SceneUpdateContext): void {
+  public update(deltaSeconds: number, elapsedSeconds: number, context?: SceneUpdateContext): void {
+    this.grass?.update(deltaSeconds, elapsedSeconds, context);
     if (!this.generator || !context) return;
 
     const centerX = toChunkCoordinate(context.focusX);
@@ -110,10 +127,15 @@ export class ChunkStreamer implements SceneVisualSystem {
     this.drainBuildBudget();
   }
 
+  public beforeRender(renderer: THREE.WebGLRenderer): void {
+    this.grass?.beforeRender(renderer);
+  }
+
   /** 场景卸载时释放这个流式世界独占的显存。 */
   public dispose(): void {
     this.disposed = true;
     this.clearChunks();
+    this.grass?.dispose();
     this.gridGeometry.dispose();
     this.fillMaterial.dispose();
     this.generator = undefined;
@@ -138,14 +160,16 @@ export class ChunkStreamer implements SceneVisualSystem {
   private mount(chunk: PendingChunk): boolean {
     if (!this.generator) return false;
     try {
+      const data = this.generator.buildChunk(chunk.chunkX, chunk.chunkZ);
       const view = new ChunkView(
         chunk.key,
         chunk.chunkX,
         chunk.chunkZ,
-        this.generator.buildChunk(chunk.chunkX, chunk.chunkZ),
+        data,
         { fill: this.fillMaterial, outline: OUTLINE_MATERIAL, grid: GROUND_GRID_MATERIAL },
         this.gridGeometry,
       );
+      this.grass?.mountChunk(chunk.key, data);
       this.views.set(chunk.key, view);
       this.root.add(view.root);
       return true;
@@ -160,6 +184,7 @@ export class ChunkStreamer implements SceneVisualSystem {
     const view = this.views.get(key);
     if (!view) return;
     this.views.delete(key);
+    this.grass?.unmountChunk(key);
     view.dispose();
   }
 
