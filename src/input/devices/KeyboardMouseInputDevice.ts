@@ -28,6 +28,12 @@ export class KeyboardMouseInputDevice extends BufferedInputDevice {
     this.pressedButtons.clear();
   }
 
+  /** 重绑定后同步需要阻止浏览器默认行为的控制路径。 */
+  public setPreventDefaultControls(controls: Iterable<string>): void {
+    this.preventDefaultControls.clear();
+    for (const control of controls) this.preventDefaultControls.add(control);
+  }
+
   public dispose(): void {
     this.keyboardTarget.removeEventListener('keydown', this.handleKeyDown);
     this.keyboardTarget.removeEventListener('keyup', this.handleKeyUp);

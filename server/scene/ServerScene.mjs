@@ -11,6 +11,10 @@ import {
   MAXIMUM_INPUT_DELTA_SECONDS,
   MOVEMENT_IDLE_TIMEOUT_MS,
 } from '../../shared/networkTuning.mjs';
+import {
+  createActorSnapshots,
+  createServerActorWorld,
+} from '../actors/ServerActorFactory.mjs';
 
 function roundCoordinate(value) {
   return Math.round(value * 1000) / 1000;
@@ -29,6 +33,7 @@ export class ServerScene {
     this.id = definition.id;
     this.bounds = definition.gameplay?.bounds ?? PLAYER_BOUNDS;
     this.spawn = definition.gameplay?.spawn;
+    this.actorWorld = createServerActorWorld(definition);
     this.tick = 0;
     this.players = new Map();
     this.now = options.now ?? (() => Date.now());
@@ -101,6 +106,7 @@ export class ServerScene {
       );
       if (now - player.lastInputAt > MOVEMENT_IDLE_TIMEOUT_MS) player.speed = 0;
     }
+    this.actorWorld.update(elapsedSeconds, now / 1000);
   }
 
   createSnapshot() {
@@ -108,6 +114,7 @@ export class ServerScene {
       sceneId: this.id,
       tick: this.tick,
       serverTime: this.now(),
+      actors: createActorSnapshots(this.actorWorld),
       players: Array.from(this.players.values(), (player) => ({
         id: player.id,
         name: player.name,

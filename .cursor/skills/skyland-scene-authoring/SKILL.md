@@ -10,9 +10,11 @@ Create scenes as server-authoritative JSON data. Keep the lobby on its empty sce
 ## Read before editing
 
 1. Read `config/scenes/scene.schema.json` and the existing `.scene.json` closest to the desired result.
+   When the scene places Actors, also read `config/actors/actor.schema.json` and the referenced `.actor.json` files.
 2. Read [references/scene-config.md](references/scene-config.md) completely when adding or reviewing a scene. It defines every field, its runtime effect, and cross-field constraints.
 3. If the request introduces a new renderer type, content kind, or field, inspect these integration points before editing:
    - `server/scenes/SceneCatalog.mjs`
+   - `server/actors/ActorCatalog.mjs` for Actor archetypes or placements
    - `src/scenes/data/SceneDefinition.ts`
    - `src/scene/createLineArtScene.ts`
    - the relevant module under `src/models/` or visual system under `src/`
@@ -44,6 +46,9 @@ Do not load the scene selected in the browser directly from local JSON. The expe
 
 `SceneCatalog startup scan -> /api/scenes -> room creation -> fork room worker -> room:initialize -> room:ready -> WebSocket room:joined -> client loadScene(joined.scene)`
 
+Actor-bearing scenes extend the same flow with:
+`ActorCatalog resolution -> room worker ActorWorld -> actors snapshot -> client Actor Replica`.
+
 An invalid or unknown scene ID must fail room creation. Leaving or losing the room must return the renderer to `showEmptyScene()`.
 
 ## Verify
@@ -53,6 +58,7 @@ For a configuration-only scene addition:
 1. Run `npm run test:server` to exercise catalog and DS behavior.
 2. Run `npm run build` to catch client type and bundle errors.
 3. Start the server and confirm the new scene appears in `/api/scenes`, can create a room, and loads only after joining.
+4. For Actor scenes, confirm the room snapshot contains the Actor and that the client creates it only after receiving that snapshot.
 
 For schema, validation, renderer, or gameplay changes, also run `npm test` and add focused tests for the new invariant or system.
 

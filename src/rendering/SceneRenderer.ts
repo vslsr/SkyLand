@@ -1,7 +1,13 @@
 import * as THREE from 'three';
 import type { CameraFrame } from '../camera/CameraTransform';
+import {
+  MouseGrassInteractor,
+  type GrassBendImpulse,
+  type GrassInteractionTarget,
+} from '../grass';
 import { createLineArtScene } from '../scene/createLineArtScene';
-import type { SceneVisualSystem } from '../scene/SceneVisualSystem';
+import type { ActorSnapshotTarget, SceneVisualSystem } from '../scene/SceneVisualSystem';
+import type { SnapshotActor } from '../network/protocol';
 import type { SceneDefinition } from '../scenes/data/SceneDefinition';
 
 const EMPTY_SCENE_COLOR = 0xfdfbf6;
@@ -29,6 +35,9 @@ export class SceneRenderer {
   private readonly camera = new THREE.PerspectiveCamera(50, 1, 0.1, 100);
   private scene = createEmptyScene();
   private visualSystems: SceneVisualSystem[] = [];
+  private mouseGrassInteractor?: MouseGrassInteractor;
+  private grassInteraction?: GrassInteractionTarget;
+  private actorSnapshotTarget?: ActorSnapshotTarget;
   private readonly dynamicWorld = new THREE.Group();
   private readonly lookTarget = new THREE.Vector3();
 
@@ -54,6 +63,10 @@ export class SceneRenderer {
       frame.position[2] + frame.axes.forward[2],
     );
     this.camera.lookAt(this.lookTarget);
+    this.mouseGrassInteractor?.update(this.camera);
+    for (const system of this.visualSystems) {
+      system.beforeRender?.(this.renderer, this.camera);
+    }
     this.renderer.render(this.scene, this.camera);
   }
 
@@ -65,8 +78,17 @@ export class SceneRenderer {
     this.dynamicWorld.remove(object);
   }
 
+  /** Shared entry point for mouse tests, footsteps, touch input, or gameplay effects. */
+  public applyGrassImpulse(impulse: GrassBendImpulse): void {
+    this.grassInteraction?.applyImpulse(impulse);
+  }
+
   public update(deltaSeconds: number, elapsedSeconds: number): void {
     for (const system of this.visualSystems) system.update(deltaSeconds, elapsedSeconds);
+  }
+
+  public syncActors(snapshots: readonly SnapshotActor[]): void {
+    this.actorSnapshotTarget?.syncSnapshots(snapshots);
   }
 
   public loadScene(definition: SceneDefinition): void {
@@ -74,18 +96,35 @@ export class SceneRenderer {
       throw new Error(`不支持的场景渲染器：${definition.renderer.type as string}`);
     }
     const composition = createLineArtScene(definition);
-    this.replaceScene(composition.scene, composition.visualSystems);
+    this.replaceScene(
+      composition.scene,
+      composition.visualSystems,
+      composition.grassInteraction,
+      composition.actorSnapshotTarget,
+    );
   }
 
   public showEmptyScene(): void {
     this.replaceScene(createEmptyScene(), []);
   }
 
-  private replaceScene(nextScene: THREE.Scene, visualSystems: SceneVisualSystem[]): void {
+  private replaceScene(
+    nextScene: THREE.Scene,
+    visualSystems: SceneVisualSystem[],
+    grassInteraction?: GrassInteractionTarget,
+    actorSnapshotTarget?: ActorSnapshotTarget,
+  ): void {
+    this.mouseGrassInteractor?.dispose();
+    for (const system of this.visualSystems) system.dispose?.();
     this.scene.remove(this.dynamicWorld);
     disposeScene(this.scene);
     this.scene = nextScene;
     this.visualSystems = visualSystems;
+    this.grassInteraction = grassInteraction;
+    this.actorSnapshotTarget = actorSnapshotTarget;
+    this.mouseGrassInteractor = grassInteraction
+      ? new MouseGrassInteractor(this.renderer.domElement, grassInteraction)
+      : undefined;
     this.scene.add(this.dynamicWorld);
   }
 

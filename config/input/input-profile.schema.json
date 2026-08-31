@@ -1,0 +1,191 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://skyland.local/schemas/input-profile.schema.json",
+  "title": "SkyLand Input Scheme",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "id", "inputActions", "inputConfig", "inputMappingContexts", "devicePrompts"],
+  "properties": {
+    "$schema": { "type": "string" },
+    "schemaVersion": { "const": 1 },
+    "id": { "type": "string", "minLength": 1 },
+    "inputActions": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/action" }
+    },
+    "inputConfig": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["bindings"],
+      "properties": {
+        "bindings": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["tag", "actionId"],
+            "properties": {
+              "tag": { "type": "string", "pattern": "^[A-Za-z0-9_]+(?:\\.[A-Za-z0-9_]+)+$" },
+              "actionId": { "type": "string", "minLength": 1 }
+            }
+          }
+        }
+      }
+    },
+    "inputMappingContexts": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/context" }
+    },
+    "devicePrompts": { "$ref": "#/$defs/devicePrompts" }
+  },
+  "$defs": {
+    "deviceKind": { "enum": ["keyboardMouse", "touch", "gamepad"] },
+    "axis2D": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["x", "y"],
+      "properties": { "x": { "type": "number" }, "y": { "type": "number" } }
+    },
+    "trigger": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type"],
+          "properties": { "type": { "const": "pressed" } }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "thresholdMs"],
+          "properties": { "type": { "const": "hold" }, "thresholdMs": { "type": "number", "minimum": 0 } }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "maximumGapMs"],
+          "properties": {
+            "type": { "const": "doubleTap" },
+            "maximumGapMs": { "type": "number", "exclusiveMinimum": 0 },
+            "maximumTapMs": { "type": "number", "exclusiveMinimum": 0 }
+          }
+        }
+      ]
+    },
+    "modifier": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "minimum"],
+          "properties": {
+            "type": { "const": "deadZone" },
+            "minimum": { "type": "number", "minimum": 0, "exclusiveMaximum": 1 },
+            "maximum": { "type": "number", "exclusiveMinimum": 0, "maximum": 1 }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "x", "y"],
+          "properties": { "type": { "const": "scale" }, "x": { "type": "number" }, "y": { "type": "number" } }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type"],
+          "properties": { "type": { "const": "negate" }, "axes": { "enum": ["x", "y", "xy"] } }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type"],
+          "properties": { "type": { "const": "normalize" } }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "order"],
+          "properties": { "type": { "const": "swizzle" }, "order": { "enum": ["xy", "yx"] } }
+        }
+      ]
+    },
+    "action": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "valueType"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "valueType": { "enum": ["digital", "axis2D"] },
+        "trigger": { "$ref": "#/$defs/trigger" },
+        "modifiers": { "type": "array", "items": { "$ref": "#/$defs/modifier" } },
+        "deadZone": { "type": "number", "minimum": 0, "exclusiveMaximum": 1 }
+      }
+    },
+    "mapping": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "deviceKind", "control", "actionId"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "deviceKind": { "$ref": "#/$defs/deviceKind" },
+        "control": { "type": "string", "minLength": 1 },
+        "actionId": { "type": "string", "minLength": 1 },
+        "axis2D": { "$ref": "#/$defs/axis2D" },
+        "scale": { "$ref": "#/$defs/axis2D" },
+        "modifiers": { "type": "array", "items": { "$ref": "#/$defs/modifier" } },
+        "consume": { "type": "boolean" }
+      }
+    },
+    "context": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "priority", "mappings"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "priority": { "type": "number" },
+        "activeByDefault": { "type": "boolean" },
+        "mappings": { "type": "array", "items": { "$ref": "#/$defs/mapping" } }
+      }
+    },
+    "promptEntry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["label"],
+      "properties": {
+        "label": { "type": "string", "minLength": 1 },
+        "mappingIds": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+        "text": { "type": "string", "minLength": 1 },
+        "joinWith": { "type": "string", "minLength": 1 }
+      },
+      "anyOf": [{ "required": ["mappingIds"] }, { "required": ["text"] }]
+    },
+    "prompt": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mode", "deviceKind"],
+      "properties": {
+        "mode": { "type": "string", "minLength": 1 },
+        "deviceKind": { "$ref": "#/$defs/deviceKind" },
+        "state": { "type": "string", "minLength": 1 },
+        "text": { "type": "string", "minLength": 1 },
+        "entries": { "type": "array", "items": { "$ref": "#/$defs/promptEntry" } },
+        "separator": { "type": "string", "minLength": 1 }
+      },
+      "anyOf": [{ "required": ["text"] }, { "required": ["entries"] }]
+    },
+    "devicePrompts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["controlLabels", "prompts"],
+      "properties": {
+        "controlLabels": {
+          "type": "object",
+          "additionalProperties": { "type": "string", "minLength": 1 }
+        },
+        "prompts": { "type": "array", "items": { "$ref": "#/$defs/prompt" } }
+      }
+    }
+  }
+}
+

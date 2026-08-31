@@ -16,6 +16,13 @@ test('loads every selectable map from an independent scene JSON', async () => {
   assert.equal(water.renderer.ocean.noiseStrength, 1.15);
   assert.equal(water.renderer.ocean.segments, 28);
   assert.equal(water.renderer.ocean.interlaceStrength, 0.42);
+  assert.deepEqual(water.actors[0], {
+    id: 'demo-raft-01',
+    archetypeId: 'raft',
+    position: [0, 0, 0],
+    yaw: 0.24,
+  });
+  assert.equal(water.actorArchetypes[0].id, 'raft');
 });
 
 test('rejects unknown scene ids instead of silently selecting another map', async () => {

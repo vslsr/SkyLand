@@ -9,10 +9,32 @@ export interface SnapshotPlayer {
   sequence: number;
 }
 
+export type ActorFloatState = 'afloat' | 'overloaded' | 'flooding' | 'sinking';
+
+export interface SnapshotActor {
+  id: string;
+  archetypeId: string;
+  revision: number;
+  transform: {
+    x: number;
+    y: number;
+    z: number;
+    yaw: number;
+  };
+  buoyancy?: {
+    state: ActorFloatState;
+    draft: number;
+    staticRoll: number;
+    staticPitch: number;
+    speedFactor: number;
+  };
+}
+
 export interface RoomSnapshot {
   sceneId: string;
   tick: number;
   serverTime: number;
+  actors: SnapshotActor[];
   players: SnapshotPlayer[];
 }
 

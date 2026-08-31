@@ -1,6 +1,12 @@
 import type { RoomSummary } from '../network/RoomClient';
 import type { InputDeviceKind } from '../input/index';
 
+export type InputPromptResolver = (
+  mode: 'fly' | 'topdown',
+  deviceKind: InputDeviceKind,
+  state: 'locked' | 'unlocked',
+) => string;
+
 export class HudController {
   private readonly lockHint: HTMLElement;
   private readonly roomLabel: HTMLElement;
@@ -10,6 +16,7 @@ export class HudController {
   private inputDeviceKind: InputDeviceKind = 'keyboardMouse';
   private locked = false;
   private controlMode: 'fly' | 'topdown' = 'fly';
+  private promptResolver?: InputPromptResolver;
 
   public constructor() {
     this.lockHint = this.requireElement<HTMLElement>('lock-hint');
@@ -56,21 +63,21 @@ export class HudController {
     this.refreshControlHint();
   }
 
-  private refreshControlHint(): void {
-    if (this.controlMode === 'fly') {
-      this.lockHint.textContent = this.locked
-        ? 'WASD · 移动　空格/C · 升降　Shift · 加速　Esc · 释放鼠标'
-        : '点击画面 · WASD 自由镜头';
-      return;
-    }
+  public setInputPromptResolver(resolver: InputPromptResolver): void {
+    this.promptResolver = resolver;
+    this.refreshInputPrompt();
+  }
 
-    if (this.inputDeviceKind === 'touch') {
-      this.lockHint.textContent = '触摸摇杆 · 移动　RUN · 加速';
-    } else if (this.inputDeviceKind === 'gamepad') {
-      this.lockHint.textContent = '左摇杆/D-Pad · 移动　L3 · 加速';
-    } else {
-      this.lockHint.textContent = 'WASD · 移动　鼠标 · 朝向';
-    }
+  public refreshInputPrompt(): void {
+    this.refreshControlHint();
+  }
+
+  private refreshControlHint(): void {
+    this.lockHint.textContent = this.promptResolver?.(
+      this.controlMode,
+      this.inputDeviceKind,
+      this.locked ? 'locked' : 'unlocked',
+    ) ?? '';
   }
 
   private requireElement<T extends HTMLElement>(id: string): T {

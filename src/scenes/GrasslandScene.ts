@@ -1,13 +1,11 @@
 import { FlyController } from '../camera/FlyController';
 import { GameInteractionLayer } from '../interaction/GameInteractionLayer';
 import {
-  GameplayInputContext,
+  createPlayerInputScheme,
   GamepadInputDevice,
   InputSubsystem,
+  type InputSchemeRuntime,
   KeyboardMouseInputDevice,
-  PlayerInputActions,
-  PlayerInputConfig,
-  PREVENT_DEFAULT_GAMEPLAY_CONTROLS,
   VirtualControls,
   VirtualInputDevice,
 } from '../input/index';
@@ -32,6 +30,7 @@ export interface GrasslandSceneOptions extends SceneUIContext {
 
 export class GrasslandScene extends Scene {
   private readonly canvas: HTMLCanvasElement;
+  private readonly inputScheme: InputSchemeRuntime = createPlayerInputScheme();
   private readonly input: InputSubsystem;
   private readonly virtualControls: VirtualControls;
   private readonly renderer: SceneRenderer;
@@ -49,24 +48,38 @@ export class GrasslandScene extends Scene {
   private player?: PlayerEntity;
   private timeSinceInputSent = 0;
 
+  /** 暴露当前场景的实时绑定方案，供设置页或调试面板调用 rebind/reset。 */
+  public get inputBindings(): InputSchemeRuntime {
+    return this.inputScheme;
+  }
+
   public constructor(options: GrasslandSceneOptions) {
     super('grassland', options);
     this.canvas = options.canvas;
     const virtualInput = new VirtualInputDevice();
+    const keyboardInput = new KeyboardMouseInputDevice({
+      pointerTarget: options.canvas,
+      preventDefaultControls: this.inputScheme.getPreventDefaultControls(),
+    });
     this.input = new InputSubsystem({
-      actions: PlayerInputActions,
-      config: PlayerInputConfig,
-      contexts: [GameplayInputContext],
+      actions: this.inputScheme.actions,
+      config: this.inputScheme.config,
+      contexts: this.inputScheme.contexts,
       devices: [
-        new KeyboardMouseInputDevice({
-          pointerTarget: options.canvas,
-          preventDefaultControls: PREVENT_DEFAULT_GAMEPLAY_CONTROLS,
-        }),
+        keyboardInput,
         new GamepadInputDevice(),
         virtualInput,
       ],
     });
     this.virtualControls = new VirtualControls({ root: options.baseLayer, device: virtualInput });
+    this.hud.setInputPromptResolver((mode, deviceKind, state) => (
+      this.inputScheme.getPrompt(mode, deviceKind, state)
+    ));
+    this.inputScheme.onBindingsChanged(() => {
+      this.input.replaceMappingContexts(this.inputScheme.contexts);
+      keyboardInput.setPreventDefaultControls(this.inputScheme.getPreventDefaultControls());
+      this.hud.refreshInputPrompt();
+    });
     this.renderer = new SceneRenderer(options.canvas);
     this.flyController = new FlyController(options.canvas, {
       position: [0, 4.2, 13.5],
@@ -222,6 +235,7 @@ export class GrasslandScene extends Scene {
 
   private handleSnapshot(snapshot: RoomSnapshot): void {
     if (!this.joinedRoom) return;
+    this.renderer.syncActors(snapshot.actors);
     this.snapshots.push(snapshot);
 
     // 自己的那条不走插值：直接交给和解，把预测拉回服务器的结论。

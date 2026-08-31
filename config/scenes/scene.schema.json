@@ -10,6 +10,7 @@
     "displayName",
     "description",
     "capacity",
+    "actors",
     "renderer",
     "gameplay",
     "camera"
@@ -21,6 +22,26 @@
     "displayName": { "type": "string", "minLength": 1, "maxLength": 32 },
     "description": { "type": "string", "minLength": 1, "maxLength": 120 },
     "capacity": { "type": "integer", "minimum": 1, "maximum": 64 },
+    "actors": {
+      "type": "array",
+      "maxItems": 256,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "archetype", "position", "yaw"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$" },
+          "archetype": { "type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$" },
+          "position": {
+            "type": "array",
+            "minItems": 3,
+            "maxItems": 3,
+            "items": { "type": "number" }
+          },
+          "yaw": { "type": "number" }
+        }
+      }
+    },
     "renderer": {
       "type": "object",
       "additionalProperties": false,
@@ -74,9 +95,7 @@
             "surfaceColor",
             "secondaryColor",
             "gridLineColor",
-            "gridLineOpacity",
-            "foamColor",
-            "demoRaft"
+            "gridLineOpacity"
           ],
           "properties": {
             "size": { "type": "number", "minimum": 16, "maximum": 1024 },
@@ -89,9 +108,7 @@
             "surfaceColor": { "$ref": "#/$defs/color" },
             "secondaryColor": { "$ref": "#/$defs/color" },
             "gridLineColor": { "$ref": "#/$defs/color" },
-            "gridLineOpacity": { "type": "number", "minimum": 0, "maximum": 1 },
-            "foamColor": { "$ref": "#/$defs/color" },
-            "demoRaft": { "type": "boolean" }
+            "gridLineOpacity": { "type": "number", "minimum": 0, "maximum": 1 }
           }
         }
       }

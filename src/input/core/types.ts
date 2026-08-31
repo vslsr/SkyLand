@@ -82,8 +82,12 @@ export interface InputConfigDefinition {
 }
 
 export interface InputMappingDefinition {
+  /** 稳定的配置标识；运行时重绑定方案必须提供。 */
+  readonly id?: string;
   readonly control: string;
   readonly actionId: string;
+  /** Mapping 所属的设备槽位；运行时重绑定时用于限制跨设备误绑。 */
+  readonly deviceKind?: InputDeviceKind;
   /** 将 digital 控制映射为 axis2D 时使用的方向。 */
   readonly axis2D?: Axis2DValue;
   /** 对 axis2D 输入进行逐轴缩放。 */

@@ -38,11 +38,33 @@ export {
   type GamepadSnapshot,
 } from './devices/GamepadInputDevice';
 export {
+  createPlayerInputScheme,
   GameplayInputContext,
   PlayerInputActionIds,
   PlayerInputActions,
   PlayerInputConfig,
+  PlayerInputSchemeDefinition,
   PlayerInputTags,
   PREVENT_DEFAULT_GAMEPLAY_CONTROLS,
 } from './config/playerInput';
+export { InputSchemeRuntime, type InputSchemeRuntimeOptions } from './config/InputSchemeRuntime';
+export {
+  LocalStorageInputBindingStorage,
+  createBrowserInputBindingStorage,
+  type InputBindingStorage,
+} from './config/InputBindingStorage';
+export { inferInputDeviceKind, parseInputSchemeDefinition } from './config/InputSchemeParser';
+export type {
+  ConfigurableInputMappingContextDefinition,
+  ConfigurableInputMappingDefinition,
+  InputBindingChangeReason,
+  InputBindingsChangedEvent,
+  InputDevicePromptConfigDefinition,
+  InputDevicePromptDefinition,
+  InputPromptEntryDefinition,
+  InputRebindConflictPolicy,
+  InputRebindOptions,
+  InputSchemeDefinition,
+  StoredInputBindingOverrides,
+} from './config/InputSchemeTypes';
 export { VirtualControls, type VirtualControlsOptions } from './ui/VirtualControls';

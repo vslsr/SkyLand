@@ -1,16 +1,13 @@
 import * as THREE from 'three';
-import { evaluateVesselBuoyancy } from '../../../shared/vesselBuoyancy.mjs';
 import { createFillMaterial, type FillMaterialEnvironment } from '../../materials/createFillMaterial';
 import { createOutlinedObject } from '../outlinedObject';
+import type { ActorArchetypeDefinition } from '../../scenes/data/SceneDefinition';
 
 export interface BuoyancyRaftModel {
   readonly root: THREE.Group;
   readonly visualRoot: THREE.Group;
   readonly length: number;
   readonly width: number;
-  readonly visualDraft: number;
-  readonly trimRoll: number;
-  readonly trimPitch: number;
 }
 
 function addOutlinedBox(
@@ -33,20 +30,17 @@ function addOutlinedBox(
 
 export function createBuoyancyRaftModel(
   environment: FillMaterialEnvironment,
-  foamColor: THREE.ColorRepresentation,
+  definition: ActorArchetypeDefinition['components']['render'],
 ): BuoyancyRaftModel {
   const root = new THREE.Group();
-  root.name = 'buoyancy-demo-simulation-root';
-  root.position.set(0, 0, 0);
-  root.rotation.y = 0.24;
+  root.name = 'raft-authoritative-root';
 
   const visualRoot = new THREE.Group();
-  visualRoot.name = 'buoyancy-demo-visual-root';
+  visualRoot.name = 'raft-visual-root';
   root.add(visualRoot);
 
   const outline = new THREE.LineBasicMaterial({ color: 0x292724 });
-  const length = 4.8;
-  const width = 3.2;
+  const { length, width } = definition;
   addOutlinedBox(visualRoot, [width, 0.18, length], [0, 0.38, 0], 0xdfc99f, environment, outline);
 
   for (const x of [-1.15, 1.15]) {
@@ -71,32 +65,20 @@ export function createBuoyancyRaftModel(
   const foam = new THREE.LineLoop(
     new THREE.BufferGeometry().setFromPoints(foamPoints),
     new THREE.LineBasicMaterial({
-      color: foamColor,
+      color: definition.foamColor,
       transparent: true,
       opacity: 0.82,
       depthWrite: false,
       fog: true,
     }),
   );
-  foam.name = 'buoyancy-demo-waterline';
+  foam.name = 'raft-waterline';
   visualRoot.add(foam);
-
-  const evaluation = evaluateVesselBuoyancy([
-    { mass: 80, buoyancy: 0, localX: 0, localZ: 0 },
-    { mass: 12, buoyancy: 80, localX: -1.15, localZ: -1.35 },
-    { mass: 12, buoyancy: 80, localX: 1.15, localZ: -1.35 },
-    { mass: 12, buoyancy: 80, localX: -1.15, localZ: 1.35 },
-    { mass: 12, buoyancy: 80, localX: 1.15, localZ: 1.35 },
-    { mass: 92, buoyancy: 0, localX: 0.68, localZ: 0.12 },
-  ], { minimumBeam: width, minimumLength: length, maximumTrimRadians: 0.09 });
 
   return {
     root,
     visualRoot,
     length,
     width,
-    visualDraft: 0.08 + evaluation.draftRatio * 0.2,
-    trimRoll: evaluation.trimRoll,
-    trimPitch: evaluation.trimPitch,
   };
 }

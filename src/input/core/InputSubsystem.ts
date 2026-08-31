@@ -118,6 +118,35 @@ export class InputSubsystem {
     return this.activeContexts.has(contextId);
   }
 
+  /**
+   * 原子替换 Mapping Context 定义，用于运行时重绑定。
+   * 已激活 Context 会保持激活；替换期间统一取消当前输入，避免按键卡住。
+   */
+  public replaceMappingContexts(definitions: readonly InputMappingContextDefinition[]): void {
+    const nextContexts = new Map<string, InputMappingContextDefinition>();
+    for (const definition of definitions) {
+      if (!definition.id) throw new TypeError('InputMappingContext id 不能为空');
+      if (nextContexts.has(definition.id)) {
+        throw new Error(`重复的 InputMappingContext：${definition.id}`);
+      }
+      this.validateContext(definition);
+      nextContexts.set(definition.id, definition);
+    }
+
+    const previouslyActive = new Set(this.activeContexts);
+    this.resetDeviceState();
+    this.cancelAll(this.now());
+    this.contexts.clear();
+    this.activeContexts.clear();
+    for (const [id, context] of nextContexts) {
+      this.contexts.set(id, context);
+      if (previouslyActive.has(id) || (!previouslyActive.size && context.activeByDefault)) {
+        this.activeContexts.add(id);
+      }
+    }
+    this.mappingsDirty = true;
+  }
+
   public bind(
     tag: TagLike,
     handler: InputActionHandler,
@@ -221,23 +250,27 @@ export class InputSubsystem {
       if (this.contexts.has(definition.id)) {
         throw new Error(`重复的 InputMappingContext：${definition.id}`);
       }
-      for (const mapping of definition.mappings) {
-        if (!mapping.control) throw new TypeError(`${definition.id} 中存在空控制路径`);
-        if (!this.actions.has(mapping.actionId)) {
-          throw new Error(`${definition.id} 引用了不存在的 InputAction：${mapping.actionId}`);
-        }
-        const action = this.actions.get(mapping.actionId)?.definition;
-        if (action?.valueType === 'digital' && mapping.modifiers?.length) {
-          throw new TypeError(`${definition.id}/${mapping.control} 不能给 digital Action 配置 axis2D Modifier`);
-        }
-        this.validateAxis(mapping.axis2D, `${definition.id}/${mapping.control} 的 axis2D`);
-        this.validateAxis(mapping.scale, `${definition.id}/${mapping.control} 的 scale`);
-        for (const modifier of mapping.modifiers ?? []) {
-          validateAxis2DModifier(modifier, `${definition.id}/${mapping.control}`);
-        }
-      }
+      this.validateContext(definition);
       this.contexts.set(definition.id, definition);
       if (definition.activeByDefault) this.activeContexts.add(definition.id);
+    }
+  }
+
+  private validateContext(definition: InputMappingContextDefinition): void {
+    for (const mapping of definition.mappings) {
+      if (!mapping.control) throw new TypeError(`${definition.id} 中存在空控制路径`);
+      if (!this.actions.has(mapping.actionId)) {
+        throw new Error(`${definition.id} 引用了不存在的 InputAction：${mapping.actionId}`);
+      }
+      const action = this.actions.get(mapping.actionId)?.definition;
+      if (action?.valueType === 'digital' && mapping.modifiers?.length) {
+        throw new TypeError(`${definition.id}/${mapping.control} 不能给 digital Action 配置 axis2D Modifier`);
+      }
+      this.validateAxis(mapping.axis2D, `${definition.id}/${mapping.control} 的 axis2D`);
+      this.validateAxis(mapping.scale, `${definition.id}/${mapping.control} 的 scale`);
+      for (const modifier of mapping.modifiers ?? []) {
+        validateAxis2DModifier(modifier, `${definition.id}/${mapping.control}`);
+      }
     }
   }
 
