@@ -32,7 +32,7 @@ Change one and you must change the other, rebuild the WASM, and commit the rebui
 - **Add a prop kind**: touches both implementations, the template registry, and buffer capacity. See below.
 - **Change loading policy** (when chunks load and unload): edit `shared/world/chunkStream.mjs` only. It is pure and has no WASM counterpart.
 - **Change rendering only** (materials, batching, draw calls): edit `src/models/chunkMesh.ts`, `src/models/chunkTemplates.ts` or `src/world/`. Placement is untouched, so no WASM rebuild.
-- **Change what blocks the player or the camera**: edit `PROP_COLLIDER_TEMPLATES` in `shared/world/chunkColliders.mjs` only. It is derived from the placement records, has no WASM counterpart, and both the browser and the room DS read it, so a one-sided edit is impossible. Keep it in step with the models in `src/models/`.
+- **Change what blocks the player or the camera**: use `skyland-collision-partition`. Collider shapes live in `shared/world/chunkColliders.mjs`, are derived from the placement records, and have no WASM counterpart.
 
 ## Keep generation deterministic
 
