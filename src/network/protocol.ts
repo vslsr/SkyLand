@@ -7,6 +7,8 @@ export interface SnapshotPlayer {
   yaw: number;
   speed: number;
   sequence: number;
+  inventory?: Array<{ itemType: string; quantity: number }>;
+  inventoryRevision?: number;
 }
 
 export type ActorFloatState = 'afloat' | 'overloaded' | 'flooding' | 'sinking';
@@ -51,7 +53,7 @@ export interface SnapshotActor {
     revision: number;
   };
   interactable?: {
-    action: 'cargo-toggle' | 'mushroom-bite';
+    action: 'cargo-toggle' | 'mushroom-bite' | 'pickup-stack';
     label: string;
     enabled: boolean;
     revision: number;
@@ -71,6 +73,23 @@ export interface SnapshotActor {
   };
   hazard?: {
     radius: number;
+  };
+  thermal?: {
+    temperature: number;
+    burning: boolean;
+    fuelRatio: number;
+    revision: number;
+  };
+  itemStack?: {
+    itemType: string;
+    displayName: string;
+    quantity: number;
+    maximumQuantity: number;
+    revision: number;
+  };
+  residency?: {
+    state: 'active' | 'sleeping';
+    revision: number;
   };
 }
 

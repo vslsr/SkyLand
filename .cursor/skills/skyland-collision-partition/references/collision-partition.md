@@ -10,7 +10,7 @@
 | `shared/collision/CollisionWorld.mjs` | 场景碰撞世界。静态分组 + 动态条目，对外提供 `resolveCircle` 与 `sweepSphere`。 |
 | `shared/collision/collisionBox.mjs` | 有向盒的世界包围盒与扫掠球求交。唯一做三维运算的地方。 |
 | `shared/collision/collisionLayers.mjs` | `MOVEMENT` / `CAMERA` 位掩码。 |
-| `shared/actor/simpleCollision.mjs` | **窄相**。圆对有向盒的两轮推出，本次改动一个字节没动。 |
+| `shared/actor/simpleCollision.mjs` | **窄相**。先按玩家垂直轮廓/可跨越高度过滤，再做圆对有向盒的两轮 XZ 推出。 |
 | `shared/world/chunkColliders.mjs` | 由整数放置记录派生静态碰撞盒。纯函数，没有 WASM 对应实现。 |
 | `src/world/ChunkStreamer.ts` | chunk 装载/卸载时整组进出静态碰撞体。 |
 | `src/actors/ClientActorSystem.ts` | 每帧把 Actor 的盒子刷进网格。 |
@@ -37,7 +37,7 @@
 
 ### 推出查询的外扩
 
-`resolveCircle` 用 `radius × 3` 的范围取候选，而不是 `radius`。理由：推出会把点挪走，挪走之后可能贴上另一个原本不在范围里的盒子；一次推出的位移不超过一个直径，按半径两倍外扩足够覆盖两轮迭代，候选集合在整个解算过程中保持不变。这正是「网格结果必须等于全量遍历」的前提，改小了就会在盒子角落处出现网格漏判。
+`resolveCircle` 用 `radius × 3` 的范围取候选，而不是 `radius`。理由：推出会把点挪走，挪走之后可能贴上另一个原本不在范围里的盒子；一次推出的位移不超过一个直径，按半径两倍外扩足够覆盖两轮迭代，候选集合在整个解算过程中保持不变。这正是「网格结果必须等于全量遍历」的前提，改小了就会在盒子角落处出现网格漏判。玩家查询还会把同一份 `verticalProfile` 转交窄相：顶部不高于 `minimumY + maximumStepHeight` 的低台阶被忽略，垂直不重叠的悬空盒也不会形成隐形墙。
 
 ## 静态碰撞不走网络
 

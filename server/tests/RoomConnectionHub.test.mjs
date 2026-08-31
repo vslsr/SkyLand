@@ -65,6 +65,12 @@ test('RoomConnectionHub 在传输之外处理会话，并标记广播通道', ()
     channel: 'realtime',
   });
 
+  const beforeForeignSnapshot = sent.length;
+  roomManager.emit('snapshot', 'room-1', { tick: 11 }, 'player-2');
+  assert.equal(sent.length, beforeForeignSnapshot);
+  roomManager.emit('snapshot', 'room-1', { tick: 12 }, 'player-1');
+  assert.equal(sent.at(-1).message.snapshot.tick, 12);
+
   roomManager.emit('summary', { id: 'room-1', playerCount: 1 });
   assert.equal(sent.at(-1).channel, 'control');
   assert.equal(sent.at(-1).message.type, 'room:summary');

@@ -95,6 +95,15 @@ export function createSimpleCollisionFromRender(render) {
       maximumY: positiveNumber(render.height, 0.1),
     });
   }
+  if (model === 'line-art-campfire' || model === 'line-art-dry-hay' || model === 'line-art-wood-pile') {
+    const radius = positiveNumber(render.radius, 0.5);
+    return createSimpleCollisionDefinition({
+      halfWidth: radius,
+      halfLength: radius,
+      minimumY: 0,
+      maximumY: positiveNumber(render.height, 0.6),
+    });
+  }
   throw new TypeError(`无法为模型 ${model || '<unknown>'} 生成简易碰撞`);
 }
 

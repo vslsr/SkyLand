@@ -28,14 +28,16 @@ export interface TopDownControllerOptions {
   fieldOfViewDegrees?: number;
   bounds?: SceneBounds;
   collisionRadius?: number;
+  movement?: { walkSpeed: number; sprintMultiplier: number };
   resolveCollision?: (
     position: { x: number; z: number },
     radius: number,
   ) => { x: number; z: number };
   /**
-   * 第三人称相机的遮挡探针。传进来时机位会挂在一根会被世界挡住的悬臂上，
-   * 镜头不再穿进树、石头或船体；不传就是原来的固定偏移机位。
+   * 是否启用第三人称相机遮挡判定与悬臂收缩。默认关闭。
    */
+  cameraCollisionEnabled?: boolean;
+  /** 第三人称相机的遮挡探针；只有 cameraCollisionEnabled 开启时才会查询。 */
   cameraProbe?: CameraProbe;
 }
 
@@ -52,7 +54,9 @@ export class TopDownController {
   private readonly movementInput = { x: 0, y: 0 };
   private readonly bounds: SceneBounds;
   private readonly collisionRadius: number;
+  private readonly movement: { walkSpeed: number; sprintMultiplier: number };
   private readonly resolveCollision?: TopDownControllerOptions['resolveCollision'];
+  private readonly cameraCollisionEnabled: boolean;
   private readonly cameraProbe?: CameraProbe;
   private readonly cameraBoom = new CameraBoom();
   private cameraDistanceRatio = 1;
@@ -75,7 +79,12 @@ export class TopDownController {
     this.cameraOffset = options.cameraOffset ?? [5.5, 7.5, 8.5];
     this.bounds = options.bounds ?? PLAYER_BOUNDS;
     this.collisionRadius = Math.max(0, options.collisionRadius ?? 0);
+    this.movement = options.movement ?? {
+      walkSpeed: PLAYER_MOVE_SPEED,
+      sprintMultiplier: PLAYER_SPRINT_MULTIPLIER,
+    };
     this.resolveCollision = options.resolveCollision;
+    this.cameraCollisionEnabled = options.cameraCollisionEnabled ?? false;
     this.cameraProbe = options.cameraProbe;
     this.fieldOfViewRadians = ((options.fieldOfViewDegrees ?? 50) * Math.PI) / 180;
     this.bindInput(input);
@@ -191,9 +200,11 @@ export class TopDownController {
         { x: this.moveX, z: this.moveZ, sprint: this.sprinting },
         deltaSeconds,
         this.bounds,
+        this.movement,
       );
       this.setPosition(next.x, next.z);
-      const speed = PLAYER_MOVE_SPEED * (this.sprinting ? PLAYER_SPRINT_MULTIPLIER : 1);
+      const speed = this.movement.walkSpeed
+        * (this.sprinting ? this.movement.sprintMultiplier : 1);
       this.currentSpeed += (speed - this.currentSpeed) * Math.min(1, deltaSeconds * 12);
     } else {
       this.currentSpeed += (0 - this.currentSpeed) * Math.min(1, deltaSeconds * 10);
@@ -226,7 +237,7 @@ export class TopDownController {
       this.cameraPivot,
       this.cameraOffset,
       deltaSeconds,
-      this.cameraProbe,
+      this.cameraCollisionEnabled ? this.cameraProbe : undefined,
     );
   }
 

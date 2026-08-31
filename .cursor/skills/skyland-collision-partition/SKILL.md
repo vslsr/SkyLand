@@ -11,7 +11,7 @@ Collision cost comes from comparing one query against every collider. A streamed
 
 **The broad phase picks candidates. It never changes the answer.**
 
-The narrow phase is still `resolveCircleAgainstSimpleCollisions` in `shared/actor/simpleCollision.mjs` — the same two-pass push-out the project always had. `CollisionWorld.resolveCircle` only decides *which* boxes go into it. If a change to the grid, the query margin, or the layer masks makes a query return a different position than a full scan would, that is a bug, not an optimization.
+The narrow phase is `resolveCircleAgainstSimpleCollisions` in `shared/actor/simpleCollision.mjs`. `CollisionWorld.resolveCircle` only decides *which* boxes go into it and forwards the same optional vertical profile. If a change to the grid, query margin, layer masks, or profile forwarding makes a query differ from a full scan with the same inputs, that is a bug, not an optimization.
 
 `server/tests/collisionWorld.test.mjs` is the safety net: 400 boxes, 500 sample points, grid result asserted equal to the brute-force result. Any candidate-selection change that narrows the set too far fails it.
 

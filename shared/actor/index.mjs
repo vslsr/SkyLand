@@ -8,6 +8,10 @@ export {
   ActorControlComponent,
 } from './components/ActorControlComponent.mjs';
 export {
+  ACTOR_RESIDENCY_COMPONENT,
+  ActorResidencyComponent,
+} from './components/ActorResidencyComponent.mjs';
+export {
   BUOYANCY_COMPONENT,
   BuoyancyComponent,
 } from './components/BuoyancyComponent.mjs';
@@ -15,6 +19,14 @@ export {
   CARGO_COMPONENT,
   CargoComponent,
 } from './components/CargoComponent.mjs';
+export {
+  DROP_MOTION_COMPONENT,
+  DropMotionComponent,
+} from './components/DropMotionComponent.mjs';
+export {
+  COMBUSTIBLE_COMPONENT,
+  CombustibleComponent,
+} from './components/CombustibleComponent.mjs';
 export {
   ELASTIC_TETHER_COMPONENT,
   ElasticTetherComponent,
@@ -24,9 +36,29 @@ export {
   HazardComponent,
 } from './components/HazardComponent.mjs';
 export {
+  HEAT_EMITTER_COMPONENT,
+  HeatEmitterComponent,
+} from './components/HeatEmitterComponent.mjs';
+export {
+  INVENTORY_COMPONENT,
+  InventoryComponent,
+} from './components/InventoryComponent.mjs';
+export {
   INTERACTABLE_COMPONENT,
   InteractableComponent,
 } from './components/InteractableComponent.mjs';
+export {
+  ITEM_STACK_COMPONENT,
+  ItemStackComponent,
+} from './components/ItemStackComponent.mjs';
+export {
+  LIFETIME_COMPONENT,
+  LifetimeComponent,
+} from './components/LifetimeComponent.mjs';
+export {
+  REPLICATION_POLICY_COMPONENT,
+  ReplicationPolicyComponent,
+} from './components/ReplicationPolicyComponent.mjs';
 export {
   PLAYER_MOVEMENT_COMPONENT,
   PlayerMovementComponent,
@@ -39,6 +71,10 @@ export {
   TRANSFORM_COMPONENT,
   TransformComponent,
 } from './components/TransformComponent.mjs';
+export {
+  TEMPERATURE_COMPONENT,
+  TemperatureComponent,
+} from './components/TemperatureComponent.mjs';
 export {
   circleTouchesSimpleCollision,
   createSimpleCollisionDefinition,

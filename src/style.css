@@ -494,6 +494,12 @@ body.has-interaction-target .crosshair {
   gap: 12px;
 }
 
+.debug-menu__section + .debug-menu__section {
+  padding-top: 18px;
+  margin-top: 18px;
+  border-top: 1px solid rgba(28, 26, 23, 0.16);
+}
+
 .debug-menu__section h3 {
   margin: 0;
   color: #728562;

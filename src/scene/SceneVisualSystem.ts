@@ -43,14 +43,16 @@ export interface ActorSnapshotTarget {
   /** 把 Actor 当前的碰撞盒登记进场景碰撞世界。查询前调用，每帧最多兑现一次。 */
   refreshColliders(): void;
   setSimpleCollisionVisible(visible: boolean): void;
+  setTemperatureVisible(visible: boolean): void;
 }
 
 export interface ActorInteractionCandidate {
   actorId: string;
   label: string;
-  action: 'cargo-toggle' | 'mushroom-bite';
+  action: 'cargo-toggle' | 'mushroom-bite' | 'pickup-stack';
   carrierActorId: string | null;
   holderPlayerId: string | null;
+  quantity?: number;
 }
 
 export interface VesselHudState {

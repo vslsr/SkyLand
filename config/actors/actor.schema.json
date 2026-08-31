@@ -73,7 +73,7 @@
           "additionalProperties": false,
           "required": ["action", "label", "maximumDistance"],
           "properties": {
-            "action": { "enum": ["cargo-toggle", "mushroom-bite"] },
+            "action": { "enum": ["cargo-toggle", "mushroom-bite", "pickup-stack"] },
             "label": { "type": "string", "minLength": 1, "maxLength": 32 },
             "maximumDistance": { "type": "number", "minimum": 0.5, "maximum": 12 }
           }
@@ -109,6 +109,96 @@
             "damage": { "type": "number", "exclusiveMinimum": 0, "maximum": 1 },
             "cooldownMs": { "type": "integer", "minimum": 100, "maximum": 60000 },
             "partId": { "type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$" }
+          }
+        },
+        "temperature": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["initialTemperature", "ambientTemperature", "heatCapacity", "coolingRate"],
+          "properties": {
+            "initialTemperature": { "type": "number", "minimum": -100, "maximum": 2000 },
+            "ambientTemperature": { "type": "number", "minimum": -100, "maximum": 2000 },
+            "heatCapacity": { "type": "number", "exclusiveMinimum": 0, "maximum": 10000 },
+            "coolingRate": { "type": "number", "minimum": 0, "maximum": 10 }
+          }
+        },
+        "combustible": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "ignitionTemperature",
+            "extinguishTemperature",
+            "fuel",
+            "burnRate",
+            "heatOutput",
+            "heatRadius"
+          ],
+          "properties": {
+            "ignitionTemperature": { "type": "number", "minimum": -100, "maximum": 2000 },
+            "extinguishTemperature": { "type": "number", "minimum": -100, "maximum": 2000 },
+            "fuel": { "type": "number", "exclusiveMinimum": 0, "maximum": 100000 },
+            "burnRate": { "type": "number", "exclusiveMinimum": 0, "maximum": 10000 },
+            "heatOutput": { "type": "number", "exclusiveMinimum": 0, "maximum": 100000 },
+            "heatRadius": { "type": "number", "exclusiveMinimum": 0, "maximum": 32 }
+          }
+        },
+        "heatEmitter": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["power", "radius", "enabled"],
+          "properties": {
+            "power": { "type": "number", "exclusiveMinimum": 0, "maximum": 100000 },
+            "radius": { "type": "number", "exclusiveMinimum": 0, "maximum": 32 },
+            "enabled": { "type": "boolean" }
+          }
+        },
+        "itemStack": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["itemType", "displayName", "defaultQuantity", "maximumQuantity", "compatibilityKey"],
+          "properties": {
+            "itemType": { "type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$" },
+            "displayName": { "type": "string", "minLength": 1, "maxLength": 32 },
+            "defaultQuantity": { "type": "integer", "minimum": 1, "maximum": 100000 },
+            "maximumQuantity": { "type": "integer", "minimum": 1, "maximum": 100000 },
+            "compatibilityKey": { "type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$" }
+          }
+        },
+        "actorResidency": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["sleepDelaySeconds", "dormantDelaySeconds", "dormantEligible"],
+          "properties": {
+            "sleepDelaySeconds": { "type": "number", "minimum": 0, "maximum": 60 },
+            "dormantDelaySeconds": { "type": "number", "minimum": 0, "maximum": 600 },
+            "dormantEligible": { "type": "boolean" }
+          }
+        },
+        "dropMotion": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["gravity", "drag", "settleSpeed"],
+          "properties": {
+            "gravity": { "type": "number", "minimum": 0, "maximum": 50 },
+            "drag": { "type": "number", "minimum": 0, "maximum": 50 },
+            "settleSpeed": { "type": "number", "exclusiveMinimum": 0, "maximum": 10 }
+          }
+        },
+        "lifetime": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["lifetimeSeconds"],
+          "properties": {
+            "lifetimeSeconds": { "type": "number", "minimum": 0, "maximum": 86400 }
+          }
+        },
+        "replicationPolicy": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["mode", "radiusChunks"],
+          "properties": {
+            "mode": { "enum": ["always", "aoi"] },
+            "radiusChunks": { "type": "integer", "minimum": 0, "maximum": 8 }
           }
         },
         "render": {
@@ -221,6 +311,44 @@
                 "width": { "type": "number", "exclusiveMinimum": 0, "maximum": 12 },
                 "length": { "type": "number", "exclusiveMinimum": 0, "maximum": 12 },
                 "height": { "type": "number", "exclusiveMinimum": 0, "maximum": 1 }
+              }
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["model", "stoneColor", "woodColor", "emberColor", "radius", "height"],
+              "properties": {
+                "model": { "const": "line-art-campfire" },
+                "stoneColor": { "$ref": "#/$defs/color" },
+                "woodColor": { "$ref": "#/$defs/color" },
+                "emberColor": { "$ref": "#/$defs/color" },
+                "radius": { "type": "number", "exclusiveMinimum": 0, "maximum": 3 },
+                "height": { "type": "number", "exclusiveMinimum": 0, "maximum": 3 }
+              }
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["model", "color", "accentColor", "radius", "height"],
+              "properties": {
+                "model": { "const": "line-art-dry-hay" },
+                "color": { "$ref": "#/$defs/color" },
+                "accentColor": { "$ref": "#/$defs/color" },
+                "radius": { "type": "number", "exclusiveMinimum": 0, "maximum": 3 },
+                "height": { "type": "number", "exclusiveMinimum": 0, "maximum": 3 }
+              }
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["model", "woodColor", "cutColor", "inkColor", "radius", "height"],
+              "properties": {
+                "model": { "const": "line-art-wood-pile" },
+                "woodColor": { "$ref": "#/$defs/color" },
+                "cutColor": { "$ref": "#/$defs/color" },
+                "inkColor": { "$ref": "#/$defs/color" },
+                "radius": { "type": "number", "exclusiveMinimum": 0, "maximum": 3 },
+                "height": { "type": "number", "exclusiveMinimum": 0, "maximum": 3 }
               }
             }
           ]

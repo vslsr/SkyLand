@@ -1,10 +1,27 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { Object3D } from 'three';
 import { CameraBoom, type CameraProbe } from '../src/camera/CameraBoom';
+import { TopDownController } from '../src/controllers/TopDownController';
+import type { InputSubsystem } from '../src/input/index';
 import type { Vec3 } from '../src/math/vec3';
 
 const PIVOT: Vec3 = [0, 0.25, 0];
 const OFFSET: Vec3 = [5.5, 7.5, 8.5];
+
+function createTopDownController(options: {
+  cameraCollisionEnabled?: boolean;
+  cameraProbe: CameraProbe;
+}): TopDownController {
+  const canvas = {
+    addEventListener: () => undefined,
+    removeEventListener: () => undefined,
+  } as unknown as HTMLCanvasElement;
+  const input = {
+    bind: () => () => undefined,
+  } as unknown as InputSubsystem;
+  return new TopDownController(canvas, new Object3D(), input, options);
+}
 
 test('没有探针时悬臂保持全长', () => {
   const boom = new CameraBoom();
@@ -71,4 +88,37 @@ test('reset 丢掉上一处的收缩量，瞬移之后镜头不会莫名贴脸',
   boom.solve(PIVOT, OFFSET, 0.016, () => 0.25);
   boom.reset();
   assert.equal(boom.distanceRatio, 1);
+});
+
+test('TopDown 控制器默认不判定遮挡也不收缩镜头', () => {
+  let probeCount = 0;
+  const controller = createTopDownController({
+    cameraProbe: () => {
+      probeCount += 1;
+      return 0.4;
+    },
+  });
+
+  controller.update(0.016);
+
+  assert.equal(probeCount, 0);
+  assert.equal(controller.cameraDistance, 1);
+  controller.dispose();
+});
+
+test('TopDown 控制器显式开启后才会按碰撞结果收缩镜头', () => {
+  let probeCount = 0;
+  const controller = createTopDownController({
+    cameraCollisionEnabled: true,
+    cameraProbe: () => {
+      probeCount += 1;
+      return 0.4;
+    },
+  });
+
+  controller.update(0.016);
+
+  assert.equal(probeCount, 1);
+  assert.ok(Math.abs(controller.cameraDistance - 0.4) < 1e-12);
+  controller.dispose();
 });

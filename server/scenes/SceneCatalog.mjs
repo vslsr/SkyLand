@@ -308,6 +308,21 @@ function validateSceneDefinition(raw, filename, actorCatalog) {
       `${filename}.gameplay.playerActor 需要 playerMovement + line-art-player-slime 原型`,
     );
   }
+  const runtimeActorArchetypeIds = gameplay.runtimeActorArchetypes ?? [];
+  if (!Array.isArray(runtimeActorArchetypeIds) || runtimeActorArchetypeIds.length > 32) {
+    throw new TypeError(`${filename}.gameplay.runtimeActorArchetypes 必须是最多 32 项的数组`);
+  }
+  const runtimeActorArchetypes = runtimeActorArchetypeIds.map((archetypeId, index) => {
+    const path = `${filename}.gameplay.runtimeActorArchetypes[${index}]`;
+    const id = requireString(archetypeId, path, 48);
+    if (!SCENE_ID_PATTERN.test(id)) throw new TypeError(`${path} 格式无效`);
+    const archetype = actorCatalog.require(id);
+    if (archetype.components.playerMovement) throw new TypeError(`${path} 不能引用玩家原型`);
+    return archetype;
+  });
+  if (new Set(runtimeActorArchetypeIds).size !== runtimeActorArchetypeIds.length) {
+    throw new TypeError(`${filename}.gameplay.runtimeActorArchetypes 不能重复`);
+  }
   const bounds = requireObject(gameplay.bounds, `${filename}.gameplay.bounds`);
   const spawn = requireObject(gameplay.spawn, `${filename}.gameplay.spawn`);
   const minimumX = requireNumber(bounds.minimumX, `${filename}.gameplay.bounds.minimumX`);
@@ -366,6 +381,11 @@ function validateSceneDefinition(raw, filename, actorCatalog) {
   if (!actorComposition.actorArchetypes.some((definition) => definition.id === playerActorArchetype.id)) {
     actorComposition.actorArchetypes.push(playerActorArchetype);
   }
+  for (const archetype of runtimeActorArchetypes) {
+    if (!actorComposition.actorArchetypes.some((definition) => definition.id === archetype.id)) {
+      actorComposition.actorArchetypes.push(archetype);
+    }
+  }
   for (const component of sceneComponents) {
     if (component.type !== 'ability-lab') continue;
     const target = actorComposition.actors.find((actor) => actor.id === component.targetActorId);
@@ -413,6 +433,7 @@ function validateSceneDefinition(raw, filename, actorCatalog) {
     },
     gameplay: {
       playerActor: { archetypeId: playerActorArchetype.id },
+      runtimeActorArchetypes: runtimeActorArchetypeIds.slice(),
       bounds: { minimumX, maximumX, minimumZ, maximumZ },
       spawn: {
         centerX,

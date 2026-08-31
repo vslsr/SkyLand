@@ -1,0 +1,28 @@
+{
+  "$schema": "./actor.schema.json",
+  "schemaVersion": 1,
+  "id": "dry-hay",
+  "components": {
+    "temperature": {
+      "initialTemperature": 20,
+      "ambientTemperature": 20,
+      "heatCapacity": 10,
+      "coolingRate": 0.08
+    },
+    "combustible": {
+      "ignitionTemperature": 75,
+      "extinguishTemperature": 45,
+      "fuel": 60,
+      "burnRate": 0.5,
+      "heatOutput": 340,
+      "heatRadius": 2.2
+    },
+    "render": {
+      "model": "line-art-dry-hay",
+      "color": "#d6b765",
+      "accentColor": "#846438",
+      "radius": 0.45,
+      "height": 0.72
+    }
+  }
+}

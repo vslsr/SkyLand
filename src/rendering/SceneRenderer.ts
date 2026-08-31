@@ -48,6 +48,7 @@ export class SceneRenderer implements GrassInteractionTarget {
   private actorSnapshotTarget?: ActorSnapshotTarget;
   private collisionWorld?: CollisionWorld;
   private simpleCollisionVisible = false;
+  private temperatureVisible = false;
   private readonly dynamicWorld = new THREE.Group();
   private readonly lookTarget = new THREE.Vector3();
   private readonly beforeRenderListeners = new Set<SceneBeforeRenderListener>();
@@ -159,10 +160,18 @@ export class SceneRenderer implements GrassInteractionTarget {
   public resolveSimpleCollision(
     position: { x: number; z: number },
     radius: number,
+    maximumStepHeight = 0,
+    moverHeight = radius * 2,
   ): { x: number; z: number } {
     // Actor 的盒子每帧刷新一次，先让 Actor System 兑现待登记的变更。
     this.actorSnapshotTarget?.refreshColliders();
-    return this.collisionWorld?.resolveCircle(position, radius) ?? position;
+    return this.collisionWorld?.resolveCircle(position, radius, {
+      verticalProfile: {
+        minimumY: 0,
+        maximumY: Math.max(0, moverHeight),
+        maximumStepHeight,
+      },
+    }) ?? position;
   }
 
   /**
@@ -185,6 +194,15 @@ export class SceneRenderer implements GrassInteractionTarget {
 
   public get isSimpleCollisionVisible(): boolean {
     return this.simpleCollisionVisible;
+  }
+
+  public setTemperatureVisible(visible: boolean): void {
+    this.temperatureVisible = visible;
+    this.actorSnapshotTarget?.setTemperatureVisible(visible);
+  }
+
+  public get isTemperatureVisible(): boolean {
+    return this.temperatureVisible;
   }
 
   /**
@@ -215,6 +233,7 @@ export class SceneRenderer implements GrassInteractionTarget {
     this.actorSnapshotTarget = composition.actorSnapshotTarget;
     this.collisionWorld = composition.collisionWorld;
     this.actorSnapshotTarget?.setSimpleCollisionVisible(this.simpleCollisionVisible);
+    this.actorSnapshotTarget?.setTemperatureVisible(this.temperatureVisible);
     this.scene.add(this.dynamicWorld);
   }
 

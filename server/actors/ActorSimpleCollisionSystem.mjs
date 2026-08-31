@@ -38,6 +38,11 @@ export class ActorSimpleCollisionSystem {
       const collision = actor.requireComponent(SIMPLE_COLLISION_COMPONENT);
       const motor = actor.requireComponent(VESSEL_MOTOR_COMPONENT);
       const radius = Math.min(collision.halfWidth, collision.halfLength);
+      const verticalProfile = {
+        minimumY: transform.y + collision.minimumY,
+        maximumY: transform.y + collision.maximumY,
+        maximumStepHeight: 0,
+      };
       // 自己和挂在自己身上的货箱不参与推出，否则船会被自己的货推走。
       const accept = (candidate) => {
         const other = candidate.actor;
@@ -45,7 +50,7 @@ export class ActorSimpleCollisionSystem {
         return other !== actor && !isRelatedActor(actor, other);
       };
       const resolved = collisionWorld
-        ? collisionWorld.resolveCircle(transform, radius, { accept })
+        ? collisionWorld.resolveCircle(transform, radius, { accept, verticalProfile })
         : resolveCircleAgainstSimpleCollisions(
           transform,
           radius,
@@ -55,6 +60,7 @@ export class ActorSimpleCollisionSystem {
               collision: candidate.requireComponent(SIMPLE_COLLISION_COMPONENT),
               transform: candidate.requireComponent(TRANSFORM_COMPONENT),
             })),
+          verticalProfile,
         );
       const bounds = world.context.bounds;
       if (bounds) {

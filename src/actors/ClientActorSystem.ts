@@ -1,6 +1,8 @@
 import * as THREE from 'three';
 import {
   ACTOR_CONTROL_COMPONENT,
+  ACTOR_RESIDENCY_COMPONENT,
+  ActorResidencyComponent,
   ActorControlComponent,
   Actor,
   ActorWorld,
@@ -8,18 +10,31 @@ import {
   BuoyancyComponent,
   CARGO_COMPONENT,
   CargoComponent,
+  COMBUSTIBLE_COMPONENT,
+  CombustibleComponent,
+  DropMotionComponent,
   ELASTIC_TETHER_COMPONENT,
   ElasticTetherComponent,
   HazardComponent,
+  HEAT_EMITTER_COMPONENT,
+  HeatEmitterComponent,
   INTERACTABLE_COMPONENT,
   InteractableComponent,
+  ITEM_STACK_COMPONENT,
+  ItemStackComponent,
+  LifetimeComponent,
+  PlayerMovementComponent,
+  ReplicationPolicyComponent,
   SIMPLE_COLLISION_COMPONENT,
   SimpleCollisionComponent,
+  TEMPERATURE_COMPONENT,
+  TemperatureComponent,
   TRANSFORM_COMPONENT,
   TransformComponent,
   VESSEL_MOTOR_COMPONENT,
   VesselMotorComponent,
 } from '../../shared/actor/index.mjs';
+import { createSimpleCollisionFromRender } from '../../shared/actor/simpleCollision.mjs';
 import {
   COLLISION_LAYER_SOLID,
   CollisionWorld,
@@ -51,6 +66,16 @@ import { AttachmentVisualSystem } from './systems/AttachmentVisualSystem';
 import { CargoVisualSystem } from './systems/CargoVisualSystem';
 import { WaterBobVisualSystem } from './systems/WaterBobVisualSystem';
 import { ElasticTetherVisualSystem } from './systems/ElasticTetherVisualSystem';
+import {
+  FIRE_VISUAL_COMPONENT,
+  FireVisualComponent,
+} from './components/FireVisualComponent';
+import { FireVisualSystem } from './systems/FireVisualSystem';
+import { HighCountActorBatchSystem } from './systems/HighCountActorBatchSystem';
+import {
+  TEMPERATURE_MARKER_COMPONENT,
+  TemperatureMarkerComponent,
+} from './components/TemperatureMarkerComponent';
 
 export interface ClientActorSystemOptions {
   definition: SceneDefinition;
@@ -74,7 +99,11 @@ export class ClientActorSystem implements SceneVisualSystem {
   private readonly raycaster = new THREE.Raycaster();
   private readonly rayOrigin = new THREE.Vector3();
   private readonly rayDirection = new THREE.Vector3();
+  private readonly pointToActor = new THREE.Vector3();
+  private readonly actorWorldPoint = new THREE.Vector3();
+  private readonly closestRayPoint = new THREE.Vector3();
   private readonly collision: CollisionWorld;
+  private readonly highCountBatches: HighCountActorBatchSystem;
   /** actorId → 登记进碰撞世界的实例，逐帧复用，避免每帧产生一批临时对象。 */
   private readonly colliderInstances = new Map<string, {
     collision: SimpleCollisionComponent;
@@ -87,6 +116,7 @@ export class ClientActorSystem implements SceneVisualSystem {
   private hoveredActorId?: string;
   private hoverHelper?: THREE.BoxHelper;
   private simpleCollisionVisible = false;
+  private temperatureVisible = false;
 
   public constructor(options: ClientActorSystemOptions) {
     this.root.name = 'replicated-actor-world';
@@ -95,6 +125,7 @@ export class ClientActorSystem implements SceneVisualSystem {
     );
     this.now = options.now ?? (() => Date.now());
     this.collision = options.collision ?? new CollisionWorld();
+    this.highCountBatches = new HighCountActorBatchSystem(options.environment, this.archetypes);
     // 客户端不运行 AttachmentSystem：最终世界坐标来自快照插值，不能被
     // localTransform 再次解算覆盖。
     this.world.addSystem(new ActorTransformSystem(this.root));
@@ -104,6 +135,7 @@ export class ClientActorSystem implements SceneVisualSystem {
     }
     this.world.addSystem(new AttachmentVisualSystem());
     this.world.addSystem(new ElasticTetherVisualSystem());
+    this.world.addSystem(new FireVisualSystem());
     this.environment = options.environment;
   }
 
@@ -157,6 +189,10 @@ export class ClientActorSystem implements SceneVisualSystem {
   public update(deltaSeconds: number, elapsedSeconds: number): void {
     this.applySnapshotSet(this.snapshots.sample(this.now()));
     this.world.update(deltaSeconds, elapsedSeconds);
+    this.highCountBatches.sync(this.world);
+    if (this.highCountBatches.root.children.length > 0 && !this.highCountBatches.root.parent) {
+      this.root.add(this.highCountBatches.root);
+    }
     this.publishColliders();
     this.hoverHelper?.update();
   }
@@ -208,6 +244,13 @@ export class ClientActorSystem implements SceneVisualSystem {
       ) as InteractionMarkerComponent;
       marker.faceCamera(camera);
     }
+    if (!this.temperatureVisible) return;
+    for (const actor of this.world.query(TEMPERATURE_MARKER_COMPONENT) as Actor[]) {
+      const marker = actor.requireComponent(
+        TEMPERATURE_MARKER_COMPONENT,
+      ) as TemperatureMarkerComponent;
+      marker.faceCamera(camera);
+    }
   }
 
   public dispose(): void {
@@ -215,6 +258,7 @@ export class ClientActorSystem implements SceneVisualSystem {
     this.snapshots.clear();
     for (const actorId of this.colliderInstances.keys()) this.collision.removeDynamic(actorId);
     this.colliderInstances.clear();
+    this.highCountBatches.dispose();
     this.world.dispose();
   }
 
@@ -237,10 +281,18 @@ export class ClientActorSystem implements SceneVisualSystem {
   public resolveSimpleCollision(
     position: { x: number; z: number },
     radius: number,
+    maximumStepHeight = 0,
+    moverHeight = radius * 2,
   ): { x: number; z: number } {
     // 候选来自空间网格，窄相仍是原来的两轮推出，手感不变。
     this.refreshColliders();
-    return this.collision.resolveCircle(position, radius);
+    return this.collision.resolveCircle(position, radius, {
+      verticalProfile: {
+        minimumY: 0,
+        maximumY: Math.max(0, moverHeight),
+        maximumStepHeight,
+      },
+    });
   }
 
   public setSimpleCollisionVisible(visible: boolean): void {
@@ -248,6 +300,16 @@ export class ClientActorSystem implements SceneVisualSystem {
     for (const actor of this.world.query(THREE_OBJECT_COMPONENT) as Actor[]) {
       const render = actor.requireComponent(THREE_OBJECT_COMPONENT) as ThreeObjectComponent;
       render.setSimpleCollisionVisible(visible);
+    }
+  }
+
+  public setTemperatureVisible(visible: boolean): void {
+    this.temperatureVisible = visible;
+    for (const actor of this.world.query(TEMPERATURE_MARKER_COMPONENT) as Actor[]) {
+      const marker = actor.requireComponent(
+        TEMPERATURE_MARKER_COMPONENT,
+      ) as TemperatureMarkerComponent;
+      marker.setVisible(visible);
     }
   }
 
@@ -277,6 +339,29 @@ export class ClientActorSystem implements SceneVisualSystem {
         distance: hit.distance,
         candidate: this.createInteractionCandidate(actor, interactable),
       };
+    }
+    // 合批 Actor 没有独立 Object3D；用权威 Transform + 碰撞半径做解析射线命中。
+    for (const actor of this.world.query(
+      INTERACTABLE_COMPONENT,
+      TRANSFORM_COMPONENT,
+      ITEM_STACK_COMPONENT,
+    ) as Actor[]) {
+      const interactable = actor.requireComponent(INTERACTABLE_COMPONENT) as InteractableComponent;
+      if (!interactable.enabled) continue;
+      const transform = actor.requireComponent(TRANSFORM_COMPONENT) as TransformComponent;
+      const collision = actor.requireComponent(SIMPLE_COLLISION_COMPONENT) as SimpleCollisionComponent;
+      this.actorWorldPoint.set(
+        transform.x,
+        transform.y + (collision.minimumY + collision.maximumY) * 0.5,
+        transform.z,
+      );
+      this.pointToActor.copy(this.actorWorldPoint).sub(this.rayOrigin);
+      const distance = this.pointToActor.dot(this.rayDirection);
+      if (distance < 0 || distance > maximumDistance || (nearest && distance >= nearest.distance)) continue;
+      this.closestRayPoint.copy(this.rayDirection).multiplyScalar(distance).add(this.rayOrigin);
+      const radius = Math.max(collision.halfWidth, collision.halfLength, 0.2);
+      if (this.closestRayPoint.distanceToSquared(this.actorWorldPoint) > radius * radius) continue;
+      nearest = { distance, candidate: this.createInteractionCandidate(actor, interactable) };
     }
     return nearest?.candidate;
   }
@@ -362,6 +447,9 @@ export class ClientActorSystem implements SceneVisualSystem {
     if (archetype.components.buoyancy) {
       actor.addComponent(new BuoyancyComponent(archetype.components.buoyancy));
     }
+    if (archetype.components.playerMovement) {
+      actor.addComponent(new PlayerMovementComponent(archetype.components.playerMovement));
+    }
     if (archetype.components.vesselMotor) {
       actor.addComponent(new VesselMotorComponent(archetype.components.vesselMotor));
       actor.addComponent(new ActorControlComponent());
@@ -378,7 +466,47 @@ export class ClientActorSystem implements SceneVisualSystem {
     if (archetype.components.hazard) {
       actor.addComponent(new HazardComponent(archetype.components.hazard));
     }
+    if (archetype.components.temperature) {
+      actor.addComponent(new TemperatureComponent(archetype.components.temperature));
+    }
+    if (archetype.components.combustible) {
+      actor.addComponent(new CombustibleComponent(archetype.components.combustible));
+    }
+    if (archetype.components.heatEmitter) {
+      actor.addComponent(new HeatEmitterComponent(archetype.components.heatEmitter));
+    }
+    if (archetype.components.itemStack) {
+      actor.addComponent(new ItemStackComponent({
+        ...archetype.components.itemStack,
+        quantity: snapshot.itemStack?.quantity,
+      }));
+    }
+    if (archetype.components.actorResidency) {
+      actor.addComponent(new ActorResidencyComponent({
+        ...archetype.components.actorResidency,
+        state: snapshot.residency?.state,
+      }));
+    }
+    if (archetype.components.dropMotion) actor.addComponent(new DropMotionComponent(archetype.components.dropMotion));
+    if (archetype.components.lifetime) actor.addComponent(new LifetimeComponent(archetype.components.lifetime));
+    if (archetype.components.replicationPolicy) {
+      actor.addComponent(new ReplicationPolicyComponent(archetype.components.replicationPolicy));
+    }
+    const clientStack = actor.getComponent(ITEM_STACK_COMPONENT) as ItemStackComponent | undefined;
+    const clientFuel = actor.getComponent(COMBUSTIBLE_COMPONENT) as CombustibleComponent | undefined;
+    if (clientStack && clientFuel) {
+      clientFuel.maximumFuel *= clientStack.quantity;
+      clientFuel.fuel = clientFuel.maximumFuel;
+    }
     actor.addComponent(new ReplicationComponent());
+
+    if (archetype.components.itemStack) {
+      actor.addComponent(new SimpleCollisionComponent(
+        createSimpleCollisionFromRender(archetype.components.render),
+      ));
+      this.world.addActor(actor);
+      return actor;
+    }
 
     const model = createActorVisualModel(this.environment, archetype.components.render);
     model.root.name = `actor-${snapshot.id}-root`;
@@ -387,11 +515,26 @@ export class ClientActorSystem implements SceneVisualSystem {
     const render = new ThreeObjectComponent(model);
     render.setSimpleCollisionVisible(this.simpleCollisionVisible);
     actor.addComponent(render);
+    if (render.fireVisualRig) {
+      const emitter = actor.getComponent(HEAT_EMITTER_COMPONENT) as HeatEmitterComponent | undefined;
+      actor.addComponent(new FireVisualComponent(render.fireVisualRig, emitter?.enabled ? 1 : 0));
+    }
     if (archetype.components.interactable) {
       actor.addComponent(new InteractionMarkerComponent(
         model.root,
         render.interactionAnchorY,
       ));
+    }
+    if (archetype.components.temperature) {
+      const temperature = actor.requireComponent(TEMPERATURE_COMPONENT) as TemperatureComponent;
+      const marker = new TemperatureMarkerComponent(
+        model.root,
+        render.simpleCollision.centerX + render.simpleCollision.halfWidth + 0.42,
+        render.interactionAnchorY,
+        temperature.temperature,
+      );
+      marker.setVisible(this.temperatureVisible);
+      actor.addComponent(marker);
     }
     this.root.add(model.root);
     this.world.addActor(actor);
@@ -449,8 +592,36 @@ export class ClientActorSystem implements SceneVisualSystem {
       tether.releaseRevision = snapshot.elasticTether.releaseRevision;
       tether.revision = snapshot.elasticTether.revision;
     }
-    const render = actor.requireComponent(THREE_OBJECT_COMPONENT) as ThreeObjectComponent;
-    render.root.userData.floatState = snapshot.buoyancy?.state;
+    if (snapshot.thermal) {
+      const temperature = actor.requireComponent(TEMPERATURE_COMPONENT) as TemperatureComponent;
+      temperature.temperature = snapshot.thermal.temperature;
+      temperature.revision = snapshot.thermal.revision;
+      const temperatureMarker = actor.getComponent(
+        TEMPERATURE_MARKER_COMPONENT,
+      ) as TemperatureMarkerComponent | undefined;
+      temperatureMarker?.setTemperature(snapshot.thermal.temperature);
+      const combustible = actor.getComponent(COMBUSTIBLE_COMPONENT) as CombustibleComponent | undefined;
+      if (combustible) {
+        combustible.burning = snapshot.thermal.burning;
+        combustible.fuel = combustible.maximumFuel * snapshot.thermal.fuelRatio;
+        combustible.revision = snapshot.thermal.revision;
+      }
+      const fire = actor.getComponent(FIRE_VISUAL_COMPONENT) as FireVisualComponent | undefined;
+      if (fire) fire.targetIntensity = snapshot.thermal.burning ? 1 : 0;
+    }
+    if (snapshot.itemStack) {
+      const stack = actor.requireComponent(ITEM_STACK_COMPONENT) as ItemStackComponent;
+      stack.quantity = snapshot.itemStack.quantity;
+      stack.revision = snapshot.itemStack.revision;
+    }
+    if (snapshot.residency) {
+      const residency = actor.requireComponent(ACTOR_RESIDENCY_COMPONENT) as ActorResidencyComponent;
+      residency.state = snapshot.residency.state;
+      residency.revision = snapshot.residency.revision;
+    }
+    replication.revision = Math.max(replication.revision, snapshot.revision);
+    const render = actor.getComponent(THREE_OBJECT_COMPONENT) as ThreeObjectComponent | undefined;
+    if (render) render.root.userData.floatState = snapshot.buoyancy?.state;
   }
 
   private disposeHoverHelper(): void {
@@ -470,12 +641,14 @@ export class ClientActorSystem implements SceneVisualSystem {
     const tether = actor.getComponent(
       ELASTIC_TETHER_COMPONENT,
     ) as ElasticTetherComponent | undefined;
+    const stack = actor.getComponent(ITEM_STACK_COMPONENT) as ItemStackComponent | undefined;
     return {
       actorId: actor.id,
       label: interactable.label,
       action: interactable.action,
       carrierActorId: cargo?.carrierActorId ?? null,
       holderPlayerId: tether?.holderPlayerId ?? null,
+      quantity: stack?.quantity,
     };
   }
 }

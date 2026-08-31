@@ -61,6 +61,21 @@ test('静态分组整组进出，撤走之后路重新通了', () => {
   assert.deepEqual(world.resolveCircle(blocked, 0.42), blocked);
 });
 
+test('空间划分会把同一份玩家可跨越高度传给窄相', () => {
+  const world = new CollisionWorld();
+  const step = createBox(0, 0, 0, 1, 1);
+  step.collision.maximumY = 0.12;
+  world.setStaticGroup('step', [step]);
+  const point = { x: 0, z: 0 };
+  const profile = { minimumY: 0, maximumY: 0.84, maximumStepHeight: 0.2 };
+  assert.deepEqual(
+    world.resolveCircle(point, 0.42, { verticalProfile: profile }),
+    resolveCircleAgainstSimpleCollisions(point, 0.42, [step], profile),
+  );
+  assert.deepEqual(world.resolveCircle(point, 0.42, { verticalProfile: profile }), point);
+  assert.notDeepEqual(world.resolveCircle(point, 0.42), point);
+});
+
 test('动态碰撞体按 id 原地更新，移走后不再挡路', () => {
   const world = new CollisionWorld();
   const raft = createBox(0, 0, 0, 1.6, 2.4);

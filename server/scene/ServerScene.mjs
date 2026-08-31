@@ -1,4 +1,5 @@
 import {
+  DEFAULT_PLAYER_MOVEMENT,
   PLAYER_BOUNDS,
   PLAYER_COLLISION_RADIUS,
   applyPlayerMovement,
@@ -19,6 +20,8 @@ import {
   CARGO_COMPONENT,
   ELASTIC_TETHER_COMPONENT,
   INTERACTABLE_COMPONENT,
+  INVENTORY_COMPONENT,
+  ITEM_STACK_COMPONENT,
   SIMPLE_COLLISION_COMPONENT,
   TRANSFORM_COMPONENT,
   VESSEL_MOTOR_COMPONENT,
@@ -28,6 +31,7 @@ import {
   createActorSnapshots,
   createServerActorWorld,
 } from '../actors/ServerActorFactory.mjs';
+import { ServerPlayerActor } from '../actors/ServerPlayerActor.mjs';
 import {
   addVesselCargo,
   damageVesselPart,
@@ -54,6 +58,24 @@ function sanitizeActorId(value) {
   return ACTOR_ID_PATTERN.test(id) ? id : undefined;
 }
 
+function resolvePlayerActorArchetype(definition) {
+  const configuredId = definition.gameplay?.playerActor?.archetypeId;
+  if (!configuredId) {
+    return {
+      id: 'player-slime',
+      components: {
+        playerMovement: DEFAULT_PLAYER_MOVEMENT,
+        render: { model: 'line-art-player-slime', radius: PLAYER_COLLISION_RADIUS },
+      },
+    };
+  }
+  const archetype = definition.actorArchetypes?.find((candidate) => candidate.id === configuredId);
+  if (!archetype?.components.playerMovement || archetype.components.render.model !== 'line-art-player-slime') {
+    throw new Error(`场景缺少玩家 Actor 原型：${configuredId}`);
+  }
+  return archetype;
+}
+
 /**
  * 房间内的权威世界状态。
  *
@@ -67,6 +89,7 @@ export class ServerScene {
     this.id = definition.id;
     this.bounds = definition.gameplay?.bounds ?? PLAYER_BOUNDS;
     this.spawn = definition.gameplay?.spawn;
+    this.playerActorArchetype = resolvePlayerActorArchetype(definition);
     this.players = new Map();
     // 一张空间网格同时承载 Actor 与流式世界的静态物件。玩家推出只查身边的
     // 几个格子，成本不随房间里的 Actor 数或世界面积增长。
@@ -88,25 +111,29 @@ export class ServerScene {
 
   addPlayer(player) {
     const spawn = createSpawnPoint(player.slot ?? this.players.size, this.spawn, this.bounds);
+    const radius = this.playerActorArchetype.components.render.radius;
+    const movement = this.playerActorArchetype.components.playerMovement;
     // 出生点是按槽位算的固定圆周，未必避得开树和石头；先把它推到碰撞外面，
     // 否则新玩家会卡在树干里，等第一条输入才被挤出来。
     this.chunkColliders.ensureAround(spawn.x, spawn.z);
     const placed = clampToPlayArea(
-      this.collision.resolveCircle(spawn, PLAYER_COLLISION_RADIUS),
+      this.collision.resolveCircle(spawn, radius, {
+        verticalProfile: {
+          minimumY: 0,
+          maximumY: radius * 2,
+          maximumStepHeight: movement.maximumStepHeight,
+        },
+      }),
       this.bounds,
     );
-    this.players.set(player.id, {
-      id: player.id,
-      name: player.name,
-      x: placed.x,
-      z: placed.z,
-      yaw: Math.PI,
-      speed: 0,
-      sequence: 0,
-      actorInteractionSequence: 0,
-      timeBudget: INPUT_TIME_BUDGET_SECONDS,
-      lastInputAt: this.now(),
-    });
+    const actor = new ServerPlayerActor(
+      player,
+      this.playerActorArchetype,
+      placed,
+      this.now(),
+    );
+    this.actorWorld.addActor(actor);
+    this.players.set(player.id, actor);
   }
 
   removePlayer(playerId) {
@@ -120,6 +147,7 @@ export class ServerScene {
       }
     }
     this.players.delete(playerId);
+    this.actorWorld.removeActor(playerId);
     for (const actor of this.actorWorld.query(ACTOR_CONTROL_COMPONENT)) {
       const control = actor.requireComponent(ACTOR_CONTROL_COMPONENT);
       if (control.ownerPlayerId === playerId) this.releaseActorControl(playerId, actor.id);
@@ -237,6 +265,17 @@ export class ServerScene {
       return true;
     }
 
+    if (interactable.action === 'pickup-stack') {
+      const stack = target.getComponent(ITEM_STACK_COMPONENT);
+      if (!stack) return false;
+      const distance = Math.hypot(targetTransform.x - player.x, targetTransform.z - player.z);
+      if (distance > interactable.maximumDistance) return false;
+      const pickedUp = this.actorWorld.context.highCountActors?.pickup(this.actorWorld, target.id, player) ?? 0;
+      if (pickedUp <= 0) return false;
+      player.actorInteractionSequence = sequence;
+      return true;
+    }
+
     if (interactable.action !== 'cargo-toggle') return false;
     const cargo = target.getComponent(CARGO_COMPONENT);
     if (!cargo) return false;
@@ -334,17 +373,28 @@ export class ServerScene {
     player.yaw = normalizeAngle(toFiniteNumber(message?.yaw, player.yaw));
 
     const move = sanitizeMoveInput({ ...message?.move, sprint: message?.sprint === true });
-    const next = applyPlayerMovement({ x: player.x, z: player.z }, move, granted, this.bounds);
+    const next = applyPlayerMovement(
+      { x: player.x, z: player.z },
+      move,
+      granted,
+      this.bounds,
+      player.movement,
+    );
     // 玩家可能刚加入或刚跨过边界，先确认脚下这一片的静态碰撞体已经就位，
     // 否则这一步会从树里穿过去，再被下一个 tick 拉回来。
     this.chunkColliders.ensureAround(next.x, next.z);
     const resolved = clampToPlayArea(
-      this.collision.resolveCircle(next, PLAYER_COLLISION_RADIUS),
+      this.collision.resolveCircle(next, player.collisionRadius, {
+        verticalProfile: {
+          minimumY: player.y,
+          maximumY: player.y + player.collisionHeight,
+          maximumStepHeight: player.movement.maximumStepHeight,
+        },
+      }),
       this.bounds,
     );
     const distance = Math.hypot(resolved.x - player.x, resolved.z - player.z);
-    player.x = resolved.x;
-    player.z = resolved.z;
+    player.setPosition(resolved.x, resolved.z);
     player.speed = granted > 0 ? distance / granted : 0;
     player.lastInputAt = this.now();
   }
@@ -369,12 +419,23 @@ export class ServerScene {
     this.chunkColliders.sync(this.players.values());
   }
 
-  createSnapshot() {
+  /** 树木、矿脉或战利品系统调用这一入口生成一个可自动合并的物品堆。 */
+  spawnItemStack(archetypeId, options = {}) {
+    return this.actorWorld.context.highCountActors.spawn(
+      this.actorWorld,
+      archetypeId,
+      options,
+      this.now() / 1000,
+    );
+  }
+
+  createSnapshot(viewerPlayerId) {
+    const viewer = viewerPlayerId ? this.players.get(viewerPlayerId) : undefined;
     return {
       sceneId: this.id,
       tick: this.tick,
       serverTime: this.now(),
-      actors: createActorSnapshots(this.actorWorld),
+      actors: createActorSnapshots(this.actorWorld, { viewer }),
       players: Array.from(this.players.values(), (player) => ({
         id: player.id,
         name: player.name,
@@ -383,6 +444,8 @@ export class ServerScene {
         yaw: roundCoordinate(player.yaw),
         speed: roundCoordinate(player.speed),
         sequence: player.sequence,
+        inventory: player.requireComponent(INVENTORY_COMPONENT).snapshot(),
+        inventoryRevision: player.requireComponent(INVENTORY_COMPONENT).revision,
       })),
     };
   }

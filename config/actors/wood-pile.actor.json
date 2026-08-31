@@ -1,0 +1,53 @@
+{
+  "$schema": "./actor.schema.json",
+  "schemaVersion": 1,
+  "id": "wood-pile",
+  "components": {
+    "interactable": {
+      "action": "pickup-stack",
+      "label": "木材",
+      "maximumDistance": 2.4
+    },
+    "itemStack": {
+      "itemType": "wood",
+      "displayName": "木材",
+      "defaultQuantity": 1,
+      "maximumQuantity": 999,
+      "compatibilityKey": "wood-standard"
+    },
+    "actorResidency": {
+      "sleepDelaySeconds": 1,
+      "dormantDelaySeconds": 3,
+      "dormantEligible": true
+    },
+    "dropMotion": {
+      "gravity": 9.8,
+      "drag": 5,
+      "settleSpeed": 0.08
+    },
+    "lifetime": { "lifetimeSeconds": 900 },
+    "replicationPolicy": { "mode": "aoi", "radiusChunks": 2 },
+    "temperature": {
+      "initialTemperature": 20,
+      "ambientTemperature": 20,
+      "heatCapacity": 8,
+      "coolingRate": 0.18
+    },
+    "combustible": {
+      "ignitionTemperature": 260,
+      "extinguishTemperature": 180,
+      "fuel": 90,
+      "burnRate": 1.2,
+      "heatOutput": 110,
+      "heatRadius": 2.2
+    },
+    "render": {
+      "model": "line-art-wood-pile",
+      "woodColor": "#B98558",
+      "cutColor": "#E6C89C",
+      "inkColor": "#51463E",
+      "radius": 0.55,
+      "height": 0.38
+    }
+  }
+}

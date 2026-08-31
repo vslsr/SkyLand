@@ -182,7 +182,9 @@ export class RoomProcessManager extends EventEmitter {
 
   handleWorkerMessage(record, message) {
     if (!message || typeof message !== 'object') return;
-    if (message.type === 'room:snapshot') this.emit('snapshot', record.id, message.snapshot);
+    if (message.type === 'room:snapshot') {
+      this.emit('snapshot', record.id, message.snapshot, message.playerId);
+    }
   }
 
   handleWorkerExit(record, code, signal) {

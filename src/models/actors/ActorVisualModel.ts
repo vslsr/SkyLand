@@ -22,6 +22,35 @@ export interface ActorVisualModel {
   readonly elasticTetherRig?: ElasticTetherVisualRig;
   /** 仅训练假人提供；能力表现只修改这些 VisualRoot 下的展示节点。 */
   readonly abilityTargetRig?: AbilityTargetVisualRig;
+  /** 热状态只控制强度；所有顶点与火星对象都位于该 Actor 的 visualRoot 下。 */
+  readonly fireVisualRig?: LineArtFireVisualRig;
+}
+
+export interface WavyFlameVisual {
+  readonly line: THREE.LineLoop;
+  readonly position: THREE.BufferAttribute;
+  readonly x: number;
+  readonly y: number;
+  readonly z: number;
+  readonly height: number;
+  readonly width: number;
+  readonly phase: number;
+  readonly speed: number;
+  readonly segments: number;
+}
+
+export interface LineArtFireVisualRig {
+  readonly root: THREE.Group;
+  readonly flames: readonly WavyFlameVisual[];
+  readonly sparks: readonly {
+    object: THREE.LineSegments;
+    phase: number;
+    drift: number;
+    x: number;
+    y: number;
+    z: number;
+    rise: number;
+  }[];
 }
 
 export interface ElasticTetherVisualRig {

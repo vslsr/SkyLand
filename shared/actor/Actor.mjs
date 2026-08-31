@@ -57,7 +57,10 @@ export class Actor {
     }
     this.components.set(component.type, component);
     component.attach(this);
-    if (this.started) component.beginPlay(this.world);
+    if (this.started) {
+      this.world?.onActorComponentChanged(this, component.type, true);
+      component.beginPlay(this.world);
+    }
     return component;
   }
 
@@ -65,6 +68,7 @@ export class Actor {
     const component = this.components.get(type);
     if (!component) return false;
     this.components.delete(type);
+    if (this.started) this.world?.onActorComponentChanged(this, type, false);
     component.detach();
     return true;
   }

@@ -57,7 +57,9 @@ export class ActorInteractionController {
     const prompt = this.resolvePrompt(this.candidate, vesselId);
     this.port.setPrompt(prompt);
     if (this.interactionRequested && this.candidate) {
-      if (this.candidate.action === 'mushroom-bite') {
+      if (this.candidate.action === 'pickup-stack') {
+        if (playerId) this.port.sendInteraction(this.candidate.actorId);
+      } else if (this.candidate.action === 'mushroom-bite') {
         if (playerId && !this.candidate.holderPlayerId) {
           this.port.sendInteraction(this.candidate.actorId);
         }
@@ -86,6 +88,13 @@ export class ActorInteractionController {
     vesselId: string | undefined,
   ): string | undefined {
     if (!candidate) return undefined;
+    if (candidate.action === 'pickup-stack') {
+      const quantity = candidate.quantity ? ` ×${candidate.quantity}` : '';
+      return this.withInputLabel(
+        this.port.getInputLabel(PlayerInputTags.WorldInteract),
+        `拾取「${candidate.label}${quantity}」`,
+      );
+    }
     if (candidate.action === 'mushroom-bite') {
       if (!candidate.holderPlayerId) {
         return this.withInputLabel(

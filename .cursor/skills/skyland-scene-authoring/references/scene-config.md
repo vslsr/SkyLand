@@ -17,7 +17,7 @@
 | `sceneComponents` | 0–16 项的数组 | 按声明顺序加载场景特化逻辑，类似该场景的 GameMode；退出与换图时按相反顺序停用、释放。 |
 | `actors` | 0–256 项的数组 | 场景内服务端权威 Actor 的摆放列表；每项引用 `config/actors` 中的原型。 |
 | `renderer` | 对象 | 客户端如何构建和表现这个场景。 |
-| `gameplay` | 对象 | DS 和客户端共同使用的可活动区域、出生规则与环境基准。 |
+| `gameplay` | 对象 | DS 和客户端共同使用的玩家 Actor、可活动区域、出生规则与环境基准。 |
 | `camera` | 对象 | 加入房间后的初始视角、控制模式和移动速度。 |
 
 ## `renderer`：场景视觉
@@ -122,12 +122,16 @@ AOI 或跟随焦点的固定窗口，并在组件停用/销毁时释放监听、
 
 当前原型可组合以下 Component：
 
+- `playerMovement`：玩家步行速度、冲刺倍率与最大可跨越高度；只用于 `gameplay.playerActor` 动态玩家。
 - `buoyancy`：质量/浮力部件、船体尺寸、最大静态倾斜和吃水范围；由 DS 创建 Component。
 - `vesselMotor`：前进/倒车速度、加减速、阻力、转向速度与输入超时；由 DS 固定 tick 推进。
 - `interactable`：交互动作、提示名称、最大权威交互距离和启用状态。
 - `cargo`：货物质量、装载到承载 Actor 后的局部挂点，以及运行态承载关系。
 - `hazard`：服务端碰撞半径、伤害量、冷却时间和受损浮力部件 id。
-- `render`：客户端线稿模型类型和视觉参数；除木筏、货箱、礁石与弹性蘑菇外，还支持可复用的 `line-art-training-dummy`、`line-art-focus-obelisk` 和 `line-art-floor-plaque`。
+- `temperature`：当前/环境温度、热容量和散热速率，由服务端温度 System 结算。
+- `combustible`：燃点、熄灭阈值、燃料、燃烧速率以及着火后的热输出；必须与 `temperature` 组合。
+- `heatEmitter`：篝火等稳定热源的功率、半径和启用状态。
+- `render`：客户端线稿模型类型和视觉参数；支持玩家史莱姆、木筏、货箱、礁石、弹性蘑菇、训练假人、焦点碑、地面牌、篝火和干草堆。
 
 `cargo-crate` 使用 `interactable + cargo + render`，`reef` 使用 `hazard + render`，`raft`
 使用 `buoyancy + vesselMotor + render`。新增组合时要同步 Actor Schema、`ActorCatalog`、共享
@@ -140,6 +144,14 @@ Shader 波浪、木筏和自由货箱的微小起伏只修改 Replica 的 Visual
 Transform。危险物碰撞只由 DS 根据权威 Transform 计算。
 
 ## `gameplay`：权威玩法空间
+
+### `gameplay.playerActor`
+
+`{ "archetype": "player-slime" }` 选择玩家连接房间后动态创建的 Actor 原型。该原型必须
+组合 `playerMovement + line-art-player-slime render`，不能同时作为 `actors[]` 的固定摆放项。
+`playerMovement.maximumStepHeight`（0–2 米）决定低矮 Actor 是否参与玩家的 XZ 推出；
+客户端预测与房间 DS 使用同一净化值。玩家位置仍通过专用 `players` 快照高频同步，以保留
+本地预测与和解。
 
 ### `gameplay.bounds`
 
@@ -188,6 +200,7 @@ Transform。危险物碰撞只由 DS 根据权威 Transform 计算。
 - 海洋开关、`renderer.ocean`、`gameplay.water` 三者应成组出现。
 - `sceneComponents` 必须在每张场景中显式填写，可为空数组；组件类型不得重复，且必须满足各自的跨字段依赖。
 - `actors[].archetype` 必须能在 `config/actors/*.actor.json` 中找到，Actor id 在同一场景内必须唯一。
+- `gameplay.playerActor.archetype` 必须引用带 `playerMovement` 的史莱姆原型，且不能放进 `actors[]`。
 - `actors[].parentActorId` 必须引用同场景 Actor，且层级不得自挂或形成循环。
 - JSON Schema 声明 `additionalProperties: false`，不要加入未定义字段。运行时会净化并只下发已知字段，但不应依赖静默丢弃拼写错误。
 - 新场景文件或配置改动需要重启 Node 主服务；目录只在 `SceneCatalog.load()` 时扫描一次。
@@ -198,7 +211,7 @@ Transform。危险物碰撞只由 DS 根据权威 Transform 计算。
 1. 从 `grassland.scene.json`、`open-meadow.scene.json` 或 `water.scene.json` 中选择最接近的模板。
 2. 设置唯一文件名、`id`、名称、说明和容量。
 3. 设置 `sceneComponents`、内容开关、配色和雾效；海域补齐 `renderer.ocean`。
-4. 设置玩法边界、出生区域；海域补齐 `gameplay.water`。
+4. 设置玩家 Actor、玩法边界、出生区域；海域补齐 `gameplay.water`。
 5. 选择 `topdown` 玩法模式或 `fly` 展示模式并调整初始相机。
 6. 若摆放可交互物，确认它与初始可控 Actor 的距离不超过 `interactable.maximumDistance`；危险物还要核对半径与边界。
 7. 用编辑器/Schema 检查 JSON，再以 `SceneCatalog` 和 `ActorCatalog` 测试确认运行时校验。

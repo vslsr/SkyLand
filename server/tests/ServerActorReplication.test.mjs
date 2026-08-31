@@ -2,7 +2,9 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   BUOYANCY_COMPONENT,
+  COMBUSTIBLE_COMPONENT,
   SIMPLE_COLLISION_COMPONENT,
+  TEMPERATURE_COMPONENT,
   TRANSFORM_COMPONENT,
 } from '../../shared/actor/index.mjs';
 import { ServerScene } from '../scene/ServerScene.mjs';
@@ -47,6 +49,35 @@ test('能力实验室的持久测试对象全部由场景 Actor 快照生成', a
     actors.get('training-dummy-01').transform,
     { x: 0, y: 0, z: -1.5, yaw: 0 },
   );
+});
+
+test('温度系统在空房间暂停，并在玩家附近让篝火点燃干草', async () => {
+  const clock = createClock();
+  const catalog = await SceneCatalog.load();
+  const scene = new ServerScene(catalog.require('thermal-lab'), { now: clock.now });
+  const hayActor = scene.actorWorld.getActor('dry-hay-01');
+  const temperature = hayActor.requireComponent(TEMPERATURE_COMPONENT);
+  const combustible = hayActor.requireComponent(COMBUSTIBLE_COMPONENT);
+
+  for (let index = 0; index < 100; index += 1) {
+    clock.advance(0.05);
+    scene.update();
+  }
+  assert.equal(temperature.temperature, 20);
+  assert.equal(combustible.burning, false);
+
+  scene.addPlayer({ id: 'thermal-observer', name: '观察者', slot: 0 });
+  for (let index = 0; index < 140 && !combustible.burning; index += 1) {
+    clock.advance(0.05);
+    scene.update();
+  }
+
+  assert.equal(combustible.burning, true);
+  assert.ok(temperature.temperature >= combustible.ignitionTemperature);
+  const snapshot = scene.createSnapshot().actors.find((actor) => actor.id === 'dry-hay-01');
+  assert.equal(snapshot.thermal.burning, true);
+  assert.ok(snapshot.thermal.temperature >= 75);
+  assert.ok(snapshot.thermal.fuelRatio < 1);
 });
 
 test('场景 JSON 的子 Actor 输出稳定局部坐标和服务端权威世界坐标', async () => {
@@ -300,4 +331,33 @@ test('玩家移动由房间 DS 按 Actor 模型生成的简易碰撞权威推出
   const deltaZ = player.z - transform.z;
   const localX = cosYaw * deltaX - sinYaw * deltaZ;
   assert.ok(localX <= -clearance + 1e-6);
+});
+
+test('玩家 Actor 的 maximumStepHeight 允许跨过低矮场景 Actor', async () => {
+  const clock = createClock();
+  const catalog = await SceneCatalog.load();
+  const scene = new ServerScene(catalog.require('ability-lab'), { now: clock.now });
+  scene.addPlayer({ id: 'step-walker', name: '台阶测试', slot: 0 });
+  const player = scene.players.get('step-walker');
+  const plaque = scene.actorWorld.getActor('ability-floor-plaque-01');
+  const transform = plaque.requireComponent(TRANSFORM_COMPONENT);
+  const collision = plaque.requireComponent(SIMPLE_COLLISION_COMPONENT);
+  const startZ = transform.z + collision.halfLength + player.collisionRadius + 0.05;
+  player.setPosition(transform.x, startZ);
+
+  scene.applyInput('step-walker', {
+    sequence: 1,
+    deltaSeconds: 0.1,
+    move: { x: 0, z: -1 },
+    sprint: false,
+    yaw: Math.PI,
+  });
+
+  assert.equal(player.archetypeId, 'player-slime');
+  assert.equal(player.movement.maximumStepHeight, 0.2);
+  assert.ok(player.z < startZ - 0.25);
+  assert.equal(
+    scene.createSnapshot().actors.some((actor) => actor.id === 'step-walker'),
+    false,
+  );
 });

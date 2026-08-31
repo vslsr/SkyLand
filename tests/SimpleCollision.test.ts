@@ -52,3 +52,51 @@ test('完全位于盒内时仍能稳定推出，多个碰撞体的迭代次数�
   assert.ok(Math.abs(resolved.x + 1.42) < 1e-9);
   assert.equal(resolved.z, 0);
 });
+
+test('玩家只被高于可跨越高度且与身体垂直重叠的 Actor 挡住', () => {
+  const lowStep = {
+    collision: createSimpleCollisionDefinition({
+      halfWidth: 1,
+      halfLength: 1,
+      minimumY: 0,
+      maximumY: 0.12,
+    }),
+    transform: { x: 0, y: 0, z: 0, yaw: 0 },
+  };
+  const profile = { minimumY: 0, maximumY: 0.84, maximumStepHeight: 0.2 };
+  assert.deepEqual(
+    resolveCircleAgainstSimpleCollisions({ x: 0, z: 0 }, 0.42, [lowStep], profile),
+    { x: 0, z: 0 },
+  );
+
+  const wall = {
+    ...lowStep,
+    collision: createSimpleCollisionDefinition({
+      halfWidth: 1,
+      halfLength: 1,
+      minimumY: 0,
+      maximumY: 1,
+    }),
+  };
+  const blocked = resolveCircleAgainstSimpleCollisions(
+    { x: 0, z: 0 },
+    0.42,
+    [wall],
+    profile,
+  );
+  assert.ok(Math.abs(blocked.x + 1.42) < 1e-9);
+
+  const floating = {
+    ...wall,
+    collision: createSimpleCollisionDefinition({
+      halfWidth: 1,
+      halfLength: 1,
+      minimumY: 1.2,
+      maximumY: 2,
+    }),
+  };
+  assert.deepEqual(
+    resolveCircleAgainstSimpleCollisions({ x: 0, z: 0 }, 0.42, [floating], profile),
+    { x: 0, z: 0 },
+  );
+});

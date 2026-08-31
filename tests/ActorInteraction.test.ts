@@ -112,6 +112,7 @@ const definition = {
     },
   },
   gameplay: {
+    playerActor: { archetypeId: 'player-slime' },
     bounds: { minimumX: -10, maximumX: 10, minimumZ: -10, maximumZ: 10 },
     spawn: { centerX: 0, centerZ: 0, radius: 0, slots: 8 },
     water: { seaLevel: 0 },

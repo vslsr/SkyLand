@@ -1,9 +1,10 @@
 import * as THREE from 'three';
-import { Actor } from '../../shared/actor/Actor.mjs';
+import { Actor, PlayerMovementComponent } from '../../shared/actor/index.mjs';
 import { GrassDisplacementComponent } from '../actors/components/GrassDisplacementComponent';
 import type { GrassInteractionTarget } from '../grass';
 import { createPlayerSlimeModel, createSlimePalette } from '../models/playerSlime';
 import type { InterpolatedPlayerState } from '../network/protocol';
+import type { ActorArchetypeDefinition } from '../scenes/data/SceneDefinition';
 import { SlimeAnimator } from './SlimeAnimator';
 
 function disposeSubtree(root: THREE.Object3D): void {
@@ -25,14 +26,27 @@ export class RemotePlayer extends Actor {
 
   private readonly grassDisplacement: GrassDisplacementComponent;
 
-  public constructor(state: InterpolatedPlayerState, grassInteraction: GrassInteractionTarget) {
-    super(state.id, 'player-slime');
+  public constructor(
+    state: InterpolatedPlayerState,
+    grassInteraction: GrassInteractionTarget,
+    archetype: ActorArchetypeDefinition,
+  ) {
+    super(state.id, archetype.id);
+    if (!archetype.components.playerMovement || archetype.components.render.model !== 'line-art-player-slime') {
+      throw new Error(`玩家 Actor 原型无效：${archetype.id}`);
+    }
+    const movement = this.addComponent(new PlayerMovementComponent(
+      archetype.components.playerMovement,
+    )) as PlayerMovementComponent;
     this.name = state.name;
-    this.model = createPlayerSlimeModel(createSlimePalette(state.id));
+    this.model = createPlayerSlimeModel(
+      archetype.components.render,
+      createSlimePalette(state.id),
+    );
     this.model.root.name = `remote-player-${state.id}`;
     this.model.root.position.set(state.x, 0, state.z);
     this.model.root.rotation.y = state.yaw;
-    this.animator = new SlimeAnimator(this.model);
+    this.animator = new SlimeAnimator(this.model, movement.walkSpeed);
     this.grassDisplacement = this.addComponent(new GrassDisplacementComponent(
       this.model.root,
       grassInteraction,

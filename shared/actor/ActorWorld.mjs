@@ -6,6 +6,9 @@ export class ActorWorld {
   constructor(context = {}) {
     this.context = context;
     this.actorMap = new Map();
+    this.componentIndex = new Map();
+    this.queryCache = new Map();
+    this.actorListCache = undefined;
     this.systems = [];
     this.pendingMutations = [];
     this.updating = false;
@@ -61,11 +64,38 @@ export class ActorWorld {
   }
 
   actors() {
-    return Array.from(this.actorMap.values());
+    if (!this.actorListCache) this.actorListCache = Array.from(this.actorMap.values());
+    return this.actorListCache;
   }
 
   query(...componentTypes) {
-    return this.actors().filter((actor) => actor.hasComponents(...componentTypes));
+    if (componentTypes.length === 0) return this.actors();
+    const normalizedTypes = Array.from(new Set(componentTypes)).sort();
+    const cacheKey = normalizedTypes.join('\u0000');
+    const cached = this.queryCache.get(cacheKey);
+    if (cached) return cached;
+
+    let candidates;
+    for (const type of normalizedTypes) {
+      const indexed = this.componentIndex.get(type);
+      if (!indexed) {
+        const empty = [];
+        this.queryCache.set(cacheKey, empty);
+        return empty;
+      }
+      if (!candidates || indexed.size < candidates.size) candidates = indexed;
+    }
+    const result = Array.from(candidates).filter((actor) => actor.hasComponents(...normalizedTypes));
+    this.queryCache.set(cacheKey, result);
+    return result;
+  }
+
+  /** Actor 启动后动态增删 Component 时同步查询索引。 */
+  onActorComponentChanged(actor, componentType, added) {
+    if (this.actorMap.get(actor.id) !== actor) return;
+    if (added) this.indexComponent(actor, componentType);
+    else this.componentIndex.get(componentType)?.delete(actor);
+    this.queryCache.clear();
   }
 
   update(deltaSeconds, elapsedSeconds) {
@@ -96,6 +126,9 @@ export class ActorWorld {
     this.pendingMutations.length = 0;
     const actors = Array.from(this.actorMap.values()).reverse();
     this.actorMap.clear();
+    this.componentIndex.clear();
+    this.queryCache.clear();
+    this.actorListCache = undefined;
     for (const actor of actors) actor.dispose();
   }
 
@@ -107,6 +140,8 @@ export class ActorWorld {
   addActorNow(actor) {
     if (this.actorMap.has(actor.id)) throw new Error(`Actor id 重复：${actor.id}`);
     this.actorMap.set(actor.id, actor);
+    for (const componentType of actor.components.keys()) this.indexComponent(actor, componentType);
+    this.invalidateActorCollections();
     actor.beginPlay(this);
   }
 
@@ -117,7 +152,9 @@ export class ActorWorld {
       for (const child of actor.children) {
         child.setParent(undefined, { worldPositionStays: true });
       }
+      this.deindexActor(actor);
       this.actorMap.delete(actor.id);
+      this.invalidateActorCollections();
       actor.dispose();
       return true;
     }
@@ -127,7 +164,11 @@ export class ActorWorld {
       subtree.push(current);
     };
     collect(actor);
-    for (const current of subtree) this.actorMap.delete(current.id);
+    for (const current of subtree) {
+      this.deindexActor(current);
+      this.actorMap.delete(current.id);
+    }
+    this.invalidateActorCollections();
     for (const current of subtree) current.dispose();
     return true;
   }
@@ -143,5 +184,27 @@ export class ActorWorld {
   flushMutations() {
     const mutations = this.pendingMutations.splice(0);
     for (const mutation of mutations) mutation();
+  }
+
+  indexComponent(actor, componentType) {
+    let actors = this.componentIndex.get(componentType);
+    if (!actors) {
+      actors = new Set();
+      this.componentIndex.set(componentType, actors);
+    }
+    actors.add(actor);
+  }
+
+  deindexActor(actor) {
+    for (const componentType of actor.components.keys()) {
+      const actors = this.componentIndex.get(componentType);
+      actors?.delete(actor);
+      if (actors?.size === 0) this.componentIndex.delete(componentType);
+    }
+  }
+
+  invalidateActorCollections() {
+    this.actorListCache = undefined;
+    this.queryCache.clear();
   }
 }

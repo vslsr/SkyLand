@@ -18,6 +18,8 @@
 - 大厅空场景、JSON 地图目录与创建房间时的地图选择
 - 服务端权威的移动同步：输入上行、快照广播、客户端预测与和解
 - 均匀网格空间划分：树、石头与 Actor 共用一张网格，碰撞查询成本与世界面积无关
+- 服务端权威温度与燃烧：篝火局部加热、可燃 Actor 点燃、燃料消耗和参考线稿火焰表现
+- 高数量 Actor 驻留预算：物品堆自动合并、休眠、chunk dormant、逐玩家 AOI 与客户端批次绘制
 - 会被世界挡住的第三人称相机悬臂，镜头不再穿进树冠和船体
 
 ## 运行与联机测试
@@ -317,9 +319,10 @@ Actor 不需要重建任何树。格子按需创建、空了立刻回收，所�
 | 静态分组 | 一个 chunk 的树和石头，key 就是 chunk key | chunk 卸载时整组撤走 |
 | 动态条目 | Actor，按 id 原地更新 | Actor 消失时按 id 撤走 |
 
-窄相仍然是原来的 `resolveCircleAgainstSimpleCollisions`——网格只负责给出候选，
-推出算法一个字节都没改，所以手感不变。`server/tests/collisionWorld.test.mjs`
-在 400 个盒子上取 500 个采样点，逐个比对网格结果与逐个遍历的结果必须完全一致。
+窄相统一由 `resolveCircleAgainstSimpleCollisions` 处理——网格只负责给出候选，并把
+同一份玩家垂直轮廓传进去。低矮 Actor 的顶部不超过玩家原型配置的
+`maximumStepHeight` 时不做 XZ 推出；更高且与玩家身体垂直重叠的盒子仍会阻挡。
+`server/tests/collisionWorld.test.mjs` 会逐个比对网格结果与全量遍历结果。
 
 ### 静态碰撞不走网络
 
@@ -358,7 +361,8 @@ Actor 不需要重建任何树。格子按需创建、空了立刻回收，所�
 `src/camera/CameraBoom.ts` 把机位当成一根从角色伸出去的杆子：每帧从角色胸口
 沿杆子扫掠一个半径 0.32 m 的球（`CollisionWorld.sweepSphere`，只看 CAMERA 层），
 撞上东西就把杆子缩到撞击点之前。杆子的方向不变，只有长度在变，所以相机三轴、
-鼠标射线投影、朝向解算都不受影响。
+鼠标射线投影、朝向解算都不受影响。`TopDownController` 默认关闭这项遮挡判定与
+收缩功能；只有构造时显式传入 `cameraCollisionEnabled: true` 才会使用 `cameraProbe`。
 
 收放是不对称的，这是刻意的：
 
@@ -410,11 +414,14 @@ Actor 简易碰撞边框，产品构建会移除该 Mapping，不占用 F8。
 - `grassland.scene.json`：完整线稿草地、树林和草丛
 - `open-meadow.scene.json`：移除树林的暖色开阔原野
 - `water.scene.json`：低多边形线稿海面，以及木筏、漂流货箱和礁石 Actor 的交互示例
+- `thermal-lab.scene.json`：篝火逐步点燃邻近干草并继续传播热量的测试场景
 
 `config/scenes/scene.schema.json` 描述可编辑字段。场景配置包括：
 
 - 地图 id、显示名称、描述和人数上限
 - 场景 Actor 的原型引用、初始位置和朝向
+- `gameplay.playerActor.archetype` 选择按连接动态生成的玩家 Actor 原型
+- `gameplay.runtimeActorArchetypes` 声明运行时允许生成、但不固定摆放的 Actor 原型
 - 按顺序加载的场景级 Component（场景专属逻辑、流程与规则）
 - 渲染器类型、背景、雾效、内容开关和颜色表
 - 服务端权威活动边界与出生点规则
@@ -424,8 +431,9 @@ Actor 简易碰撞边框，产品构建会移除该 Mapping，不占用 F8。
 扫描并严格校验全部配置。配置无效或 id 重复会阻止服务器启动，避免客户端与 DS 使用
 不同的地图数据。修改配置后需要重启 Node.js 服务器。
 
-可复用 Actor 原型位于 `config/actors/*.actor.json`。场景的 `actors` 只负责摆放；
-`ActorCatalog` 会解析浮力、船舶动力、交互、货物、危险物和渲染 Component，DS 使用相同
+可复用 Actor 原型位于 `config/actors/*.actor.json`。场景的 `actors` 只负责摆放固定对象；
+玩家原型由 `gameplay.playerActor.archetype` 引用，并按连接动态加入 ActorWorld。
+`ActorCatalog` 会解析玩家移动、浮力、船舶动力、交互、货物、危险物、温度、可燃性、热源和渲染 Component，DS 使用相同
 的净化结果创建 ActorWorld。木筏的权威位置、控制者、航速、吃水、漂浮状态和静态倾斜，
 以及货箱的承载关系和礁石危险范围都会进入 `actors` 快照。客户端收到快照后才创建对应
 Replica。Actor 使用服务端校验的 `parentActorId + localTransform` 构成层级，DS 在父 Actor
@@ -435,8 +443,45 @@ Transform 回退 120 ms 插值；父子关系不插值，海浪造成的上下�
 
 每个受支持的 Actor 模型在创建时会从 `render` 的 authoring 尺寸自动生成一个简易有向盒，
 无需再维护重复碰撞配置。玩家圆形碰撞、可控 Actor 推出和客户端预测共用
-`shared/actor/simpleCollision.mjs`；房间 DS 仍是最终权威。碰撞查询只遍历当前房间最多
-256 个 Actor，不随流式大世界面积增长。
+`shared/actor/simpleCollision.mjs`；房间 DS 仍是最终权威。宽相只查询玩家附近的网格格子，
+成本随局部碰撞密度而不是世界面积增长。
+
+### 高数量 Actor 与掉落物堆
+
+Actor 身份、逐 tick 模拟、网络复制和 Object3D 已经互相独立。`wood-pile.actor.json`
+是第一种使用这条路径的原型；砍树或战利品系统通过服务端入口生成物品堆：
+
+```js
+scene.spawnItemStack('wood-pile', {
+  quantity: 6,
+  position: [x, y, z],
+  velocity: [vx, vy, vz],
+});
+```
+
+它仍然是完整 Actor，有 Transform、物品数量、温度、燃料、碰撞与交互 Component，
+但生命周期按成本分层：
+
+```text
+active（弹道/燃烧） → sleeping（不再移动） → dormant chunk record（离开 ActorWorld）
+        ↑                                      │
+        └──────── 玩家进入保留圈后恢复同一 id ──┘
+```
+
+- 同类 sleeping 堆先按邻近距离合并；单 chunk 每个兼容组超过 16 堆时触发过载聚合。
+- active 软预算默认 256；Actor 与 dormant record 的转换每 tick 最多 32 个，避免尖峰。
+- `ReplicationPolicyComponent` 把物品堆限制在玩家周围 2 个 chunk 的快照，额外 1 圈作为
+  驻留迟滞。房间进程为每名玩家分别生成快照，网关只投递给对应连接。
+- sleeping 且离开所有玩家保留圈的 Actor 会序列化成按 chunk 保存的记录；记录不运行
+  System、不占碰撞条目、也不进入快照。寿命通过绝对服务端时间和到期最小堆继续结算。
+- 燃烧堆保持 active；合并时数量、温度、剩余燃料与寿命一起守恒，不会只合并模型。
+- 客户端 Replica 不创建独立 ThreeObject。相同原型、驻留状态与燃烧状态组成一个批次，
+  每批固定一份 InstancedMesh 填充和一份合并 EdgesGeometry 轮廓；射线选择改用权威
+  Transform 与碰撞半径的解析命中。
+
+`ActorWorld.query` 使用 Component 倒排索引并缓存组合结果，只有 Actor 或 Component
+结构变化时才失效；因此 System 不会在每 tick 为全部 Actor 重建临时数组。掉落物碰撞
+仍进入场景唯一的 `CollisionWorld`，没有额外的空间查询旁路。
 
 创建房间与加载顺序：
 
@@ -464,6 +509,8 @@ DS 初始化 ServerScene、边界、出生规则并回复 room:ready
 
 - 玩家实体不存在：使用原有 `FlyController` 自由飞行镜头。
 - 玩家加入房间并生成实体：`SceneControlRouter` 自动切换到 `TopDownController`。
+- 玩家模型、步行速度、冲刺倍率和最大可跨越高度来自场景引用的玩家 Actor 原型；默认
+  `player-slime` 的 `maximumStepHeight` 为 0.2 米。
 - W / A / S / D：按俯视镜头的屏幕方向移动。
 - Shift：加速移动。
 - 鼠标：通过透视射线投影到玩法 XY 平面，并让史莱姆面向投影点。玩法坐标的 Y 在 Three.js 世界中映射为地面的 Z 轴。
@@ -532,14 +579,16 @@ Actor 控制和断线清理逻辑。
   每 50 ms 上报 { sequence, deltaSeconds,
                  move, sprint, yaw }  ──→  校验 → 推进权威位置
   记录该序号对应的预测位置
-                                     ←──  每 100 ms 广播全房间快照
+                                     ←──  每 100 ms 下发逐连接快照
+                                          （高数量 Actor 按 AOI 裁剪）
   自己那条：与预测对账后平滑纠正
   其他人：回退 120 ms 做插值渲染
 ```
 
 `shared/playerMovement.mjs` 是两端共用的移动实现，`TopDownController` 的本地预测与
 `ServerScene` 的权威计算调用同一个 `applyPlayerMovement`，相同输入必然得到相同位置，
-客户端预测才有对账的基础。`shared/networkTuning.mjs` 统一了频率、插值延迟与各项阈值。
+客户端预测才有对账的基础。速度与跨越高度来自服务器校验后的玩家 Actor 原型；
+`shared/networkTuning.mjs` 统一了频率、插值延迟与各项阈值。
 
 ### 服务端的校验
 
@@ -548,7 +597,8 @@ Actor 控制和断线清理逻辑。
 | 手段 | 位置 | 作用 |
 | --- | --- | --- |
 | 方向向量归一化到 ≤ 1 | `sanitizeMoveInput` | 放大向量换不来速度 |
-| 速度与倍率写死在服务端 | `applyPlayerMovement` | 上限恒为 3.2 × 1.65 m/s |
+| 速度与倍率由服务端 Actor 原型限定 | `ActorCatalog` + `applyPlayerMovement` | 客户端不能提交或放大速度参数 |
+| 低矮台阶按权威高度过滤 | `maximumStepHeight` + `CollisionWorld` | 低台阶可跨越，高障碍仍推出 |
 | 活动范围钳制 | `clampToPlayArea` | 走不出大世界的活动区 |
 | 单条输入时长上限 | `ServerScene.applyInput` | 一条消息最多推进 0.1 s |
 | 服务器时钟维护的时间预算 | `ServerScene.update` | 谎报时长只会提前花光预算 |

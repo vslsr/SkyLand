@@ -8,11 +8,12 @@ test('loads every selectable map from an independent scene JSON', async () => {
 
   assert.deepEqual(
     scenes.map((scene) => scene.id),
-    ['ability-lab', 'grass-test', 'grassland', 'open-meadow', 'open-world', 'water'],
+    ['ability-lab', 'grass-test', 'grassland', 'open-meadow', 'open-world', 'thermal-lab', 'water'],
   );
   const abilityLab = catalog.require('ability-lab');
   assert.equal(abilityLab.capacity, 1);
   assert.equal(abilityLab.camera.mode, 'topdown');
+  assert.deepEqual(abilityLab.gameplay.playerActor, { archetypeId: 'player-slime' });
   assert.deepEqual(abilityLab.sceneComponents, [{
     type: 'ability-lab',
     targetActorId: 'training-dummy-01',
@@ -30,6 +31,11 @@ test('loads every selectable map from an independent scene JSON', async () => {
     abilityLab.actorArchetypes.find((actor) => actor.id === 'training-dummy')
       .components.render.model,
     'line-art-training-dummy',
+  );
+  assert.equal(
+    abilityLab.actorArchetypes.find((actor) => actor.id === 'player-slime')
+      .components.playerMovement.maximumStepHeight,
+    0.2,
   );
   const grassTest = catalog.require('grass-test');
   assert.equal(grassTest.renderer.content.grass, true);
@@ -54,7 +60,24 @@ test('loads every selectable map from an independent scene JSON', async () => {
     impulseStrength: 3.4,
   });
   assert.equal(catalog.require('open-meadow').renderer.content.trees, false);
-  assert.deepEqual(catalog.require('open-world').sceneComponents, []);
+  const openWorld = catalog.require('open-world');
+  assert.deepEqual(openWorld.sceneComponents[0], grassland.sceneComponents[1]);
+  assert.deepEqual(openWorld.gameplay.runtimeActorArchetypes, ['wood-pile']);
+  const thermalLab = catalog.require('thermal-lab');
+  assert.deepEqual(
+    thermalLab.actors.map((actor) => [actor.id, actor.archetypeId]),
+    [
+      ['campfire-01', 'campfire'],
+      ['dry-hay-01', 'dry-hay'],
+      ['dry-hay-02', 'dry-hay'],
+      ['dry-hay-03', 'dry-hay'],
+    ],
+  );
+  assert.equal(
+    thermalLab.actorArchetypes.find((actor) => actor.id === 'dry-hay')
+      .components.combustible.ignitionTemperature,
+    75,
+  );
   const water = catalog.require('water');
   assert.equal(water.camera.mode, 'fly');
   assert.equal(water.renderer.content.ocean, true);

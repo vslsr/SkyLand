@@ -1,0 +1,55 @@
+{
+  "$schema": "./scene.schema.json",
+  "schemaVersion": 1,
+  "id": "thermal-lab",
+  "displayName": "温度与燃烧实验场",
+  "description": "观察篝火加热干草、达到燃点后着火并继续向邻近干草传播热量。",
+  "capacity": 4,
+  "sceneComponents": [],
+  "actors": [
+    {
+      "id": "campfire-01",
+      "archetype": "campfire",
+      "localTransform": { "position": [0, 0, -1.5], "yaw": 0 }
+    },
+    {
+      "id": "dry-hay-01",
+      "archetype": "dry-hay",
+      "localTransform": { "position": [1.4, 0, -1.5], "yaw": 0.12 }
+    },
+    {
+      "id": "dry-hay-02",
+      "archetype": "dry-hay",
+      "localTransform": { "position": [2.65, 0, -1.5], "yaw": -0.18 }
+    },
+    {
+      "id": "dry-hay-03",
+      "archetype": "dry-hay",
+      "localTransform": { "position": [1.4, 0, -2.75], "yaw": 0.28 }
+    }
+  ],
+  "renderer": {
+    "type": "line-art",
+    "background": "#f8f2e6",
+    "fog": { "color": "#f8f2e6", "near": 24, "far": 58 },
+    "content": { "ground": true, "trees": false, "grass": false, "ocean": false },
+    "palette": {
+      "ground": "#eee3ce",
+      "grass": "#c9bd88",
+      "treeTrunk": "#d6bea3",
+      "treeNeedles": "#cbdcbc"
+    }
+  },
+  "gameplay": {
+    "playerActor": { "archetype": "player-slime" },
+    "bounds": { "minimumX": -10, "maximumX": 10, "minimumZ": -10, "maximumZ": 10 },
+    "spawn": { "centerX": 0, "centerZ": 4, "radius": 1.4, "slots": 4 }
+  },
+  "camera": {
+    "mode": "topdown",
+    "position": [0, 5.2, 13],
+    "yaw": 0,
+    "pitch": -0.2,
+    "moveSpeed": 6.5
+  }
+}

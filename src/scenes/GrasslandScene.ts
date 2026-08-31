@@ -28,7 +28,10 @@ import { DebugMenuPage } from '../ui/pages/DebugMenuPage';
 import { GameMenuPage } from '../ui/pages/GameMenuPage';
 import { RoomLobbyPage } from '../ui/pages/RoomLobbyPage';
 import { Scene, type SceneUIContext } from './Scene';
-import type { SceneSummary } from './data/SceneDefinition';
+import type {
+  ActorArchetypeDefinition,
+  SceneSummary,
+} from './data/SceneDefinition';
 
 export interface GrasslandSceneOptions extends SceneUIContext {
   canvas: HTMLCanvasElement;
@@ -92,6 +95,9 @@ export class GrasslandScene extends Scene {
       this.debugMenuPage.onRequestClose(() => this.commonUI.pop(this.debugMenuPage));
       this.debugMenuPage.onCollisionToggle((visible) => {
         this.renderer.setSimpleCollisionVisible(visible);
+      });
+      this.debugMenuPage.onTemperatureToggle((visible) => {
+        this.renderer.setTemperatureVisible(visible);
       });
       this.refreshDebugMenuShortcut();
     }
@@ -277,8 +283,20 @@ export class GrasslandScene extends Scene {
     this.actorInteractions.reset();
     this.renderer.loadScene(joined.scene, joined.room.worldSeed);
     this.flyController.configure(joined.scene.camera);
+    const playerArchetype = joined.scene.actorArchetypes.find(
+      (definition) => definition.id === joined.scene.gameplay.playerActor.archetypeId,
+    );
+    if (!playerArchetype) {
+      throw new Error(`场景缺少玩家 Actor 原型：${joined.scene.gameplay.playerActor.archetypeId}`);
+    }
+    this.remotePlayers.configure(playerArchetype);
     if (joined.scene.camera.mode === 'topdown') {
-      this.createPlayer(joined.player.id, joined.player.spawn, joined.scene.gameplay.bounds);
+      this.createPlayer(
+        joined.player.id,
+        joined.player.spawn,
+        joined.scene.gameplay.bounds,
+        playerArchetype,
+      );
     } else {
       this.controls.setPlayerController(undefined);
       this.remotePlayers.clear();
@@ -308,6 +326,7 @@ export class GrasslandScene extends Scene {
       return;
     }
     page.setCollisionVisible(this.renderer.isSimpleCollisionVisible);
+    page.setTemperatureVisible(this.renderer.isTemperatureVisible);
     this.commonUI.push(page);
   }
 
@@ -369,6 +388,7 @@ export class GrasslandScene extends Scene {
     playerId: string,
     spawn: { x: number; z: number },
     bounds: JoinedRoom['scene']['gameplay']['bounds'],
+    archetype: ActorArchetypeDefinition,
   ): void {
     if (this.player) return;
     this.player = new PlayerEntity(
@@ -378,6 +398,7 @@ export class GrasslandScene extends Scene {
       this.input,
       bounds,
       this.renderer,
+      archetype,
     );
     this.renderer.addWorldObject(this.player.object3D);
     this.controls.setPlayerController(this.player.controller);

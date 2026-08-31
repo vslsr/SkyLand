@@ -41,11 +41,20 @@ The current implementation demonstrates these roles:
 | `BuoyancyComponent` | Vessel mass, buoyancy parts, dynamic loads, damage and derived float state; dirty recalculation avoids unnecessary CPU work. |
 | `VesselMotorComponent` | Throttle/steering intent and authoritative speed integration. |
 | `ActorControlComponent` | Exclusive player owner, input/event sequences, timeout timestamps and revision. |
+| `PlayerMovementComponent` | Authoritative walk speed, sprint multiplier and maximum step height for dynamically spawned player Actors. |
 | `InteractableComponent` | Semantic action, label, enabled state and maximum DS interaction distance. |
 | `CargoComponent` | Cargo mass, carrier Actor id and carrier-local mount offset. |
 | `HazardComponent` | DS collision radius, damage/cooldown configuration and private per-vessel cooldown state. |
+| `TemperatureComponent` | Current/ambient temperature, heat capacity and cooling rate; server-owned and compactly replicated. |
+| `CombustibleComponent` | Ignition/extinguish thresholds, fuel, burn rate and the heat emitted while burning. |
+| `HeatEmitterComponent` | Stable server heat source such as a campfire; nearby queries are spatially bucketed. |
 | `ReplicationComponent` | Client-only applied snapshot revision. |
 | `ThreeObjectComponent` | Client-only authority root, inherited presentation root, model visual root ownership and subtree-safe disposal. |
+| `TemperatureMarkerComponent` | Client-only F8 world label; reuses one CanvasTexture per loaded temperature Actor and reads replicated temperature only. |
+
+Player Actors are selected by `gameplay.playerActor`, then created once per connection rather than placed
+in the scene's fixed `actors[]`. The DS stores them in `ActorWorld`; their high-frequency transform remains
+in the dedicated `players` snapshot so local prediction/reconciliation does not create a duplicate Replica.
 
 Create a new Component when the state is reusable and behavior can be selected by composition. Do not add an archetype switch to a global update loop when a System can query the required Component set.
 
@@ -103,6 +112,8 @@ When one action changes multiple Components, use one handler or shared mutation 
 - The replicated root receives Transform. Models expose a child `visualRoot` for shader waves, water bob, damage shake, selection effects and other presentation.
 - A free floating object may sample the same deterministic client wave function as the water surface. A carried object should inherit its carrier's visual bob/tilt while its DS root continues to follow the authoritative carrier mount.
 - Selection outlines and helpers are client resources: dispose their geometry/material when the target changes, its Actor disappears, or the scene is destroyed.
+- Fire geometry is transient presentation under `visualRoot`. The DS replicates thermal state; clients deform the reference-style `LineLoop` flames and never feed visual particles back into temperature authority.
+- Temperature debug labels are client-only world UI attached to the Actor authority root. Keep them hidden by default, face them toward the active camera only while enabled, and bound their resources to loaded temperature Actors rather than world area.
 
 ## Network channel rules
 

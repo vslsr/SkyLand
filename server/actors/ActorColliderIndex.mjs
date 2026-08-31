@@ -29,17 +29,33 @@ export class ActorColliderIndex {
     for (const actor of world.query(TRANSFORM_COMPONENT, SIMPLE_COLLISION_COMPONENT)) {
       this.live.add(actor.id);
       let instance = this.instances.get(actor.id);
-      if (!instance) {
+      if (!instance || instance.actor !== actor) {
         instance = {
           collision: actor.requireComponent(SIMPLE_COLLISION_COMPONENT),
           transform: actor.requireComponent(TRANSFORM_COMPONENT),
           layers: COLLISION_LAYER_SOLID,
           // 推出时要能认出「这是谁」，船才不会被自己或自己的货推走。
           actor,
+          publishedX: Number.NaN,
+          publishedY: Number.NaN,
+          publishedZ: Number.NaN,
+          publishedYaw: Number.NaN,
         };
         this.instances.set(actor.id, instance);
       }
-      collision.setDynamic(actor.id, instance);
+      const transform = instance.transform;
+      if (
+        transform.x !== instance.publishedX
+        || transform.y !== instance.publishedY
+        || transform.z !== instance.publishedZ
+        || transform.yaw !== instance.publishedYaw
+      ) {
+        collision.setDynamic(actor.id, instance);
+        instance.publishedX = transform.x;
+        instance.publishedY = transform.y;
+        instance.publishedZ = transform.z;
+        instance.publishedYaw = transform.yaw;
+      }
     }
     for (const actorId of Array.from(this.instances.keys())) {
       if (this.live.has(actorId)) continue;

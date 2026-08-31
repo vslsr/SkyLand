@@ -102,6 +102,29 @@ export type ActorRenderDefinition =
       width: number;
       length: number;
       height: number;
+    }
+  | {
+      model: 'line-art-campfire';
+      stoneColor: string;
+      woodColor: string;
+      emberColor: string;
+      radius: number;
+      height: number;
+    }
+  | {
+      model: 'line-art-dry-hay';
+      color: string;
+      accentColor: string;
+      radius: number;
+      height: number;
+    }
+  | {
+      model: 'line-art-wood-pile';
+      woodColor: string;
+      cutColor: string;
+      inkColor: string;
+      radius: number;
+      height: number;
     };
 
 export interface ActorArchetypeDefinition {
@@ -131,7 +154,7 @@ export interface ActorArchetypeDefinition {
       inputTimeoutMs: number;
     };
     interactable?: {
-      action: 'cargo-toggle' | 'mushroom-bite';
+      action: 'cargo-toggle' | 'mushroom-bite' | 'pickup-stack';
       label: string;
       maximumDistance: number;
     };
@@ -153,6 +176,44 @@ export interface ActorArchetypeDefinition {
       cooldownMs: number;
       partId: string;
     };
+    temperature?: {
+      initialTemperature: number;
+      ambientTemperature: number;
+      heatCapacity: number;
+      coolingRate: number;
+    };
+    combustible?: {
+      ignitionTemperature: number;
+      extinguishTemperature: number;
+      fuel: number;
+      burnRate: number;
+      heatOutput: number;
+      heatRadius: number;
+    };
+    heatEmitter?: {
+      power: number;
+      radius: number;
+      enabled: boolean;
+    };
+    itemStack?: {
+      itemType: string;
+      displayName: string;
+      defaultQuantity: number;
+      maximumQuantity: number;
+      compatibilityKey: string;
+    };
+    actorResidency?: {
+      sleepDelaySeconds: number;
+      dormantDelaySeconds: number;
+      dormantEligible: boolean;
+    };
+    dropMotion?: {
+      gravity: number;
+      drag: number;
+      settleSpeed: number;
+    };
+    lifetime?: { lifetimeSeconds: number };
+    replicationPolicy?: { mode: 'always' | 'aoi'; radiusChunks: number };
     render: ActorRenderDefinition;
   };
 }
@@ -220,6 +281,7 @@ export interface SceneDefinition extends SceneSummary {
   };
   gameplay: {
     playerActor: { archetypeId: string };
+    runtimeActorArchetypes?: string[];
     bounds: SceneBounds;
     spawn: { centerX: number; centerZ: number; radius: number; slots: number };
     water?: { seaLevel: number };

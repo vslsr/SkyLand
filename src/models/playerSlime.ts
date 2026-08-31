@@ -24,7 +24,7 @@ export interface PlayerSlimeModel extends ActorVisualModel {
   radius: number;
 }
 
-export type SlimeColor = THREE.Color | number;
+export type SlimeColor = THREE.Color | number | string;
 
 export interface SlimePalette {
   membrane: SlimeColor;

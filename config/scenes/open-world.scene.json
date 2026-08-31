@@ -5,8 +5,29 @@
   "displayName": "无边草原",
   "description": "由世界种子确定性生成、按 chunk 流式加载的 512 米大世界。",
   "capacity": 16,
-  "sceneComponents": [],
-  "actors": [],
+  "sceneComponents": [
+    {
+      "type": "interactive-particle-effect",
+      "id": "grassland-leaves",
+      "preset": "line-art-leaves",
+      "position": [0, 0, 1.5],
+      "particleCount": 180,
+      "radius": 8,
+      "seed": 139732,
+      "fillColor": "#d6a45b",
+      "accentColor": "#bd7041",
+      "lineColor": "#493426",
+      "interactionRadius": 0.9,
+      "impulseStrength": 3.4
+    }
+  ],
+  "actors": [
+    {
+      "id": "elastic-mushroom-01",
+      "archetype": "elastic-mushroom",
+      "localTransform": { "position": [0, 0, 5], "yaw": -0.18 }
+    }
+  ],
   "renderer": {
     "type": "line-art",
     "background": "#fdfbf6",
@@ -26,6 +47,7 @@
   },
   "gameplay": {
     "playerActor": { "archetype": "player-slime" },
+    "runtimeActorArchetypes": ["wood-pile"],
     "bounds": { "minimumX": -192, "maximumX": 192, "minimumZ": -192, "maximumZ": 192 },
     "spawn": { "centerX": 0, "centerZ": 0, "radius": 6, "slots": 16 }
   },

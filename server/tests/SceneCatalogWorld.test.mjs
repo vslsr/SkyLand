@@ -37,6 +37,7 @@ function createSceneFile(overrides = {}) {
       ...overrides.renderer,
     },
     gameplay: {
+      playerActor: { archetype: 'player-slime' },
       bounds: { minimumX: -192, maximumX: 192, minimumZ: -192, maximumZ: 192 },
       spawn: { centerX: 0, centerZ: 0, radius: 6, slots: 8 },
       ...overrides.gameplay,
@@ -121,6 +122,20 @@ test('能力实验室组件必须引用场景内的训练假人 Actor', async ()
   }];
   wrongModel.sceneComponents = [{ type: 'ability-lab', targetActorId: 'wrong-target' }];
   await assert.rejects(loadSingleScene(wrongModel), /需要 line-art-training-dummy render/);
+});
+
+test('玩家 Actor 必须使用动态玩家原型，不能作为固定 Actor 摆放', async () => {
+  const wrongArchetype = createSceneFile();
+  wrongArchetype.gameplay.playerActor = { archetype: 'deck-prop' };
+  await assert.rejects(loadSingleScene(wrongArchetype), /需要 playerMovement/);
+
+  const placedPlayer = createSceneFile();
+  placedPlayer.actors = [{
+    id: 'placed-player',
+    archetype: 'player-slime',
+    localTransform: { position: [0, 0, 0], yaw: 0 },
+  }];
+  await assert.rejects(loadSingleScene(placedPlayer), /玩家由 gameplay\.playerActor 按连接动态创建/);
 });
 
 test('Actor 父节点可后声明，且子节点坐标按局部 Transform 保留', async () => {

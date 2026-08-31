@@ -1,0 +1,20 @@
+{
+  "$schema": "./actor.schema.json",
+  "schemaVersion": 1,
+  "id": "campfire",
+  "components": {
+    "heatEmitter": {
+      "power": 520,
+      "radius": 3.2,
+      "enabled": true
+    },
+    "render": {
+      "model": "line-art-campfire",
+      "stoneColor": "#c8c0b2",
+      "woodColor": "#79513a",
+      "emberColor": "#c95d32",
+      "radius": 0.65,
+      "height": 0.45
+    }
+  }
+}

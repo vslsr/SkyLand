@@ -12,8 +12,12 @@ export class RoomConnectionHub {
     this.roomManager = roomManager;
     this.sessions = new Set();
 
-    this.handleSnapshot = (roomId, snapshot) => {
-      this.broadcastToRoom(roomId, { type: 'room:snapshot', snapshot }, 'realtime');
+    this.handleSnapshot = (roomId, snapshot, playerId) => {
+      if (playerId) {
+        this.sendToPlayer(roomId, playerId, { type: 'room:snapshot', snapshot }, 'realtime');
+      } else {
+        this.broadcastToRoom(roomId, { type: 'room:snapshot', snapshot }, 'realtime');
+      }
     };
     this.handleSummary = (room) => {
       this.broadcastToRoom(room.id, { type: 'room:summary', room }, 'control');
@@ -139,6 +143,14 @@ export class RoomConnectionHub {
   broadcastToRoom(roomId, message, channel) {
     for (const session of this.sessions) {
       if (session.roomId === roomId) this.send(session, message, channel);
+    }
+  }
+
+  sendToPlayer(roomId, playerId, message, channel) {
+    for (const session of this.sessions) {
+      if (session.roomId === roomId && session.playerId === playerId) {
+        this.send(session, message, channel);
+      }
     }
   }
 

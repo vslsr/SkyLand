@@ -83,7 +83,7 @@ export function createLineArtScene(
     scene.add(ocean.root);
     visualSystems.push(ocean);
   }
-  if (definition.actors.length > 0) {
+  if (definition.actors.length > 0 || (definition.gameplay.runtimeActorArchetypes?.length ?? 0) > 0) {
     const actors = new ClientActorSystem({ definition, environment, collision: collisionWorld });
     scene.add(actors.root);
     visualSystems.push(actors);

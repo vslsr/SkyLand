@@ -142,7 +142,11 @@ export class CollisionWorld {
    * 只是候选集合由网格给出而不是整份碰撞体列表——推出手感一个字节都没变。
    * @param {{ x: number, z: number }} point
    * @param {number} radius
-   * @param {{ accept?: (instance: object) => boolean, layers?: number }} [options]
+   * @param {{
+   *   accept?: (instance: object) => boolean,
+   *   layers?: number,
+   *   verticalProfile?: { minimumY: number, maximumY: number, maximumStepHeight?: number },
+   * }} [options]
    * @returns {{ x: number, z: number }}
    */
   resolveCircle(point, radius, options = {}) {
@@ -163,7 +167,12 @@ export class CollisionWorld {
     if (candidates.length === 0) {
       return { x: finiteNumber(point.x), z: finiteNumber(point.z) };
     }
-    return resolveCircleAgainstSimpleCollisions(point, safeRadius, candidates);
+    return resolveCircleAgainstSimpleCollisions(
+      point,
+      safeRadius,
+      candidates,
+      options.verticalProfile,
+    );
   }
 
   /**

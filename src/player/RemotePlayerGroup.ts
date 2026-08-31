@@ -1,12 +1,14 @@
 import * as THREE from 'three';
 import type { GrassInteractionTarget } from '../grass';
 import type { InterpolatedPlayerState } from '../network/protocol';
+import type { ActorArchetypeDefinition } from '../scenes/data/SceneDefinition';
 import { RemotePlayer } from './RemotePlayer';
 
 /** 远端玩家集合：按快照增删改，本地玩家由 PlayerEntity 单独负责。 */
 export class RemotePlayerGroup {
   public readonly root = new THREE.Group();
   private readonly players = new Map<string, RemotePlayer>();
+  private archetype?: ActorArchetypeDefinition;
 
   public constructor(private readonly grassInteraction: GrassInteractionTarget) {
     this.root.name = 'remote-players';
@@ -16,7 +18,14 @@ export class RemotePlayerGroup {
     return this.players.size;
   }
 
+  public configure(archetype: ActorArchetypeDefinition): void {
+    if (this.archetype?.id !== archetype.id) this.clear();
+    this.archetype = archetype;
+  }
+
   public sync(states: InterpolatedPlayerState[], localPlayerId?: string): void {
+    const archetype = this.archetype;
+    if (!archetype) return;
     const seen = new Set<string>();
 
     for (const state of states) {
@@ -27,7 +36,7 @@ export class RemotePlayerGroup {
         existing.applyState(state);
         continue;
       }
-      const created = new RemotePlayer(state, this.grassInteraction);
+      const created = new RemotePlayer(state, this.grassInteraction, archetype);
       this.players.set(state.id, created);
       this.root.add(created.object3D);
     }

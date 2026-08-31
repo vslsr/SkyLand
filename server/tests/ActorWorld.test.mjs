@@ -36,6 +36,22 @@ test('ActorWorld 管理 Component 的完整生命周期与组合查询', () => {
   assert.equal(world.size, 0);
 });
 
+test('ActorWorld 的组合查询缓存会随运行时 Component 变化失效', () => {
+  const world = new ActorWorld();
+  const actor = new Actor('indexed-actor', 'probe');
+  actor.addComponent(new TransformComponent());
+  world.addActor(actor);
+
+  const first = world.query('transform');
+  assert.equal(world.query('transform'), first);
+  assert.deepEqual(world.query('transform', 'lifecycle'), []);
+
+  actor.addComponent(new LifecycleComponent([]));
+  assert.deepEqual(world.query('transform', 'lifecycle'), [actor]);
+  actor.removeComponent('lifecycle');
+  assert.deepEqual(world.query('transform', 'lifecycle'), []);
+});
+
 test('System 更新期间增删 Actor 会延迟到本轮结束', () => {
   const world = new ActorWorld();
   const first = new Actor('first', 'test');

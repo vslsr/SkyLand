@@ -4,6 +4,10 @@ import * as THREE from 'three';
 import {
   BUOYANCY_COMPONENT,
   type BuoyancyComponent,
+  COMBUSTIBLE_COMPONENT,
+  type CombustibleComponent,
+  ITEM_STACK_COMPONENT,
+  type ItemStackComponent,
   SIMPLE_COLLISION_COMPONENT,
   type SimpleCollisionComponent,
   TRANSFORM_COMPONENT,
@@ -14,6 +18,14 @@ import {
   THREE_OBJECT_COMPONENT,
   type ThreeObjectComponent,
 } from '../src/actors/components/ThreeObjectComponent';
+import {
+  FIRE_VISUAL_COMPONENT,
+  type FireVisualComponent,
+} from '../src/actors/components/FireVisualComponent';
+import {
+  TEMPERATURE_MARKER_COMPONENT,
+  type TemperatureMarkerComponent,
+} from '../src/actors/components/TemperatureMarkerComponent';
 import type { SnapshotActor } from '../src/network/protocol';
 import type { SceneDefinition } from '../src/scenes/data/SceneDefinition';
 
@@ -121,6 +133,75 @@ const floorPlaqueArchetype: SceneDefinition['actorArchetypes'][number] = {
   },
 };
 
+const campfireArchetype: SceneDefinition['actorArchetypes'][number] = {
+  schemaVersion: 1,
+  id: 'campfire',
+  components: {
+    heatEmitter: { power: 520, radius: 3.2, enabled: true },
+    render: {
+      model: 'line-art-campfire',
+      stoneColor: '#c8c0b2',
+      woodColor: '#79513a',
+      emberColor: '#c95d32',
+      radius: 0.65,
+      height: 0.45,
+    },
+  },
+};
+
+const dryHayArchetype: SceneDefinition['actorArchetypes'][number] = {
+  schemaVersion: 1,
+  id: 'dry-hay',
+  components: {
+    temperature: {
+      initialTemperature: 20,
+      ambientTemperature: 20,
+      heatCapacity: 10,
+      coolingRate: 0.08,
+    },
+    combustible: {
+      ignitionTemperature: 75,
+      extinguishTemperature: 45,
+      fuel: 60,
+      burnRate: 0.5,
+      heatOutput: 340,
+      heatRadius: 2.2,
+    },
+    render: {
+      model: 'line-art-dry-hay',
+      color: '#d6b765',
+      accentColor: '#846438',
+      radius: 0.45,
+      height: 0.72,
+    },
+  },
+};
+
+const woodPileArchetype: SceneDefinition['actorArchetypes'][number] = {
+  schemaVersion: 1,
+  id: 'wood-pile',
+  components: {
+    interactable: { action: 'pickup-stack', label: '木材', maximumDistance: 2.4 },
+    itemStack: {
+      itemType: 'wood', displayName: '木材', defaultQuantity: 1,
+      maximumQuantity: 999, compatibilityKey: 'wood-standard',
+    },
+    actorResidency: { sleepDelaySeconds: 1, dormantDelaySeconds: 3, dormantEligible: true },
+    dropMotion: { gravity: 9.8, drag: 5, settleSpeed: 0.08 },
+    lifetime: { lifetimeSeconds: 900 },
+    replicationPolicy: { mode: 'aoi', radiusChunks: 2 },
+    temperature: { initialTemperature: 20, ambientTemperature: 20, heatCapacity: 8, coolingRate: 0.18 },
+    combustible: {
+      ignitionTemperature: 260, extinguishTemperature: 180, fuel: 90,
+      burnRate: 1.2, heatOutput: 110, heatRadius: 2.2,
+    },
+    render: {
+      model: 'line-art-wood-pile', woodColor: '#b98558', cutColor: '#e6c89c',
+      inkColor: '#51463e', radius: 0.55, height: 0.38,
+    },
+  },
+};
+
 const definition = {
   schemaVersion: 1,
   id: 'water',
@@ -140,6 +221,9 @@ const definition = {
     trainingDummyArchetype,
     focusObeliskArchetype,
     floorPlaqueArchetype,
+    campfireArchetype,
+    dryHayArchetype,
+    woodPileArchetype,
   ],
   renderer: {
     type: 'line-art',
@@ -150,6 +234,7 @@ const definition = {
     ocean,
   },
   gameplay: {
+    playerActor: { archetypeId: 'player-slime' },
     bounds: { minimumX: -10, maximumX: 10, minimumZ: -10, maximumZ: 10 },
     spawn: { centerX: 0, centerZ: 0, radius: 0, slots: 8 },
     water: { seaLevel: 0 },
@@ -412,4 +497,129 @@ test('客户端离散恢复父子关系，并只插值子 Actor 的权威世界�
   system.update(0, 1.5);
   assert.equal(system.getActor(child.id), undefined);
   assert.equal(childGeometryDisposeCount, 1);
+});
+
+test('客户端按权威燃烧状态显示参考 LineLoop 火焰，稳定篝火始终可见', () => {
+  let now = 1_000;
+  const system = new ClientActorSystem({
+    definition,
+    environment: { fogColor: '#ffffff', fogNear: 20, fogFar: 60 },
+    now: () => now,
+  });
+  const campfire: SnapshotActor = {
+    id: 'campfire-01',
+    archetypeId: 'campfire',
+    revision: 0,
+    transform: { x: 0, y: 0, z: -1.5, yaw: 0 },
+  };
+  const coldHay: SnapshotActor = {
+    id: 'dry-hay-01',
+    archetypeId: 'dry-hay',
+    revision: 0,
+    transform: { x: 1.4, y: 0, z: -1.5, yaw: 0 },
+    thermal: { temperature: 20, burning: false, fuelRatio: 1, revision: 0 },
+  };
+  system.syncSnapshots([campfire, coldHay], 1_000, 1_000);
+  system.update(1 / 60, 0.5);
+
+  const campfireFire = system.getActor(campfire.id)!
+    .requireComponent(FIRE_VISUAL_COMPONENT) as FireVisualComponent;
+  const hayActor = system.getActor(coldHay.id)!;
+  const hayFire = hayActor.requireComponent(FIRE_VISUAL_COMPONENT) as FireVisualComponent;
+  const temperatureMarker = hayActor.requireComponent(
+    TEMPERATURE_MARKER_COMPONENT,
+  ) as TemperatureMarkerComponent;
+  assert.equal(campfireFire.rig.root.visible, true);
+  assert.equal(hayFire.rig.root.visible, false);
+  assert.equal(temperatureMarker.visible, false);
+  assert.equal(temperatureMarker.label, '');
+  assert.equal(campfireFire.rig.flames.length, 5);
+  assert.equal(campfireFire.rig.sparks.length, 6);
+
+  system.setTemperatureVisible(true);
+  assert.equal(temperatureMarker.visible, true);
+  assert.equal(temperatureMarker.label, '20.0 °C');
+  assert.ok(hayActor.requireComponent(THREE_OBJECT_COMPONENT)
+    .root.getObjectByName('actor-temperature-marker'));
+  const camera = new THREE.PerspectiveCamera();
+  camera.position.set(3, 4, 7);
+  system.beforeRender({} as THREE.WebGLRenderer, camera);
+
+  const burningHay: SnapshotActor = {
+    ...coldHay,
+    revision: 4,
+    thermal: { temperature: 78.4, burning: true, fuelRatio: 0.99, revision: 4 },
+  };
+  now = 1_100;
+  system.syncSnapshots([campfire, burningHay], 1_100, 1_100);
+  now = 1_230;
+  system.update(0.1, 0.6);
+
+  const combustible = hayActor.requireComponent(COMBUSTIBLE_COMPONENT) as CombustibleComponent;
+  assert.equal(combustible.burning, true);
+  assert.equal(hayFire.rig.root.visible, true);
+  assert.equal(temperatureMarker.label, '78.4 °C');
+  assert.equal(hayFire.rig.flames.length, 4);
+  assert.equal(hayFire.rig.sparks.length, 4);
+  const flameTop = Math.max(...hayFire.rig.flames.map((flame) => (
+    hayFire.rig.root.position.y
+      + (flame.y + flame.height) * hayFire.rig.root.scale.y
+  )));
+  assert.ok(flameTop > dryHayArchetype.components.render.height);
+  const flameOrigins = hayFire.rig.flames.map((flame) => (
+    new THREE.Vector3(flame.x, flame.y, flame.z)
+  ));
+  let minimumOriginDistance = Number.POSITIVE_INFINITY;
+  for (let left = 0; left < flameOrigins.length; left += 1) {
+    for (let right = left + 1; right < flameOrigins.length; right += 1) {
+      minimumOriginDistance = Math.min(
+        minimumOriginDistance,
+        flameOrigins[left].distanceTo(flameOrigins[right]),
+      );
+    }
+  }
+  assert.ok(minimumOriginDistance > dryHayArchetype.components.render.radius * 0.22);
+  const positions = hayFire.rig.flames[0].position.array as Float32Array;
+  assert.ok(positions.some((value) => Math.abs(value) > 1e-5));
+  system.setTemperatureVisible(false);
+  assert.equal(temperatureMarker.visible, false);
+  system.dispose();
+});
+
+test('高数量物品 Actor 保留交互与碰撞身份，但用批次绘制而没有独立 Object3D', () => {
+  const system = new ClientActorSystem({
+    definition,
+    environment: { fogColor: '#ffffff', fogNear: 20, fogFar: 60 },
+    now: () => 1_000,
+  });
+  const wood: SnapshotActor = {
+    id: 'drop-1',
+    archetypeId: 'wood-pile',
+    revision: 2,
+    transform: { x: 1, y: 0, z: 2, yaw: 0.2 },
+    interactable: { action: 'pickup-stack', label: '木材', enabled: true, revision: 0 },
+    itemStack: { itemType: 'wood', displayName: '木材', quantity: 12, maximumQuantity: 999, revision: 1 },
+    residency: { state: 'sleeping', revision: 1 },
+    thermal: { temperature: 20, burning: false, fuelRatio: 1, revision: 0 },
+  };
+  system.syncSnapshots([wood], 1_000, 1_000);
+  system.update(0, 0);
+
+  const actor = system.getActor(wood.id)!;
+  assert.equal(actor.getComponent(THREE_OBJECT_COMPONENT), undefined);
+  assert.equal((actor.requireComponent(ITEM_STACK_COMPONENT) as ItemStackComponent).quantity, 12);
+  assert.ok(actor.getComponent(SIMPLE_COLLISION_COMPONENT));
+  assert.equal(system.findNearbyInteractableActor({ x: 1, z: 2 })?.quantity, 12);
+
+  const batchRoot = system.root.getObjectByName('high-count-actor-batches')!;
+  const fills: THREE.InstancedMesh[] = [];
+  const outlines: THREE.LineSegments[] = [];
+  batchRoot.traverse((object) => {
+    if ((object as THREE.InstancedMesh).isInstancedMesh) fills.push(object as THREE.InstancedMesh);
+    if ((object as THREE.LineSegments).isLineSegments) outlines.push(object as THREE.LineSegments);
+  });
+  assert.equal(fills.length, 1);
+  assert.equal(fills[0].count, 1);
+  assert.equal(outlines.length, 1);
+  system.dispose();
 });

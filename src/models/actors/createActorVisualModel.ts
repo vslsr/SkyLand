@@ -9,6 +9,9 @@ import { createFloorPlaqueModel } from './createFloorPlaqueModel';
 import { createFocusObeliskModel } from './createFocusObeliskModel';
 import { createTrainingDummyModel } from './createTrainingDummyModel';
 import { createPlayerSlimeModel } from '../playerSlime';
+import { createCampfireModel } from './createCampfireModel';
+import { createDryHayModel } from './createDryHayModel';
+import { createWoodPileModel } from './createWoodPileModel';
 
 export function createActorVisualModel(
   environment: FillMaterialEnvironment,
@@ -34,6 +37,15 @@ export function createActorVisualModel(
   }
   if (definition.model === 'line-art-floor-plaque') {
     return createFloorPlaqueModel(environment, definition);
+  }
+  if (definition.model === 'line-art-campfire') {
+    return createCampfireModel(environment, definition);
+  }
+  if (definition.model === 'line-art-dry-hay') {
+    return createDryHayModel(environment, definition);
+  }
+  if (definition.model === 'line-art-wood-pile') {
+    return createWoodPileModel(environment, definition);
   }
   return createReefModel(environment, definition);
 }

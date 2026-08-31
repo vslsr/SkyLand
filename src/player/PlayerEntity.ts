@@ -1,13 +1,22 @@
 import type * as THREE from 'three';
-import { Actor } from '../../shared/actor/Actor.mjs';
+import {
+  Actor,
+  PlayerMovementComponent,
+} from '../../shared/actor/index.mjs';
 import {
   GrassDisplacementComponent,
 } from '../actors/components/GrassDisplacementComponent';
 import { TopDownController } from '../controllers/TopDownController';
 import type { GrassInteractionTarget } from '../grass';
 import type { InputSubsystem } from '../input/index';
-import type { SceneBounds } from '../scenes/data/SceneDefinition';
-import { createPlayerSlimeModel } from '../models/playerSlime';
+import type {
+  ActorArchetypeDefinition,
+  SceneBounds,
+} from '../scenes/data/SceneDefinition';
+import {
+  createPlayerSlimeModel,
+  type PlayerSlimeModel,
+} from '../models/playerSlime';
 import { PlayerReconciler } from './PlayerReconciler';
 import { SlimeAnimator } from './SlimeAnimator';
 
@@ -15,6 +24,8 @@ interface PlayerWorldInteraction extends GrassInteractionTarget {
   resolveSimpleCollision?(
     position: { x: number; z: number },
     radius: number,
+    maximumStepHeight: number,
+    moverHeight: number,
   ): { x: number; z: number };
   /** 第三人称相机悬臂的遮挡探针，见 SceneRenderer.sweepCameraProbe。 */
   sweepCameraProbe?(
@@ -25,9 +36,9 @@ interface PlayerWorldInteraction extends GrassInteractionTarget {
 }
 
 export class PlayerEntity extends Actor {
-  public readonly model = createPlayerSlimeModel();
+  public readonly model: PlayerSlimeModel;
   public readonly controller: TopDownController;
-  private readonly animator = new SlimeAnimator(this.model);
+  private readonly animator: SlimeAnimator;
   private readonly reconciler = new PlayerReconciler();
   private readonly grassDisplacement: GrassDisplacementComponent;
 
@@ -38,8 +49,17 @@ export class PlayerEntity extends Actor {
     input: InputSubsystem,
     bounds: SceneBounds,
     grassInteraction: PlayerWorldInteraction,
+    archetype: ActorArchetypeDefinition,
   ) {
-    super(playerId, 'player-slime');
+    super(playerId, archetype.id);
+    if (!archetype.components.playerMovement || archetype.components.render.model !== 'line-art-player-slime') {
+      throw new Error(`玩家 Actor 原型无效：${archetype.id}`);
+    }
+    const movement = this.addComponent(new PlayerMovementComponent(
+      archetype.components.playerMovement,
+    )) as PlayerMovementComponent;
+    this.model = createPlayerSlimeModel(archetype.components.render);
+    this.animator = new SlimeAnimator(this.model, movement.walkSpeed);
     const cameraProbe = grassInteraction.sweepCameraProbe?.bind(grassInteraction);
     this.model.root.name = 'local-player-slime';
     this.model.root.position.set(spawn.x, 0, spawn.z);
@@ -47,8 +67,14 @@ export class PlayerEntity extends Actor {
       enabled: false,
       bounds,
       collisionRadius: this.model.radius,
+      movement,
       resolveCollision: (position, radius) => (
-        grassInteraction.resolveSimpleCollision?.(position, radius) ?? position
+        grassInteraction.resolveSimpleCollision?.(
+          position,
+          radius,
+          movement.maximumStepHeight,
+          this.model.radius * 2,
+        ) ?? position
       ),
       cameraProbe,
     });

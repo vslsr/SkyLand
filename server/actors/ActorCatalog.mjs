@@ -112,8 +112,8 @@ function validatePlayerMovement(raw, filename) {
 function validateInteractable(raw, filename) {
   const path = `${filename}.components.interactable`;
   const definition = requireObject(raw, path);
-  if (definition.action !== 'cargo-toggle' && definition.action !== 'mushroom-bite') {
-    throw new TypeError(`${path}.action 暂只支持 cargo-toggle 或 mushroom-bite`);
+  if (!['cargo-toggle', 'mushroom-bite', 'pickup-stack'].includes(definition.action)) {
+    throw new TypeError(`${path}.action 暂只支持 cargo-toggle、mushroom-bite 或 pickup-stack`);
   }
   return {
     action: definition.action,
@@ -165,6 +165,114 @@ function validateHazard(raw, filename) {
     cooldownMs,
     partId: requireId(definition.partId, `${path}.partId`),
   };
+}
+
+function validateTemperature(raw, filename) {
+  const path = `${filename}.components.temperature`;
+  const definition = requireObject(raw, path);
+  return {
+    initialTemperature: requireNumber(definition.initialTemperature, `${path}.initialTemperature`, -100, 2000),
+    ambientTemperature: requireNumber(definition.ambientTemperature, `${path}.ambientTemperature`, -100, 2000),
+    heatCapacity: requireNumber(definition.heatCapacity, `${path}.heatCapacity`, Number.EPSILON, 10_000),
+    coolingRate: requireNumber(definition.coolingRate, `${path}.coolingRate`, 0, 10),
+  };
+}
+
+function validateCombustible(raw, filename) {
+  const path = `${filename}.components.combustible`;
+  const definition = requireObject(raw, path);
+  const ignitionTemperature = requireNumber(
+    definition.ignitionTemperature,
+    `${path}.ignitionTemperature`,
+    -100,
+    2000,
+  );
+  const extinguishTemperature = requireNumber(
+    definition.extinguishTemperature,
+    `${path}.extinguishTemperature`,
+    -100,
+    2000,
+  );
+  if (extinguishTemperature >= ignitionTemperature) {
+    throw new TypeError(`${path}.extinguishTemperature 必须小于 ignitionTemperature`);
+  }
+  return {
+    ignitionTemperature,
+    extinguishTemperature,
+    fuel: requireNumber(definition.fuel, `${path}.fuel`, Number.EPSILON, 100_000),
+    burnRate: requireNumber(definition.burnRate, `${path}.burnRate`, Number.EPSILON, 10_000),
+    heatOutput: requireNumber(definition.heatOutput, `${path}.heatOutput`, Number.EPSILON, 100_000),
+    heatRadius: requireNumber(definition.heatRadius, `${path}.heatRadius`, Number.EPSILON, 32),
+  };
+}
+
+function validateHeatEmitter(raw, filename) {
+  const path = `${filename}.components.heatEmitter`;
+  const definition = requireObject(raw, path);
+  if (typeof definition.enabled !== 'boolean') throw new TypeError(`${path}.enabled 必须是布尔值`);
+  return {
+    power: requireNumber(definition.power, `${path}.power`, Number.EPSILON, 100_000),
+    radius: requireNumber(definition.radius, `${path}.radius`, Number.EPSILON, 32),
+    enabled: definition.enabled,
+  };
+}
+
+function validateItemStack(raw, filename) {
+  const path = `${filename}.components.itemStack`;
+  const definition = requireObject(raw, path);
+  const defaultQuantity = requireNumber(definition.defaultQuantity, `${path}.defaultQuantity`, 1, 100_000);
+  const maximumQuantity = requireNumber(definition.maximumQuantity, `${path}.maximumQuantity`, 1, 100_000);
+  if (!Number.isInteger(defaultQuantity) || !Number.isInteger(maximumQuantity)) {
+    throw new TypeError(`${path} 的数量必须是整数`);
+  }
+  if (defaultQuantity > maximumQuantity) throw new TypeError(`${path}.defaultQuantity 不能超过 maximumQuantity`);
+  return {
+    itemType: requireId(definition.itemType, `${path}.itemType`),
+    displayName: requireString(definition.displayName, `${path}.displayName`, 32),
+    defaultQuantity,
+    maximumQuantity,
+    compatibilityKey: requireId(definition.compatibilityKey, `${path}.compatibilityKey`),
+  };
+}
+
+function validateActorResidency(raw, filename) {
+  const path = `${filename}.components.actorResidency`;
+  const definition = requireObject(raw, path);
+  if (typeof definition.dormantEligible !== 'boolean') {
+    throw new TypeError(`${path}.dormantEligible 必须是布尔值`);
+  }
+  return {
+    sleepDelaySeconds: requireNumber(definition.sleepDelaySeconds, `${path}.sleepDelaySeconds`, 0, 60),
+    dormantDelaySeconds: requireNumber(definition.dormantDelaySeconds, `${path}.dormantDelaySeconds`, 0, 600),
+    dormantEligible: definition.dormantEligible,
+  };
+}
+
+function validateDropMotion(raw, filename) {
+  const path = `${filename}.components.dropMotion`;
+  const definition = requireObject(raw, path);
+  return {
+    gravity: requireNumber(definition.gravity, `${path}.gravity`, 0, 50),
+    drag: requireNumber(definition.drag, `${path}.drag`, 0, 50),
+    settleSpeed: requireNumber(definition.settleSpeed, `${path}.settleSpeed`, Number.EPSILON, 10),
+  };
+}
+
+function validateLifetime(raw, filename) {
+  const path = `${filename}.components.lifetime`;
+  const definition = requireObject(raw, path);
+  return { lifetimeSeconds: requireNumber(definition.lifetimeSeconds, `${path}.lifetimeSeconds`, 0, 86_400) };
+}
+
+function validateReplicationPolicy(raw, filename) {
+  const path = `${filename}.components.replicationPolicy`;
+  const definition = requireObject(raw, path);
+  if (definition.mode !== 'always' && definition.mode !== 'aoi') {
+    throw new TypeError(`${path}.mode 必须是 always 或 aoi`);
+  }
+  const radiusChunks = requireNumber(definition.radiusChunks, `${path}.radiusChunks`, 0, 8);
+  if (!Number.isInteger(radiusChunks)) throw new TypeError(`${path}.radiusChunks 必须是整数`);
+  return { mode: definition.mode, radiusChunks };
 }
 
 function validateRender(raw, filename) {
@@ -247,6 +355,35 @@ function validateRender(raw, filename) {
       height: requireNumber(render.height, `${path}.height`, Number.EPSILON, 1),
     };
   }
+  if (render.model === 'line-art-campfire') {
+    return {
+      model: render.model,
+      stoneColor: requireColor(render.stoneColor, `${path}.stoneColor`),
+      woodColor: requireColor(render.woodColor, `${path}.woodColor`),
+      emberColor: requireColor(render.emberColor, `${path}.emberColor`),
+      radius: requireNumber(render.radius, `${path}.radius`, Number.EPSILON, 3),
+      height: requireNumber(render.height, `${path}.height`, Number.EPSILON, 3),
+    };
+  }
+  if (render.model === 'line-art-dry-hay') {
+    return {
+      model: render.model,
+      color: requireColor(render.color, `${path}.color`),
+      accentColor: requireColor(render.accentColor, `${path}.accentColor`),
+      radius: requireNumber(render.radius, `${path}.radius`, Number.EPSILON, 3),
+      height: requireNumber(render.height, `${path}.height`, Number.EPSILON, 3),
+    };
+  }
+  if (render.model === 'line-art-wood-pile') {
+    return {
+      model: render.model,
+      woodColor: requireColor(render.woodColor, `${path}.woodColor`),
+      cutColor: requireColor(render.cutColor, `${path}.cutColor`),
+      inkColor: requireColor(render.inkColor, `${path}.inkColor`),
+      radius: requireNumber(render.radius, `${path}.radius`, Number.EPSILON, 3),
+      height: requireNumber(render.height, `${path}.height`, Number.EPSILON, 3),
+    };
+  }
   throw new TypeError(`${path}.model 不受支持：${render.model}`);
 }
 
@@ -262,6 +399,14 @@ function validateActorArchetype(raw, filename) {
     'cargo',
     'elasticTether',
     'hazard',
+    'temperature',
+    'combustible',
+    'heatEmitter',
+    'itemStack',
+    'actorResidency',
+    'dropMotion',
+    'lifetime',
+    'replicationPolicy',
     'render',
   ]);
   for (const componentName of Object.keys(components)) {
@@ -294,6 +439,45 @@ function validateActorArchetype(raw, filename) {
   if (render.model === 'line-art-player-slime' && !playerMovement) {
     throw new TypeError(`${filename}.components.render line-art-player-slime 需要 playerMovement`);
   }
+  const temperature = components.temperature
+    ? validateTemperature(components.temperature, filename)
+    : undefined;
+  const combustible = components.combustible
+    ? validateCombustible(components.combustible, filename)
+    : undefined;
+  const heatEmitter = components.heatEmitter
+    ? validateHeatEmitter(components.heatEmitter, filename)
+    : undefined;
+  const itemStack = components.itemStack ? validateItemStack(components.itemStack, filename) : undefined;
+  const actorResidency = components.actorResidency
+    ? validateActorResidency(components.actorResidency, filename)
+    : undefined;
+  const dropMotion = components.dropMotion ? validateDropMotion(components.dropMotion, filename) : undefined;
+  const lifetime = components.lifetime ? validateLifetime(components.lifetime, filename) : undefined;
+  const replicationPolicy = components.replicationPolicy
+    ? validateReplicationPolicy(components.replicationPolicy, filename)
+    : undefined;
+  if (combustible && !temperature) {
+    throw new TypeError(`${filename}.components.combustible 需要 temperature`);
+  }
+  if (render.model === 'line-art-campfire' && !heatEmitter) {
+    throw new TypeError(`${filename}.components.render line-art-campfire 需要 heatEmitter`);
+  }
+  if (render.model === 'line-art-dry-hay' && (!temperature || !combustible)) {
+    throw new TypeError(`${filename}.components.render line-art-dry-hay 需要 temperature 和 combustible`);
+  }
+  if (interactable?.action === 'pickup-stack' && !itemStack) {
+    throw new TypeError(`${filename}.components.interactable pickup-stack 需要 itemStack`);
+  }
+  if (itemStack && (!actorResidency || !dropMotion || !lifetime || !replicationPolicy)) {
+    throw new TypeError(`${filename}.components.itemStack 需要 actorResidency、dropMotion、lifetime 和 replicationPolicy`);
+  }
+  if (itemStack && interactable?.action !== 'pickup-stack') {
+    throw new TypeError(`${filename}.components.itemStack 需要 pickup-stack interactable`);
+  }
+  if (render.model === 'line-art-wood-pile' && !itemStack) {
+    throw new TypeError(`${filename}.components.render line-art-wood-pile 需要 itemStack`);
+  }
   return {
     schemaVersion: 1,
     id: requireId(definition.id, `${filename}.id`),
@@ -305,6 +489,14 @@ function validateActorArchetype(raw, filename) {
       ...(components.cargo ? { cargo: validateCargo(components.cargo, filename) } : {}),
       ...(elasticTether ? { elasticTether } : {}),
       ...(components.hazard ? { hazard: validateHazard(components.hazard, filename) } : {}),
+      ...(temperature ? { temperature } : {}),
+      ...(combustible ? { combustible } : {}),
+      ...(heatEmitter ? { heatEmitter } : {}),
+      ...(itemStack ? { itemStack } : {}),
+      ...(actorResidency ? { actorResidency } : {}),
+      ...(dropMotion ? { dropMotion } : {}),
+      ...(lifetime ? { lifetime } : {}),
+      ...(replicationPolicy ? { replicationPolicy } : {}),
       render,
     },
   };

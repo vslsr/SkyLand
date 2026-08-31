@@ -30,7 +30,18 @@ function initialize(message) {
   ticker = setInterval(() => {
     scene.update();
     if (scene.tick % TICKS_PER_SNAPSHOT === 0) {
-      send({ type: 'room:snapshot', snapshot: scene.createSnapshot() });
+      if (scene.players.size === 0) {
+        // 保留无连接房间的观测快照，便于监控和子进程集成测试。
+        send({ type: 'room:snapshot', snapshot: scene.createSnapshot() });
+      } else {
+        for (const playerId of scene.players.keys()) {
+          send({
+            type: 'room:snapshot',
+            playerId,
+            snapshot: scene.createSnapshot(playerId),
+          });
+        }
+      }
     }
   }, 1000 / SERVER_TICK_RATE);
   send({ type: 'room:ready', pid: process.pid, sceneId: scene.id });

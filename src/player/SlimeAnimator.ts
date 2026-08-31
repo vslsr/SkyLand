@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { PLAYER_MOVE_SPEED } from '../../shared/playerMovement.mjs';
 import type { PlayerSlimeModel } from '../models/playerSlime';
 
 const BASE_SQUASH = 0.78;
@@ -13,7 +14,10 @@ export class SlimeAnimator {
   private tiltVelocity = 0;
   private pulse = 2;
 
-  public constructor(model: PlayerSlimeModel) {
+  public constructor(
+    model: PlayerSlimeModel,
+    private readonly referenceSpeed = PLAYER_MOVE_SPEED,
+  ) {
     this.model = model;
   }
 
@@ -37,14 +41,15 @@ export class SlimeAnimator {
     this.model.body.scale.set(scaleXZ, scaleY, scaleXZ);
     this.model.body.position.y = this.model.radius * scaleY;
 
-    const targetTilt = Math.min(movementSpeed / 3.2, 1) * 0.15;
+    const targetTilt = Math.min(movementSpeed / Math.max(0.01, this.referenceSpeed), 1) * 0.15;
     this.tiltVelocity += (targetTilt - this.tilt) * 130 * deltaSeconds;
     this.tiltVelocity *= Math.exp(-5 * deltaSeconds);
     this.tilt += this.tiltVelocity * deltaSeconds;
     this.model.body.rotation.x = this.tilt + this.wobble * 0.35;
     this.model.body.rotation.z =
       Math.sin(elapsedSeconds * 2.1) * 0.02 +
-      Math.sin(this.pulse * 0.5) * 0.035 * Math.min(movementSpeed / 3.2, 1) +
+      Math.sin(this.pulse * 0.5) * 0.035
+        * Math.min(movementSpeed / Math.max(0.01, this.referenceSpeed), 1) +
       this.wobble * 0.55;
 
     this.deformBody(elapsedSeconds, moving ? 0.02 : 0.007, moving ? 7.5 : 1.5);
