@@ -7,6 +7,7 @@
     "dev": "vite",
     "server": "node server/index.mjs",
     "server:dev": "node --watch server/index.mjs",
+    "build:wasm": "node scripts/build-wasm.mjs",
     "test:server": "node --test server/tests/*.test.mjs",
     "test:client": "node --test \"tests/*.test.ts\"",
     "test": "npm run test:server && npm run test:client",

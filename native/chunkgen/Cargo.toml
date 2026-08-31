@@ -1,0 +1,16 @@
+[package]
+name = "chunkgen"
+version = "0.1.0"
+edition = "2021"
+description = "SkyLand 大世界 chunk 的放置算法与顶点合批，编译为 WebAssembly"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[profile.release]
+opt-level = 3
+lto = true
+panic = "abort"
+codegen-units = 1
+strip = true
