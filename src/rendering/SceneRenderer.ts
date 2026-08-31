@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import type { CollisionWorld } from '../../shared/collision/index.mjs';
 import type { CameraFrame } from '../camera/CameraTransform';
 import {
   type GrassBendImpulse,
@@ -8,6 +9,7 @@ import { createLineArtScene } from '../scene/createLineArtScene';
 import type {
   ActorInteractionCandidate,
   ActorSnapshotTarget,
+  SceneComposition,
   SceneUpdateContext,
   SceneVisualSystem,
   VesselHudState,
@@ -43,6 +45,7 @@ export class SceneRenderer implements GrassInteractionTarget {
   private visualSystems: SceneVisualSystem[] = [];
   private grassInteraction?: GrassInteractionTarget;
   private actorSnapshotTarget?: ActorSnapshotTarget;
+  private collisionWorld?: CollisionWorld;
   private simpleCollisionVisible = false;
   private readonly dynamicWorld = new THREE.Group();
   private readonly lookTarget = new THREE.Vector3();
@@ -144,11 +147,30 @@ export class SceneRenderer implements GrassInteractionTarget {
     return this.actorSnapshotTarget?.getVesselHudState(playerId);
   }
 
+  /**
+   * 圆形移动体的水平推出。候选由场景碰撞网格给出，Actor 与流式 chunk 的
+   * 静态物件都在里面，成本只跟身边的碰撞体密度有关。
+   */
   public resolveSimpleCollision(
     position: { x: number; z: number },
     radius: number,
   ): { x: number; z: number } {
-    return this.actorSnapshotTarget?.resolveSimpleCollision(position, radius) ?? position;
+    // Actor 的盒子每帧刷新一次，先让 Actor System 兑现待登记的变更。
+    this.actorSnapshotTarget?.refreshColliders();
+    return this.collisionWorld?.resolveCircle(position, radius) ?? position;
+  }
+
+  /**
+   * 第三人称相机悬臂的探针：从角色到期望机位扫掠一个球，返回最早的命中位置
+   * （线段参数 0–1，没挡住就是 1）。查询走 CAMERA 层，所以树冠这类
+   * 「不挡走路但挡镜头」的体积也会被算进去。
+   */
+  public sweepCameraProbe(
+    start: readonly [number, number, number],
+    end: readonly [number, number, number],
+    radius: number,
+  ): number {
+    return this.collisionWorld?.sweepSphere(start, end, radius) ?? 1;
   }
 
   public setSimpleCollisionVisible(visible: boolean): void {
@@ -168,32 +190,25 @@ export class SceneRenderer implements GrassInteractionTarget {
     if (definition.renderer.type !== 'line-art') {
       throw new Error(`不支持的场景渲染器：${definition.renderer.type as string}`);
     }
-    const composition = createLineArtScene(definition, worldSeed);
-    this.replaceScene(
-      composition.scene,
-      composition.visualSystems,
-      composition.grassInteraction,
-      composition.actorSnapshotTarget,
-    );
+    this.replaceScene(createLineArtScene(definition, worldSeed));
   }
 
   public showEmptyScene(): void {
-    this.replaceScene(createEmptyScene(), []);
+    this.replaceScene({ scene: createEmptyScene(), visualSystems: [] });
   }
 
-  private replaceScene(
-    nextScene: THREE.Scene,
-    visualSystems: SceneVisualSystem[],
-    grassInteraction?: GrassInteractionTarget,
-    actorSnapshotTarget?: ActorSnapshotTarget,
-  ): void {
+  private replaceScene(composition: SceneComposition): void {
     for (const system of this.visualSystems) system.dispose?.();
     this.scene.remove(this.dynamicWorld);
     disposeScene(this.scene);
-    this.scene = nextScene;
-    this.visualSystems = visualSystems;
-    this.grassInteraction = grassInteraction;
-    this.actorSnapshotTarget = actorSnapshotTarget;
+    // 碰撞世界随场景走：上一张地图的 chunk 与 Actor 碰撞体一起被丢掉，
+    // 不会有残留的盒子挡住新地图里的路。
+    this.collisionWorld?.clear();
+    this.scene = composition.scene;
+    this.visualSystems = composition.visualSystems;
+    this.grassInteraction = composition.grassInteraction;
+    this.actorSnapshotTarget = composition.actorSnapshotTarget;
+    this.collisionWorld = composition.collisionWorld;
     this.actorSnapshotTarget?.setSimpleCollisionVisible(this.simpleCollisionVisible);
     this.scene.add(this.dynamicWorld);
   }

@@ -21,6 +21,7 @@ import {
   VesselMotorComponent,
 } from '../../shared/actor/index.mjs';
 import { createSimpleCollisionFromRender } from '../../shared/actor/simpleCollision.mjs';
+import { ActorColliderIndex } from './ActorColliderIndex.mjs';
 import { ActorSimpleCollisionSystem } from './ActorSimpleCollisionSystem.mjs';
 import { BuoyancySystem } from './BuoyancySystem.mjs';
 import { VesselHazardSystem } from './VesselHazardSystem.mjs';
@@ -32,14 +33,23 @@ export function createServerActorWorld(sceneDefinition, options = {}) {
     seaLevel: sceneDefinition.gameplay?.water?.seaLevel ?? 0,
     bounds: sceneDefinition.gameplay?.bounds,
     players: options.players,
+    // 场景共用的空间划分。System 拿它做邻近查询，而不是每次遍历全部 Actor。
+    collision: options.collision,
   });
+  // 碰撞索引在「Actor 已经移动完」和「tick 结束」两个位置各跑一次，
+  // 见 ActorColliderIndex 的说明。
+  const colliderIndex = new ActorColliderIndex();
   world.addSystem(new BuoyancySystem());
   world.addSystem(new VesselMotorSystem());
+  world.addSystem(colliderIndex);
   world.addSystem(new ActorSimpleCollisionSystem());
   world.addSystem(new ElasticTetherSystem());
   // 父 Actor 的玩法移动先完成，再统一按拓扑解算所有子 Actor。
   world.addSystem(new AttachmentSystem());
   world.addSystem(new VesselHazardSystem());
+  // tick 末尾再同步一次：玩家输入在两个 tick 之间结算，那时查询到的必须是
+  // AttachmentSystem 解算完之后的最新位置。
+  world.addSystem(colliderIndex);
 
   const archetypes = new Map(
     (sceneDefinition.actorArchetypes ?? []).map((definition) => [definition.id, definition]),

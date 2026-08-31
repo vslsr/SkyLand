@@ -24,7 +24,9 @@ function sendSummary() {
 function initialize(message) {
   if (scene) return;
   room = message.room;
-  scene = new ServerScene(message.scene);
+  // 世界种子决定这一局的树和石头长在哪；房间 DS 靠它算出与客户端一致的
+  // 静态碰撞，静态内容因此依然一个字节都不用同步。
+  scene = new ServerScene(message.scene, { worldSeed: message.worldSeed });
   ticker = setInterval(() => {
     scene.update();
     if (scene.tick % TICKS_PER_SNAPSHOT === 0) {

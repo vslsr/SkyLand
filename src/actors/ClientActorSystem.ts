@@ -20,7 +20,10 @@ import {
   VESSEL_MOTOR_COMPONENT,
   VesselMotorComponent,
 } from '../../shared/actor/index.mjs';
-import { resolveCircleAgainstSimpleCollisions } from '../../shared/actor/simpleCollision.mjs';
+import {
+  COLLISION_LAYER_SOLID,
+  CollisionWorld,
+} from '../../shared/collision/index.mjs';
 import type { FillMaterialEnvironment } from '../materials/createFillMaterial';
 import { createActorVisualModel } from '../models/actors/createActorVisualModel';
 import type { SnapshotActor } from '../network/protocol';
@@ -53,6 +56,12 @@ export interface ClientActorSystemOptions {
   definition: SceneDefinition;
   environment: FillMaterialEnvironment;
   now?: () => number;
+  /**
+   * 场景共用的碰撞世界。传进来时 Actor 与流式 chunk 的碰撞体落在同一张
+   * 空间网格上，玩家推出与相机悬臂各查一次就够；不传就自己建一个，
+   * 单独使用这个 System 的测试因此不需要额外搭场景。
+   */
+  collision?: CollisionWorld;
 }
 
 /** 接收服务端完整 Actor 快照并维护对应的客户端 Replica。 */
@@ -65,6 +74,16 @@ export class ClientActorSystem implements SceneVisualSystem {
   private readonly raycaster = new THREE.Raycaster();
   private readonly rayOrigin = new THREE.Vector3();
   private readonly rayDirection = new THREE.Vector3();
+  private readonly collision: CollisionWorld;
+  /** actorId → 登记进碰撞世界的实例，逐帧复用，避免每帧产生一批临时对象。 */
+  private readonly colliderInstances = new Map<string, {
+    collision: SimpleCollisionComponent;
+    transform: TransformComponent;
+    layers: number;
+    actorId: string;
+  }>();
+  /** 快照换过一批 Actor 之后必须重新登记，置位后由下一次查询或 update 兑现。 */
+  private collidersStale = true;
   private hoveredActorId?: string;
   private hoverHelper?: THREE.BoxHelper;
   private simpleCollisionVisible = false;
@@ -75,6 +94,7 @@ export class ClientActorSystem implements SceneVisualSystem {
       options.definition.actorArchetypes.map((definition) => [definition.id, definition]),
     );
     this.now = options.now ?? (() => Date.now());
+    this.collision = options.collision ?? new CollisionWorld();
     // 客户端不运行 AttachmentSystem：最终世界坐标来自快照插值，不能被
     // localTransform 再次解算覆盖。
     this.world.addSystem(new ActorTransformSystem(this.root));
@@ -98,6 +118,7 @@ export class ClientActorSystem implements SceneVisualSystem {
   }
 
   private applySnapshotSet(snapshots: readonly SnapshotActor[]): void {
+    this.collidersStale = true;
     const liveIds = new Set<string>();
 
     // Pass 1：先创建完整集合，确保父节点可以出现在快照的任意位置。
@@ -136,7 +157,48 @@ export class ClientActorSystem implements SceneVisualSystem {
   public update(deltaSeconds: number, elapsedSeconds: number): void {
     this.applySnapshotSet(this.snapshots.sample(this.now()));
     this.world.update(deltaSeconds, elapsedSeconds);
+    this.publishColliders();
     this.hoverHelper?.update();
+  }
+
+  /**
+   * 把 Actor 的碰撞盒刷新进空间网格。
+   *
+   * 成本随场景 Actor 数（上限 256）走，不随世界大小走。Actor 通常只挪动
+   * 一点点，网格因此多半只是原地改数值，不做任何 Map 操作。
+   *
+   * 一帧内会被本地预测和回滚重放调用多次，所以只在 Actor 集合真的变过时重登记。
+   */
+  public refreshColliders(): void {
+    if (!this.collidersStale) return;
+    this.publishColliders();
+  }
+
+  private publishColliders(): void {
+    this.collidersStale = false;
+    const live = new Set<string>();
+    for (const actor of this.world.query(
+      TRANSFORM_COMPONENT,
+      SIMPLE_COLLISION_COMPONENT,
+    ) as Actor[]) {
+      live.add(actor.id);
+      let instance = this.colliderInstances.get(actor.id);
+      if (!instance) {
+        instance = {
+          collision: actor.requireComponent(SIMPLE_COLLISION_COMPONENT) as SimpleCollisionComponent,
+          transform: actor.requireComponent(TRANSFORM_COMPONENT) as TransformComponent,
+          layers: COLLISION_LAYER_SOLID,
+          actorId: actor.id,
+        };
+        this.colliderInstances.set(actor.id, instance);
+      }
+      this.collision.setDynamic(actor.id, instance);
+    }
+    for (const actorId of Array.from(this.colliderInstances.keys())) {
+      if (live.has(actorId)) continue;
+      this.colliderInstances.delete(actorId);
+      this.collision.removeDynamic(actorId);
+    }
   }
 
   public beforeRender(_renderer: THREE.WebGLRenderer, camera: THREE.Camera): void {
@@ -151,6 +213,8 @@ export class ClientActorSystem implements SceneVisualSystem {
   public dispose(): void {
     this.disposeHoverHelper();
     this.snapshots.clear();
+    for (const actorId of this.colliderInstances.keys()) this.collision.removeDynamic(actorId);
+    this.colliderInstances.clear();
     this.world.dispose();
   }
 
@@ -174,14 +238,9 @@ export class ClientActorSystem implements SceneVisualSystem {
     position: { x: number; z: number },
     radius: number,
   ): { x: number; z: number } {
-    const colliders = (this.world.query(
-      TRANSFORM_COMPONENT,
-      SIMPLE_COLLISION_COMPONENT,
-    ) as Actor[]).map((actor) => ({
-      collision: actor.requireComponent(SIMPLE_COLLISION_COMPONENT) as SimpleCollisionComponent,
-      transform: actor.requireComponent(TRANSFORM_COMPONENT) as TransformComponent,
-    }));
-    return resolveCircleAgainstSimpleCollisions(position, radius, colliders);
+    // 候选来自空间网格，窄相仍是原来的两轮推出，手感不变。
+    this.refreshColliders();
+    return this.collision.resolveCircle(position, radius);
   }
 
   public setSimpleCollisionVisible(visible: boolean): void {

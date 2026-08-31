@@ -7,6 +7,8 @@ import {
   DEFAULT_WORLD_SEED,
   toWorldSeed,
 } from '../../shared/world/worldConfig.mjs';
+import type { CollisionWorld } from '../../shared/collision/index.mjs';
+import { readChunkColliders } from '../../shared/world/chunkColliders.mjs';
 import { StreamingGrassSystem, type GrassInteractionTarget } from '../grass';
 import type { FillMaterialEnvironment } from '../materials/createFillMaterial';
 import { OUTLINE_MATERIAL, GROUND_GRID_MATERIAL } from '../materials/lineMaterials';
@@ -30,6 +32,11 @@ export interface ChunkStreamerOptions {
   environment: FillMaterialEnvironment;
   /** 房间分配的世界种子。种子决定这一局的世界，缺省时退回默认种子。 */
   worldSeed?: number;
+  /**
+   * 场景的碰撞世界。chunk 装载时把它的静态碰撞体整组交进去，卸载时整组撤走，
+   * 所以参与碰撞的物件数量跟着 keepRadius 走，不跟世界面积走。
+   */
+  collision?: CollisionWorld;
 }
 
 /**
@@ -51,6 +58,7 @@ export class ChunkStreamer implements SceneVisualSystem {
   private readonly fillMaterial: THREE.Material;
   private readonly gridGeometry: THREE.BufferGeometry;
   private readonly grass?: StreamingGrassSystem;
+  private readonly collision?: CollisionWorld;
   private pending: PendingChunk[] = [];
   private generator?: ChunkGenerator;
   private readonly worldSeed: number;
@@ -61,6 +69,7 @@ export class ChunkStreamer implements SceneVisualSystem {
   public constructor(options: ChunkStreamerOptions) {
     this.root.name = 'chunk-streamer';
     this.world = options.world;
+    this.collision = options.collision;
     this.worldSeed = toWorldSeed(options.worldSeed ?? DEFAULT_WORLD_SEED);
     this.fillMaterial = createChunkFillMaterial(options.environment);
     this.gridGeometry = createChunkGridGeometry();
@@ -170,6 +179,8 @@ export class ChunkStreamer implements SceneVisualSystem {
         this.gridGeometry,
       );
       this.grass?.mountChunk(chunk.key, data);
+      // 碰撞体由同一批放置记录派生，和几何体同生共死，不会出现「看得见但撞不到」。
+      this.collision?.setStaticGroup(chunk.key, readChunkColliders(data.props, data.propCount));
       this.views.set(chunk.key, view);
       this.root.add(view.root);
       return true;
@@ -185,6 +196,7 @@ export class ChunkStreamer implements SceneVisualSystem {
     if (!view) return;
     this.views.delete(key);
     this.grass?.unmountChunk(key);
+    this.collision?.removeStaticGroup(key);
     view.dispose();
   }
 

@@ -32,6 +32,7 @@ Change one and you must change the other, rebuild the WASM, and commit the rebui
 - **Add a prop kind**: touches both implementations, the template registry, and buffer capacity. See below.
 - **Change loading policy** (when chunks load and unload): edit `shared/world/chunkStream.mjs` only. It is pure and has no WASM counterpart.
 - **Change rendering only** (materials, batching, draw calls): edit `src/models/chunkMesh.ts`, `src/models/chunkTemplates.ts` or `src/world/`. Placement is untouched, so no WASM rebuild.
+- **Change what blocks the player or the camera**: edit `PROP_COLLIDER_TEMPLATES` in `shared/world/chunkColliders.mjs` only. It is derived from the placement records, has no WASM counterpart, and both the browser and the room DS read it, so a one-sided edit is impossible. Keep it in step with the models in `src/models/`.
 
 ## Keep generation deterministic
 
@@ -60,6 +61,10 @@ Both implementations carry the kind list and its scale table, and the ground tem
 2. `shared/world/chunkContent.mjs`: add the scale range and the selection branch.
 3. `native/chunkgen/src/placement.rs`: add `KIND_*`, bump `KIND_COUNT`, extend `SCALE_MINIMUM` and `SCALE_MAXIMUM`. `TEMPLATE_GROUND` and `TEMPLATE_COUNT` in `lib.rs` follow `KIND_COUNT`.
 4. `src/models/`: add the model, and register its template in `src/models/chunkTemplates.ts`.
+   Then give it a collision template in `shared/world/chunkColliders.mjs` — an empty
+   array if it should not collide (grass), a box list otherwise. A prop kind with no
+   entry there is visible but not solid, and the camera boom will pass straight
+   through it.
 5. Give it a colour. Prop colours come from the scene: either reuse `renderer.palette`, or add a field to `renderer.world` and validate it in `server/scenes/SceneCatalog.mjs`, `config/scenes/scene.schema.json` and `src/scenes/data/SceneDefinition.ts` together.
 6. Rebuild the WASM and run the full suite.
 
