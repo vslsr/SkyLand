@@ -338,9 +338,9 @@ test('靠近生成树时显示砍伐提示，并直接发送自描述 Actor id',
     now: () => now,
   });
   const tree: ActorInteractionCandidate = {
-    actorId: 'tree:-1:0:12',
+    actorId: 'prop:tree:-1:0:12',
     label: '树木',
-    action: 'chop-tree',
+    action: 'harvest-prop',
     carrierActorId: null,
     holderPlayerId: null,
   };
@@ -361,7 +361,7 @@ test('靠近生成树时显示砍伐提示，并直接发送自描述 Actor id',
     position: [0, 5, 8],
     axes: { right: [1, 0, 0], up: [0, 1, 0], forward: [0, -0.5, -1] },
   });
-  assert.deepEqual(sent, ['tree:-1:0:12']);
+  assert.deepEqual(sent, ['prop:tree:-1:0:12']);
   assert.equal(prompts.at(-1), 'E · 砍伐「树木」');
   controller.dispose();
   input.dispose();

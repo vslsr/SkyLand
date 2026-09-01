@@ -12,7 +12,7 @@ import { readChunkColliders } from '../../shared/world/chunkColliders.mjs';
 import {
   isPropSkipped,
   setPropSkipped as updatePropSkipMask,
-} from '../../shared/world/generatedTree.mjs';
+} from '../../shared/world/generatedProp.mjs';
 import { StreamingGrassSystem, type GrassInteractionTarget } from '../grass';
 import type { FillMaterialEnvironment } from '../materials/createFillMaterial';
 import { OUTLINE_MATERIAL, GROUND_GRID_MATERIAL } from '../materials/lineMaterials';
@@ -132,7 +132,7 @@ export class ChunkStreamer implements SceneVisualSystem {
     return this.pending.length;
   }
 
-  /** 应用服务端树偏离态；已加载时只重建这一块。 */
+  /** 应用服务端下发的生成物件偏离态；已加载时只重建这一块。 */
   public setPropSkipped(
     chunkX: number,
     chunkZ: number,

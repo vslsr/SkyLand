@@ -4,14 +4,15 @@
   "id": "generated-tree",
   "components": {
     "interactable": {
-      "action": "chop-tree",
+      "action": "harvest-prop",
       "label": "树木",
       "maximumDistance": 2.6
     },
-    "generatedTree": {
+    "generatedProp": {
+      "kind": "tree",
       "maximumHealth": 3,
-      "chopDamage": 1,
-      "woodQuantity": 5
+      "harvestDamage": 1,
+      "drop": { "archetypeId": "wood-pile", "quantity": 5 }
     },
     "replicationPolicy": { "mode": "aoi", "radiusChunks": 2 }
   }

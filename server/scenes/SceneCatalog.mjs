@@ -386,6 +386,28 @@ function validateSceneDefinition(raw, filename, actorCatalog) {
       actorComposition.actorArchetypes.push(archetype);
     }
   }
+  // 生成物件的原型注册表必须无歧义：一种物件只能由一个原型承载，否则两端各自
+  // 挑到哪个原型就取决于声明顺序。掉落也必须指向这张地图上真的存在的堆叠原型，
+  // 否则要等玩家采到那一下才会炸在交互路径上。
+  const generatedPropKinds = new Set();
+  for (const archetype of actorComposition.actorArchetypes) {
+    const generatedProp = archetype.components.generatedProp;
+    if (!generatedProp) continue;
+    if (generatedPropKinds.has(generatedProp.kind)) {
+      throw new TypeError(
+        `${filename} 的物件种类 ${generatedProp.kind} 被多个原型声明，注册表有歧义`,
+      );
+    }
+    generatedPropKinds.add(generatedProp.kind);
+    const dropArchetype = actorComposition.actorArchetypes.find(
+      (definition) => definition.id === generatedProp.drop.archetypeId,
+    );
+    if (!dropArchetype?.components.itemStack) {
+      throw new TypeError(
+        `${filename} 的 ${archetype.id} 掉落引用了不存在或不可堆叠的原型：${generatedProp.drop.archetypeId}`,
+      );
+    }
+  }
   for (const component of sceneComponents) {
     if (component.type !== 'ability-lab') continue;
     const target = actorComposition.actors.find((actor) => actor.id === component.targetActorId);

@@ -14,7 +14,7 @@ import {
   buildChunkColliders,
 } from '../../shared/world/chunkColliders.mjs';
 import { CHUNK_SIZE, PROP_KIND } from '../../shared/world/worldConfig.mjs';
-import { formatGeneratedTreeId, setPropSkipped } from '../../shared/world/generatedTree.mjs';
+import { formatGeneratedPropId, setPropSkipped } from '../../shared/world/generatedProp.mjs';
 
 const SEED = 0x5c1a2d0b;
 
@@ -99,7 +99,7 @@ test('树碰撞携带派生 Actor id，跳过掩码会整棵移除', () => {
     }
   }
   assert.ok(propIndex >= 0);
-  const actorId = formatGeneratedTreeId(-2, 1, propIndex);
+  const actorId = formatGeneratedPropId(PROP_KIND.TREE, -2, 1, propIndex);
   const baseline = buildChunkColliders(SEED, -2, 1);
   assert.equal(baseline.filter((collider) => collider.actorId === actorId).length, 3);
 
@@ -112,4 +112,17 @@ test('树碰撞携带派生 Actor id，跳过掩码会整棵移除', () => {
   );
   assert.equal(masked.some((collider) => collider.actorId === actorId), false);
   assert.equal(masked.length, baseline.length - 3);
+
+  // 岩石同样带 id：交互查询从碰撞世界反查 Actor 的这条路对所有种类一视同仁，
+  // 哪些种类真的有 Actor 由原型注册表决定，碰撞体这一层不需要知道。
+  let rockIndex = -1;
+  for (let index = 0; index < count; index += 1) {
+    if (props[index * PROP_STRIDE + PROP_FIELD.KIND] === PROP_KIND.ROCK) {
+      rockIndex = index;
+      break;
+    }
+  }
+  assert.ok(rockIndex >= 0);
+  const rockId = formatGeneratedPropId(PROP_KIND.ROCK, -2, 1, rockIndex);
+  assert.equal(baseline.filter((collider) => collider.actorId === rockId).length, 1);
 });

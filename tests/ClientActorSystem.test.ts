@@ -6,8 +6,8 @@ import {
   type BuoyancyComponent,
   COMBUSTIBLE_COMPONENT,
   type CombustibleComponent,
-  GENERATED_TREE_COMPONENT,
-  type GeneratedTreeComponent,
+  GENERATED_PROP_COMPONENT,
+  type GeneratedPropComponent,
   ITEM_STACK_COMPONENT,
   type ItemStackComponent,
   SIMPLE_COLLISION_COMPONENT,
@@ -23,7 +23,7 @@ import {
   generateChunkProps,
 } from '../shared/world/chunkContent.mjs';
 import { readChunkColliders } from '../shared/world/chunkColliders.mjs';
-import { formatGeneratedTreeId } from '../shared/world/generatedTree.mjs';
+import { formatGeneratedPropId } from '../shared/world/generatedProp.mjs';
 import { DEFAULT_WORLD_SEED, PROP_KIND } from '../shared/world/worldConfig.mjs';
 import { ClientActorSystem } from '../src/actors/ClientActorSystem';
 import {
@@ -214,12 +214,17 @@ const woodPileArchetype: SceneDefinition['actorArchetypes'][number] = {
   },
 };
 
-const generatedTreeArchetype: SceneDefinition['actorArchetypes'][number] = {
+const generatedPropArchetype: SceneDefinition['actorArchetypes'][number] = {
   schemaVersion: 1,
   id: 'generated-tree',
   components: {
-    interactable: { action: 'chop-tree', label: '树木', maximumDistance: 2.6 },
-    generatedTree: { maximumHealth: 3, chopDamage: 1, woodQuantity: 5 },
+    interactable: { action: 'harvest-prop', label: '树木', maximumDistance: 2.6 },
+    generatedProp: {
+      kind: 'tree',
+      maximumHealth: 3,
+      harvestDamage: 1,
+      drop: { archetypeId: 'wood-pile', quantity: 5 },
+    },
     replicationPolicy: { mode: 'aoi', radiusChunks: 2 },
   },
 };
@@ -246,7 +251,7 @@ const definition = {
     campfireArchetype,
     dryHayArchetype,
     woodPileArchetype,
-    generatedTreeArchetype,
+    generatedPropArchetype,
   ],
   renderer: {
     type: 'line-art',
@@ -657,7 +662,7 @@ test('流式树按 Chunk 构造无网格 Actor，偏离态可在无 Transform �
     collision,
     now: () => now,
   });
-  system.setGeneratedTreeOverrideTarget((chunkX, chunkZ, propIndex, removed) => {
+  system.setGeneratedPropOverrideTarget((chunkX, chunkZ, propIndex, removed) => {
     overrides.push({ chunkX, chunkZ, propIndex, removed });
   });
 
@@ -675,10 +680,10 @@ test('流式树按 Chunk 构造无网格 Actor，偏离态可在无 Transform �
     chunkX: -1,
     chunkZ: 0,
   }));
-  system.mountGeneratedTreeChunk('-1:0', -1, 0, props, propCount);
+  system.mountGeneratedPropChunk('-1:0', -1, 0, props, propCount);
   system.update(0, 0);
 
-  const actorId = formatGeneratedTreeId(-1, 0, propIndex);
+  const actorId = formatGeneratedPropId(PROP_KIND.TREE, -1, 0, propIndex);
   const actor = system.getActor(actorId)!;
   assert.ok(actor);
   assert.equal(actor.hasComponents(THREE_OBJECT_COMPONENT), false);
@@ -691,10 +696,10 @@ test('流式树按 Chunk 构造无网格 Actor，偏离态可在无 Transform �
   system.syncSnapshots([{
     id: actorId,
     revision: 3,
-    treeState: { health: 0, removed: true },
+    propState: { health: 0, removed: true },
   }], 1_000);
   system.update(0, 0);
-  const tree = actor.requireComponent(GENERATED_TREE_COMPONENT) as GeneratedTreeComponent;
+  const tree = actor.requireComponent(GENERATED_PROP_COMPONENT) as GeneratedPropComponent;
   assert.equal(tree.removed, true);
   assert.deepEqual(overrides.at(-1), { chunkX: -1, chunkZ: 0, propIndex, removed: true });
 
@@ -703,7 +708,7 @@ test('流式树按 Chunk 构造无网格 Actor，偏离态可在无 Transform �
   now = 1_230;
   system.update(0, 0);
   assert.equal(system.getActor(actorId), actor);
-  system.unmountGeneratedTreeChunk('-1:0');
+  system.unmountGeneratedPropChunk('-1:0');
   assert.equal(system.getActor(actorId), undefined);
   system.dispose();
 });

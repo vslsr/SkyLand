@@ -19,8 +19,8 @@ import {
   HazardComponent,
   HEAT_EMITTER_COMPONENT,
   HeatEmitterComponent,
-  GENERATED_TREE_COMPONENT,
-  GeneratedTreeComponent,
+  GENERATED_PROP_COMPONENT,
+  GeneratedPropComponent,
   AttachmentSystem,
   INTERACTABLE_COMPONENT,
   InteractableComponent,
@@ -91,10 +91,10 @@ export function createServerActor(spawn, archetype, runtime = {}) {
   if (archetype.components.replicationPolicy) {
     actor.addComponent(new ReplicationPolicyComponent(archetype.components.replicationPolicy));
   }
-  if (archetype.components.generatedTree) {
-    actor.addComponent(new GeneratedTreeComponent(
-      archetype.components.generatedTree,
-      runtime.generatedTree,
+  if (archetype.components.generatedProp) {
+    actor.addComponent(new GeneratedPropComponent(
+      archetype.components.generatedProp,
+      runtime.generatedProp,
     ));
   }
   const temperature = actor.getComponent(TEMPERATURE_COMPONENT);
@@ -195,16 +195,16 @@ export function createActorSnapshots(world, options = {}) {
     const combustible = actor.getComponent(COMBUSTIBLE_COMPONENT);
     const itemStack = actor.getComponent(ITEM_STACK_COMPONENT);
     const residency = actor.getComponent(ACTOR_RESIDENCY_COMPONENT);
-    const generatedTree = actor.getComponent(GENERATED_TREE_COMPONENT);
-    // 生成树的 id 已经携带 archetype 与位置地址。偏离态只发 id + 状态，
+    const generatedProp = actor.getComponent(GENERATED_PROP_COMPONENT);
+    // 生成物件的 id 已经携带种类与位置地址。偏离态只发 id + 状态，
     // 默认 Interactable 与最大生命由两端同一原型提供。
-    if (generatedTree) {
+    if (generatedProp) {
       return {
         id: actor.id,
-        revision: generatedTree.revision,
-        treeState: {
-          health: generatedTree.health,
-          removed: generatedTree.removed,
+        revision: generatedProp.revision,
+        propState: {
+          health: generatedProp.health,
+          removed: generatedProp.removed,
         },
       };
     }

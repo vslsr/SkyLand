@@ -8,7 +8,7 @@ import { WebSocketGateway } from '../network/WebSocketGateway.mjs';
 import { RoomProcessManager } from '../rooms/RoomProcessManager.mjs';
 import { SceneCatalog } from '../scenes/SceneCatalog.mjs';
 import { generateChunkContent } from '../../shared/world/chunkContent.mjs';
-import { formatGeneratedTreeId } from '../../shared/world/generatedTree.mjs';
+import { formatGeneratedPropId } from '../../shared/world/generatedProp.mjs';
 import {
   MAXIMUM_CHUNK_COORDINATE,
   MINIMUM_CHUNK_COORDINATE,
@@ -258,7 +258,7 @@ test('真实 WebSocket 贯通流式树砍伐、偏离态快照和木材掉落', 
         const distance = Math.hypot(prop.x - player.x, prop.z - player.z);
         if (!target || distance < target.distance) {
           target = {
-            id: formatGeneratedTreeId(chunkX, chunkZ, propIndex),
+            id: formatGeneratedPropId(PROP_KIND.TREE, chunkX, chunkZ, propIndex),
             x: prop.x,
             z: prop.z,
             distance,
@@ -293,7 +293,7 @@ test('真实 WebSocket 贯通流式树砍伐、偏离态快照和木材掉落', 
   const felledState = waitForJson(socket, (message) => {
     if (message.type !== 'room:snapshot') return false;
     const tree = actorFrom(message, target.id);
-    return tree?.treeState.removed === true
+    return tree?.propState.removed === true
       && message.snapshot.actors.some((actor) => (
         actor.archetypeId === 'wood-pile' && actor.itemStack?.itemType === 'wood'
       ));
@@ -304,6 +304,6 @@ test('真实 WebSocket 贯通流式树砍伐、偏离态快照和木材掉落', 
   const felled = await felledState;
   const tree = actorFrom(felled, target.id);
   assert.equal(tree.transform, undefined);
-  assert.equal(tree.treeState.health, 0);
-  assert.equal(tree.treeState.removed, true);
+  assert.equal(tree.propState.health, 0);
+  assert.equal(tree.propState.removed, true);
 });

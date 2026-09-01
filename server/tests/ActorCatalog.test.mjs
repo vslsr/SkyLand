@@ -68,6 +68,42 @@ test('ActorCatalog 加载并净化木筏原型', async () => {
   assert.equal(wood.components.actorResidency.dormantEligible, true);
   assert.equal(wood.components.replicationPolicy.mode, 'aoi');
   assert.equal(wood.components.render.model, 'line-art-wood-pile');
+
+  const tree = catalog.require('generated-tree');
+  assert.equal(tree.components.generatedProp.kind, 'tree');
+  assert.deepEqual(tree.components.generatedProp.drop, { archetypeId: 'wood-pile', quantity: 5 });
+  assert.equal(tree.components.interactable.action, 'harvest-prop');
+});
+
+test('ActorCatalog 拒绝未知物件种类与缺失的掉落配置', async () => {
+  const base = {
+    schemaVersion: 1,
+    id: 'generated-probe',
+    components: {
+      interactable: { action: 'harvest-prop', label: '探针', maximumDistance: 2 },
+      generatedProp: {
+        kind: 'tree',
+        maximumHealth: 3,
+        harvestDamage: 1,
+        drop: { archetypeId: 'wood-pile', quantity: 5 },
+      },
+      replicationPolicy: { mode: 'aoi', radiusChunks: 2 },
+    },
+  };
+  await loadSingleActor(base);
+
+  const unknownKind = structuredClone(base);
+  unknownKind.components.generatedProp.kind = 'dragon';
+  await assert.rejects(loadSingleActor(unknownKind), /kind 必须是已知物件种类/);
+
+  const missingDrop = structuredClone(base);
+  delete missingDrop.components.generatedProp.drop;
+  await assert.rejects(loadSingleActor(missingDrop), /drop 必须是对象/);
+
+  // 生成物件与 harvest-prop 交互必须成对出现，少一半就没有入口或没有状态。
+  const wrongAction = structuredClone(base);
+  wrongAction.components.interactable.action = 'cargo-toggle';
+  await assert.rejects(loadSingleActor(wrongAction), /需要 harvest-prop interactable/);
 });
 
 test('ActorCatalog 拒绝缺少温度的可燃物和倒置的点燃阈值', async () => {

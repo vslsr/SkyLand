@@ -14,7 +14,7 @@
       "additionalProperties": false,
       "anyOf": [
         { "required": ["render"] },
-        { "required": ["generatedTree"] }
+        { "required": ["generatedProp"] }
       ],
       "properties": {
         "playerMovement": {
@@ -76,7 +76,7 @@
           "additionalProperties": false,
           "required": ["action", "label", "maximumDistance"],
           "properties": {
-            "action": { "enum": ["cargo-toggle", "mushroom-bite", "pickup-stack", "chop-tree"] },
+            "action": { "enum": ["cargo-toggle", "mushroom-bite", "pickup-stack", "harvest-prop"] },
             "label": { "type": "string", "minLength": 1, "maxLength": 32 },
             "maximumDistance": { "type": "number", "minimum": 0.5, "maximum": 12 }
           }
@@ -204,14 +204,24 @@
             "radiusChunks": { "type": "integer", "minimum": 0, "maximum": 8 }
           }
         },
-        "generatedTree": {
+        "generatedProp": {
           "type": "object",
+          "description": "把原型绑到世界生成算法的一种物件；位置与外观仍由世界种子派生",
           "additionalProperties": false,
-          "required": ["maximumHealth", "chopDamage", "woodQuantity"],
+          "required": ["kind", "maximumHealth", "harvestDamage", "drop"],
           "properties": {
+            "kind": { "enum": ["tree", "grass", "rock"] },
             "maximumHealth": { "type": "integer", "minimum": 1, "maximum": 1000 },
-            "chopDamage": { "type": "integer", "minimum": 1, "maximum": 1000 },
-            "woodQuantity": { "type": "integer", "minimum": 1, "maximum": 1000 }
+            "harvestDamage": { "type": "integer", "minimum": 1, "maximum": 1000 },
+            "drop": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["archetypeId", "quantity"],
+              "properties": {
+                "archetypeId": { "type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$" },
+                "quantity": { "type": "integer", "minimum": 1, "maximum": 1000 }
+              }
+            }
           }
         },
         "render": {

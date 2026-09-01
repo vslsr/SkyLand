@@ -17,7 +17,7 @@ import {
   createPropSkipMask,
   isPropSkipped,
   setPropSkipped as updatePropSkipMask,
-} from '../../shared/world/generatedTree.mjs';
+} from '../../shared/world/generatedProp.mjs';
 import { ChunkResidency } from './ChunkResidency.mjs';
 
 const DEFAULT_RESIDENT_RADIUS = 1;

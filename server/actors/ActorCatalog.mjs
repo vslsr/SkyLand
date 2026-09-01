@@ -1,6 +1,7 @@
 import { readdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { PROP_KIND_BY_NAME } from '../../shared/world/generatedProp.mjs';
 
 export const DEFAULT_ACTOR_DIRECTORY = fileURLToPath(new URL('../../config/actors/', import.meta.url));
 
@@ -112,7 +113,7 @@ function validatePlayerMovement(raw, filename) {
 function validateInteractable(raw, filename) {
   const path = `${filename}.components.interactable`;
   const definition = requireObject(raw, path);
-  if (!['cargo-toggle', 'mushroom-bite', 'pickup-stack', 'chop-tree'].includes(definition.action)) {
+  if (!['cargo-toggle', 'mushroom-bite', 'pickup-stack', 'harvest-prop'].includes(definition.action)) {
     throw new TypeError(`${path}.action 暂不支持：${definition.action}`);
   }
   return {
@@ -275,16 +276,31 @@ function validateReplicationPolicy(raw, filename) {
   return { mode: definition.mode, radiusChunks };
 }
 
-function validateGeneratedTree(raw, filename) {
-  const path = `${filename}.components.generatedTree`;
+function validateGeneratedProp(raw, filename) {
+  const path = `${filename}.components.generatedProp`;
   const definition = requireObject(raw, path);
-  const maximumHealth = requireNumber(definition.maximumHealth, `${path}.maximumHealth`, 1, 1000);
-  const chopDamage = requireNumber(definition.chopDamage, `${path}.chopDamage`, 1, 1000);
-  const woodQuantity = requireNumber(definition.woodQuantity, `${path}.woodQuantity`, 1, 1000);
-  if (![maximumHealth, chopDamage, woodQuantity].every(Number.isInteger)) {
-    throw new TypeError(`${path} 的生命、伤害与木材数量必须是整数`);
+  // kind 把原型绑到世界生成算法的一种物件上。名字而不是数值，因为数值是放置
+  // 记录的内部编码，不该出现在配置里。
+  if (PROP_KIND_BY_NAME[definition.kind] === undefined) {
+    throw new TypeError(
+      `${path}.kind 必须是已知物件种类：${Object.keys(PROP_KIND_BY_NAME).join(' / ')}`,
+    );
   }
-  return { maximumHealth, chopDamage, woodQuantity };
+  const maximumHealth = requireNumber(definition.maximumHealth, `${path}.maximumHealth`, 1, 1000);
+  const harvestDamage = requireNumber(definition.harvestDamage, `${path}.harvestDamage`, 1, 1000);
+  if (![maximumHealth, harvestDamage].every(Number.isInteger)) {
+    throw new TypeError(`${path} 的生命与伤害必须是整数`);
+  }
+  const dropPath = `${path}.drop`;
+  const drop = requireObject(definition.drop, dropPath);
+  const quantity = requireNumber(drop.quantity, `${dropPath}.quantity`, 1, 1000);
+  if (!Number.isInteger(quantity)) throw new TypeError(`${dropPath}.quantity 必须是整数`);
+  return {
+    kind: definition.kind,
+    maximumHealth,
+    harvestDamage,
+    drop: { archetypeId: requireId(drop.archetypeId, `${dropPath}.archetypeId`), quantity },
+  };
 }
 
 function validateRender(raw, filename) {
@@ -419,7 +435,7 @@ function validateActorArchetype(raw, filename) {
     'dropMotion',
     'lifetime',
     'replicationPolicy',
-    'generatedTree',
+    'generatedProp',
     'render',
   ]);
   for (const componentName of Object.keys(components)) {
@@ -428,11 +444,11 @@ function validateActorArchetype(raw, filename) {
     }
   }
   const render = components.render ? validateRender(components.render, filename) : undefined;
-  const generatedTree = components.generatedTree
-    ? validateGeneratedTree(components.generatedTree, filename)
+  const generatedProp = components.generatedProp
+    ? validateGeneratedProp(components.generatedProp, filename)
     : undefined;
-  if (!render && !generatedTree) {
-    throw new TypeError(`${filename}.components 至少需要 render 或 generatedTree`);
+  if (!render && !generatedProp) {
+    throw new TypeError(`${filename}.components 至少需要 render 或 generatedProp`);
   }
   const playerMovement = components.playerMovement
     ? validatePlayerMovement(components.playerMovement, filename)
@@ -497,14 +513,14 @@ function validateActorArchetype(raw, filename) {
   if (render?.model === 'line-art-wood-pile' && !itemStack) {
     throw new TypeError(`${filename}.components.render line-art-wood-pile 需要 itemStack`);
   }
-  if (generatedTree && interactable?.action !== 'chop-tree') {
-    throw new TypeError(`${filename}.components.generatedTree 需要 chop-tree interactable`);
+  if (generatedProp && interactable?.action !== 'harvest-prop') {
+    throw new TypeError(`${filename}.components.generatedProp 需要 harvest-prop interactable`);
   }
-  if (interactable?.action === 'chop-tree' && !generatedTree) {
-    throw new TypeError(`${filename}.components.interactable chop-tree 需要 generatedTree`);
+  if (interactable?.action === 'harvest-prop' && !generatedProp) {
+    throw new TypeError(`${filename}.components.interactable harvest-prop 需要 generatedProp`);
   }
-  if (generatedTree && !replicationPolicy) {
-    throw new TypeError(`${filename}.components.generatedTree 需要 replicationPolicy`);
+  if (generatedProp && !replicationPolicy) {
+    throw new TypeError(`${filename}.components.generatedProp 需要 replicationPolicy`);
   }
   return {
     schemaVersion: 1,
@@ -525,7 +541,7 @@ function validateActorArchetype(raw, filename) {
       ...(dropMotion ? { dropMotion } : {}),
       ...(lifetime ? { lifetime } : {}),
       ...(replicationPolicy ? { replicationPolicy } : {}),
-      ...(generatedTree ? { generatedTree } : {}),
+      ...(generatedProp ? { generatedProp } : {}),
       ...(render ? { render } : {}),
     },
   };

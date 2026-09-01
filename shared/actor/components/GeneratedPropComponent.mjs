@@ -1,18 +1,25 @@
 import { ActorComponent } from '../ActorComponent.mjs';
 
-export const GENERATED_TREE_COMPONENT = 'generatedTree';
+export const GENERATED_PROP_COMPONENT = 'generatedProp';
 
-/** 生成树只保存偏离默认值所需的玩法状态；位置与外观仍由世界种子派生。 */
-export class GeneratedTreeComponent extends ActorComponent {
+/**
+ * 世界生成物件的玩法状态。
+ *
+ * 位置、朝向、缩放和种类仍然由世界种子派生，一个字节都不同步；这里只保存
+ * 「偏离默认生成结果」所需的那几项：还剩多少血、有没有被采完。
+ */
+export class GeneratedPropComponent extends ActorComponent {
   constructor(definition, runtime = {}) {
-    super(GENERATED_TREE_COMPONENT);
+    super(GENERATED_PROP_COMPONENT);
+    this.kind = Math.max(0, Math.trunc(Number(runtime.kind) || 0));
     this.chunkX = Math.trunc(Number(runtime.chunkX) || 0);
     this.chunkZ = Math.trunc(Number(runtime.chunkZ) || 0);
     this.propIndex = Math.max(0, Math.trunc(Number(runtime.propIndex) || 0));
     this.scale = Math.max(0.01, Number(runtime.scale) || 1);
     this.maximumHealth = Math.max(1, Math.trunc(Number(definition.maximumHealth) || 1));
-    this.chopDamage = Math.max(1, Math.trunc(Number(definition.chopDamage) || 1));
-    this.baseWoodQuantity = Math.max(1, Math.trunc(Number(definition.woodQuantity) || 1));
+    this.harvestDamage = Math.max(1, Math.trunc(Number(definition.harvestDamage) || 1));
+    this.dropArchetypeId = definition.drop?.archetypeId;
+    this.baseDropQuantity = Math.max(1, Math.trunc(Number(definition.drop?.quantity) || 1));
     this.health = Math.max(0, Math.min(
       this.maximumHealth,
       Math.trunc(Number(runtime.health ?? this.maximumHealth)),
@@ -22,11 +29,12 @@ export class GeneratedTreeComponent extends ActorComponent {
     this.revision = Math.max(0, Math.trunc(Number(runtime.revision) || 0));
   }
 
-  get woodQuantity() {
-    return Math.max(1, Math.round(this.baseWoodQuantity * this.scale));
+  /** 大树掉的木材比小树多；数量跟着生成时的缩放走，两端算出的结果一致。 */
+  get dropQuantity() {
+    return Math.max(1, Math.round(this.baseDropQuantity * this.scale));
   }
 
-  applyDamage(amount = this.chopDamage) {
+  applyDamage(amount = this.harvestDamage) {
     if (this.removed) return false;
     const damage = Math.max(0, Math.trunc(Number(amount) || 0));
     if (damage === 0) return false;

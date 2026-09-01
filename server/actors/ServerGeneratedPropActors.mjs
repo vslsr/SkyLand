@@ -1,5 +1,5 @@
 import {
-  GENERATED_TREE_COMPONENT,
+  GENERATED_PROP_COMPONENT,
   INTERACTABLE_COMPONENT,
   REPLICATED_COMPONENT,
   ReplicatedComponent,
@@ -10,37 +10,43 @@ import {
   PROP_STRIDE,
   generateChunkProps,
 } from '../../shared/world/chunkContent.mjs';
-import { formatGeneratedTreeId } from '../../shared/world/generatedTree.mjs';
-import { PROP_KIND, toWorldSeed } from '../../shared/world/worldConfig.mjs';
+import {
+  PROP_KIND_BY_NAME,
+  formatGeneratedPropId,
+} from '../../shared/world/generatedProp.mjs';
+import { toWorldSeed } from '../../shared/world/worldConfig.mjs';
 import { ChunkResidency } from '../scene/ChunkResidency.mjs';
 import { createServerActor } from './ServerActorFactory.mjs';
 
 const DEFAULT_RESIDENT_RADIUS = 2;
 
 /**
- * 房间 DS 侧的生成树 Actor 常驻策略。
+ * 房间 DS 侧的世界生成物件 Actor 常驻策略。
  *
- * 树和静态碰撞体一样由世界种子确定性推导，一个字节都不用同步。但树是可交互
- * 的，所以它必须以 Actor 的形式存在于 ActorWorld 里——而整个世界有约 2000
- * 棵，全部常驻的话每一个按 Component 查询的 System 都要为它们付钱：
- * `TemperatureSystem` 的热源收集就是 `query(transform)`，10 Hz 扫全世界的树。
+ * 树、石头这些由世界种子确定性推导的东西和静态碰撞体一样，一个字节都不用同步。
+ * 但它们可交互，所以必须以 Actor 的形式存在于 ActorWorld 里——而整个世界有约
+ * 2000 棵树和 900 块石头，全部常驻的话每一个按 Component 查询的 System 都要为
+ * 它们付钱：`TemperatureSystem` 的热源收集就是 `query(transform)`。
  *
- * 因此这里和静态碰撞用同一套 ChunkResidency：只保留玩家周围的树，走远之后
- * 卸载。上界是玩家数 × (2 × keepRadius + 1)² 个 chunk 的树，与世界面积无关。
+ * 因此这里和静态碰撞用同一套 ChunkResidency：只保留玩家周围的物件，走远之后
+ * 卸载。上界是玩家数 × (2 × keepRadius + 1)² 个 chunk 的物件，与世界面积无关。
  *
  * **residentRadius 不能小于原型的 replicationPolicy.radiusChunks。** AOI 之内
- * 的树必须有 Actor，否则被砍倒的树没有快照条目，客户端会把它画回来。构造时
- * 直接从原型里取，避免两个半径各写一份之后悄悄失配。
+ * 的物件必须有 Actor，否则被采掉的那个没有快照条目，客户端会把它画回来。构造时
+ * 直接从原型里取所有种类的最大值，避免两个半径各写一份之后悄悄失配。
  *
- * 卸载时把偏离默认生成结果的树（砍过一半或已倒下）记进 deviations，重新装载
- * 时恢复。没被动过的树不占任何状态内存，所以状态量跟着「玩家改动过多少棵树」
- * 走，而不是跟着世界里有多少棵树走。
+ * 哪一种物件由哪个原型承载，来自原型自己声明的 `generatedProp.kind`：这里只
+ * 建一张 kind → archetype 的表，没有登记的种类就是纯布景，不产生 Actor。
+ *
+ * 卸载时把偏离默认生成结果的物件（采过一半或已采完）记进 deviations，重新装载
+ * 时恢复。没被动过的物件不占任何状态内存，所以状态量跟着「玩家改动过多少个」
+ * 走，而不是跟着世界里有多少个走。
  */
-export class ServerGeneratedTreeActors {
+export class ServerGeneratedPropActors {
   /**
    * @param {{
    *   world: import('../../shared/actor/ActorWorld.mjs').ActorWorld,
-   *   archetype?: { id: string, components: object },
+   *   archetypes?: ReadonlyArray<{ id: string, components: object }>,
    *   worldSeed?: number,
    *   enabled?: boolean,
    *   residentRadius?: number,
@@ -49,11 +55,23 @@ export class ServerGeneratedTreeActors {
    */
   constructor(options) {
     this.world = options.world;
-    this.archetype = options.archetype;
     this.worldSeed = toWorldSeed(options.worldSeed);
-    const enabled = options.enabled !== false && Boolean(this.archetype?.components.generatedTree);
-    // 复制半径决定了「哪些树的状态必须能进快照」，常驻半径不能比它小。
-    const replicationRadius = this.archetype?.components.replicationPolicy?.radiusChunks ?? 0;
+    /** @type {Map<number, { id: string, components: object }>} 物件种类 → 承载它的原型。 */
+    this.archetypesByKind = new Map();
+    let replicationRadius = 0;
+    for (const archetype of options.archetypes ?? []) {
+      const definition = archetype.components.generatedProp;
+      if (!definition) continue;
+      const kind = PROP_KIND_BY_NAME[definition.kind];
+      if (kind === undefined) continue;
+      // 同一种类只能有一个原型，重复的在 SceneCatalog 就被拒了；这里取先声明的。
+      if (this.archetypesByKind.has(kind)) continue;
+      this.archetypesByKind.set(kind, archetype);
+      replicationRadius = Math.max(
+        replicationRadius,
+        archetype.components.replicationPolicy?.radiusChunks ?? 0,
+      );
+    }
     const residentRadius = Math.max(
       options.residentRadius ?? DEFAULT_RESIDENT_RADIUS,
       replicationRadius,
@@ -65,7 +83,7 @@ export class ServerGeneratedTreeActors {
     /** 放置记录缓冲区复用，避免每装载一个 chunk 都新建一次。 */
     this.propBuffer = new Int32Array(PROP_BUFFER_LENGTH);
     this.residency = new ChunkResidency({
-      enabled,
+      enabled: options.enabled !== false && this.archetypesByKind.size > 0,
       residentRadius,
       keepRadius: options.keepRadius ?? residentRadius + 1,
       onLoad: (chunkX, chunkZ, key) => this.mountChunk(chunkX, chunkZ, key),
@@ -89,16 +107,21 @@ export class ServerGeneratedTreeActors {
     return this.residency.residentCount;
   }
 
-  /** 当前真正存在于 ActorWorld 里的生成树数量。 */
+  /** 当前真正存在于 ActorWorld 里的生成物件数量。 */
   get residentActorCount() {
     let count = 0;
     for (const actorIds of this.actorIdsByChunk.values()) count += actorIds.length;
     return count;
   }
 
-  /** 被玩家改动过、需要跨卸载保留的树数量。 */
+  /** 被玩家改动过、需要跨卸载保留的物件数量。 */
   get deviationCount() {
     return this.deviations.size;
+  }
+
+  /** @param {number} kind */
+  archetypeForKind(kind) {
+    return this.archetypesByKind.get(kind);
   }
 
   /** @param {number} x @param {number} z */
@@ -111,7 +134,7 @@ export class ServerGeneratedTreeActors {
     this.residency.sync(focuses);
   }
 
-  /** 房间清空或场景重置：卸掉全部常驻树，偏离态一并丢弃。 */
+  /** 房间清空或场景重置：卸掉全部常驻物件，偏离态一并丢弃。 */
   clear() {
     this.residency.clear();
     this.deviations.clear();
@@ -123,14 +146,17 @@ export class ServerGeneratedTreeActors {
     const actorIds = [];
     for (let propIndex = 0; propIndex < propCount; propIndex += 1) {
       const offset = propIndex * PROP_STRIDE;
-      if (this.propBuffer[offset + PROP_FIELD.KIND] !== PROP_KIND.TREE) continue;
-      const id = formatGeneratedTreeId(chunkX, chunkZ, propIndex);
+      const kind = this.propBuffer[offset + PROP_FIELD.KIND];
+      const archetype = this.archetypesByKind.get(kind);
+      // 没有原型的种类是纯布景（草），不产生 Actor。
+      if (!archetype) continue;
+      const id = formatGeneratedPropId(kind, chunkX, chunkZ, propIndex);
       // 同一个 chunk 不会装两次，这里只防御 ensureAround 与 sync 的竞争。
       if (this.world.getActor(id)) continue;
       const deviation = this.deviations.get(id);
       const actor = createServerActor({
         id,
-        archetypeId: this.archetype.id,
+        archetypeId: archetype.id,
         localTransform: {
           position: [
             this.propBuffer[offset + PROP_FIELD.X_MM] / 1000,
@@ -139,9 +165,10 @@ export class ServerGeneratedTreeActors {
           ],
           yaw: this.propBuffer[offset + PROP_FIELD.ROTATION_MRAD] / 1000,
         },
-      }, this.archetype, {
+      }, archetype, {
         replicated: false,
-        generatedTree: {
+        generatedProp: {
+          kind,
           chunkX,
           chunkZ,
           propIndex,
@@ -150,8 +177,8 @@ export class ServerGeneratedTreeActors {
         },
       });
       if (deviation) {
-        // 偏离态必须立刻可复制：AOI 里的客户端要靠这一条把树从世界里抹掉，
-        // 否则重新走回这一片时树会原地长回来。
+        // 偏离态必须立刻可复制：AOI 里的客户端要靠这一条把物件从世界里抹掉，
+        // 否则重新走回这一片时它会原地长回来。
         actor.addComponent(new ReplicatedComponent());
         if (deviation.removed) {
           const interactable = actor.getComponent(INTERACTABLE_COMPONENT);
@@ -178,26 +205,26 @@ export class ServerGeneratedTreeActors {
   }
 
   /**
-   * 记下一棵树偏离默认生成结果的部分。完好无损的树什么都不记，
-   * 所以状态量与「被动过的树」成正比，而不是与世界里的树成正比。
+   * 记下一个物件偏离默认生成结果的部分。完好无损的什么都不记，
+   * 所以状态量与「被动过的物件」成正比，而不是与世界里的物件成正比。
    * @param {import('../../shared/actor/Actor.mjs').Actor} actor
    */
   captureDeviation(actor) {
-    const tree = actor.getComponent(GENERATED_TREE_COMPONENT);
-    if (!tree) return;
-    if (!tree.removed && tree.health >= tree.maximumHealth) {
+    const prop = actor.getComponent(GENERATED_PROP_COMPONENT);
+    if (!prop) return;
+    if (!prop.removed && prop.health >= prop.maximumHealth) {
       this.deviations.delete(actor.id);
       return;
     }
     this.deviations.set(actor.id, {
-      health: tree.health,
-      removed: tree.removed,
-      revision: tree.revision,
+      health: prop.health,
+      removed: prop.removed,
+      revision: prop.revision,
     });
   }
 
   /**
-   * 砍伐等改动发生时立即登记，不必等到卸载。
+   * 采集等改动发生时立即登记，不必等到卸载。
    * 这样即使 Actor 被别的路径移除，偏离态也不会丢。
    * @param {import('../../shared/actor/Actor.mjs').Actor} actor
    */

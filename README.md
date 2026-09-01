@@ -358,25 +358,42 @@ Actor 不需要重建任何树。格子按需创建、空了立刻回收，所�
 | 使用者 | 装载内容 | residentRadius / keepRadius |
 | --- | --- | --- |
 | `server/scene/ServerChunkColliders.mjs` | chunk 静态碰撞体 | 1 / 2 |
-| `server/actors/ServerGeneratedTreeActors.mjs` | 可交互的生成树 Actor | 2 / 3 |
+| `server/actors/ServerGeneratedPropActors.mjs` | 可交互的世界生成物件 Actor | 2 / 3 |
 
 房间 DS 不建几何体，但必须知道树在哪，否则玩家会被客户端预测挡住、又被服务端
 和解拉回去。碰撞体只服务玩家自己的推出解算，所以一圈就够。
 
-生成树的半径更大，而且**不能小于原型的 `replicationPolicy.radiusChunks`**：AOI
-之内的树必须有 Actor，否则被砍倒的树没有快照条目，客户端会把它画回来。这个下界
-在构造时直接从原型里取，两个半径不会各写一份之后悄悄失配。
+生成物件的半径更大，而且**不能小于原型的 `replicationPolicy.radiusChunks`**：AOI
+之内的物件必须有 Actor，否则被采掉的那个没有快照条目，客户端会把它画回来。这个
+下界在构造时从所有已登记原型里取最大值，两个半径不会各写一份之后悄悄失配。
 
-整个世界有约 2000 棵树。全部常驻的话，每一个按 Component 查询的 System 都要为
-它们付钱——`TemperatureSystem` 的热源收集是 `query(transform)`，会 10 Hz 扫全世界
-的树。改成跟着玩家滑动之后，一名玩家在场时 ActorWorld 里带 Transform 的 Actor
-从 1913 个降到 162 个，而且不再随世界变大而增长。
+整个世界有约 2000 棵树和 900 块石头。全部常驻的话，每一个按 Component 查询的
+System 都要为它们付钱——`TemperatureSystem` 的热源收集是 `query(transform)`，会
+10 Hz 扫全世界。改成跟着玩家滑动之后，一名玩家在场时 ActorWorld 里带 Transform
+的 Actor 从 1913 个降到 162 个，而且不再随世界变大而增长。
 
-树的玩法状态用**偏离态**保存：卸载时只记下被砍过或已倒下的树（血量、是否倒下、
-revision），装载时按同一个 id 恢复并立刻挂上 `ReplicatedComponent`。完好的树什么
-都不记，所以状态量跟着「玩家改动过多少棵树」走，而不是跟着「世界里有多少棵树」走。
-被砍倒这一位同时写进 `ServerChunkColliders` 的 skip 掩码，静态碰撞和几何体因此
+玩法状态用**偏离态**保存：卸载时只记下被采过或已采完的物件（血量、是否移除、
+revision），装载时按同一个 id 恢复并立刻挂上 `ReplicatedComponent`。完好的物件
+什么都不记，所以状态量跟着「玩家改动过多少个」走，而不是跟着「世界里有多少个」走。
+被移除这一位同时写进 `ServerChunkColliders` 的 skip 掩码，静态碰撞和几何体因此
 一起消失。
+
+### 世界生成物件的原型注册表
+
+一个物件是布景还是可交互 Actor，取决于有没有原型认领它：原型在
+`generatedProp.kind` 里声明自己承载哪一种物件，服务端与客户端各自建一张
+种类 → 原型的表。没有原型认领的种类（当前是草）只有网格，不产生 Actor。
+
+Actor id 是自描述的：`prop:<种类>:<chunkX>:<chunkZ>:<放置下标>`。种类是冗余的
+——后三项已经唯一确定一格——带上它是为了让「只拿到 id」的一侧不跑生成器就能挑出
+原型：生成物件的快照只发 `{ id, revision, propState }`，没有 `archetypeId`。这份
+冗余不会让客户端说了算：权威侧的 Actor 只可能由服务端从世界种子推导出来，交互
+入口再拿 id 里的种类和 Component 对一次，对不上就拒绝。
+
+掉什么、掉多少写在原型的 `generatedProp.drop` 里，不写在代码分支里；数量按生成
+时的缩放取整，所以大树掉的木材比小树多，两端算出的结果一致。`SceneCatalog` 在
+启动时校验两件事：一种物件不能被多个原型认领（否则注册表有歧义），掉落必须指向
+这张地图上真的存在的可堆叠原型（否则要等玩家采到那一下才会炸在交互路径上）。
 
 ### 第三人称相机悬臂
 

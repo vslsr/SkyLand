@@ -10,7 +10,24 @@ import {
   isChunkInsideWorld,
 } from './worldConfig.mjs';
 
-const GENERATED_TREE_ID_PATTERN = /^tree:(-?\d+):(-?\d+):(\d+)$/;
+/**
+ * PROP_KIND 数值与 Actor id 里出现的名字之间的映射。
+ *
+ * 名字写进 Actor id，也就写进了网络消息，所以它是对外契约的一部分：可以新增，
+ * 不能改名。数值本身写进放置记录，同样不能重排——两者一起构成「这一格是什么」
+ * 的稳定表示。
+ */
+export const PROP_KIND_NAME = Object.freeze({
+  [PROP_KIND.TREE]: 'tree',
+  [PROP_KIND.GRASS]: 'grass',
+  [PROP_KIND.ROCK]: 'rock',
+});
+
+export const PROP_KIND_BY_NAME = Object.freeze(
+  Object.fromEntries(Object.entries(PROP_KIND_NAME).map(([kind, name]) => [name, Number(kind)])),
+);
+
+const GENERATED_PROP_ID_PATTERN = /^prop:([a-z]+):(-?\d+):(-?\d+):(\d+)$/;
 
 /** @typedef {{ low: number, high: number }} PropSkipMask */
 
@@ -46,38 +63,55 @@ export function setPropSkipped(mask, propIndex, skipped) {
   return current;
 }
 
-export function formatGeneratedTreeId(chunkX, chunkZ, propIndex) {
+/**
+ * 生成物件的自描述 id：`prop:<种类>:<chunkX>:<chunkZ>:<放置下标>`。
+ *
+ * 种类是冗余的——(chunkX, chunkZ, propIndex) 已经唯一确定了一格。带上它是为了
+ * 让「只拿到 id」的一侧（客户端收到偏离态快照，但对应 chunk 还没装载）不用跑一遍
+ * 生成器就能挑出原型。冗余不会让客户端说了算：权威侧的 Actor 只可能由服务端从
+ * 世界种子推导出来，交互入口再拿 id 里的种类和 Component 对一次，对不上就拒绝。
+ *
+ * @param {number} kind PROP_KIND 中的一个
+ * @param {number} chunkX
+ * @param {number} chunkZ
+ * @param {number} propIndex
+ */
+export function formatGeneratedPropId(kind, chunkX, chunkZ, propIndex) {
+  const name = PROP_KIND_NAME[kind];
+  if (!name) throw new RangeError(`未知的物件种类：${kind}`);
   if (!Number.isInteger(chunkX) || !Number.isInteger(chunkZ) || !isChunkInsideWorld(chunkX, chunkZ)) {
-    throw new RangeError('树的 chunk 坐标超出世界范围');
+    throw new RangeError('物件的 chunk 坐标超出世界范围');
   }
   if (!Number.isInteger(propIndex) || propIndex < 0 || propIndex >= MAXIMUM_PROPS_PER_CHUNK) {
-    throw new RangeError('树的 propIndex 超出范围');
+    throw new RangeError('物件的 propIndex 超出范围');
   }
-  return `tree:${chunkX}:${chunkZ}:${propIndex}`;
+  return `prop:${name}:${chunkX}:${chunkZ}:${propIndex}`;
 }
 
 /**
  * @param {unknown} value
- * @returns {{ chunkX: number, chunkZ: number, propIndex: number } | undefined}
+ * @returns {{ kind: number, chunkX: number, chunkZ: number, propIndex: number } | undefined}
  */
-export function parseGeneratedTreeId(value) {
-  const match = GENERATED_TREE_ID_PATTERN.exec(String(value ?? ''));
+export function parseGeneratedPropId(value) {
+  const match = GENERATED_PROP_ID_PATTERN.exec(String(value ?? ''));
   if (!match) return undefined;
-  const chunkX = Number(match[1]);
-  const chunkZ = Number(match[2]);
-  const propIndex = Number(match[3]);
+  const kind = PROP_KIND_BY_NAME[match[1]];
+  const chunkX = Number(match[2]);
+  const chunkZ = Number(match[3]);
+  const propIndex = Number(match[4]);
   if (
-    !isChunkInsideWorld(chunkX, chunkZ)
+    kind === undefined
+    || !isChunkInsideWorld(chunkX, chunkZ)
     || !Number.isInteger(propIndex)
     || propIndex < 0
     || propIndex >= MAXIMUM_PROPS_PER_CHUNK
   ) return undefined;
-  return { chunkX, chunkZ, propIndex };
+  return { kind, chunkX, chunkZ, propIndex };
 }
 
 /**
- * 从确定性放置结果解析一棵树。服务端可用它校验自描述 id，客户端可用它构造
- * 不带网格的派生 Actor。返回 undefined 表示该下标不是一棵真实生成的树。
+ * 从确定性放置结果解析一个物件。服务端用它校验自描述 id，客户端用它构造不带
+ * 网格的派生 Actor。返回 undefined 表示该下标上没有物件。
  *
  * @param {number} worldSeed
  * @param {number} chunkX
@@ -85,7 +119,7 @@ export function parseGeneratedTreeId(value) {
  * @param {number} propIndex
  * @param {Int32Array} [buffer]
  */
-export function deriveGeneratedTree(worldSeed, chunkX, chunkZ, propIndex, buffer) {
+export function deriveGeneratedProp(worldSeed, chunkX, chunkZ, propIndex, buffer) {
   if (!Number.isInteger(chunkX) || !Number.isInteger(chunkZ) || !isChunkInsideWorld(chunkX, chunkZ)) {
     return undefined;
   }
@@ -96,9 +130,11 @@ export function deriveGeneratedTree(worldSeed, chunkX, chunkZ, propIndex, buffer
   const count = generateChunkProps(worldSeed, chunkX, chunkZ, props);
   if (propIndex >= count) return undefined;
   const offset = propIndex * PROP_STRIDE;
-  if (props[offset + PROP_FIELD.KIND] !== PROP_KIND.TREE) return undefined;
+  const kind = props[offset + PROP_FIELD.KIND];
+  if (!PROP_KIND_NAME[kind]) return undefined;
   return {
-    id: formatGeneratedTreeId(chunkX, chunkZ, propIndex),
+    id: formatGeneratedPropId(kind, chunkX, chunkZ, propIndex),
+    kind,
     chunkX,
     chunkZ,
     propIndex,
