@@ -3,6 +3,17 @@ const SPRITE_ELEMENT_ID = 'ui-icon-sprite';
 const SYMBOL_ID_PREFIX = 'icon-';
 
 /**
+ * 地形图标共用的底图：一条地平线加一段山脊。
+ *
+ * 整套地形图标都是「同一片地形 + 右上角一个表示操作的徽标」，所以底图只写一份。
+ * 徽标固定占据 x 14–21、y 5–11 这块空地，避免和山脊叠在一起。
+ */
+const TERRAIN_BASE = `
+    <path d="M2.5 18.5h19" />
+    <path d="m3 18.5 4.5-6 3 3.5 2.5-3 5 5.5" />
+  `;
+
+/**
  * 图标定义。
  *
  * 全部按 24×24 视口、纯描边绘制，`stroke="currentColor"` 让颜色跟着按钮的
@@ -10,40 +21,38 @@ const SYMBOL_ID_PREFIX = 'icon-';
  */
 const ICON_PATHS = {
   'terrain-raise': `
-    <path d="M4 17.5h16" />
-    <path d="M12 4.5v8" />
-    <path d="M8 8.5 12 4.5l4 4" />
+    ${TERRAIN_BASE}
+    <path d="M17.5 11.5V5" />
+    <path d="m15 7.5 2.5-2.5L20 7.5" />
   `,
   'terrain-lower': `
-    <path d="M4 6.5h16" />
-    <path d="M12 19.5v-8" />
-    <path d="M8 15.5 12 19.5l4-4" />
+    ${TERRAIN_BASE}
+    <path d="M17.5 5v6.5" />
+    <path d="m15 9 2.5 2.5L20 9" />
   `,
   'terrain-flatten': `
-    <path d="M3 14.5h18" />
-    <path d="M6 10.5h4" />
-    <path d="M14 10.5h4" />
+    ${TERRAIN_BASE}
+    <rect x="14.3" y="6.6" width="6.4" height="3.6" rx="1.1" />
+    <path d="M17.5 8.4h.01" />
   `,
   'terrain-water': `
-    <path d="M3 9c2-2 4-2 6 0s4 2 6 0 4-2 6 0" />
-    <path d="M3 15c2-2 4-2 6 0s4 2 6 0 4-2 6 0" />
+    ${TERRAIN_BASE}
+    <path d="M14.5 6.5c1-1 2-1 3 0s2 1 3 0" />
+    <path d="M14.5 10c1-1 2-1 3 0s2 1 3 0" />
   `,
   'terrain-ground': `
-    <path d="M3.5 8.5h17v11h-17z" />
-    <path d="M3.5 12.5h17" />
-    <path d="M9.5 12.5v7" />
-    <path d="M15.5 12.5v7" />
-    <path d="M3.5 8.5 7 5h10l3.5 3.5" />
+    ${TERRAIN_BASE}
+    <rect x="14.3" y="5.8" width="6.4" height="5.4" rx="1.1" fill="currentColor" />
   `,
   'terrain-panel': `
-    <path d="M3 18.5h18" />
-    <path d="m3 18.5 5.5-7 3.5 4 3-3.5 6 6.5" />
-    <path d="M15.5 8.5h5" />
-    <path d="M18 6v5" />
+    ${TERRAIN_BASE}
+    <path d="M15 8h5" />
+    <path d="M17.5 5.5v5" />
   `,
   'terrain-reset': `
-    <path d="M20 12a8 8 0 1 1-2.6-5.9" />
-    <path d="M20 4v4.5h-4.5" />
+    ${TERRAIN_BASE}
+    <path d="M20.5 8.5a3 3 0 1 1-1-2.3" />
+    <path d="M20.8 5.2v3h-3" />
   `,
 } as const;
 
