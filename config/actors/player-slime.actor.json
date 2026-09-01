@@ -3,6 +3,16 @@
   "schemaVersion": 1,
   "id": "player-slime",
   "components": {
+    "buoyancy": {
+      "minimumBeam": 0.84,
+      "minimumLength": 0.84,
+      "maximumTrimRadians": 0,
+      "minimumDraft": 0.08,
+      "maximumDraft": 0.28,
+      "parts": [
+        { "id": "body", "mass": 40, "buoyancy": 80, "integrity": 1, "localX": 0, "localZ": 0 }
+      ]
+    },
     "playerMovement": {
       "walkSpeed": 3.2,
       "sprintMultiplier": 1.65,

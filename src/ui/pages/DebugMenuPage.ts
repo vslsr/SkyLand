@@ -1,10 +1,18 @@
 import { ModalWindow } from '../common/ModalWindow';
+import {
+  DEFAULT_WEATHER,
+  WEATHER_LABELS,
+  WEATHER_TYPES,
+  type WeatherType,
+} from '../../weather/index';
 
 export class DebugMenuPage extends ModalWindow {
   private readonly collisionButton: HTMLButtonElement;
   private readonly temperatureButton: HTMLButtonElement;
+  private readonly weatherButtons = new Map<WeatherType, HTMLButtonElement>();
   private collisionToggleHandler?: (visible: boolean) => void;
   private temperatureToggleHandler?: (visible: boolean) => void;
+  private weatherSelectHandler?: (weather: WeatherType) => void;
   private collisionVisible = false;
   private temperatureVisible = false;
 
@@ -13,7 +21,7 @@ export class DebugMenuPage extends ModalWindow {
       id: 'development-debug-menu',
       kicker: 'DEVELOPMENT ONLY · F8',
       title: '调试菜单',
-      description: '检查运行时 Actor 的碰撞、温度与其他开发状态。',
+      description: '检查运行时 Actor 状态，并向房间服务端请求切换权威天气。',
       size: 'compact',
     });
 
@@ -47,9 +55,32 @@ export class DebugMenuPage extends ModalWindow {
     });
     temperatureSection.append(temperatureHeading, temperatureDescription, this.temperatureButton);
 
-    this.bodyElement.append(collisionSection, temperatureSection);
+    const weatherSection = document.createElement('section');
+    weatherSection.className = 'debug-menu__section';
+    const weatherHeading = document.createElement('h3');
+    weatherHeading.textContent = 'ROOM WEATHER';
+    const weatherDescription = document.createElement('p');
+    weatherDescription.textContent = '服务端只同步当前天气；每个客户端按本地玩家周围的 chunk 激活固定容量天气粒子。';
+    const weatherGrid = document.createElement('div');
+    weatherGrid.className = 'debug-menu__weather-grid';
+    weatherGrid.setAttribute('role', 'group');
+    weatherGrid.setAttribute('aria-label', '切换房间天气');
+    for (const weather of WEATHER_TYPES) {
+      const button = document.createElement('button');
+      button.className = 'paper-button debug-menu__weather-button';
+      button.type = 'button';
+      button.dataset.weather = weather;
+      button.textContent = WEATHER_LABELS[weather];
+      button.addEventListener('click', () => this.weatherSelectHandler?.(weather));
+      this.weatherButtons.set(weather, button);
+      weatherGrid.append(button);
+    }
+    weatherSection.append(weatherHeading, weatherDescription, weatherGrid);
+
+    this.bodyElement.append(collisionSection, temperatureSection, weatherSection);
     this.setCollisionVisible(false);
     this.setTemperatureVisible(false);
+    this.setWeather(DEFAULT_WEATHER);
   }
 
   public onCollisionToggle(handler: (visible: boolean) => void): void {
@@ -58,6 +89,10 @@ export class DebugMenuPage extends ModalWindow {
 
   public onTemperatureToggle(handler: (visible: boolean) => void): void {
     this.temperatureToggleHandler = handler;
+  }
+
+  public onWeatherSelect(handler: (weather: WeatherType) => void): void {
+    this.weatherSelectHandler = handler;
   }
 
   public setCollisionVisible(visible: boolean): void {
@@ -74,6 +109,12 @@ export class DebugMenuPage extends ModalWindow {
     this.temperatureButton.textContent = visible
       ? '隐藏 Actor 温度'
       : '显示 Actor 温度';
+  }
+
+  public setWeather(weather: WeatherType): void {
+    for (const [candidate, button] of this.weatherButtons) {
+      button.setAttribute('aria-pressed', String(candidate === weather));
+    }
   }
 
   public onOpen(): void {

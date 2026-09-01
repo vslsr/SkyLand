@@ -71,6 +71,22 @@ test('密度噪声让世界有疏有密，而不是均匀铺开', () => {
   assert.ok(Math.max(...counts) - Math.min(...counts) >= 8, '疏密差异过小，密度噪声可能失效');
 });
 
+test('蘑菇在世界中稳定散布，频率略低于草', () => {
+  const counts = new Map(Object.values(PROP_KIND).map((kind) => [kind, 0]));
+  for (let chunkX = -8; chunkX <= 7; chunkX += 1) {
+    for (let chunkZ = -8; chunkZ <= 7; chunkZ += 1) {
+      for (const prop of generateChunkContent(DEFAULT_WORLD_SEED, chunkX, chunkZ)) {
+        counts.set(prop.kind, counts.get(prop.kind) + 1);
+      }
+    }
+  }
+  const mushroomCount = counts.get(PROP_KIND.MUSHROOM);
+  const grassCount = counts.get(PROP_KIND.GRASS);
+  assert.ok(mushroomCount > 0);
+  assert.ok(mushroomCount < grassCount, '蘑菇应比草稍少');
+  assert.ok(mushroomCount / grassCount > 0.6, '蘑菇不应稀疏到明显低于草');
+});
+
 test('整数记录解码成米与弧度的换算是稳定的', () => {
   const buffer = new Int32Array(PROP_BUFFER_LENGTH);
   const count = generateChunkProps(DEFAULT_WORLD_SEED, 1, 1, buffer);

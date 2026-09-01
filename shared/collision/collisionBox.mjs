@@ -1,8 +1,8 @@
 /**
  * 简易碰撞盒的几何运算：世界包围盒与扫掠球求交。
  *
- * 简易碰撞（shared/actor/simpleCollision.mjs）的盒子在 XZ 平面上是有向的
- * （带 yaw），在 Y 上是轴对齐的区间。推出算法只用到 XZ，但相机悬臂必须知道
+ * 简易碰撞（shared/actor/simpleCollision.mjs）在 XZ 平面支持有向盒与圆柱，
+ * 在 Y 上是轴对齐的区间。推出算法只用到 XZ，但相机悬臂必须知道
  * 高度——玩家能从树冠下面走过去，镜头却不该从树冠里穿过去。所以这里的运算
  * 都是三维的，Y 取自 transform.y（缺省 0）加上定义里的 minimumY/maximumY。
  *
@@ -33,6 +33,15 @@ export function simpleCollisionWorldBounds(instance, margin = 0) {
   const halfLength = finiteNumber(collision.halfLength);
   const worldX = finiteNumber(transform.x) + cosYaw * centerX + sinYaw * centerZ;
   const worldZ = finiteNumber(transform.z) - sinYaw * centerX + cosYaw * centerZ;
+  if (collision.shape === 'cylinder') {
+    const radius = Math.min(halfWidth, halfLength) + margin;
+    return {
+      minimumX: worldX - radius,
+      maximumX: worldX + radius,
+      minimumZ: worldZ - radius,
+      maximumZ: worldZ + radius,
+    };
+  }
   const extentX = Math.abs(cosYaw) * halfWidth + Math.abs(sinYaw) * halfLength + margin;
   const extentZ = Math.abs(sinYaw) * halfWidth + Math.abs(cosYaw) * halfLength + margin;
   return {
@@ -85,6 +94,43 @@ export function sweepSphereAgainstSimpleCollision(start, end, radius, instance) 
   const halfLength = finiteNumber(collision.halfLength) + safeRadius;
   const minimumY = transformY + finiteNumber(collision.minimumY) - safeRadius;
   const maximumY = transformY + finiteNumber(collision.maximumY) + safeRadius;
+
+  if (collision.shape === 'cylinder') {
+    const directionX = endLocalX - startLocalX;
+    const directionZ = endLocalZ - startLocalZ;
+    const expandedRadius = Math.min(
+      finiteNumber(collision.halfWidth),
+      finiteNumber(collision.halfLength),
+    ) + safeRadius;
+    const horizontalA = directionX * directionX + directionZ * directionZ;
+    const horizontalC = (
+      startLocalX * startLocalX + startLocalZ * startLocalZ
+      - expandedRadius * expandedRadius
+    );
+    let enter = 0;
+    let exit = 1;
+    if (horizontalC > 0) {
+      if (horizontalA < EPSILON) return 1;
+      const horizontalB = 2 * (startLocalX * directionX + startLocalZ * directionZ);
+      const discriminant = horizontalB * horizontalB - 4 * horizontalA * horizontalC;
+      if (discriminant < 0) return 1;
+      const root = Math.sqrt(discriminant);
+      enter = Math.max(enter, (-horizontalB - root) / (2 * horizontalA));
+      exit = Math.min(exit, (-horizontalB + root) / (2 * horizontalA));
+      if (enter > exit) return 1;
+    }
+    const directionY = endLocalY - startLocalY;
+    if (Math.abs(directionY) < EPSILON) {
+      if (startLocalY < minimumY || startLocalY > maximumY) return 1;
+    } else {
+      let near = (minimumY - startLocalY) / directionY;
+      let far = (maximumY - startLocalY) / directionY;
+      if (near > far) [near, far] = [far, near];
+      enter = Math.max(enter, near);
+      exit = Math.min(exit, far);
+    }
+    return enter <= exit && exit >= 0 && enter <= 1 ? Math.max(0, enter) : 1;
+  }
 
   let enter = 0;
   let exit = 1;

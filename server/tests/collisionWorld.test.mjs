@@ -128,6 +128,28 @@ test('扫掠球返回最早的遮挡位置，只看 CAMERA 层', () => {
   assert.equal(world.sweepSphere([0, 9, 0], [10, 9, 0], 0.3), 1);
 });
 
+test('圆柱的空间登记、移动推出与相机扫掠共用真实圆形截面', () => {
+  const world = new CollisionWorld();
+  const cylinder = createBox(4, 0, 0, 1, 1);
+  cylinder.collision.shape = 'cylinder';
+  world.setStaticGroup('cylinder', [cylinder]);
+
+  assert.deepEqual(
+    world.resolveCircle({ x: 5.2, z: 1.2 }, 0.5),
+    { x: 5.2, z: 1.2 },
+    '圆柱外接方盒的斜角不能挡住移动体',
+  );
+  assert.ok(
+    Math.abs(world.sweepSphere([0, 1, 0], [10, 1, 0], 0.5) - 0.25) < 1e-9,
+    '沿圆心扫掠应在圆柱半径与探针半径之和处命中',
+  );
+  assert.equal(
+    world.sweepSphere([0, 1, 1.6], [10, 1, 1.6], 0.5),
+    1,
+    '掠过圆柱外接方盒角落时不应产生相机命中',
+  );
+});
+
 test('清空场景会连同静态与动态碰撞体一起丢掉', () => {
   const world = new CollisionWorld();
   world.setStaticGroup('0:0', [createBox(1, 1, 0, 1, 1)]);

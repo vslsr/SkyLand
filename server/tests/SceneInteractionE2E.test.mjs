@@ -9,6 +9,7 @@ import { RoomProcessManager } from '../rooms/RoomProcessManager.mjs';
 import { SceneCatalog } from '../scenes/SceneCatalog.mjs';
 import { generateChunkContent } from '../../shared/world/chunkContent.mjs';
 import { formatGeneratedPropId } from '../../shared/world/generatedProp.mjs';
+import { selectWorldPropVariant } from '../../shared/world/worldPropVariants.mjs';
 import {
   MAXIMUM_CHUNK_COORDINATE,
   MINIMUM_CHUNK_COORDINATE,
@@ -44,6 +45,55 @@ function waitForJson(socket, predicate, timeoutMs = 7_000) {
 function actorFrom(message, actorId) {
   return message.snapshot.actors.find((actor) => actor.id === actorId);
 }
+
+test('真实 WebSocket 贯通天气请求、DS 校验和权威快照回传', async (context) => {
+  const sceneCatalog = await SceneCatalog.load();
+  const roomManager = new RoomProcessManager({ sceneCatalog });
+  const room = await roomManager.createRoom('天气闭环测试', 'open-meadow');
+  const roomRecord = roomManager.rooms.get(room.id);
+  assert.ok(roomRecord);
+  const server = http.createServer();
+  const connectionHub = new RoomConnectionHub(roomManager);
+  const gateway = new WebSocketGateway(server, connectionHub);
+  let socket;
+
+  context.after(async () => {
+    socket?.terminate();
+    gateway.close();
+    connectionHub.close();
+    const childExited = roomRecord.child.exitCode == null
+      ? once(roomRecord.child, 'exit')
+      : Promise.resolve();
+    roomManager.shutdown();
+    await childExited;
+    if (server.listening) await new Promise((resolve) => server.close(resolve));
+  });
+
+  server.listen(0, '127.0.0.1');
+  await once(server, 'listening');
+  const address = server.address();
+  assert.equal(typeof address, 'object');
+  socket = new WebSocket('ws://127.0.0.1:' + address.port + '/ws');
+  const connected = waitForJson(socket, (message) => message.type === 'connected');
+  await once(socket, 'open');
+  await connected;
+
+  const joinedState = waitForJson(socket, (message) => message.type === 'room:joined');
+  socket.send(JSON.stringify({ type: 'room:join', roomId: room.id, name: '观云者' }));
+  await joinedState;
+
+  const stormState = waitForJson(socket, (message) => (
+    message.type === 'room:snapshot' && message.snapshot.weather === 'storm'
+  ));
+  socket.send(JSON.stringify({ type: 'weather:set', weather: 'storm' }));
+  assert.equal((await stormState).snapshot.weather, 'storm');
+
+  const unchangedState = waitForJson(socket, (message) => (
+    message.type === 'room:snapshot' && message.snapshot.weather === 'storm'
+  ));
+  socket.send(JSON.stringify({ type: 'weather:set', weather: 'sandstorm' }));
+  assert.equal((await unchangedState).snapshot.weather, 'storm');
+});
 
 test('真实 WebSocket 贯通接管、装货、航行撞礁、损伤和卸货', async (context) => {
   const sceneCatalog = await SceneCatalog.load();
@@ -208,7 +258,7 @@ test('真实 WebSocket 贯通史莱姆叼取、移动拉伸和自动脱离', asy
   assert.equal(mushroom.elasticTether.releaseRevision, 1);
 });
 
-test('真实 WebSocket 贯通流式树砍伐、偏离态快照和木材掉落', async (context) => {
+test('真实 WebSocket 贯通流式树砍伐、偏离态快照和圆木掉落', async (context) => {
   const sceneCatalog = await SceneCatalog.load();
   const roomManager = new RoomProcessManager({ sceneCatalog });
   const room = await roomManager.createRoom('流式树闭环测试', 'open-world');
@@ -255,6 +305,15 @@ test('真实 WebSocket 贯通流式树砍伐、偏离态快照和木材掉落', 
       const props = generateChunkContent(room.worldSeed, chunkX, chunkZ);
       props.forEach((prop, propIndex) => {
         if (prop.kind !== PROP_KIND.TREE) return;
+        const variant = selectWorldPropVariant(
+          room.worldSeed,
+          prop.kind,
+          chunkX,
+          chunkZ,
+          propIndex,
+          joined.scene.gameplay.worldProps.tree,
+        );
+        if (variant?.archetypeId !== 'generated-tree') return;
         const distance = Math.hypot(prop.x - player.x, prop.z - player.z);
         if (!target || distance < target.distance) {
           target = {
@@ -295,7 +354,7 @@ test('真实 WebSocket 贯通流式树砍伐、偏离态快照和木材掉落', 
     const tree = actorFrom(message, target.id);
     return tree?.propState.removed === true
       && message.snapshot.actors.some((actor) => (
-        actor.archetypeId === 'wood-pile' && actor.itemStack?.itemType === 'wood'
+        actor.archetypeId === 'wood-log' && actor.itemStack?.itemType === 'wood-log'
       ));
   });
   for (let sequence = 1; sequence <= 3; sequence += 1) {

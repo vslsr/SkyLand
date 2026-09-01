@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
+  ELASTIC_TETHER_COMPONENT,
   GENERATED_PROP_COMPONENT,
   INVENTORY_COMPONENT,
   ITEM_STACK_COMPONENT,
@@ -85,6 +86,7 @@ test('生成物件 id 带种类、可在负 chunk 往返，并拒绝越界与未
     propIndex: 17,
   });
   assert.equal(formatGeneratedPropId(PROP_KIND.ROCK, 0, 0, 3), 'prop:rock:0:0:3');
+  assert.equal(formatGeneratedPropId(PROP_KIND.MUSHROOM, 0, 0, 4), 'prop:mushroom:0:0:4');
   assert.equal(parseGeneratedPropId('prop:tree:99:2:17'), undefined, 'chunk 越界');
   assert.equal(parseGeneratedPropId('prop:dragon:0:0:1'), undefined, '未知种类');
   assert.equal(parseGeneratedPropId('tree:0:0:1'), undefined, '旧格式不再被接受');
@@ -113,8 +115,18 @@ test('空房间不建任何物件，玩家到场才装载他周围的那一片',
 
   scene.addPlayer({ id: 'woodcutter', name: '樵夫', slot: 0 });
   const resident = residentProps(scene);
+  const mushrooms = scene.actorWorld.query(ELASTIC_TETHER_COMPONENT);
   assert.ok(residentTrees(scene).length > 0, '玩家出生点周围应该有树');
   assert.ok(residentProps(scene, PROP_KIND.ROCK).length > 0, '也应该有石头');
+  assert.ok(mushrooms.length > 0, '也应该有完整复制的弹性蘑菇 Actor');
+  const mushroomSnapshot = scene.createSnapshot('woodcutter').actors.find(
+    (actor) => actor.archetypeId === 'elastic-mushroom',
+  );
+  assert.ok(mushroomSnapshot);
+  assert.ok(mushroomSnapshot.id.startsWith('prop:mushroom:'));
+  assert.equal(mushroomSnapshot.propState, undefined);
+  assert.equal(mushroomSnapshot.interactable.action, 'mushroom-bite');
+  assert.equal(mushroomSnapshot.elasticTether.holderPlayerId, null);
 
   // 常驻半径至少要覆盖复制半径，否则 AOI 里的树没有 Actor 可复制偏离态。
   const archetype = scene.generatedProps.archetypeForKind(PROP_KIND.TREE);
@@ -126,17 +138,17 @@ test('空房间不建任何物件，玩家到场才装载他周围的那一片',
   // 常驻集合是玩家周围的一圈，不是全世界；两种物件走同一套半径。
   const player = scene.players.get('woodcutter');
   const reach = (scene.generatedProps.residentRadius + 1) * CHUNK_SIZE;
-  for (const actor of resident) {
+  for (const actor of [...resident, ...mushrooms]) {
     const transform = actor.requireComponent(TRANSFORM_COMPONENT);
     assert.ok(
       Math.abs(transform.x - player.x) <= reach && Math.abs(transform.z - player.z) <= reach,
       `物件 ${actor.id} 落在常驻范围之外`,
     );
   }
-  assert.equal(resident.length, scene.generatedProps.residentActorCount);
+  assert.equal(resident.length + mushrooms.length, scene.generatedProps.residentActorCount);
 });
 
-test('默认树是无网格轻量 Actor，受损后才复制，倒下时移除碰撞并生成木材', async () => {
+test('默认树倒下时从树中心逐根生成带物理效果的圆木', async () => {
   const scene = await createOpenWorldScene();
   scene.addPlayer({ id: 'woodcutter', name: '樵夫', slot: 0 });
   const player = scene.players.get('woodcutter');
@@ -169,11 +181,25 @@ test('默认树是无网格轻量 Actor，受损后才复制，倒下时移除�
   const snapshot = scene.createSnapshot('woodcutter');
   const removed = snapshot.actors.find((actor) => actor.id === treeActor.id);
   assert.deepEqual(removed.propState, { health: 0, removed: true });
-  const wood = scene.actorWorld.query(ITEM_STACK_COMPONENT).find((actor) => (
-    actor.requireComponent(ITEM_STACK_COMPONENT).itemType === 'wood'
+  const logs = scene.actorWorld.query(ITEM_STACK_COMPONENT, TRANSFORM_COMPONENT).filter((actor) => (
+    actor.archetypeId === 'wood-log'
+    && actor.requireComponent(ITEM_STACK_COMPONENT).itemType === 'wood-log'
   ));
-  assert.ok(wood);
-  assert.equal(wood.requireComponent(ITEM_STACK_COMPONENT).quantity, tree.dropQuantity);
+  assert.equal(logs.length, tree.dropQuantity, '默认掉落数量应拆成等量的独立圆木 Actor');
+  assert.equal(
+    logs.reduce((total, actor) => (
+      total + actor.requireComponent(ITEM_STACK_COMPONENT).quantity
+    ), 0),
+    tree.dropQuantity,
+  );
+  const expectedOriginY = transform.y + tree.scale * 1.95;
+  for (const log of logs) {
+    const logTransform = log.requireComponent(TRANSFORM_COMPONENT);
+    assert.equal(logTransform.x, transform.x, '圆木应从树中心出生');
+    assert.equal(logTransform.y, expectedOriginY);
+    assert.equal(logTransform.z, transform.z, '圆木应从树中心出生');
+    assert.equal(log.requireComponent(ITEM_STACK_COMPONENT).quantity, 1);
+  }
   assert.equal(scene.interactWithActor('woodcutter', { actorId: treeActor.id, sequence }), false);
 });
 
@@ -245,12 +271,12 @@ test('倒下的树重新装载后仍然是倒下的，不会原地长回来', as
   // 快照必须继续带着 removed，否则客户端会把它画回来。
   const snapshot = scene.createSnapshot('woodcutter').actors.find((actor) => actor.id === treeId);
   assert.deepEqual(snapshot.propState, { health: 0, removed: true });
-  // 已经倒下的树不能再砍出第二份木材。
+  // 已经倒下的树不能再砍出第二份圆木。
   assert.equal(scene.interactWithActor('woodcutter', { actorId: treeId, sequence }), false);
 });
 
 
-test('石头走的是同一条采集链路，掉的是石料而不是木材', async () => {
+test('石头走的是同一条采集链路，掉的是石料而不是圆木', async () => {
   const scene = await createOpenWorldScene();
   scene.addPlayer({ id: 'miner', name: '矿工', slot: 0 });
   const player = scene.players.get('miner');
@@ -261,15 +287,15 @@ test('石头走的是同一条采集链路，掉的是石料而不是木材', as
 
   const rockActor = nearestPropTo(scene, player.x, player.z, PROP_KIND.ROCK);
   assert.ok(rockActor);
-  assert.equal(rockActor.archetypeId, 'generated-rock');
+  assert.equal(rockActor.archetypeId, 'large-rock');
   assert.equal(rockActor.id.startsWith('prop:rock:'), true);
 
   const transform = rockActor.requireComponent(TRANSFORM_COMPONENT);
   const rock = rockActor.requireComponent(GENERATED_PROP_COMPONENT);
   movePlayerTo(scene, 'miner', transform.x + 0.5, transform.z);
 
-  // 石头比树硬：血量取自 generated-rock.actor.json，不是代码里的常数。
-  assert.equal(rock.maximumHealth, 4);
+  // 大石头比树硬：血量取自 large-rock.actor.json，不是代码里的常数。
+  assert.equal(rock.maximumHealth, 5);
   const sequence = harvestUntilRemoved(scene, 'miner', rockActor.id, rock);
 
   const stone = scene.actorWorld.query(ITEM_STACK_COMPONENT).find((actor) => (
@@ -278,10 +304,10 @@ test('石头走的是同一条采集链路，掉的是石料而不是木材', as
   assert.ok(stone, '应该掉出石料');
   assert.equal(stone.archetypeId, 'stone-pile');
   assert.equal(stone.requireComponent(ITEM_STACK_COMPONENT).quantity, rock.dropQuantity);
-  // 采石头不应该顺带掉木材。
+  // 采石头不应该顺带掉圆木。
   assert.equal(
     scene.actorWorld.query(ITEM_STACK_COMPONENT).some((actor) => (
-      actor.requireComponent(ITEM_STACK_COMPONENT).itemType === 'wood'
+      actor.requireComponent(ITEM_STACK_COMPONENT).itemType === 'wood-log'
     )),
     false,
   );
@@ -319,7 +345,7 @@ test('同一个玩家采树和采石得到两种不同的物品', async () => {
 
   assert.deepEqual(
     inventory.snapshot().map((entry) => entry.itemType),
-    ['stone', 'wood'],
+    ['stone', 'wood-log'],
     '两种物品分别入账，没有被当成同一种堆叠',
   );
 });

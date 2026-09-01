@@ -68,6 +68,10 @@ process.on('message', (message) => {
       if (!scene) break;
       scene.applyInput(message.playerId, message.input ?? {});
       break;
+    case 'weather:set':
+      if (!scene) break;
+      scene.setWeather(message.playerId, message.weather);
+      break;
     case 'actor:claim':
       if (!scene) break;
       scene.claimActorControl(message.playerId, message.actorId);

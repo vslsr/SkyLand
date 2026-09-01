@@ -8,7 +8,6 @@ import {
 import type { ChunkGenerator, ChunkTemplate } from '../../shared/world/chunkGenerator.mjs';
 import { MAXIMUM_PROPS_PER_CHUNK, PROP_KIND } from '../../shared/world/worldConfig.mjs';
 import { createFillMaterial, type FillMaterialEnvironment } from '../materials/createFillMaterial';
-import { createChunkGroundGeometry } from './ground';
 import { createGrassClusterModel } from './grass';
 import { createRockModel } from './rock';
 import { createTreeModel } from './tree';
@@ -127,24 +126,6 @@ function createTemplateFromObject(object: THREE.Object3D): ChunkTemplate {
   };
 }
 
-/** 地面铺块。它不描边，否则世界上会浮现出一张 chunk 的网格。 */
-function createGroundTemplate(groundColor: THREE.ColorRepresentation): ChunkTemplate {
-  const source = createChunkGroundGeometry();
-  const geometry = source.index ? source.toNonIndexed() : source;
-  const positions = geometry.attributes.position;
-  const color = new THREE.Color(groundColor);
-  const fill: number[] = [];
-
-  for (let index = 0; index < positions.count; index += 1) {
-    scratchVertex.fromBufferAttribute(positions as THREE.BufferAttribute, index);
-    fill.push(scratchVertex.x, scratchVertex.y, scratchVertex.z, 0, 1, 0, color.r, color.g, color.b);
-  }
-
-  if (geometry !== source) geometry.dispose();
-  source.dispose();
-  return { fill: new Float32Array(fill), line: new Float32Array(0) };
-}
-
 /**
  * 一个 chunk 全是同一种物件时最多要多少顶点。
  *
@@ -197,12 +178,16 @@ export function registerChunkTemplates(
     ? createTemplateFromObject(createGrassClusterModel(grassMaterial))
     : EMPTY_TEMPLATE;
   const rock = createTemplateFromObject(createRockModel(rockMaterial));
-  const ground = content.ground ? createGroundTemplate(palette.ground) : EMPTY_TEMPLATE;
-  warnIfTemplatesOverflow([tree, grass, rock], ground);
+  // 台地、斜坡、断崖与水面由 TerrainChunkView 独立生成；WASM 只合批静态物件。
+  const ground = EMPTY_TEMPLATE;
+  // 蘑菇是完整复制的交互 Actor；空模板只保留确定性放置记录，不重复画静态网格。
+  const mushroom = EMPTY_TEMPLATE;
+  warnIfTemplatesOverflow([tree, grass, rock, mushroom], ground);
 
   generator.registerTemplate(PROP_KIND.TREE, tree);
   generator.registerTemplate(PROP_KIND.GRASS, grass);
   generator.registerTemplate(PROP_KIND.ROCK, rock);
+  generator.registerTemplate(PROP_KIND.MUSHROOM, mushroom);
   generator.registerTemplate(GROUND_TEMPLATE_INDEX, ground);
 
   for (const material of materials) material.dispose();

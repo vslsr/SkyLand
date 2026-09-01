@@ -87,6 +87,26 @@ test('房间子进程把水域 JSON Actor 作为权威快照上报', async () =>
   await exited;
 });
 
+test('房间 IPC 把天气请求交给 DS 并从快照同步结果', async () => {
+  const sceneCatalog = await SceneCatalog.load();
+  const manager = new RoomProcessManager({ sceneCatalog });
+  const room = await manager.createRoom('天气同步测试房', 'open-meadow');
+  const record = manager.rooms.get(room.id);
+  const joined = manager.joinRoom(room.id, '观云者');
+
+  manager.setWeather(room.id, joined.player.id, 'storm');
+  const snapshot = await waitForSnapshot(
+    manager,
+    room.id,
+    (candidate) => candidate.weather === 'storm',
+  );
+  assert.equal(snapshot.weather, 'storm');
+
+  const exited = once(record.child, 'exit');
+  manager.removeRoom(room.id);
+  await exited;
+});
+
 test('房间 IPC 贯通控制权、船舶输入和载重事件', async () => {
   const sceneCatalog = await SceneCatalog.load();
   const manager = new RoomProcessManager({ sceneCatalog });

@@ -110,7 +110,10 @@ export function createServerActor(spawn, archetype, runtime = {}) {
     combustible.burning = runtime.thermal.burning ?? combustible.burning;
   }
   if (archetype.components.render) {
-    actor.addComponent(new SimpleCollisionComponent(createSimpleCollisionFromRender(archetype.components.render)));
+    actor.addComponent(new SimpleCollisionComponent(createSimpleCollisionFromRender(
+      archetype.components.render,
+      archetype.components.dropMotion,
+    )));
   }
   if (runtime.replicated !== false) actor.addComponent(new ReplicatedComponent());
   return actor;
@@ -123,6 +126,7 @@ export function createServerActorWorld(sceneDefinition, options = {}) {
     players: options.players,
     // 场景共用的空间划分。System 拿它做邻近查询，而不是每次遍历全部 Actor。
     collision: options.collision,
+    groundHeightAt: options.groundHeightAt,
     createActor: createServerActor,
   });
   // 碰撞索引在「Actor 已经移动完」和「tick 结束」两个位置各跑一次，

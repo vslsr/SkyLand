@@ -10,7 +10,10 @@ export class RemotePlayerGroup {
   private readonly players = new Map<string, RemotePlayer>();
   private archetype?: ActorArchetypeDefinition;
 
-  public constructor(private readonly grassInteraction: GrassInteractionTarget) {
+  public constructor(private readonly grassInteraction: GrassInteractionTarget & {
+    sampleGroundHeight?(x: number, z: number): number;
+    samplePlayerHeight?(x: number, z: number, buoyancyDraft?: number): number;
+  }) {
     this.root.name = 'remote-players';
   }
 

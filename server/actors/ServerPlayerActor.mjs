@@ -1,5 +1,6 @@
 import {
   Actor,
+  BuoyancyComponent,
   InventoryComponent,
   PLAYER_MOVEMENT_COMPONENT,
   PlayerMovementComponent,
@@ -16,11 +17,15 @@ export class ServerPlayerActor extends Actor {
   constructor(player, archetype, spawn, now) {
     super(player.id, archetype.id);
     this.name = player.name;
-    this.addComponent(new TransformComponent({ position: [spawn.x, 0, spawn.z], yaw: Math.PI }));
+    this.addComponent(new TransformComponent({ position: [spawn.x, spawn.y ?? 0, spawn.z], yaw: Math.PI }));
+    if (archetype.components.buoyancy) {
+      this.addComponent(new BuoyancyComponent(archetype.components.buoyancy));
+    }
     this.addComponent(new PlayerMovementComponent(archetype.components.playerMovement));
     this.addComponent(new InventoryComponent());
-    this.collisionRadius = archetype.components.render.radius;
-    this.collisionHeight = this.collisionRadius * 2;
+    const render = archetype.components.render;
+    this.collisionRadius = render.collisionRadius ?? render.radius;
+    this.collisionHeight = render.collisionHeight ?? render.radius * 2;
     this.speed = 0;
     this.sequence = 0;
     this.actorInteractionSequence = 0;
@@ -58,7 +63,7 @@ export class ServerPlayerActor extends Actor {
     this.transform.setWorldTransform([this.x, this.y, this.z], value);
   }
 
-  setPosition(x, z) {
-    this.transform.setWorldTransform([x, this.y, z], this.yaw);
+  setPosition(x, z, y = this.y) {
+    this.transform.setWorldTransform([x, y, z], this.yaw);
   }
 }

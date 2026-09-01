@@ -154,6 +154,18 @@ test('非法数值不会污染权威状态', () => {
   assert.ok(Number.isFinite(player.yaw));
 });
 
+test('房间服务端校验天气枚举并通过快照同步当前天气', () => {
+  const scene = new ServerScene('grassland');
+  scene.addPlayer({ id: 'player-1', name: '旅人', slot: 0 });
+
+  assert.equal(scene.createSnapshot().weather, 'sunny');
+  assert.equal(scene.setWeather('missing-player', 'rain'), false);
+  assert.equal(scene.setWeather('player-1', 'sandstorm'), false);
+  assert.equal(scene.createSnapshot().weather, 'sunny');
+  assert.equal(scene.setWeather('player-1', 'blizzard'), true);
+  assert.equal(scene.createSnapshot().weather, 'blizzard');
+});
+
 test('场景 JSON 的边界与出生配置参与权威模拟', () => {
   const scene = new ServerScene({
     id: 'tiny-map',

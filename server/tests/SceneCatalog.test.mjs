@@ -8,7 +8,17 @@ test('loads every selectable map from an independent scene JSON', async () => {
 
   assert.deepEqual(
     scenes.map((scene) => scene.id),
-    ['ability-lab', 'grass-test', 'grassland', 'open-meadow', 'open-world', 'orchard', 'thermal-lab', 'water'],
+    [
+      'ability-lab',
+      'grass-test',
+      'grassland',
+      'open-meadow',
+      'open-world',
+      'orchard',
+      'pbf-slime-test',
+      'thermal-lab',
+      'water',
+    ],
   );
   const abilityLab = catalog.require('ability-lab');
   assert.equal(abilityLab.capacity, 1);
@@ -62,17 +72,48 @@ test('loads every selectable map from an independent scene JSON', async () => {
   assert.equal(catalog.require('open-meadow').renderer.content.trees, false);
   const openWorld = catalog.require('open-world');
   assert.deepEqual(openWorld.sceneComponents[0], grassland.sceneComponents[1]);
-  // 绑定写在场景里，原型自己不再声明承载哪一种物件。
+  // 变体写在场景里；普通树占 5 份、果树占 1 份，选择由房间种子决定。
   assert.deepEqual(openWorld.gameplay.worldProps, {
-    tree: 'generated-tree',
-    rock: 'generated-rock',
+    tree: [
+      { archetypeId: 'generated-tree', weight: 5 },
+      { archetypeId: 'fruit-tree', weight: 1 },
+    ],
+    rock: [{ archetypeId: 'large-rock', weight: 1 }],
+    mushroom: [{ archetypeId: 'elastic-mushroom', weight: 1 }],
   });
   assert.deepEqual(openWorld.gameplay.runtimeActorArchetypes, []);
+  assert.deepEqual(openWorld.actors, []);
+  assert.equal(openWorld.gameplay.water.seaLevel, -0.4);
+  assert.equal(openWorld.renderer.ocean.deepColor, '#2f6f96');
+  assert.equal(openWorld.renderer.ocean.depthColorRange, 2.5);
   // 绑定的原型连同它的掉落一起被自动带进场景，作者不用再重复列一遍。
   const openWorldArchetypeIds = openWorld.actorArchetypes.map((archetype) => archetype.id).sort();
-  for (const id of ['generated-tree', 'wood-pile', 'generated-rock', 'stone-pile']) {
+  for (const id of [
+    'generated-tree',
+    'fruit-tree',
+    'wood-log',
+    'fruit-pile',
+    'large-rock',
+    'stone-pile',
+    'elastic-mushroom',
+  ]) {
     assert.ok(openWorldArchetypeIds.includes(id), `${id} 应该被自动带进场景`);
   }
+  const pbfSlimeTest = catalog.require('pbf-slime-test');
+  assert.deepEqual(
+    pbfSlimeTest.actors.map((actor) => [actor.id, actor.archetypeId]),
+    [
+      ['pbf-collision-dummy-center', 'training-dummy'],
+      ['pbf-collision-obelisk-left', 'arcane-focus-obelisk'],
+      ['pbf-collision-obelisk-right', 'arcane-focus-obelisk'],
+    ],
+  );
+  assert.equal(
+    pbfSlimeTest.actorArchetypes.find((actor) => actor.id === 'pbf-slime')
+      .components.render.model,
+    'line-art-pbf-slime',
+  );
+  assert.equal(pbfSlimeTest.gameplay.playerActor.archetypeId, 'pbf-slime');
   const thermalLab = catalog.require('thermal-lab');
   assert.deepEqual(
     thermalLab.actors.map((actor) => [actor.id, actor.archetypeId]),
@@ -122,7 +163,10 @@ test('流式场景带上 world 配置，固定场景没有', async () => {
 test('果林把 tree 绑到可再生的果树上，和无边草原共用同一套世界生成', async () => {
   const catalog = await SceneCatalog.load();
   const orchard = catalog.require('orchard');
-  assert.deepEqual(orchard.gameplay.worldProps, { tree: 'fruit-tree', rock: 'generated-rock' });
+  assert.deepEqual(orchard.gameplay.worldProps, {
+    tree: [{ archetypeId: 'fruit-tree', weight: 1 }],
+    rock: [{ archetypeId: 'generated-rock', weight: 1 }],
+  });
 
   const fruitTree = orchard.actorArchetypes.find((archetype) => archetype.id === 'fruit-tree');
   assert.equal(fruitTree.components.generatedProp.regrow.seconds, 120);

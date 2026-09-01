@@ -48,6 +48,8 @@ import {
   formatGeneratedPropId,
   parseGeneratedPropId,
 } from '../../shared/world/generatedProp.mjs';
+import { toWorldSeed } from '../../shared/world/worldConfig.mjs';
+import { selectWorldPropVariant } from '../../shared/world/worldPropVariants.mjs';
 import type { FillMaterialEnvironment } from '../materials/createFillMaterial';
 import { createActorVisualModel } from '../models/actors/createActorVisualModel';
 import type { SnapshotActor } from '../network/protocol';
@@ -82,6 +84,8 @@ import {
 import { FireVisualSystem } from './systems/FireVisualSystem';
 import { GeneratedPropFruitSystem } from './systems/GeneratedPropFruitSystem';
 import { HighCountActorBatchSystem } from './systems/HighCountActorBatchSystem';
+import { HybridSlimeVisualComponent } from './components/HybridSlimeVisualComponent';
+import { HybridSlimeVisualSystem } from './systems/HybridSlimeVisualSystem';
 import {
   TEMPERATURE_MARKER_COMPONENT,
   TemperatureMarkerComponent,
@@ -94,6 +98,8 @@ import {
 export interface ClientActorSystemOptions {
   definition: SceneDefinition;
   environment: FillMaterialEnvironment;
+  /** 与 ChunkStreamer 相同的房间世界种子，用于选择同 kind 的玩法原型变体。 */
+  worldSeed?: number;
   now?: () => number;
   /**
    * 场景共用的碰撞世界。传进来时 Actor 与流式 chunk 的碰撞体落在同一张
@@ -147,25 +153,35 @@ export class ClientActorSystem implements SceneVisualSystem {
   private readonly generatedPropStates = new Map<string, PropStateSnapshot>();
   private generatedPropOverrideTarget?: PropOverrideTarget;
   /**
-   * 物件种类 → 承载它的原型。和服务端一样从场景的 gameplay.worldProps 建表，
-   * 两端因此对同一个 id 挑出同一个原型，不需要在快照里带 archetypeId。
+   * 物件种类 → 带权原型变体。和服务端一样从场景的 gameplay.worldProps 建表，
+   * 再用房间种子与放置地址选择，两端因此不需要在快照里带 archetypeId。
    */
-  private readonly generatedPropArchetypes = new Map<
+  private readonly generatedPropArchetypeVariants = new Map<
     number,
-    SceneDefinition['actorArchetypes'][number]
+    Array<{
+      archetype: SceneDefinition['actorArchetypes'][number];
+      weight: number;
+    }>
   >();
+  private readonly worldSeed: number;
 
   public constructor(options: ClientActorSystemOptions) {
     this.root.name = 'replicated-actor-world';
     this.archetypes = new Map(
       options.definition.actorArchetypes.map((definition) => [definition.id, definition]),
     );
-    for (const [name, archetypeId] of Object.entries(options.definition.gameplay.worldProps ?? {})) {
+    for (const [name, variants] of Object.entries(options.definition.gameplay.worldProps ?? {})) {
       const kind = PROP_KIND_BY_NAME[name];
-      const archetype = this.archetypes.get(archetypeId);
-      if (kind === undefined || !archetype?.components.generatedProp) continue;
-      this.generatedPropArchetypes.set(kind, archetype);
+      if (kind === undefined || !Array.isArray(variants)) continue;
+      const resolved = variants.flatMap((variant) => {
+        const archetype = this.archetypes.get(variant.archetypeId);
+        return archetype?.components.generatedProp
+          ? [{ archetype, weight: variant.weight }]
+          : [];
+      });
+      if (resolved.length > 0) this.generatedPropArchetypeVariants.set(kind, resolved);
     }
+    this.worldSeed = toWorldSeed(options.worldSeed);
     this.now = options.now ?? (() => Date.now());
     this.collision = options.collision ?? new CollisionWorld();
     this.highCountBatches = new HighCountActorBatchSystem(options.environment, this.archetypes);
@@ -173,6 +189,7 @@ export class ClientActorSystem implements SceneVisualSystem {
     // 客户端不运行 AttachmentSystem：最终世界坐标来自快照插值，不能被
     // localTransform 再次解算覆盖。
     this.world.addSystem(new ActorTransformSystem(this.root));
+    this.world.addSystem(new HybridSlimeVisualSystem());
     if (options.definition.renderer.ocean) {
       this.world.addSystem(new WaterBobVisualSystem(options.definition.renderer.ocean));
       this.world.addSystem(new CargoVisualSystem(options.definition.renderer.ocean));
@@ -390,13 +407,13 @@ export class ClientActorSystem implements SceneVisualSystem {
     props: Int32Array,
     propCount: number,
   ): void {
-    if (this.generatedPropArchetypes.size === 0) return;
+    if (this.generatedPropArchetypeVariants.size === 0) return;
     this.unmountGeneratedPropChunk(key);
     const actorIds = new Set<string>();
     for (let propIndex = 0; propIndex < propCount; propIndex += 1) {
       const offset = propIndex * PROP_STRIDE;
       const kind = props[offset + PROP_FIELD.KIND];
-      const archetype = this.generatedPropArchetypes.get(kind);
+      const archetype = this.archetypeForGeneratedProp(kind, chunkX, chunkZ, propIndex);
       // 没有原型的种类是纯布景（草），只有网格没有逻辑 Actor。
       if (!archetype?.components.generatedProp) continue;
       const actorId = formatGeneratedPropId(kind, chunkX, chunkZ, propIndex);
@@ -407,7 +424,7 @@ export class ClientActorSystem implements SceneVisualSystem {
       actor.addComponent(new TransformComponent({
         position: [
           props[offset + PROP_FIELD.X_MM] / 1000,
-          0,
+          props[offset + PROP_FIELD.Y_MM] / 1000,
           props[offset + PROP_FIELD.Z_MM] / 1000,
         ],
         yaw: props[offset + PROP_FIELD.ROTATION_MRAD] / 1000,
@@ -648,7 +665,7 @@ export class ClientActorSystem implements SceneVisualSystem {
     if (archetype.components.itemStack) {
       if (!archetype.components.render) throw new Error(`物品堆 ${archetype.id} 缺少 render`);
       actor.addComponent(new SimpleCollisionComponent(
-        createSimpleCollisionFromRender(archetype.components.render),
+        createSimpleCollisionFromRender(archetype.components.render, archetype.components.dropMotion),
       ));
       this.world.addActor(actor);
       return actor;
@@ -662,6 +679,15 @@ export class ClientActorSystem implements SceneVisualSystem {
     const render = new ThreeObjectComponent(model);
     render.setSimpleCollisionVisible(this.simpleCollisionVisible);
     actor.addComponent(render);
+    if (
+      archetype.components.render.model === 'line-art-pbf-slime'
+      && render.pbfSlimeVisualRig
+    ) {
+      actor.addComponent(new HybridSlimeVisualComponent(
+        render.pbfSlimeVisualRig,
+        archetype.components.render,
+      ));
+    }
     if (render.fireVisualRig) {
       const emitter = actor.getComponent(HEAT_EMITTER_COMPONENT) as HeatEmitterComponent | undefined;
       actor.addComponent(new FireVisualComponent(render.fireVisualRig, emitter?.enabled ? 1 : 0));
@@ -839,14 +865,37 @@ export class ClientActorSystem implements SceneVisualSystem {
   }
 
   /**
-   * 生成物件的快照只带 id 与偏离态，原型从 id 里的种类查表得到。
-   * 这也是自描述 id 带上种类的理由：这条路径拿不到放置记录。
+   * 生成物件的快照只带 id 与偏离态；id 提供种类和放置地址，世界种子再从带权
+   * 配置中确定原型。这条路径不需要重新生成整个 chunk。
    */
   private resolveSnapshotArchetypeId(snapshot: SnapshotActor): string {
     if (snapshot.archetypeId) return snapshot.archetypeId;
     const identity = snapshot.propState ? parseGeneratedPropId(snapshot.id) : undefined;
-    const archetype = identity ? this.generatedPropArchetypes.get(identity.kind) : undefined;
+    const archetype = identity
+      ? this.archetypeForGeneratedProp(
+          identity.kind,
+          identity.chunkX,
+          identity.chunkZ,
+          identity.propIndex,
+        )
+      : undefined;
     if (archetype) return archetype.id;
     throw new Error(`Actor ${snapshot.id} 的快照缺少 archetypeId`);
+  }
+
+  private archetypeForGeneratedProp(
+    kind: number,
+    chunkX: number,
+    chunkZ: number,
+    propIndex: number,
+  ): SceneDefinition['actorArchetypes'][number] | undefined {
+    return selectWorldPropVariant(
+      this.worldSeed,
+      kind,
+      chunkX,
+      chunkZ,
+      propIndex,
+      this.generatedPropArchetypeVariants.get(kind) ?? [],
+    )?.archetype;
   }
 }

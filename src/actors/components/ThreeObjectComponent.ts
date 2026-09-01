@@ -6,6 +6,7 @@ import type {
   ActorVisualModel,
   ElasticTetherVisualRig,
   LineArtFireVisualRig,
+  PbfSlimeVisualRig,
 } from '../../models/actors/ActorVisualModel';
 import { createSimpleCollisionHelper } from '../../models/actors/createSimpleCollisionHelper';
 
@@ -37,6 +38,7 @@ export class ThreeObjectComponent extends ActorComponent {
   public readonly elasticTetherRig?: ElasticTetherVisualRig;
   public readonly abilityTargetRig?: AbilityTargetVisualRig;
   public readonly fireVisualRig?: LineArtFireVisualRig;
+  public readonly pbfSlimeVisualRig?: PbfSlimeVisualRig;
   private collisionHelper?: THREE.LineSegments<THREE.BufferGeometry, THREE.LineBasicMaterial>;
 
   public constructor(model: ActorVisualModel) {
@@ -50,6 +52,7 @@ export class ThreeObjectComponent extends ActorComponent {
     this.elasticTetherRig = model.elasticTetherRig;
     this.abilityTargetRig = model.abilityTargetRig;
     this.fireVisualRig = model.fireVisualRig;
+    this.pbfSlimeVisualRig = model.pbfSlimeVisualRig;
     this.root.userData[ACTOR_ROOT_MARKER] = true;
     this.attachmentVisualRoot.name = 'actor-attachment-visual-root';
     const visualParent = this.visualRoot.parent ?? this.root;

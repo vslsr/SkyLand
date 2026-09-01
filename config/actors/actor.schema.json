@@ -27,6 +27,18 @@
             "maximumStepHeight": { "type": "number", "minimum": 0, "maximum": 2 }
           }
         },
+        "slimeSurfaceDrag": {
+          "type": "object",
+          "description": "仅客户端使用的混合史莱姆鼠标表面拖拽参数",
+          "additionalProperties": false,
+          "required": ["maximumDistance", "pullForce", "falloffExponent", "influenceRadius"],
+          "properties": {
+            "maximumDistance": { "type": "number", "exclusiveMinimum": 0, "maximum": 2 },
+            "pullForce": { "type": "number", "exclusiveMinimum": 0, "maximum": 300 },
+            "falloffExponent": { "type": "number", "minimum": 1, "maximum": 8 },
+            "influenceRadius": { "type": "number", "exclusiveMinimum": 0, "maximum": 2 }
+          }
+        },
         "buoyancy": {
           "type": "object",
           "additionalProperties": false,
@@ -184,6 +196,9 @@
           "properties": {
             "gravity": { "type": "number", "minimum": 0, "maximum": 50 },
             "drag": { "type": "number", "minimum": 0, "maximum": 50 },
+            "groundDrag": { "type": "number", "minimum": 0, "maximum": 50 },
+            "restitution": { "type": "number", "minimum": 0, "maximum": 1 },
+            "radius": { "type": "number", "minimum": 0, "maximum": 3 },
             "settleSpeed": { "type": "number", "exclusiveMinimum": 0, "maximum": 10 }
           }
         },
@@ -237,7 +252,8 @@
               "required": ["archetypeId", "quantity"],
               "properties": {
                 "archetypeId": { "type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$" },
-                "quantity": { "type": "integer", "minimum": 1, "maximum": 1000 }
+                "quantity": { "type": "integer", "minimum": 1, "maximum": 1000 },
+                "spawnPattern": { "enum": ["center", "center-scatter", "fruit-anchors"] }
               }
             }
           }
@@ -263,6 +279,48 @@
                 "membraneColor": { "$ref": "#/$defs/color" },
                 "middleColor": { "$ref": "#/$defs/color" },
                 "coreColor": { "$ref": "#/$defs/color" },
+                "bubbleColor": { "$ref": "#/$defs/color" },
+                "inkColor": { "$ref": "#/$defs/color" },
+                "shadowColor": { "$ref": "#/$defs/color" }
+              }
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "model",
+                "radius",
+                "collisionRadius",
+                "collisionHeight",
+                "particleCount",
+                "constraintIterations",
+                "gravity",
+                "centerForce",
+                "viscosity",
+                "bubbleCount",
+                "bubbleSpeed",
+                "surfaceColor",
+                "innerColor",
+                "highlightColor",
+                "bubbleColor",
+                "inkColor",
+                "shadowColor"
+              ],
+              "properties": {
+                "model": { "const": "line-art-pbf-slime" },
+                "radius": { "type": "number", "exclusiveMinimum": 0, "maximum": 2 },
+                "collisionRadius": { "type": "number", "exclusiveMinimum": 0, "maximum": 2 },
+                "collisionHeight": { "type": "number", "exclusiveMinimum": 0, "maximum": 4 },
+                "particleCount": { "type": "integer", "minimum": 16, "maximum": 192 },
+                "constraintIterations": { "type": "integer", "minimum": 1, "maximum": 5 },
+                "gravity": { "type": "number", "minimum": 0, "maximum": 50 },
+                "centerForce": { "type": "number", "minimum": 0, "maximum": 100 },
+                "viscosity": { "type": "number", "minimum": 0, "maximum": 100 },
+                "bubbleCount": { "type": "integer", "minimum": 0, "maximum": 24 },
+                "bubbleSpeed": { "type": "number", "minimum": 0, "maximum": 2 },
+                "surfaceColor": { "$ref": "#/$defs/color" },
+                "innerColor": { "$ref": "#/$defs/color" },
+                "highlightColor": { "$ref": "#/$defs/color" },
                 "bubbleColor": { "$ref": "#/$defs/color" },
                 "inkColor": { "$ref": "#/$defs/color" },
                 "shadowColor": { "$ref": "#/$defs/color" }
@@ -390,6 +448,19 @@
                 "inkColor": { "$ref": "#/$defs/color" },
                 "radius": { "type": "number", "exclusiveMinimum": 0, "maximum": 3 },
                 "height": { "type": "number", "exclusiveMinimum": 0, "maximum": 3 }
+              }
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["model", "woodColor", "cutColor", "inkColor", "radius", "length"],
+              "properties": {
+                "model": { "const": "line-art-wood-log" },
+                "woodColor": { "$ref": "#/$defs/color" },
+                "cutColor": { "$ref": "#/$defs/color" },
+                "inkColor": { "$ref": "#/$defs/color" },
+                "radius": { "type": "number", "exclusiveMinimum": 0, "maximum": 1 },
+                "length": { "type": "number", "exclusiveMinimum": 0, "maximum": 3 }
               }
             },
             {

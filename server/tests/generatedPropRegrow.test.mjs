@@ -1,10 +1,16 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
+  ACTOR_RESIDENCY_COMPONENT,
+  DROP_MOTION_COMPONENT,
   GENERATED_PROP_COMPONENT,
   ITEM_STACK_COMPONENT,
   TRANSFORM_COMPONENT,
 } from '../../shared/actor/index.mjs';
+import {
+  fruitDropWorldPosition,
+  selectFruitDropAnchors,
+} from '../../shared/world/fruitDrop.mjs';
 import { CHUNK_SIZE, PROP_KIND } from '../../shared/world/worldConfig.mjs';
 import { SceneCatalog } from '../scenes/SceneCatalog.mjs';
 import { ServerScene } from '../scene/ServerScene.mjs';
@@ -48,7 +54,7 @@ function fruitStacks(scene) {
   ));
 }
 
-test('摘果子不砍树：树留在原地，静态碰撞一点没动', async () => {
+test('摘果子不砍树：逐颗从可见枝头生成，树与静态碰撞一点没动', async () => {
   const { scene, player } = await createOrchard();
   const tree = nearestFruitTree(scene, player.x, player.z);
   const prop = tree.requireComponent(GENERATED_PROP_COMPONENT);
@@ -62,7 +68,67 @@ test('摘果子不砍树：树留在原地，静态碰撞一点没动', async ()
   assert.ok(scene.actorWorld.getActor(tree.id), 'Actor 还在');
   const mask = scene.chunkColliders.getSkipMask(prop.chunkX, prop.chunkZ);
   assert.equal(mask.low === 0 && mask.high === 0, true, '几何体与碰撞都不该被撤走');
-  assert.equal(fruitStacks(scene).length, 1);
+  const drops = fruitStacks(scene);
+  const anchors = selectFruitDropAnchors(prop.dropQuantity);
+  assert.equal(drops.length, anchors.length);
+  assert.equal(
+    drops.reduce((total, actor) => total + actor.requireComponent(ITEM_STACK_COMPONENT).quantity, 0),
+    prop.dropQuantity,
+  );
+  const expectedOrigins = anchors.map((anchor) => fruitDropWorldPosition(transform, prop.scale, anchor));
+  for (let index = 0; index < drops.length; index += 1) {
+    const dropTransform = drops[index].requireComponent(TRANSFORM_COMPONENT);
+    assert.ok(Math.abs(dropTransform.x - expectedOrigins[index].x) < 1e-9);
+    assert.ok(Math.abs(dropTransform.y - expectedOrigins[index].y) < 1e-9);
+    assert.ok(Math.abs(dropTransform.z - expectedOrigins[index].z) < 1e-9);
+    assert.equal(drops[index].requireComponent(ITEM_STACK_COMPONENT).quantity, 1);
+  }
+});
+
+test('枝头果实受重力、落地反弹和摩擦影响，稳定后进入 sleeping 并停止逐 tick 模拟', async () => {
+  const { scene, clock, player } = await createOrchard();
+  const tree = nearestFruitTree(scene, player.x, player.z);
+  const transform = tree.requireComponent(TRANSFORM_COMPONENT);
+  moveTo(scene, transform.x + 0.5, transform.z);
+  assert.equal(scene.interactWithActor('picker', { actorId: tree.id, sequence: 1 }), true);
+  const drops = fruitStacks(scene);
+  const start = drops.map((actor) => {
+    const dropTransform = actor.requireComponent(TRANSFORM_COMPONENT);
+    return { x: dropTransform.x, y: dropTransform.y, z: dropTransform.z };
+  });
+
+  clock.ms += 100;
+  scene.update();
+  assert.ok(drops.some((actor, index) => {
+    const dropTransform = actor.requireComponent(TRANSFORM_COMPONENT);
+    return dropTransform.y < start[index].y
+      && Math.hypot(dropTransform.x - start[index].x, dropTransform.z - start[index].z) > 0;
+  }), '果实应该一边下落一边获得可见的水平滚动位移');
+
+  let sawBounce = false;
+  for (let tick = 0; tick < 25; tick += 1) {
+    clock.ms += 100;
+    scene.update();
+    sawBounce ||= fruitStacks(scene).some((actor) => (
+      actor.requireComponent(DROP_MOTION_COMPONENT).velocityY > 0.3
+      && actor.requireComponent(TRANSFORM_COMPONENT).y <= 0.141
+    ));
+  }
+  assert.equal(sawBounce, true, '首次落地应该按恢复系数反弹');
+  for (let tick = 0; tick < 75; tick += 1) {
+    clock.ms += 100;
+    scene.update();
+  }
+  const settled = fruitStacks(scene);
+  assert.ok(settled.length > 0);
+  for (const actor of settled) {
+    const residency = actor.requireComponent(ACTOR_RESIDENCY_COMPONENT);
+    const motion = actor.requireComponent(DROP_MOTION_COMPONENT);
+    const dropTransform = actor.requireComponent(TRANSFORM_COMPONENT);
+    assert.equal(residency.state, 'sleeping');
+    assert.equal(Math.hypot(motion.velocityX, motion.velocityY, motion.velocityZ), 0);
+    assert.ok(Math.abs(dropTransform.y - motion.radius) < 1e-6);
+  }
 });
 
 test('冷却期间摘不到，冷却结束自己恢复', async () => {
@@ -73,8 +139,9 @@ test('冷却期间摘不到，冷却结束自己恢复', async () => {
   moveTo(scene, transform.x + 0.5, transform.z);
 
   assert.equal(scene.interactWithActor('picker', { actorId: tree.id, sequence: 1 }), true);
+  const dropCount = fruitStacks(scene).length;
   assert.equal(scene.interactWithActor('picker', { actorId: tree.id, sequence: 2 }), false, '立刻再摘');
-  assert.equal(fruitStacks(scene).length, 1, '被拒的那一次不该掉东西');
+  assert.equal(fruitStacks(scene).length, dropCount, '被拒的那一次不该掉东西');
 
   // 差一秒还不行。
   clock.ms += (prop.regrowSeconds - 1) * 1000;
@@ -82,7 +149,7 @@ test('冷却期间摘不到，冷却结束自己恢复', async () => {
 
   clock.ms += 2_000;
   assert.equal(scene.interactWithActor('picker', { actorId: tree.id, sequence: 4 }), true);
-  assert.equal(fruitStacks(scene).length, 2);
+  assert.equal(fruitStacks(scene).length, dropCount * 2);
 });
 
 test('冷却是绝对服务端时间：chunk 卸载期间照样走完，装回来直接是熟的', async () => {

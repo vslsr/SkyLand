@@ -71,6 +71,26 @@ test('F8 调试菜单温度按钮切换文案、无障碍状态并派发回调',
     page.setTemperatureVisible(false);
     assert.equal(temperatureButton.textContent, '显示 Actor 温度');
     assert.equal(temperatureButton.getAttribute('aria-pressed'), 'false');
+
+    const stormButton = fakeDocument.elements.find((element) => (
+      element.tagName === 'button' && element.dataset.weather === 'storm'
+    ));
+    const sunnyButton = fakeDocument.elements.find((element) => (
+      element.tagName === 'button' && element.dataset.weather === 'sunny'
+    ));
+    assert.ok(stormButton);
+    assert.ok(sunnyButton);
+    assert.equal(sunnyButton.getAttribute('aria-pressed'), 'true');
+
+    const weatherRequests: string[] = [];
+    page.onWeatherSelect((weather) => weatherRequests.push(weather));
+    stormButton.dispatchEvent(new Event('click'));
+    assert.deepEqual(weatherRequests, ['storm']);
+    // 按钮只提交意图；等服务端快照回传后才改变选中状态。
+    assert.equal(sunnyButton.getAttribute('aria-pressed'), 'true');
+    page.setWeather('storm');
+    assert.equal(sunnyButton.getAttribute('aria-pressed'), 'false');
+    assert.equal(stormButton.getAttribute('aria-pressed'), 'true');
   } finally {
     Object.defineProperty(globalThis, 'document', {
       value: previousDocument,

@@ -36,6 +36,7 @@ export class GrassFieldSystem implements SceneVisualSystem {
     this.interaction = this.interactionQueue;
     this.bendField = new GrassBendField(options.bounds);
     const field = createGrassFieldGeometry({ bounds: options.bounds });
+    const runtime = options.environment.runtime;
     this.sharedUniforms = {
       uTime: { value: 0 },
       uBendTexture: { value: this.bendField.texture },
@@ -47,9 +48,14 @@ export class GrassFieldSystem implements SceneVisualSystem {
           options.bounds.maximumZ,
         ),
       },
-      uFogColor: { value: new THREE.Color(options.environment.fogColor) },
-      uFogNear: { value: options.environment.fogNear },
-      uFogFar: { value: options.environment.fogFar },
+      uFogColor: runtime?.fogColor ?? { value: new THREE.Color(options.environment.fogColor) },
+      uFogNear: runtime?.fogNear ?? { value: options.environment.fogNear },
+      uFogFar: runtime?.fogFar ?? { value: options.environment.fogFar },
+      uAmbientColor: runtime?.ambientColor ?? { value: new THREE.Color(0xffffff) },
+      uDaylight: runtime?.daylight ?? { value: 1 },
+      uSunDirection: runtime?.sunDirection ?? {
+        value: new THREE.Vector3(-0.55, 0.9, 0.35).normalize(),
+      },
       uGrassLodNear: { value: GRASS_LOD_NEAR_DISTANCE },
       uGrassLodFar: { value: GRASS_LOD_FAR_DISTANCE },
     };

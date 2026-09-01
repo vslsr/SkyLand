@@ -2,6 +2,8 @@ import * as THREE from 'three';
 import type { ChunkGenerator } from '../../shared/world/chunkGenerator.mjs';
 import { parseChunkKey, toChunkCoordinate, toChunkKey } from '../../shared/world/chunkKey.mjs';
 import { planChunkStream } from '../../shared/world/chunkStream.mjs';
+import { TerrainPatchStore } from '../../shared/world/terrainPatches.mjs';
+import { TerrainEditor } from '../../shared/world/terrainEditing.mjs';
 import {
   CHUNK_BUILD_BUDGET_PER_FRAME,
   DEFAULT_WORLD_SEED,
@@ -15,12 +17,16 @@ import {
 } from '../../shared/world/generatedProp.mjs';
 import { StreamingGrassSystem, type GrassInteractionTarget } from '../grass';
 import type { FillMaterialEnvironment } from '../materials/createFillMaterial';
+import { createOceanMaterials, type OceanMaterials } from '../materials/oceanMaterials';
+import { createWaterSplashMaterial } from '../materials/createWaterSplashMaterial';
 import { OUTLINE_MATERIAL, GROUND_GRID_MATERIAL } from '../materials/lineMaterials';
 import { createChunkFillMaterial } from '../models/chunkMesh';
 import { registerChunkTemplates, type ChunkTemplateOptions } from '../models/chunkTemplates';
-import { createChunkGridGeometry } from '../models/ground';
 import type { SceneUpdateContext, SceneVisualSystem } from '../scene/SceneVisualSystem';
-import type { WorldStreamingDefinition } from '../scenes/data/SceneDefinition';
+import type {
+  OceanVisualDefinition,
+  WorldStreamingDefinition,
+} from '../scenes/data/SceneDefinition';
 import { ChunkView } from './ChunkView';
 import { createChunkGenerator } from './loadChunkGenerator';
 
@@ -34,6 +40,9 @@ export interface ChunkStreamerOptions {
   world: WorldStreamingDefinition;
   templates: ChunkTemplateOptions;
   environment: FillMaterialEnvironment;
+  ocean?: OceanVisualDefinition;
+  seaLevel?: number;
+  terrainPatches?: TerrainPatchStore;
   /** 房间分配的世界种子。种子决定这一局的世界，缺省时退回默认种子。 */
   worldSeed?: number;
   /**
@@ -69,11 +78,17 @@ interface PropSkipMask {
 export class ChunkStreamer implements SceneVisualSystem {
   public readonly root = new THREE.Group();
   public readonly grassInteraction?: GrassInteractionTarget;
+  public readonly terrainPatches: TerrainPatchStore;
+  public readonly terrainEditor: TerrainEditor;
 
   private readonly world: WorldStreamingDefinition;
   private readonly views = new Map<string, ChunkView>();
   private readonly fillMaterial: THREE.Material;
-  private readonly gridGeometry: THREE.BufferGeometry;
+  private readonly waterMaterials?: OceanMaterials;
+  private readonly waterShoreMaterial?: THREE.ShaderMaterial;
+  private readonly waterSplashMaterial?: THREE.ShaderMaterial;
+  private readonly ocean?: OceanVisualDefinition;
+  private readonly templates: ChunkTemplateOptions;
   private readonly grass?: StreamingGrassSystem;
   private readonly collision?: CollisionWorld;
   private readonly onChunkMounted?: ChunkStreamerOptions['onChunkMounted'];
@@ -83,6 +98,8 @@ export class ChunkStreamer implements SceneVisualSystem {
   private pending: PendingChunk[] = [];
   private generator?: ChunkGenerator;
   private readonly worldSeed: number;
+  private readonly cellCodeAt: (globalCellX: number, globalCellZ: number) => number;
+  private readonly unsubscribeTerrainPatches: () => void;
   private centerX?: number;
   private centerZ?: number;
   private disposed = false;
@@ -93,9 +110,42 @@ export class ChunkStreamer implements SceneVisualSystem {
     this.collision = options.collision;
     this.onChunkMounted = options.onChunkMounted;
     this.onChunkUnmounted = options.onChunkUnmounted;
+    this.templates = options.templates;
+    this.ocean = options.ocean;
     this.worldSeed = toWorldSeed(options.worldSeed ?? DEFAULT_WORLD_SEED);
+    this.terrainPatches = options.terrainPatches ?? new TerrainPatchStore(this.worldSeed);
+    if (this.terrainPatches.worldSeed !== this.worldSeed) {
+      throw new Error('ChunkStreamer 与 TerrainPatchStore 必须使用同一 worldSeed');
+    }
+    const seaLevel = options.seaLevel ?? 0;
+    this.terrainEditor = new TerrainEditor(this.terrainPatches, { seaLevel });
+    this.cellCodeAt = (globalCellX, globalCellZ) => (
+      this.terrainPatches.cellCodeAt(globalCellX, globalCellZ)
+    );
+    this.unsubscribeTerrainPatches = this.terrainPatches.subscribe((change: {
+      affectedChunks: readonly { key: string }[];
+    }) => {
+      for (const chunk of change.affectedChunks) {
+        this.views.get(chunk.key)?.rebuildTerrain();
+      }
+    });
     this.fillMaterial = createChunkFillMaterial(options.environment);
-    this.gridGeometry = createChunkGridGeometry();
+    if (options.ocean) {
+      this.waterMaterials = createOceanMaterials(
+        options.ocean,
+        seaLevel,
+        options.environment,
+      );
+      this.waterShoreMaterial = this.waterMaterials.grid.clone();
+      this.waterShoreMaterial.uniforms.uOpacity.value = Math.min(
+        0.9,
+        options.ocean.gridLineOpacity * 3.2,
+      );
+      this.waterSplashMaterial = createWaterSplashMaterial(
+        options.ocean,
+        seaLevel,
+      );
+    }
     if (options.templates.content.grass) {
       this.grass = new StreamingGrassSystem({
         color: options.templates.palette.grass,
@@ -132,6 +182,14 @@ export class ChunkStreamer implements SceneVisualSystem {
     return this.pending.length;
   }
 
+  public setTerrainCellCode(globalCellX: number, globalCellZ: number, code: number): boolean {
+    return this.terrainPatches.setCellCode(globalCellX, globalCellZ, code);
+  }
+
+  public resetTerrainCell(globalCellX: number, globalCellZ: number): boolean {
+    return this.terrainPatches.resetCell(globalCellX, globalCellZ);
+  }
+
   /** 应用服务端下发的生成物件偏离态；已加载时只重建这一块。 */
   public setPropSkipped(
     chunkX: number,
@@ -155,6 +213,16 @@ export class ChunkStreamer implements SceneVisualSystem {
    */
   public update(deltaSeconds: number, elapsedSeconds: number, context?: SceneUpdateContext): void {
     this.grass?.update(deltaSeconds, elapsedSeconds, context);
+    if (this.waterMaterials) {
+      this.waterMaterials.surface.uniforms.uTime.value = elapsedSeconds;
+      this.waterMaterials.grid.uniforms.uTime.value = elapsedSeconds;
+      if (this.waterShoreMaterial) {
+        this.waterShoreMaterial.uniforms.uTime.value = elapsedSeconds;
+      }
+      if (this.waterSplashMaterial) {
+        this.waterSplashMaterial.uniforms.uTime.value = elapsedSeconds;
+      }
+    }
     if (!this.generator || !context) return;
 
     const centerX = toChunkCoordinate(context.focusX);
@@ -185,7 +253,11 @@ export class ChunkStreamer implements SceneVisualSystem {
     this.disposed = true;
     this.clearChunks();
     this.grass?.dispose();
-    this.gridGeometry.dispose();
+    this.waterMaterials?.surface.dispose();
+    this.waterMaterials?.grid.dispose();
+    this.waterShoreMaterial?.dispose();
+    this.waterSplashMaterial?.dispose();
+    this.unsubscribeTerrainPatches();
     this.fillMaterial.dispose();
     this.skipMasks.clear();
     this.generator = undefined;
@@ -217,8 +289,22 @@ export class ChunkStreamer implements SceneVisualSystem {
         chunk.chunkX,
         chunk.chunkZ,
         data,
-        { fill: this.fillMaterial, outline: OUTLINE_MATERIAL, grid: GROUND_GRID_MATERIAL },
-        this.gridGeometry,
+        {
+          fill: this.fillMaterial,
+          outline: OUTLINE_MATERIAL,
+          grid: GROUND_GRID_MATERIAL,
+          water: this.waterMaterials,
+          waterShore: this.waterShoreMaterial,
+          waterSplash: this.waterSplashMaterial,
+        },
+        {
+          worldSeed: this.worldSeed,
+          groundColor: this.templates.palette.ground,
+          showGround: this.templates.content.ground,
+          oceanDefinition: this.ocean,
+          seaLevel: this.terrainEditor.seaLevel,
+          cellCodeAt: this.cellCodeAt,
+        },
       );
       this.grass?.mountChunk(chunk.key, data);
       // 碰撞体由同一批放置记录派生，和几何体同生共死，不会出现「看得见但撞不到」。

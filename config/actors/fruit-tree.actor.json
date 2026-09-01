@@ -10,7 +10,11 @@
     },
     "generatedProp": {
       "regrow": { "seconds": 120 },
-      "drop": { "archetypeId": "fruit-pile", "quantity": 3 }
+      "drop": {
+        "archetypeId": "fruit-pile",
+        "quantity": 3,
+        "spawnPattern": "fruit-anchors"
+      }
     },
     "replicationPolicy": { "mode": "aoi", "radiusChunks": 2 }
   }

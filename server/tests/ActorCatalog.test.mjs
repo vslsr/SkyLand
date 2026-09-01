@@ -53,6 +53,26 @@ test('ActorCatalog 加载并净化木筏原型', async () => {
   assert.equal(player.components.render.radius, 0.42);
   assert.equal(player.components.playerMovement.walkSpeed, 3.2);
   assert.equal(player.components.playerMovement.maximumStepHeight, 0.2);
+  assert.equal(player.components.buoyancy.parts[0].id, 'body');
+  assert.equal(player.components.buoyancy.minimumDraft, 0.08);
+
+  const pbfSlime = catalog.require('pbf-slime');
+  assert.equal(pbfSlime.components.render.model, 'line-art-pbf-slime');
+  assert.equal(pbfSlime.components.render.collisionRadius, 0.52);
+  assert.equal(pbfSlime.components.render.collisionHeight, 0.72);
+  assert.equal(pbfSlime.components.render.particleCount, 72);
+  assert.equal(pbfSlime.components.render.constraintIterations, 2);
+  assert.equal(pbfSlime.components.render.gravity, 9.8);
+  assert.equal(pbfSlime.components.render.centerForce, 22);
+  assert.equal(pbfSlime.components.playerMovement.walkSpeed, 3.2);
+  assert.equal(pbfSlime.components.playerMovement.maximumStepHeight, 0.2);
+  assert.equal(pbfSlime.components.buoyancy.parts[0].buoyancy, 80);
+  assert.deepEqual(pbfSlime.components.slimeSurfaceDrag, {
+    maximumDistance: 0.62,
+    pullForce: 72,
+    falloffExponent: 2.2,
+    influenceRadius: 0.52,
+  });
 
   const campfire = catalog.require('campfire');
   assert.equal(campfire.components.heatEmitter.power, 520);
@@ -69,11 +89,45 @@ test('ActorCatalog 加载并净化木筏原型', async () => {
   assert.equal(wood.components.replicationPolicy.mode, 'aoi');
   assert.equal(wood.components.render.model, 'line-art-wood-pile');
 
+  const woodLog = catalog.require('wood-log');
+  assert.equal(woodLog.components.itemStack.itemType, 'wood-log');
+  assert.equal(woodLog.components.itemStack.displayName, '圆木');
+  assert.equal(woodLog.components.itemStack.compatibilityKey, 'wood-log');
+  assert.equal(woodLog.components.render.model, 'line-art-wood-log');
+  assert.deepEqual(woodLog.components.dropMotion, {
+    gravity: 9.8,
+    drag: 0.65,
+    groundDrag: 3.1,
+    restitution: 0.18,
+    radius: 0.11,
+    settleSpeed: 0.07,
+  });
+
   const tree = catalog.require('generated-tree');
   // 原型只描述「它是什么」，承载哪一种物件由场景的 gameplay.worldProps 决定。
   assert.equal(tree.components.generatedProp.kind, undefined);
-  assert.deepEqual(tree.components.generatedProp.drop, { archetypeId: 'wood-pile', quantity: 5 });
+  assert.deepEqual(tree.components.generatedProp.drop, {
+    archetypeId: 'wood-log',
+    quantity: 5,
+    spawnPattern: 'center-scatter',
+  });
   assert.equal(tree.components.interactable.action, 'harvest-prop');
+
+  const fruitTree = catalog.require('fruit-tree');
+  assert.deepEqual(fruitTree.components.generatedProp.drop, {
+    archetypeId: 'fruit-pile',
+    quantity: 3,
+    spawnPattern: 'fruit-anchors',
+  });
+  const fruit = catalog.require('fruit-pile');
+  assert.deepEqual(fruit.components.dropMotion, {
+    gravity: 9.8,
+    drag: 0.45,
+    groundDrag: 2.4,
+    restitution: 0.28,
+    radius: 0.14,
+    settleSpeed: 0.08,
+  });
 });
 
 test('ActorCatalog 拒绝缺失的掉落配置与不成对的采集交互', async () => {
@@ -100,6 +154,13 @@ test('ActorCatalog 拒绝缺失的掉落配置与不成对的采集交互', asyn
   const wrongAction = structuredClone(base);
   wrongAction.components.interactable.action = 'cargo-toggle';
   await assert.rejects(loadSingleActor(wrongAction), /需要 harvest-prop interactable/);
+
+  const wrongSpawnPattern = structuredClone(base);
+  wrongSpawnPattern.components.generatedProp.drop.spawnPattern = 'teleport';
+  await assert.rejects(
+    loadSingleActor(wrongSpawnPattern),
+    /spawnPattern 必须是 center、center-scatter 或 fruit-anchors/,
+  );
 });
 
 test('ActorCatalog 拒绝缺少温度的可燃物和倒置的点燃阈值', async () => {
@@ -174,5 +235,11 @@ test('ActorCatalog 拒绝越界的玩家台阶高度和错误的玩家渲染组�
     length: 1,
     height: 0.1,
   };
-  await assert.rejects(loadSingleActor(wrongRender), /需要 line-art-player-slime render/);
+  await assert.rejects(loadSingleActor(wrongRender), /需要玩家史莱姆 render/);
+
+  const catalog = await ActorCatalog.load();
+  const outsideSkin = structuredClone(catalog.require('pbf-slime'));
+  outsideSkin.id = 'probe-hybrid-slime';
+  outsideSkin.components.render.collisionHeight = outsideSkin.components.render.radius;
+  await assert.rejects(loadSingleActor(outsideSkin), /collisionHeight 必须低于外部蒙皮顶部/);
 });

@@ -1,6 +1,11 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { ActorWorld, GENERATED_PROP_COMPONENT } from '../../shared/actor/index.mjs';
+import {
+  ActorWorld,
+  ELASTIC_TETHER_COMPONENT,
+  GENERATED_PROP_COMPONENT,
+  REPLICATED_COMPONENT,
+} from '../../shared/actor/index.mjs';
 import { ServerGeneratedPropActors } from '../actors/ServerGeneratedPropActors.mjs';
 import { parseGeneratedPropId } from '../../shared/world/generatedProp.mjs';
 import { CHUNK_SIZE, PROP_KIND } from '../../shared/world/worldConfig.mjs';
@@ -25,7 +30,26 @@ function archetypeFor(id, overrides = {}) {
   };
 }
 
-/** @param {Record<string, string>} worldProps 场景侧的 种类名 → 原型 id 绑定 */
+function elasticArchetypeFor(id) {
+  return {
+    schemaVersion: 1,
+    id,
+    components: {
+      interactable: { action: 'mushroom-bite', label: id, maximumDistance: 1.35 },
+      elasticTether: {
+        restLength: 0.72,
+        breakLength: 2.65,
+        mouthHeight: 0.3,
+        mouthForwardOffset: 0.36,
+      },
+      replicationPolicy: { mode: 'aoi', radiusChunks: 2 },
+    },
+  };
+}
+
+const variants = (...entries) => entries.map(([archetypeId, weight = 1]) => ({ archetypeId, weight }));
+
+/** @param {Record<string, Array<{ archetypeId: string, weight: number }>>} worldProps */
 function createManager(archetypes, worldProps, options = {}) {
   const world = new ActorWorld();
   const props = new ServerGeneratedPropActors({
@@ -50,7 +74,7 @@ function kindsOf(world) {
 test('注册表按 kind 建立，没有登记的种类不产生 Actor', () => {
   const { world, props } = createManager(
     [archetypeFor('generated-tree')],
-    { tree: 'generated-tree' },
+    { tree: variants(['generated-tree']) },
   );
   props.ensureAround(0, 0);
 
@@ -63,13 +87,16 @@ test('注册表按 kind 建立，没有登记的种类不产生 Actor', () => {
 });
 
 test('登记第二种物件后，同一批 chunk 里两种都变成 Actor', () => {
-  const single = createManager([archetypeFor('generated-tree')], { tree: 'generated-tree' });
+  const single = createManager(
+    [archetypeFor('generated-tree')],
+    { tree: variants(['generated-tree']) },
+  );
   single.props.ensureAround(0, 0);
   const treeOnly = kindsOf(single.world);
 
   const both = createManager(
     [archetypeFor('generated-tree'), archetypeFor('generated-rock')],
-    { tree: 'generated-tree', rock: 'generated-rock' },
+    { tree: variants(['generated-tree']), rock: variants(['generated-rock']) },
   );
   both.props.ensureAround(0, 0);
   const withRock = kindsOf(both.world);
@@ -85,9 +112,65 @@ test('登记第二种物件后，同一批 chunk 里两种都变成 Actor', () =
   // 每个 Actor 的 id、原型与 Component 里的种类三者一致。
   for (const actor of both.world.query(GENERATED_PROP_COMPONENT)) {
     const prop = actor.requireComponent(GENERATED_PROP_COMPONENT);
-    assert.equal(parseGeneratedPropId(actor.id).kind, prop.kind);
-    assert.equal(actor.archetypeId, both.props.archetypeForKind(prop.kind).id);
+    const identity = parseGeneratedPropId(actor.id);
+    assert.equal(identity.kind, prop.kind);
+    assert.equal(
+      actor.archetypeId,
+      both.props.archetypeForProp(
+        identity.kind,
+        identity.chunkX,
+        identity.chunkZ,
+        identity.propIndex,
+      ).id,
+    );
   }
+});
+
+test('蘑菇放置记录生成完整复制的弹性 Actor，而不是本地派生采集物', () => {
+  const { world, props } = createManager(
+    [elasticArchetypeFor('elastic-mushroom')],
+    { mushroom: variants(['elastic-mushroom']) },
+  );
+  props.ensureAround(0, 0);
+
+  const mushrooms = world.query(ELASTIC_TETHER_COMPONENT);
+  assert.ok(mushrooms.length > 0);
+  assert.equal(props.residentActorCount, mushrooms.length);
+  for (const actor of mushrooms) {
+    assert.equal(parseGeneratedPropId(actor.id).kind, PROP_KIND.MUSHROOM);
+    assert.equal(actor.archetypeId, 'elastic-mushroom');
+    assert.equal(actor.hasComponents(GENERATED_PROP_COMPONENT), false);
+    assert.equal(actor.hasComponents(REPLICATED_COMPONENT), true);
+  }
+});
+
+test('同一种树按世界种子和权重稳定混合多个原型', () => {
+  const ordinary = archetypeFor('ordinary-tree');
+  const fruit = archetypeFor('fruit-tree');
+  fruit.components.generatedProp = {
+    regrow: { seconds: 120 },
+    drop: { archetypeId: 'fruit-pile', quantity: 3 },
+  };
+  const worldProps = {
+    tree: variants(['ordinary-tree', 5], ['fruit-tree', 1]),
+  };
+  const first = createManager([ordinary, fruit], worldProps);
+  const second = createManager([ordinary, fruit], worldProps);
+  first.props.ensureAround(0, 0);
+  second.props.ensureAround(0, 0);
+
+  const signature = (world) => world.query(GENERATED_PROP_COMPONENT)
+    .map((actor) => `${actor.id}:${actor.archetypeId}`)
+    .sort();
+  assert.deepEqual(signature(first.world), signature(second.world));
+  const ids = first.world.query(GENERATED_PROP_COMPONENT).map((actor) => actor.archetypeId);
+  assert.ok(ids.includes('ordinary-tree'));
+  assert.ok(ids.includes('fruit-tree'));
+  assert.ok(
+    ids.filter((id) => id === 'ordinary-tree').length
+      > ids.filter((id) => id === 'fruit-tree').length,
+    '5:1 的普通树应明显多于果树',
+  );
 });
 
 test('没有任何生成物件原型时整个机制关闭', () => {
@@ -104,7 +187,7 @@ test('常驻半径取所有已登记原型里最大的复制半径', () => {
   wide.components.replicationPolicy = { mode: 'aoi', radiusChunks: 5 };
   const { props } = createManager(
     [archetypeFor('generated-tree'), wide],
-    { tree: 'generated-tree', rock: 'generated-rock' },
+    { tree: variants(['generated-tree']), rock: variants(['generated-rock']) },
   );
   assert.equal(props.residentRadius, 5);
   assert.equal(props.keepRadius, 6);
@@ -113,7 +196,7 @@ test('常驻半径取所有已登记原型里最大的复制半径', () => {
 test('偏离态按 id 保存，跨种类互不干扰', () => {
   const { world, props } = createManager(
     [archetypeFor('generated-tree'), archetypeFor('generated-rock')],
-    { tree: 'generated-tree', rock: 'generated-rock' },
+    { tree: variants(['generated-tree']), rock: variants(['generated-rock']) },
   );
   props.ensureAround(0, 0);
 
@@ -158,8 +241,8 @@ test('同一种物件绑到不同原型，就得到不同的玩法与掉落', ()
     drop: { archetypeId: 'frozen-log-pile', quantity: 2 },
   };
 
-  const a = createManager([summer, winter], { tree: 'summer-tree' });
-  const b = createManager([summer, winter], { tree: 'winter-tree' });
+  const a = createManager([summer, winter], { tree: variants(['summer-tree']) });
+  const b = createManager([summer, winter], { tree: variants(['winter-tree']) });
   a.props.ensureAround(0, 0);
   b.props.ensureAround(0, 0);
 
@@ -182,10 +265,14 @@ test('同一种物件绑到不同原型，就得到不同的玩法与掉落', ()
   assert.notEqual(summerProp.dropQuantity, winterProp.dropQuantity);
 });
 
-test('绑定指向不存在或没有 generatedProp 的原型时，那一种物件被跳过', () => {
+test('绑定指向不存在或既非采集物也非弹性 Actor 的原型时，那一种物件被跳过', () => {
   const { world, props } = createManager(
     [archetypeFor('generated-tree'), { schemaVersion: 1, id: 'wood-pile', components: {} }],
-    { tree: 'generated-tree', rock: 'wood-pile', grass: 'nonexistent' },
+    {
+      tree: variants(['generated-tree']),
+      rock: variants(['wood-pile']),
+      grass: variants(['nonexistent']),
+    },
   );
   props.ensureAround(0, 0);
   assert.equal(props.archetypeForKind(PROP_KIND.TREE).id, 'generated-tree');

@@ -82,6 +82,11 @@ export class RoomConnectionHub {
             this.roomManager.sendInput(session.roomId, session.playerId, message);
           }
           break;
+        case 'weather:set':
+          if (session.roomId && session.playerId) {
+            this.roomManager.setWeather(session.roomId, session.playerId, message.weather);
+          }
+          break;
         case 'actor:claim':
           if (session.roomId && session.playerId) {
             this.roomManager.claimActorControl(session.roomId, session.playerId, message.actorId);

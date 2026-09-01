@@ -21,6 +21,7 @@ export const PROP_KIND_NAME = Object.freeze({
   [PROP_KIND.TREE]: 'tree',
   [PROP_KIND.GRASS]: 'grass',
   [PROP_KIND.ROCK]: 'rock',
+  [PROP_KIND.MUSHROOM]: 'mushroom',
 });
 
 export const PROP_KIND_BY_NAME = Object.freeze(
@@ -139,6 +140,7 @@ export function deriveGeneratedProp(worldSeed, chunkX, chunkZ, propIndex, buffer
     chunkZ,
     propIndex,
     x: props[offset + PROP_FIELD.X_MM] / 1000,
+    y: props[offset + PROP_FIELD.Y_MM] / 1000,
     z: props[offset + PROP_FIELD.Z_MM] / 1000,
     yaw: props[offset + PROP_FIELD.ROTATION_MRAD] / 1000,
     scale: props[offset + PROP_FIELD.SCALE_THOUSANDTHS] / 1000,

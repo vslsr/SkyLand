@@ -4,6 +4,10 @@ import { join } from 'node:path';
 import { ActorCatalog } from '../actors/ActorCatalog.mjs';
 import { CHUNK_SIZE, WORLD_PLAY_AREA } from '../../shared/world/worldConfig.mjs';
 import { PROP_KIND_BY_NAME } from '../../shared/world/generatedProp.mjs';
+import {
+  WORLD_PROP_VARIANT_MAXIMUM_COUNT,
+  WORLD_PROP_VARIANT_WEIGHT_MAXIMUM,
+} from '../../shared/world/worldPropVariants.mjs';
 
 export const DEFAULT_SCENE_DIRECTORY = fileURLToPath(new URL('../../config/scenes/', import.meta.url));
 
@@ -215,14 +219,14 @@ function validateSceneComponents(rawComponents, filename) {
   });
 }
 
-/** 只有 tree 与 grass 有渲染开关；岩石永远出现，所以没有对应项。 */
+/** 只有 tree 与 grass 有静态渲染开关；岩石永远出现，蘑菇则由 Actor 自己渲染。 */
 const PROP_KIND_CONTENT_KEY = { tree: 'trees', grass: 'grass' };
 
 /**
- * 流式世界里每种物件由哪个原型承载。
+ * 流式世界里每种物件可以由哪些原型承载。
  *
- * 绑定关系放在场景而不是原型里：同一棵树在不同地图上可以是不同的玩法对象
- * （雪原的树掉的东西和草原不一样），而原型只描述「它是什么」。
+ * 变体表放在场景而不是原型里：同一片林子可以同时有普通树与果树，服务端和
+ * 客户端再用房间种子 + 放置记录地址选择同一项。原型仍只描述「它是什么」。
  */
 function validateWorldProps(gameplay, filename, actorCatalog, world, content) {
   const path = `${filename}.gameplay.worldProps`;
@@ -230,7 +234,7 @@ function validateWorldProps(gameplay, filename, actorCatalog, world, content) {
   if (!world) throw new TypeError(`${path} 只能用在带 renderer.world 的流式场景上`);
   const definition = requireObject(gameplay.worldProps, path);
   const bindings = {};
-  for (const [kind, rawArchetypeId] of Object.entries(definition)) {
+  for (const [kind, rawVariants] of Object.entries(definition)) {
     if (PROP_KIND_BY_NAME[kind] === undefined) {
       throw new TypeError(
         `${path} 的 ${kind} 不是已知物件种类：${Object.keys(PROP_KIND_BY_NAME).join(' / ')}`,
@@ -241,13 +245,48 @@ function validateWorldProps(gameplay, filename, actorCatalog, world, content) {
     if (contentKey && !content[contentKey]) {
       throw new TypeError(`${path}.${kind} 需要开启 renderer.content.${contentKey}`);
     }
-    const archetypeId = requireString(rawArchetypeId, `${path}.${kind}`, 48);
-    if (!SCENE_ID_PATTERN.test(archetypeId)) throw new TypeError(`${path}.${kind} 格式无效`);
-    const archetype = actorCatalog.require(archetypeId);
-    if (!archetype.components.generatedProp) {
-      throw new TypeError(`${path}.${kind} 的 ${archetypeId} 缺少 generatedProp`);
+    if (
+      !Array.isArray(rawVariants)
+      || rawVariants.length === 0
+      || rawVariants.length > WORLD_PROP_VARIANT_MAXIMUM_COUNT
+    ) {
+      throw new TypeError(
+        `${path}.${kind} 必须是 1-${WORLD_PROP_VARIANT_MAXIMUM_COUNT} 项的原型变体数组`,
+      );
     }
-    bindings[kind] = archetypeId;
+    const seenArchetypes = new Set();
+    bindings[kind] = rawVariants.map((rawVariant, index) => {
+      const variantPath = `${path}.${kind}[${index}]`;
+      const variant = requireObject(rawVariant, variantPath);
+      const knownKeys = new Set(['archetype', 'weight']);
+      for (const key of Object.keys(variant)) {
+        if (!knownKeys.has(key)) throw new TypeError(`${variantPath}.${key} 不受支持`);
+      }
+      const archetypeId = requireString(variant.archetype, `${variantPath}.archetype`, 48);
+      if (!SCENE_ID_PATTERN.test(archetypeId)) {
+        throw new TypeError(`${variantPath}.archetype 格式无效`);
+      }
+      if (seenArchetypes.has(archetypeId)) {
+        throw new TypeError(`${path}.${kind} 不能重复引用原型：${archetypeId}`);
+      }
+      seenArchetypes.add(archetypeId);
+      const weight = requireInteger(
+        variant.weight,
+        `${variantPath}.weight`,
+        1,
+        WORLD_PROP_VARIANT_WEIGHT_MAXIMUM,
+      );
+      const archetype = actorCatalog.require(archetypeId);
+      if (!archetype.components.generatedProp && !archetype.components.elasticTether) {
+        throw new TypeError(
+          `${variantPath} 的 ${archetypeId} 不是可采集生成物或可拖拽弹性 Actor`,
+        );
+      }
+      if (!archetype.components.replicationPolicy) {
+        throw new TypeError(`${variantPath} 的 ${archetypeId} 缺少 replicationPolicy`);
+      }
+      return { archetypeId, weight };
+    });
   }
   return bindings;
 }
@@ -292,6 +331,17 @@ function validateSceneDefinition(raw, filename, actorCatalog) {
       interlaceStrength: requireNumber(rawOcean.interlaceStrength, `${filename}.renderer.ocean.interlaceStrength`),
       surfaceColor: requireColor(rawOcean.surfaceColor, `${filename}.renderer.ocean.surfaceColor`),
       secondaryColor: requireColor(rawOcean.secondaryColor, `${filename}.renderer.ocean.secondaryColor`),
+      ...(rawOcean.deepColor === undefined
+        ? {}
+        : { deepColor: requireColor(rawOcean.deepColor, `${filename}.renderer.ocean.deepColor`) }),
+      ...(rawOcean.depthColorRange === undefined
+        ? {}
+        : {
+            depthColorRange: requireNumber(
+              rawOcean.depthColorRange,
+              `${filename}.renderer.ocean.depthColorRange`,
+            ),
+          }),
       gridLineColor: requireColor(rawOcean.gridLineColor, `${filename}.renderer.ocean.gridLineColor`),
       gridLineOpacity: requireNumber(rawOcean.gridLineOpacity, `${filename}.renderer.ocean.gridLineOpacity`),
     };
@@ -301,6 +351,9 @@ function validateSceneDefinition(raw, filename, actorCatalog) {
     if (ocean.noiseScale <= 0 || ocean.noiseScale > 1) throw new TypeError(`${filename}.renderer.ocean.noiseScale 范围无效`);
     if (ocean.noiseStrength < 0 || ocean.noiseStrength > 3) throw new TypeError(`${filename}.renderer.ocean.noiseStrength 范围无效`);
     if (ocean.interlaceStrength < 0 || ocean.interlaceStrength > 0.75) throw new TypeError(`${filename}.renderer.ocean.interlaceStrength 范围无效`);
+    if (ocean.depthColorRange !== undefined && (ocean.depthColorRange <= 0 || ocean.depthColorRange > 32)) {
+      throw new TypeError(`${filename}.renderer.ocean.depthColorRange 范围无效`);
+    }
     if (ocean.gridLineOpacity < 0 || ocean.gridLineOpacity > 1) throw new TypeError(`${filename}.renderer.ocean.gridLineOpacity 范围无效`);
   }
 
@@ -338,12 +391,14 @@ function validateSceneDefinition(raw, filename, actorCatalog) {
     throw new TypeError(`${filename}.gameplay.playerActor.archetype 格式无效`);
   }
   const playerActorArchetype = actorCatalog.require(playerActorArchetypeId);
+  const playerRenderModel = playerActorArchetype.components.render.model;
   if (
     !playerActorArchetype.components.playerMovement
-    || playerActorArchetype.components.render.model !== 'line-art-player-slime'
+    || (playerRenderModel !== 'line-art-player-slime'
+      && playerRenderModel !== 'line-art-pbf-slime')
   ) {
     throw new TypeError(
-      `${filename}.gameplay.playerActor 需要 playerMovement + line-art-player-slime 原型`,
+      `${filename}.gameplay.playerActor 需要 playerMovement + 玩家史莱姆 render 原型`,
     );
   }
   const runtimeActorArchetypeIds = gameplay.runtimeActorArchetypes ?? [];
@@ -425,7 +480,7 @@ function validateSceneDefinition(raw, filename, actorCatalog) {
       actorComposition.actorArchetypes.push(archetype);
     }
   }
-  // worldProps 绑定的原型，连同它掉落的堆叠原型，一并进入场景的原型表。
+  // worldProps 变体引用的原型，连同它们掉落的堆叠原型，一并进入场景的原型表。
   // 作者不用再把这些 id 在 runtimeActorArchetypes 里重复写一遍——那份重复正是
   // 「绑了但忘了带进来」这类错误的来源。
   const includeArchetype = (archetype) => {
@@ -433,25 +488,32 @@ function validateSceneDefinition(raw, filename, actorCatalog) {
       actorComposition.actorArchetypes.push(archetype);
     }
   };
-  for (const [kind, archetypeId] of Object.entries(worldProps)) {
-    const archetype = actorCatalog.require(archetypeId);
-    includeArchetype(archetype);
-    const dropArchetypeId = archetype.components.generatedProp.drop.archetypeId;
-    // 掉落必须真的存在且可堆叠，否则要等玩家采到那一下才会炸在交互路径上。
-    let dropArchetype;
-    try {
-      dropArchetype = actorCatalog.require(dropArchetypeId);
-    } catch {
-      throw new TypeError(
-        `${filename}.gameplay.worldProps.${kind} 的 ${archetypeId} 掉落引用了不存在的原型：${dropArchetypeId}`,
-      );
+  for (const [kind, variants] of Object.entries(worldProps)) {
+    for (const [index, variant] of variants.entries()) {
+      const archetype = actorCatalog.require(variant.archetypeId);
+      includeArchetype(archetype);
+      // 完整复制的场景 Actor（当前是弹性蘑菇）没有采集掉落；它的原型到这里
+      // 已经完整进入场景表，后续由服务端按生成记录实例化即可。
+      if (!archetype.components.generatedProp) continue;
+      const dropArchetypeId = archetype.components.generatedProp.drop.archetypeId;
+      // 掉落必须真的存在且可堆叠，否则要等玩家采到那一下才会炸在交互路径上。
+      let dropArchetype;
+      try {
+        dropArchetype = actorCatalog.require(dropArchetypeId);
+      } catch {
+        throw new TypeError(
+          `${filename}.gameplay.worldProps.${kind}[${index}] 的 ${variant.archetypeId} ` +
+            `掉落引用了不存在的原型：${dropArchetypeId}`,
+        );
+      }
+      if (!dropArchetype.components.itemStack) {
+        throw new TypeError(
+          `${filename}.gameplay.worldProps.${kind}[${index}] 的掉落原型 ` +
+            `${dropArchetypeId} 没有 itemStack`,
+        );
+      }
+      includeArchetype(dropArchetype);
     }
-    if (!dropArchetype.components.itemStack) {
-      throw new TypeError(
-        `${filename}.gameplay.worldProps.${kind} 的掉落原型 ${dropArchetypeId} 没有 itemStack`,
-      );
-    }
-    includeArchetype(dropArchetype);
   }
   for (const component of sceneComponents) {
     if (component.type !== 'ability-lab') continue;
@@ -501,7 +563,12 @@ function validateSceneDefinition(raw, filename, actorCatalog) {
     gameplay: {
       playerActor: { archetypeId: playerActorArchetype.id },
       runtimeActorArchetypes: runtimeActorArchetypeIds.slice(),
-      worldProps: { ...worldProps },
+      worldProps: Object.fromEntries(
+        Object.entries(worldProps).map(([kind, variants]) => [
+          kind,
+          variants.map((variant) => ({ ...variant })),
+        ]),
+      ),
       bounds: { minimumX, maximumX, minimumZ, maximumZ },
       spawn: {
         centerX,

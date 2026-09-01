@@ -32,8 +32,9 @@ test('换一个种子就是另一个世界', () => {
   assert.notDeepEqual(a, b);
 });
 
-test('草不产生碰撞体，树与岩石产生固定数量的盒子', () => {
+test('草无碰撞，蘑菇由 Actor 碰撞接管，树与岩石产生固定数量的静态盒子', () => {
   assert.deepEqual(PROP_COLLIDER_TEMPLATES[PROP_KIND.GRASS], []);
+  assert.deepEqual(PROP_COLLIDER_TEMPLATES[PROP_KIND.MUSHROOM], []);
   const props = generateChunkContent(SEED, 0, 0);
   const expected = props.reduce(
     (total, prop) => total + PROP_COLLIDER_TEMPLATES[prop.kind].length,

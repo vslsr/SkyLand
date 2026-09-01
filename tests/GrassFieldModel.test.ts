@@ -18,7 +18,7 @@ test('grass blade keeps the seven-vertex five-triangle budget', () => {
 });
 
 test('placed grass keeps every generated cluster center and sparse three-blade count', () => {
-  const placement = { x: 12.5, z: -4.25, rotation: 0.7, scale: 1.1 };
+  const placement = { x: 12.5, y: 2, z: -4.25, rotation: 0.7, scale: 1.1 };
   const field = createPlacedGrassGeometry([placement]);
   const offsets = field.fill.getAttribute('aOffset');
   let averageX = 0;
@@ -38,6 +38,7 @@ test('placed grass keeps every generated cluster center and sparse three-blade c
     const expectedX = placement.x + cosine * localX + sine * localZ;
     const expectedZ = placement.z + cosine * localZ - sine * localX;
     assert.ok(Math.abs(offsets.getX(index) - expectedX) < 0.000_01);
+    assert.ok(Math.abs(offsets.getY(index) - (placement.y + 0.018)) < 0.000_01);
     assert.ok(Math.abs(offsets.getZ(index) - expectedZ) < 0.000_01);
   }
   assert.ok(Math.abs(averageX / offsets.count - placement.x) < 0.000_01);
@@ -60,8 +61,8 @@ test('streaming grass replaces only grass records and unloads with its chunk', (
     fillTints: new Float32Array(0),
     linePositions: new Float32Array(0),
     props: new Int32Array([
-      PROP_KIND.GRASS, 12_500, -4_250, 700, 1_100,
-      PROP_KIND.TREE, 10_000, -2_000, 0, 1_000,
+      PROP_KIND.GRASS, 12_500, -4_250, 700, 1_100, 2_000,
+      PROP_KIND.TREE, 10_000, -2_000, 0, 1_000, 0,
     ]),
     propCount: 2,
   });

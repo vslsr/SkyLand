@@ -1,12 +1,26 @@
 import * as THREE from 'three';
 import type { ChunkGeometryData } from '../../shared/world/chunkGenerator.mjs';
-import { chunkCenter } from '../../shared/world/chunkKey.mjs';
+import type { OceanMaterials } from '../materials/oceanMaterials';
 import { createChunkFillGeometry, createChunkOutlineGeometry } from '../models/chunkMesh';
+import type { OceanVisualDefinition } from '../scenes/data/SceneDefinition';
+import { TerrainChunkView } from './TerrainChunkView';
 
 export interface ChunkViewMaterials {
   fill: THREE.Material;
   outline: THREE.Material;
   grid: THREE.Material;
+  water?: OceanMaterials;
+  waterShore?: THREE.Material;
+  waterSplash?: THREE.Material;
+}
+
+export interface ChunkTerrainOptions {
+  worldSeed: number;
+  groundColor: THREE.ColorRepresentation;
+  showGround: boolean;
+  oceanDefinition?: OceanVisualDefinition;
+  seaLevel?: number;
+  cellCodeAt?: (globalCellX: number, globalCellZ: number) => number;
 }
 
 /**
@@ -25,6 +39,11 @@ export class ChunkView {
 
   private readonly fillGeometry: THREE.BufferGeometry;
   private readonly outlineGeometry: THREE.BufferGeometry;
+  private terrain: TerrainChunkView;
+  private readonly chunkX: number;
+  private readonly chunkZ: number;
+  private readonly materials: ChunkViewMaterials;
+  private readonly terrainOptions: ChunkTerrainOptions;
 
   public constructor(
     key: string,
@@ -32,9 +51,13 @@ export class ChunkView {
     chunkZ: number,
     data: ChunkGeometryData,
     materials: ChunkViewMaterials,
-    gridGeometry: THREE.BufferGeometry,
+    terrainOptions: ChunkTerrainOptions,
   ) {
     this.key = key;
+    this.chunkX = chunkX;
+    this.chunkZ = chunkZ;
+    this.materials = materials;
+    this.terrainOptions = terrainOptions;
     this.props = data.props;
     this.propCount = data.propCount;
     this.root.name = `chunk-${key}`;
@@ -44,9 +67,15 @@ export class ChunkView {
     this.root.add(new THREE.Mesh(this.fillGeometry, materials.fill));
     this.root.add(new THREE.LineSegments(this.outlineGeometry, materials.outline));
 
-    const grid = new THREE.LineSegments(gridGeometry, materials.grid);
-    grid.position.set(chunkCenter(chunkX), 0, chunkCenter(chunkZ));
-    this.root.add(grid);
+    this.terrain = this.createTerrain();
+    this.root.add(this.terrain.root);
+  }
+
+  /** 地形 patch 只替换本 chunk 的地形资源，不重建物件、草或 Actor 身份。 */
+  public rebuildTerrain(): void {
+    this.terrain.dispose();
+    this.terrain = this.createTerrain();
+    this.root.add(this.terrain.root);
   }
 
   /**
@@ -58,5 +87,19 @@ export class ChunkView {
     this.root.clear();
     this.fillGeometry.dispose();
     this.outlineGeometry.dispose();
+    this.terrain.dispose();
+  }
+
+  private createTerrain(): TerrainChunkView {
+    return new TerrainChunkView({
+      ...this.terrainOptions,
+      chunkX: this.chunkX,
+      chunkZ: this.chunkZ,
+      groundFillMaterial: this.materials.fill,
+      groundGridMaterial: this.materials.grid,
+      waterMaterials: this.materials.water,
+      waterShoreMaterial: this.materials.waterShore,
+      waterSplashMaterial: this.materials.waterSplash,
+    });
   }
 }

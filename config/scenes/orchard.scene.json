@@ -11,12 +11,27 @@
     "type": "line-art",
     "background": "#fdfaf2",
     "fog": { "color": "#fdfaf2", "near": 22, "far": 52 },
-    "content": { "ground": true, "trees": true, "grass": true, "ocean": false },
+    "content": { "ground": true, "trees": true, "grass": true, "ocean": true },
     "palette": {
       "ground": "#f3ecd9",
       "grass": "#c7d79f",
       "treeTrunk": "#cbb094",
       "treeNeedles": "#b9d2a4"
+    },
+    "ocean": {
+      "size": 32,
+      "segments": 16,
+      "waveHeight": 0.32,
+      "waveSpeed": 0.82,
+      "noiseScale": 0.085,
+      "noiseStrength": 1.15,
+      "interlaceStrength": 0.42,
+      "surfaceColor": "#c9e6f2",
+      "secondaryColor": "#b7dbea",
+      "deepColor": "#2f6f96",
+      "depthColorRange": 2.5,
+      "gridLineColor": "#5f8195",
+      "gridLineOpacity": 0.25
     },
     "world": {
       "loadRadius": 2,
@@ -26,9 +41,13 @@
   },
   "gameplay": {
     "playerActor": { "archetype": "player-slime" },
-    "worldProps": { "tree": "fruit-tree", "rock": "generated-rock" },
+    "worldProps": {
+      "tree": [{ "archetype": "fruit-tree", "weight": 1 }],
+      "rock": [{ "archetype": "generated-rock", "weight": 1 }]
+    },
     "bounds": { "minimumX": -192, "maximumX": 192, "minimumZ": -192, "maximumZ": 192 },
-    "spawn": { "centerX": 0, "centerZ": 0, "radius": 6, "slots": 16 }
+    "spawn": { "centerX": 0, "centerZ": 0, "radius": 6, "slots": 16 },
+    "water": { "seaLevel": -0.4 }
   },
   "camera": {
     "mode": "topdown",

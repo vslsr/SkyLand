@@ -4,6 +4,8 @@ import type { CollisionWorld } from '../../shared/collision/index.mjs';
 import type { GrassInteractionTarget } from '../grass';
 import type { SnapshotActor } from '../network/protocol';
 import type { ActorFloatState, ActorEventType } from '../network/protocol';
+import type { WeatherType } from '../weather/index';
+import type { TerrainWorld } from '../world/TerrainWorld';
 
 /**
  * 每帧传给场景系统的上下文。
@@ -13,6 +15,8 @@ import type { ActorFloatState, ActorEventType } from '../network/protocol';
  */
 export interface SceneUpdateContext {
   focusX: number;
+  /** 角色高度等局部表现可选用；chunk、天气与草地流送只读取 XZ。 */
+  focusY?: number;
   focusZ: number;
 }
 
@@ -22,6 +26,11 @@ export interface SceneVisualSystem {
   beforeRender?(renderer: THREE.WebGLRenderer, camera: THREE.Camera): void;
   /** 场景被换掉时释放这个系统独占的资源。 */
   dispose?(): void;
+}
+
+export interface WeatherVisualTarget {
+  readonly weather: WeatherType;
+  setWeather(weather: WeatherType): void;
 }
 
 export interface ActorSnapshotTarget {
@@ -68,6 +77,7 @@ export interface VesselHudState {
 export interface SceneComposition {
   scene: THREE.Scene;
   visualSystems: SceneVisualSystem[];
+  weatherTarget?: WeatherVisualTarget;
   grassInteraction?: GrassInteractionTarget;
   actorSnapshotTarget?: ActorSnapshotTarget;
   /**
@@ -75,4 +85,6 @@ export interface SceneComposition {
    * 玩家推出与第三人称相机悬臂共用它，随场景一起创建与丢弃。
    */
   collisionWorld?: CollisionWorld;
+  /** 规则地形保持为纯函数查询，不向碰撞网格注册 256 个格子。 */
+  terrainWorld?: TerrainWorld;
 }

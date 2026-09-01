@@ -165,6 +165,9 @@ export const OCEAN_GRID_FRAGMENT_SHADER = /* glsl */ `
 `;
 
 export const OCEAN_SURFACE_FRAGMENT_SHADER = /* glsl */ `
+  uniform vec3 uAmbientColor;
+  uniform float uDaylight;
+  uniform vec3 uSunDirection;
   uniform vec3 uFogColor;
   uniform float uFogNear;
   uniform float uFogFar;
@@ -176,17 +179,18 @@ export const OCEAN_SURFACE_FRAGMENT_SHADER = /* glsl */ `
 
   void main() {
     vec3 surfaceNormal = normalize(vWorldNormal);
-    vec3 lightDirection = normalize(vec3(-0.38, 0.90, 0.22));
+    vec3 lightDirection = normalize(uSunDirection);
     float diffuseLight = smoothstep(0.72, 0.98, dot(surfaceNormal, lightDirection));
-    float waveTone = mix(0.955, 1.035, diffuseLight);
+    float waveTone = mix(0.94, 1.0 + uDaylight * 0.035, diffuseLight);
 
     vec3 viewDirection = normalize(cameraPosition - vWorldPosition);
     vec3 halfDirection = normalize(lightDirection + viewDirection);
     float softHighlight = pow(max(dot(surfaceNormal, halfDirection), 0.0), 36.0) * 0.065;
     float crestHighlight = smoothstep(0.68, 1.0, vWaveLight) * 0.018;
     vec3 highlightColor = vec3(0.90, 0.97, 1.0);
-    vec3 surfaceColor = vColor * waveTone
-      + highlightColor * (softHighlight + crestHighlight);
+    vec3 surfaceColor = vColor * uAmbientColor * waveTone
+      + highlightColor * uAmbientColor
+        * (softHighlight * uDaylight + crestHighlight);
     float cameraDistance = distance(cameraPosition, vWorldPosition);
     float fogFactor = smoothstep(uFogNear, uFogFar, cameraDistance);
     vec3 finalColor = mix(surfaceColor, uFogColor, fogFactor);

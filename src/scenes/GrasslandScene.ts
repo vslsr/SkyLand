@@ -99,6 +99,9 @@ export class GrasslandScene extends Scene {
       this.debugMenuPage.onTemperatureToggle((visible) => {
         this.renderer.setTemperatureVisible(visible);
       });
+      this.debugMenuPage.onWeatherSelect((weather) => {
+        if (this.joinedRoom) this.roomClient.setWeather(weather);
+      });
       this.refreshDebugMenuShortcut();
     }
     this.virtualControls = new VirtualControls({
@@ -199,11 +202,17 @@ export class GrasslandScene extends Scene {
    * 世界应该围绕谁展开：有玩家时是玩家，还没有玩家时是相机。
    * 流式加载靠它决定加载哪些 chunk，大厅背后看到的因此也是一片正常的世界。
    */
-  private currentFocus(): { focusX: number; focusZ: number } {
+  private currentFocus(): { focusX: number; focusY: number; focusZ: number } {
     const player = this.player?.controller.position;
-    if (player) return { focusX: player.x, focusZ: player.z };
-    const [cameraX, , cameraZ] = this.controls.frame.position;
-    return { focusX: cameraX, focusZ: cameraZ };
+    if (player) {
+      return {
+        focusX: player.x,
+        focusY: this.player?.object3D.position.y ?? 0,
+        focusZ: player.z,
+      };
+    }
+    const [cameraX, cameraY, cameraZ] = this.controls.frame.position;
+    return { focusX: cameraX, focusY: cameraY, focusZ: cameraZ };
   }
 
   protected onEnter(): void {
@@ -327,6 +336,7 @@ export class GrasslandScene extends Scene {
     }
     page.setCollisionVisible(this.renderer.isSimpleCollisionVisible);
     page.setTemperatureVisible(this.renderer.isTemperatureVisible);
+    page.setWeather(this.renderer.weather);
     this.commonUI.push(page);
   }
 
@@ -361,6 +371,8 @@ export class GrasslandScene extends Scene {
 
   private handleSnapshot(snapshot: RoomSnapshot): void {
     if (!this.joinedRoom) return;
+    this.renderer.setWeather(snapshot.weather);
+    this.debugMenuPage?.setWeather(snapshot.weather);
     this.renderer.syncActors(snapshot.actors, snapshot.serverTime);
     this.snapshots.push(snapshot);
 

@@ -5,6 +5,30 @@ import type { ActorSimpleCollision } from './ActorVisualModel';
 export function createSimpleCollisionHelper(
   collision: ActorSimpleCollision,
 ): THREE.LineSegments<THREE.BufferGeometry, THREE.LineBasicMaterial> {
+  const material = new THREE.LineBasicMaterial({
+    color: 0xd44f72,
+    transparent: true,
+    opacity: 0.96,
+    depthTest: false,
+    depthWrite: false,
+  });
+  if (collision.shape === 'cylinder') {
+    const radius = Math.min(collision.halfWidth, collision.halfLength);
+    const height = collision.maximumY - collision.minimumY;
+    const solid = new THREE.CylinderGeometry(radius, radius, height, 32, 1, false);
+    solid.translate(
+      collision.centerX,
+      (collision.minimumY + collision.maximumY) * 0.5,
+      collision.centerZ,
+    );
+    const geometry = new THREE.EdgesGeometry(solid, 1);
+    solid.dispose();
+    const helper = new THREE.LineSegments(geometry, material);
+    helper.name = 'actor-simple-collision-helper';
+    helper.frustumCulled = false;
+    helper.renderOrder = 10_000;
+    return helper;
+  }
   const minimumX = collision.centerX - collision.halfWidth;
   const maximumX = collision.centerX + collision.halfWidth;
   const minimumZ = collision.centerZ - collision.halfLength;
@@ -27,17 +51,10 @@ export function createSimpleCollisionHelper(
   geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
   const helper = new THREE.LineSegments(
     geometry,
-    new THREE.LineBasicMaterial({
-      color: 0xd44f72,
-      transparent: true,
-      opacity: 0.96,
-      depthTest: false,
-      depthWrite: false,
-    }),
+    material,
   );
   helper.name = 'actor-simple-collision-helper';
   helper.frustumCulled = false;
   helper.renderOrder = 10_000;
   return helper;
 }
-

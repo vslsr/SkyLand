@@ -333,6 +333,44 @@ test('玩家移动由房间 DS 按 Actor 模型生成的简易碰撞权威推出
   assert.ok(localX <= -clearance + 1e-6);
 });
 
+test('混合软体测试场景按连接生成新的可操控史莱姆 Actor', async () => {
+  const catalog = await SceneCatalog.load();
+  const scene = new ServerScene(catalog.require('pbf-slime-test'), { now: () => 1_000_000 });
+  scene.addPlayer({ id: 'pbf-player', name: 'PBF 玩家', slot: 0 });
+
+  const player = scene.players.get('pbf-player');
+  assert.equal(player.archetypeId, 'pbf-slime');
+  assert.equal(player.collisionRadius, 0.52);
+  assert.equal(player.collisionHeight, 0.72);
+  assert.equal(player.movement.walkSpeed, 3.2);
+  assert.equal(player.requireComponent(BUOYANCY_COMPONENT).draft, 0.18);
+  assert.equal(scene.createSnapshot().actors.some((actor) => actor.archetypeId === 'pbf-slime'), false);
+  assert.deepEqual(
+    scene.createSnapshot().actors.map((actor) => actor.id),
+    [
+      'pbf-collision-dummy-center',
+      'pbf-collision-obelisk-left',
+      'pbf-collision-obelisk-right',
+    ],
+  );
+  assert.equal(scene.createSnapshot().players[0].id, 'pbf-player');
+
+  const obstacle = scene.actorWorld.getActor('pbf-collision-dummy-center');
+  const transform = obstacle.requireComponent(TRANSFORM_COMPONENT);
+  const collision = obstacle.requireComponent(SIMPLE_COLLISION_COMPONENT);
+  const clearance = collision.halfLength + player.collisionRadius;
+  player.x = transform.x;
+  player.z = transform.z + clearance + 0.05;
+  scene.applyInput('pbf-player', {
+    sequence: 1,
+    deltaSeconds: 0.1,
+    move: { x: 0, z: -1 },
+    sprint: false,
+    yaw: Math.PI,
+  });
+  assert.ok(player.z >= transform.z + clearance - 1e-6, '内部圆柱应被测试障碍权威推出');
+});
+
 test('玩家 Actor 的 maximumStepHeight 允许跨过低矮场景 Actor', async () => {
   const clock = createClock();
   const catalog = await SceneCatalog.load();
@@ -355,6 +393,7 @@ test('玩家 Actor 的 maximumStepHeight 允许跨过低矮场景 Actor', async 
 
   assert.equal(player.archetypeId, 'player-slime');
   assert.equal(player.movement.maximumStepHeight, 0.2);
+  assert.equal(player.requireComponent(BUOYANCY_COMPONENT).draft, 0.18);
   assert.ok(player.z < startZ - 0.25);
   assert.equal(
     scene.createSnapshot().actors.some((actor) => actor.id === 'step-walker'),

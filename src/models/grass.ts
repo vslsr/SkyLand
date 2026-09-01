@@ -23,6 +23,7 @@ export interface GrassFieldGeometryOptions {
 /** 一条来自 chunk 生成器的既有草簇放置记录。 */
 export interface GrassClusterPlacement {
   x: number;
+  y: number;
   z: number;
   rotation: number;
   scale: number;
@@ -218,7 +219,7 @@ export function createPlacedGrassGeometry(
 
       // 与 chunkGenerator.emitTemplate 的 Y 轴旋转约定完全一致。
       attributes.offsets[offsetIndex] = placement.x + cosine * localX + sine * localZ;
-      attributes.offsets[offsetIndex + 1] = 0.018;
+      attributes.offsets[offsetIndex + 1] = placement.y + 0.018;
       attributes.offsets[offsetIndex + 2] = placement.z + cosine * localZ - sine * localX;
       attributes.scales[scaleIndex] = CLUSTER_BLADE_WIDTH * placement.scale;
       attributes.scales[scaleIndex + 1] = height;

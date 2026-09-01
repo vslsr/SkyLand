@@ -15,6 +15,7 @@ import {
   formatGeneratedPropId,
 } from '../../shared/world/generatedProp.mjs';
 import { toWorldSeed } from '../../shared/world/worldConfig.mjs';
+import { selectWorldPropVariant } from '../../shared/world/worldPropVariants.mjs';
 import { ChunkResidency } from '../scene/ChunkResidency.mjs';
 import { createServerActor } from './ServerActorFactory.mjs';
 
@@ -23,10 +24,8 @@ const DEFAULT_RESIDENT_RADIUS = 2;
 /**
  * 房间 DS 侧的世界生成物件 Actor 常驻策略。
  *
- * 树、石头这些由世界种子确定性推导的东西和静态碰撞体一样，一个字节都不用同步。
- * 但它们可交互，所以必须以 Actor 的形式存在于 ActorWorld 里——而整个世界有约
- * 2000 棵树和 900 块石头，全部常驻的话每一个按 Component 查询的 System 都要为
- * 它们付钱：`TemperatureSystem` 的热源收集就是 `query(transform)`。
+ * 树、石头这些可由客户端推导的采集物只同步偏离态；蘑菇一类会变化的交互对象则
+ * 同步完整 Actor。两者都只在玩家附近进入 ActorWorld，不能让整个世界一次性常驻。
  *
  * 因此这里和静态碰撞用同一套 ChunkResidency：只保留玩家周围的物件，走远之后
  * 卸载。上界是玩家数 × (2 × keepRadius + 1)² 个 chunk 的物件，与世界面积无关。
@@ -35,9 +34,9 @@ const DEFAULT_RESIDENT_RADIUS = 2;
  * 的物件必须有 Actor，否则被采掉的那个没有快照条目，客户端会把它画回来。构造时
  * 直接从原型里取所有种类的最大值，避免两个半径各写一份之后悄悄失配。
  *
- * 哪一种物件由哪个原型承载，来自场景的 `gameplay.worldProps`：同一棵树在不同
- * 地图上可以是不同的玩法对象，而原型只描述「它是什么」。这里把那份绑定解析成
- * 一张 kind → archetype 的表，没有绑定的种类就是纯布景，不产生 Actor。
+ * 哪一种物件可由哪些原型承载，来自场景的 `gameplay.worldProps`。每条放置记录
+ * 再按房间种子与自身地址做带权选择，同一片林子因此可以混合普通树与果树；没有
+ * 绑定的种类仍是纯布景，不产生 Actor。
  *
  * 卸载时把偏离默认生成结果的物件（采过一半、已采完、或者还在冷却）记进
  * deviations，重新装载时恢复。没被动过的物件不占任何状态内存，所以状态量跟着
@@ -51,7 +50,7 @@ export class ServerGeneratedPropActors {
    * @param {{
    *   world: import('../../shared/actor/ActorWorld.mjs').ActorWorld,
    *   archetypes?: ReadonlyArray<{ id: string, components: object }>,
-   *   worldProps?: Record<string, string>,
+   *   worldProps?: Record<string, Array<{ archetypeId: string, weight: number }>>,
    *   worldSeed?: number,
    *   enabled?: boolean,
    *   residentRadius?: number,
@@ -64,21 +63,29 @@ export class ServerGeneratedPropActors {
     this.worldSeed = toWorldSeed(options.worldSeed);
     /** 绝对服务端秒数，冷却结算用的就是它。 */
     this.now = options.now ?? (() => Date.now() / 1000);
-    /** @type {Map<number, { id: string, components: object }>} 物件种类 → 承载它的原型。 */
-    this.archetypesByKind = new Map();
+    /** @type {Map<number, Array<{ archetype: { id: string, components: object }, weight: number }>>} */
+    this.archetypeVariantsByKind = new Map();
     const archetypesById = new Map((options.archetypes ?? []).map((each) => [each.id, each]));
     let replicationRadius = 0;
-    for (const [name, archetypeId] of Object.entries(options.worldProps ?? {})) {
+    for (const [name, variants] of Object.entries(options.worldProps ?? {})) {
       const kind = PROP_KIND_BY_NAME[name];
-      const archetype = archetypesById.get(archetypeId);
-      // 绑定的合法性在 SceneCatalog 就校验过了；这里只是不让一个坏配置炸在
-      // 每一次 chunk 装载上。
-      if (kind === undefined || !archetype?.components.generatedProp) continue;
-      this.archetypesByKind.set(kind, archetype);
-      replicationRadius = Math.max(
-        replicationRadius,
-        archetype.components.replicationPolicy?.radiusChunks ?? 0,
-      );
+      if (kind === undefined || !Array.isArray(variants)) continue;
+      const resolved = [];
+      for (const variant of variants) {
+        const archetype = archetypesById.get(variant?.archetypeId);
+        // 绑定的合法性在 SceneCatalog 就校验过了；这里只是不让一个坏配置炸在
+        // 每一次 chunk 装载上。
+        const isGeneratedActor = Boolean(
+          archetype?.components.generatedProp || archetype?.components.elasticTether,
+        );
+        if (!isGeneratedActor || !Number.isInteger(variant?.weight)) continue;
+        resolved.push({ archetype, weight: variant.weight });
+        replicationRadius = Math.max(
+          replicationRadius,
+          archetype.components.replicationPolicy?.radiusChunks ?? 0,
+        );
+      }
+      if (resolved.length > 0) this.archetypeVariantsByKind.set(kind, resolved);
     }
     const residentRadius = Math.max(
       options.residentRadius ?? DEFAULT_RESIDENT_RADIUS,
@@ -91,7 +98,7 @@ export class ServerGeneratedPropActors {
     /** 放置记录缓冲区复用，避免每装载一个 chunk 都新建一次。 */
     this.propBuffer = new Int32Array(PROP_BUFFER_LENGTH);
     this.residency = new ChunkResidency({
-      enabled: options.enabled !== false && this.archetypesByKind.size > 0,
+      enabled: options.enabled !== false && this.archetypeVariantsByKind.size > 0,
       residentRadius,
       keepRadius: options.keepRadius ?? residentRadius + 1,
       onLoad: (chunkX, chunkZ, key) => this.mountChunk(chunkX, chunkZ, key),
@@ -129,7 +136,24 @@ export class ServerGeneratedPropActors {
 
   /** @param {number} kind */
   archetypeForKind(kind) {
-    return this.archetypesByKind.get(kind);
+    return this.archetypeVariantsByKind.get(kind)?.[0]?.archetype;
+  }
+
+  /**
+   * @param {number} kind
+   * @param {number} chunkX
+   * @param {number} chunkZ
+   * @param {number} propIndex
+   */
+  archetypeForProp(kind, chunkX, chunkZ, propIndex) {
+    return selectWorldPropVariant(
+      this.worldSeed,
+      kind,
+      chunkX,
+      chunkZ,
+      propIndex,
+      this.archetypeVariantsByKind.get(kind) ?? [],
+    )?.archetype;
   }
 
   /** @param {number} x @param {number} z */
@@ -156,36 +180,45 @@ export class ServerGeneratedPropActors {
     for (let propIndex = 0; propIndex < propCount; propIndex += 1) {
       const offset = propIndex * PROP_STRIDE;
       const kind = this.propBuffer[offset + PROP_FIELD.KIND];
-      const archetype = this.archetypesByKind.get(kind);
+      const archetype = this.archetypeForProp(kind, chunkX, chunkZ, propIndex);
       // 没有原型的种类是纯布景（草），不产生 Actor。
       if (!archetype) continue;
       const id = formatGeneratedPropId(kind, chunkX, chunkZ, propIndex);
       // 同一个 chunk 不会装两次，这里只防御 ensureAround 与 sync 的竞争。
       if (this.world.getActor(id)) continue;
-      // 卸载期间长回来的，装载这一刻就把记录丢掉，回到「没被动过」。
-      const deviation = this.takeLiveDeviation(id, elapsedSeconds);
+      const generatedProp = archetype.components.generatedProp;
+      // 只有可采集生成物有偏离态；完整复制的蘑菇始终从原型默认状态装载。
+      const deviation = generatedProp
+        ? this.takeLiveDeviation(id, elapsedSeconds)
+        : undefined;
       const actor = createServerActor({
         id,
         archetypeId: archetype.id,
         localTransform: {
           position: [
             this.propBuffer[offset + PROP_FIELD.X_MM] / 1000,
-            0,
+            this.propBuffer[offset + PROP_FIELD.Y_MM] / 1000,
             this.propBuffer[offset + PROP_FIELD.Z_MM] / 1000,
           ],
           yaw: this.propBuffer[offset + PROP_FIELD.ROTATION_MRAD] / 1000,
         },
-      }, archetype, {
-        replicated: false,
-        generatedProp: {
-          kind,
-          chunkX,
-          chunkZ,
-          propIndex,
-          scale: this.propBuffer[offset + PROP_FIELD.SCALE_THOUSANDTHS] / 1000,
-          ...deviation,
-        },
-      });
+      }, archetype, generatedProp
+        ? {
+            // 完好的采集物由客户端从 chunk 记录推导，不进入常规完整快照。
+            replicated: false,
+            generatedProp: {
+              kind,
+              chunkX,
+              chunkZ,
+              propIndex,
+              scale: this.propBuffer[offset + PROP_FIELD.SCALE_THOUSANDTHS] / 1000,
+              ...deviation,
+            },
+          }
+        : {
+            // 蘑菇的交互状态会变化，必须走带 archetype/transform 的完整 Actor 快照。
+            replicated: true,
+          });
       if (deviation) {
         // 偏离态必须立刻可复制：AOI 里的客户端要靠这一条把物件从世界里抹掉，
         // 否则重新走回这一片时它会原地长回来。

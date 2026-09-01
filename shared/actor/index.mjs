@@ -14,6 +14,7 @@ export {
 export {
   BUOYANCY_COMPONENT,
   BuoyancyComponent,
+  recalculateBuoyancyComponent,
 } from './components/BuoyancyComponent.mjs';
 export {
   CARGO_COMPONENT,

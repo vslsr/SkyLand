@@ -22,7 +22,10 @@
     },
     "dropMotion": {
       "gravity": 9.8,
-      "drag": 4.5,
+      "drag": 0.45,
+      "groundDrag": 2.4,
+      "restitution": 0.28,
+      "radius": 0.14,
       "settleSpeed": 0.08
     },
     "lifetime": { "lifetimeSeconds": 300 },

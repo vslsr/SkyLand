@@ -101,6 +101,9 @@ export const GRASS_FILL_VERTEX_SHADER = /* glsl */ `
 
 export const GRASS_FILL_FRAGMENT_SHADER = /* glsl */ `
   uniform vec3 uFillColor;
+  uniform vec3 uAmbientColor;
+  uniform float uDaylight;
+  uniform vec3 uSunDirection;
   uniform vec3 uFogColor;
   uniform float uFogNear;
   uniform float uFogFar;
@@ -113,10 +116,12 @@ export const GRASS_FILL_FRAGMENT_SHADER = /* glsl */ `
 
   void main() {
     vec3 normal = normalize(vWorldNormal);
-    float diffuse = dot(normal, normalize(vec3(-0.55, 0.9, 0.35))) * 0.5 + 0.5;
+    float diffuse = max(dot(normal, normalize(uSunDirection)), 0.0);
     float paperVariation = 0.91 + vHeightRatio * 0.08 + vTone * 0.035;
     float touchHighlight = vBendStrength * vHeightRatio * 0.045;
-    vec3 color = uFillColor * (paperVariation + diffuse * 0.06) + touchHighlight;
+    float softLight = 0.82 + diffuse * (0.04 + uDaylight * 0.10);
+    vec3 color = uFillColor * uAmbientColor * paperVariation * softLight
+      + uAmbientColor * touchHighlight;
 
     float cameraDistance = distance(cameraPosition, vWorldPosition);
     float fogFactor = smoothstep(uFogNear, uFogFar, cameraDistance);

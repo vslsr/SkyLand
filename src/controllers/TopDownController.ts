@@ -32,7 +32,13 @@ export interface TopDownControllerOptions {
   resolveCollision?: (
     position: { x: number; z: number },
     radius: number,
-  ) => { x: number; z: number };
+    from: { x: number; z: number },
+  ) => { x: number; y?: number; z: number };
+  sampleGroundHeight?: (x: number, z: number) => number;
+  raycastGround?: (
+    origin: readonly [number, number, number],
+    direction: readonly [number, number, number],
+  ) => { x: number; y: number; z: number } | undefined;
   /**
    * 是否启用第三人称相机遮挡判定与悬臂收缩。默认关闭。
    */
@@ -56,6 +62,8 @@ export class TopDownController {
   private readonly collisionRadius: number;
   private readonly movement: { walkSpeed: number; sprintMultiplier: number };
   private readonly resolveCollision?: TopDownControllerOptions['resolveCollision'];
+  private readonly sampleGroundHeight?: TopDownControllerOptions['sampleGroundHeight'];
+  private readonly raycastGround?: TopDownControllerOptions['raycastGround'];
   private readonly cameraCollisionEnabled: boolean;
   private readonly cameraProbe?: CameraProbe;
   private readonly cameraBoom = new CameraBoom();
@@ -65,8 +73,11 @@ export class TopDownController {
   private currentSpeed = 0;
   private moveX = 0;
   private moveZ = 0;
+  private pendingCollisionDisplacementX = 0;
+  private pendingCollisionDisplacementZ = 0;
   private sprinting = false;
   private mouseFacingActive = false;
+  private mouseFacingSuppressed = false;
 
   public constructor(
     canvas: HTMLCanvasElement,
@@ -85,6 +96,8 @@ export class TopDownController {
       sprintMultiplier: PLAYER_SPRINT_MULTIPLIER,
     };
     this.resolveCollision = options.resolveCollision;
+    this.sampleGroundHeight = options.sampleGroundHeight;
+    this.raycastGround = options.raycastGround;
     this.cameraCollisionEnabled = options.cameraCollisionEnabled ?? false;
     this.cameraProbe = options.cameraProbe;
     this.fieldOfViewRadians = ((options.fieldOfViewDegrees ?? 50) * Math.PI) / 180;
@@ -119,7 +132,11 @@ export class TopDownController {
 
   /** 悬臂支点：角色所在位置抬高到胸口。 */
   private get cameraPivot(): Vec3 {
-    return [this.player.position.x, CAMERA_PIVOT_HEIGHT, this.player.position.z];
+    return [
+      this.player.position.x,
+      this.player.position.y + CAMERA_PIVOT_HEIGHT,
+      this.player.position.z,
+    ];
   }
 
   /** 当前悬臂占原长的比例，1 表示没有被遮挡。调试面板与测试用它。 */
@@ -129,6 +146,18 @@ export class TopDownController {
 
   public get position(): { x: number; z: number } {
     return { x: this.player.position.x, z: this.player.position.z };
+  }
+
+  /**
+   * 返回自上次读取后被场景碰撞阻挡的位移。它只用于客户端表现冲击，读取后清零；
+   * 权威位置仍完全由现有移动、碰撞和服务器和解路径决定。
+   */
+  public consumeCollisionDisplacement(): { x: number; z: number } | undefined {
+    const x = this.pendingCollisionDisplacementX;
+    const z = this.pendingCollisionDisplacementZ;
+    this.pendingCollisionDisplacementX = 0;
+    this.pendingCollisionDisplacementZ = 0;
+    return Math.hypot(x, z) > 1e-6 ? { x, z } : undefined;
   }
 
   /** 上行的一帧输入：只描述意图，位置留给服务端算。 */
@@ -160,13 +189,28 @@ export class TopDownController {
   }
 
   public setPosition(x: number, z: number): void {
+    const previous = { x: this.player.position.x, z: this.player.position.z };
     const bounded = {
       x: clampToRange(x, this.bounds.minimumX, this.bounds.maximumX),
       z: clampToRange(z, this.bounds.minimumZ, this.bounds.maximumZ),
     };
-    const resolved = this.resolveCollision?.(bounded, this.collisionRadius) ?? bounded;
-    this.player.position.x = clampToRange(resolved.x, this.bounds.minimumX, this.bounds.maximumX);
-    this.player.position.z = clampToRange(resolved.z, this.bounds.minimumZ, this.bounds.maximumZ);
+    const resolved: { x: number; y?: number; z: number } =
+      this.resolveCollision?.(bounded, this.collisionRadius, previous) ?? bounded;
+    const finalX = clampToRange(resolved.x, this.bounds.minimumX, this.bounds.maximumX);
+    const finalZ = clampToRange(resolved.z, this.bounds.minimumZ, this.bounds.maximumZ);
+    this.pendingCollisionDisplacementX += bounded.x - finalX;
+    this.pendingCollisionDisplacementZ += bounded.z - finalZ;
+    this.player.position.x = finalX;
+    this.player.position.y = resolved.y
+      ?? this.sampleGroundHeight?.(finalX, finalZ)
+      ?? this.player.position.y;
+    this.player.position.z = finalZ;
+  }
+
+  /** 表面拖拽命中玩家自身时暂停左键朝向，避免同一次手势同时旋转 Actor。 */
+  public setMouseFacingSuppressed(suppressed: boolean): void {
+    this.mouseFacingSuppressed = suppressed;
+    if (suppressed) this.mouseFacingActive = false;
   }
 
   public translate(deltaX: number, deltaZ: number): void {
@@ -268,6 +312,8 @@ export class TopDownController {
       frame.axes.forward[1] + frame.axes.right[1] * ndcX * tangent * aspect + frame.axes.up[1] * ndcY * tangent,
       frame.axes.forward[2] + frame.axes.right[2] * ndcX * tangent * aspect + frame.axes.up[2] * ndcY * tangent,
     ]);
+    const terrainHit = this.raycastGround?.(frame.position, rayDirection);
+    if (terrainHit) return { x: terrainHit.x, y: terrainHit.z };
     if (rayDirection[1] >= -0.0001) return undefined;
 
     const distance = -frame.position[1] / rayDirection[1];
@@ -332,7 +378,11 @@ export class TopDownController {
       event.deviceKind === 'keyboardMouse'
       && event.sourceControl?.startsWith('Mouse.')
     ) {
-      this.mouseFacingActive = this.enabled && event.value === true;
+      this.mouseFacingActive = (
+        this.enabled
+        && !this.mouseFacingSuppressed
+        && event.value === true
+      );
     }
   }
 }

@@ -14,10 +14,13 @@ import type {
   SceneUpdateContext,
   SceneVisualSystem,
   VesselHudState,
+  WeatherVisualTarget,
 } from '../scene/SceneVisualSystem';
 import type { SnapshotActor } from '../network/protocol';
 import type { SceneBeforeRenderListener } from '../scene/components';
 import type { SceneDefinition } from '../scenes/data/SceneDefinition';
+import type { TerrainWorld } from '../world/TerrainWorld';
+import { DEFAULT_WEATHER, type WeatherType } from '../weather/index';
 
 const EMPTY_SCENE_COLOR = 0xfdfbf6;
 
@@ -46,7 +49,10 @@ export class SceneRenderer implements GrassInteractionTarget {
   private visualSystems: SceneVisualSystem[] = [];
   private grassInteraction?: GrassInteractionTarget;
   private actorSnapshotTarget?: ActorSnapshotTarget;
+  private weatherTarget?: WeatherVisualTarget;
   private collisionWorld?: CollisionWorld;
+  private terrainWorld?: TerrainWorld;
+  private currentWeather: WeatherType = DEFAULT_WEATHER;
   private simpleCollisionVisible = false;
   private temperatureVisible = false;
   private readonly dynamicWorld = new THREE.Group();
@@ -162,16 +168,53 @@ export class SceneRenderer implements GrassInteractionTarget {
     radius: number,
     maximumStepHeight = 0,
     moverHeight = radius * 2,
-  ): { x: number; z: number } {
+    from: { x: number; z: number } = position,
+    buoyancyDraft?: number,
+  ): { x: number; y?: number; z: number } {
     // Actor 的盒子每帧刷新一次，先让 Actor System 兑现待登记的变更。
     this.actorSnapshotTarget?.refreshColliders();
-    return this.collisionWorld?.resolveCircle(position, radius, {
-      verticalProfile: {
-        minimumY: 0,
-        maximumY: Math.max(0, moverHeight),
+    let candidate = position;
+    for (let iteration = 0; iteration < 4; iteration += 1) {
+      const terrainPosition = this.terrainWorld?.resolveMovement(
+        from,
+        candidate,
+        radius,
         maximumStepHeight,
-      },
-    }) ?? position;
+        buoyancyDraft,
+      ) ?? { ...candidate, y: 0 };
+      const objectPosition = this.collisionWorld?.resolveCircle(terrainPosition, radius, {
+        verticalProfile: {
+          minimumY: terrainPosition.y,
+          maximumY: terrainPosition.y + Math.max(0, moverHeight),
+          maximumStepHeight,
+        },
+      }) ?? terrainPosition;
+      if (Math.hypot(
+        objectPosition.x - terrainPosition.x,
+        objectPosition.z - terrainPosition.z,
+      ) <= 1e-7) return terrainPosition;
+      candidate = objectPosition;
+    }
+    return {
+      x: from.x,
+      y: this.terrainWorld?.sampleMovementHeight(from.x, from.z, buoyancyDraft) ?? 0,
+      z: from.z,
+    };
+  }
+
+  public sampleGroundHeight(x: number, z: number): number {
+    return this.terrainWorld?.sampleGroundHeight(x, z) ?? 0;
+  }
+
+  public samplePlayerHeight(x: number, z: number, buoyancyDraft?: number): number {
+    return this.terrainWorld?.sampleMovementHeight(x, z, buoyancyDraft) ?? 0;
+  }
+
+  public raycastGround(
+    origin: readonly [number, number, number],
+    direction: readonly [number, number, number],
+  ): { x: number; y: number; z: number } | undefined {
+    return this.terrainWorld?.raycast(origin, direction);
   }
 
   /**
@@ -184,7 +227,10 @@ export class SceneRenderer implements GrassInteractionTarget {
     end: readonly [number, number, number],
     radius: number,
   ): number {
-    return this.collisionWorld?.sweepSphere(start, end, radius) ?? 1;
+    return Math.min(
+      this.collisionWorld?.sweepSphere(start, end, radius) ?? 1,
+      this.terrainWorld?.sweepCamera(start, end, radius) ?? 1,
+    );
   }
 
   public setSimpleCollisionVisible(visible: boolean): void {
@@ -205,6 +251,15 @@ export class SceneRenderer implements GrassInteractionTarget {
     return this.temperatureVisible;
   }
 
+  public setWeather(weather: WeatherType): void {
+    this.currentWeather = weather;
+    this.weatherTarget?.setWeather(weather);
+  }
+
+  public get weather(): WeatherType {
+    return this.currentWeather;
+  }
+
   /**
    * 加载场景。worldSeed 来自房间，决定流式世界长什么样；
    * 不做流式加载的场景会忽略它。
@@ -213,10 +268,12 @@ export class SceneRenderer implements GrassInteractionTarget {
     if (definition.renderer.type !== 'line-art') {
       throw new Error(`不支持的场景渲染器：${definition.renderer.type as string}`);
     }
+    this.currentWeather = DEFAULT_WEATHER;
     this.replaceScene(createLineArtScene(definition, worldSeed));
   }
 
   public showEmptyScene(): void {
+    this.currentWeather = DEFAULT_WEATHER;
     this.replaceScene({ scene: createEmptyScene(), visualSystems: [] });
   }
 
@@ -229,11 +286,14 @@ export class SceneRenderer implements GrassInteractionTarget {
     this.collisionWorld?.clear();
     this.scene = composition.scene;
     this.visualSystems = composition.visualSystems;
+    this.weatherTarget = composition.weatherTarget;
     this.grassInteraction = composition.grassInteraction;
     this.actorSnapshotTarget = composition.actorSnapshotTarget;
     this.collisionWorld = composition.collisionWorld;
+    this.terrainWorld = composition.terrainWorld;
     this.actorSnapshotTarget?.setSimpleCollisionVisible(this.simpleCollisionVisible);
     this.actorSnapshotTarget?.setTemperatureVisible(this.temperatureVisible);
+    this.weatherTarget?.setWeather(this.currentWeather);
     this.scene.add(this.dynamicWorld);
   }
 

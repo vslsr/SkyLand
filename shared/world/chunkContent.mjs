@@ -12,6 +12,17 @@
 
 import { hash32, valueNoise } from './hash.mjs';
 import {
+  terrainCellCodeAtMillimeters,
+  terrainCellHeightLevel,
+  terrainCellShape,
+  terrainCellSurface,
+} from './terrainContent.mjs';
+import {
+  TERRAIN_HEIGHT_STEP_MM,
+  TERRAIN_SHAPE,
+  TERRAIN_SURFACE,
+} from './terrainConfig.mjs';
+import {
   CHUNK_SIZE_MM,
   MAXIMUM_PROPS_PER_CHUNK,
   PROP_CELL_SIZE_MM,
@@ -20,7 +31,7 @@ import {
 } from './worldConfig.mjs';
 
 /** 一条放置记录占用的整数个数。WASM 侧使用同一个布局。 */
-export const PROP_STRIDE = 5;
+export const PROP_STRIDE = 6;
 
 /** 放置记录里各字段的下标。 */
 export const PROP_FIELD = {
@@ -29,6 +40,7 @@ export const PROP_FIELD = {
   Z_MM: 2,
   ROTATION_MRAD: 3,
   SCALE_THOUSANDTHS: 4,
+  Y_MM: 5,
 };
 
 /** 放置缓冲区需要的整数长度。 */
@@ -53,16 +65,20 @@ const BASE_OCCUPANCY = 96;
 /** 密度最高处额外增加的占用概率。 */
 const OCCUPANCY_FROM_DENSITY = 48;
 
-/** 树的占比随密度从 16/255 升到 120/255，其余按岩石、草分配。 */
+/** 树的占比随密度从 16/255 升到 120/255，其余按岩石、蘑菇、草分配。 */
 const BASE_TREE_SHARE = 16;
 const TREE_SHARE_FROM_DENSITY = 104;
 const ROCK_SHARE = 32;
+/** 扣掉树与岩石后，蘑菇占 3/7、草占 4/7，所以蘑菇比草稍少。 */
+const MUSHROOM_PLANT_SHARE_NUMERATOR = 3;
+const PLANT_SHARE_DENOMINATOR = 7;
 
 /** 各种物件的缩放范围（千分数）。 */
 const SCALE_RANGE = {
   [PROP_KIND.TREE]: { minimum: 820, maximum: 1360 },
   [PROP_KIND.GRASS]: { minimum: 780, maximum: 1250 },
   [PROP_KIND.ROCK]: { minimum: 700, maximum: 1400 },
+  [PROP_KIND.MUSHROOM]: { minimum: 850, maximum: 1150 },
 };
 
 const TWO_PI_MRAD = 6283;
@@ -98,26 +114,41 @@ export function generateChunkProps(worldSeed, chunkX, chunkZ, target) {
 
       const treeShare = BASE_TREE_SHARE + ((density * TREE_SHARE_FROM_DENSITY) / 255 | 0);
       const kindRoll = (occupancyHash >>> 8) & 0xff;
+      const rockLimit = treeShare + ROCK_SHARE;
+      const mushroomShare = (
+        (256 - rockLimit) * MUSHROOM_PLANT_SHARE_NUMERATOR / PLANT_SHARE_DENOMINATOR
+      ) | 0;
       const kind =
         kindRoll < treeShare
           ? PROP_KIND.TREE
-          : kindRoll < treeShare + ROCK_SHARE
+          : kindRoll < rockLimit
             ? PROP_KIND.ROCK
-            : PROP_KIND.GRASS;
+            : kindRoll < rockLimit + mushroomShare
+              ? PROP_KIND.MUSHROOM
+              : PROP_KIND.GRASS;
 
       const jitterHash = hash32(worldSeed, globalCellX, globalCellZ, JITTER_SALT);
       const sizeHash = hash32(worldSeed, globalCellX, globalCellZ, SIZE_SALT);
       const scale = SCALE_RANGE[kind];
 
+      const xMm =
+        originX + cellX * PROP_CELL_SIZE_MM + PROP_MARGIN_MM + (jitterHash % JITTER_SPAN_MM);
+      const zMm =
+        originZ + cellZ * PROP_CELL_SIZE_MM + PROP_MARGIN_MM + ((jitterHash >>> 12) % JITTER_SPAN_MM);
+      const terrainCode = terrainCellCodeAtMillimeters(worldSeed, xMm, zMm);
+      if (
+        terrainCellSurface(terrainCode) !== TERRAIN_SURFACE.GROUND
+        || terrainCellShape(terrainCode) !== TERRAIN_SHAPE.FLAT
+      ) continue;
+
       const offset = count * PROP_STRIDE;
       target[offset + PROP_FIELD.KIND] = kind;
-      target[offset + PROP_FIELD.X_MM] =
-        originX + cellX * PROP_CELL_SIZE_MM + PROP_MARGIN_MM + (jitterHash % JITTER_SPAN_MM);
-      target[offset + PROP_FIELD.Z_MM] =
-        originZ + cellZ * PROP_CELL_SIZE_MM + PROP_MARGIN_MM + ((jitterHash >>> 12) % JITTER_SPAN_MM);
+      target[offset + PROP_FIELD.X_MM] = xMm;
+      target[offset + PROP_FIELD.Z_MM] = zMm;
       target[offset + PROP_FIELD.ROTATION_MRAD] = (sizeHash >>> 8) % TWO_PI_MRAD;
       target[offset + PROP_FIELD.SCALE_THOUSANDTHS] =
         scale.minimum + (sizeHash % (scale.maximum - scale.minimum + 1));
+      target[offset + PROP_FIELD.Y_MM] = terrainCellHeightLevel(terrainCode) * TERRAIN_HEIGHT_STEP_MM;
       count += 1;
     }
   }
@@ -125,7 +156,7 @@ export function generateChunkProps(worldSeed, chunkX, chunkZ, target) {
   return count;
 }
 
-/** @typedef {{ kind: number, x: number, z: number, rotation: number, scale: number }} ChunkProp */
+/** @typedef {{ kind: number, x: number, y: number, z: number, rotation: number, scale: number }} ChunkProp */
 
 /**
  * 把整数放置记录解码成米与弧度。整数除以 1000 在两端都是同一个
@@ -141,6 +172,7 @@ export function readChunkProps(buffer, count) {
     props.push({
       kind: buffer[offset + PROP_FIELD.KIND],
       x: buffer[offset + PROP_FIELD.X_MM] / 1000,
+      y: buffer[offset + PROP_FIELD.Y_MM] / 1000,
       z: buffer[offset + PROP_FIELD.Z_MM] / 1000,
       rotation: buffer[offset + PROP_FIELD.ROTATION_MRAD] / 1000,
       scale: buffer[offset + PROP_FIELD.SCALE_THOUSANDTHS] / 1000,

@@ -9,20 +9,12 @@ import {
   type InteractableComponent,
   type TransformComponent,
 } from '../../../shared/actor/index.mjs';
+import {
+  fruitDropWorldPosition,
+  selectFruitDropAnchors,
+} from '../../../shared/world/fruitDrop.mjs';
 import { createFillMaterial, type FillMaterialEnvironment } from '../../materials/createFillMaterial';
 import type { ActorArchetypeDefinition } from '../../scenes/data/SceneDefinition';
-
-/**
- * 果子挂在树冠下半的位置。半径与高度取自 `createTreeModel` 的前两层树冠
- * （y=1.7 半径 1.35 / y=2.15 半径 1.05），乘上放置记录里的缩放。
- */
-const FRUIT_ANCHORS = [
-  { angle: 0.4, radius: 0.95, height: 1.68 },
-  { angle: 1.7, radius: 1.05, height: 1.52 },
-  { angle: 2.9, radius: 0.82, height: 1.95 },
-  { angle: 4.1, radius: 1.0, height: 1.74 },
-  { angle: 5.4, radius: 0.78, height: 2.12 },
-] as const;
 
 const FRUIT_RADIUS = 0.14;
 
@@ -87,10 +79,13 @@ export class GeneratedPropFruitSystem {
    *   那时一律按「熟了」处理，避免刚进场的一瞬间满树果子闪一下才出现。
    */
   public sync(world: ActorWorld, serverSeconds?: number): void {
-    const ready: Array<{ transform: TransformComponent; scale: number }> = [];
+    const ready: Array<{ transform: TransformComponent; scale: number; fruitCount: number }> = [];
     for (const actor of world.query(TRANSFORM_COMPONENT, GENERATED_PROP_COMPONENT) as Actor[]) {
       const prop = actor.requireComponent(GENERATED_PROP_COMPONENT) as GeneratedPropComponent;
-      if (!this.archetypes.get(actor.archetypeId)?.components.generatedProp?.regrow) continue;
+      if (
+        !this.archetypes.get(actor.archetypeId)?.components.generatedProp?.regrow
+        || prop.dropSpawnPattern !== 'fruit-anchors'
+      ) continue;
       const isReady = serverSeconds === undefined || prop.isReady(serverSeconds);
       // 冷却中的树没有可采的东西，交互提示也跟着关掉。
       const interactable = actor.getComponent(INTERACTABLE_COMPONENT) as
@@ -101,6 +96,7 @@ export class GeneratedPropFruitSystem {
       ready.push({
         transform: actor.requireComponent(TRANSFORM_COMPONENT) as TransformComponent,
         scale: prop.scale,
+        fruitCount: prop.dropQuantity,
       });
     }
     this.update(ready);
@@ -120,14 +116,19 @@ export class GeneratedPropFruitSystem {
     this.root.parent?.remove(this.root);
   }
 
-  private update(trees: ReadonlyArray<{ transform: TransformComponent; scale: number }>): void {
+  private update(
+    trees: ReadonlyArray<{ transform: TransformComponent; scale: number; fruitCount: number }>,
+  ): void {
     const signature = trees
-      .map((tree) => `${tree.transform.x.toFixed(2)},${tree.transform.z.toFixed(2)}`)
+      .map((tree) => `${tree.transform.x.toFixed(2)},${tree.transform.z.toFixed(2)},${tree.fruitCount}`)
       .join('|');
     if (signature === this.signature) return;
     this.signature = signature;
 
-    const required = trees.length * FRUIT_ANCHORS.length;
+    const required = trees.reduce(
+      (total, tree) => total + selectFruitDropAnchors(tree.fruitCount).length,
+      0,
+    );
     if (required > this.capacity) {
       this.root.remove(this.fill);
       this.fill.dispose();
@@ -143,13 +144,9 @@ export class GeneratedPropFruitSystem {
     let output = 0;
     for (const tree of trees) {
       const { transform } = tree;
-      for (const anchor of FRUIT_ANCHORS) {
-        const angle = anchor.angle + transform.yaw;
-        this.position.set(
-          transform.x + Math.cos(angle) * anchor.radius * tree.scale,
-          transform.y + anchor.height * tree.scale,
-          transform.z + Math.sin(angle) * anchor.radius * tree.scale,
-        );
+      for (const anchor of selectFruitDropAnchors(tree.fruitCount)) {
+        const position = fruitDropWorldPosition(transform, tree.scale, anchor);
+        this.position.set(position.x, position.y, position.z);
         this.scale.setScalar(tree.scale);
         this.matrix.compose(this.position, this.quaternion, this.scale);
         this.fill.setMatrixAt(instance, this.matrix);

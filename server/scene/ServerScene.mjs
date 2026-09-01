@@ -17,6 +17,7 @@ import {
 import {
   ACTOR_CONTROL_COMPONENT,
   BUOYANCY_COMPONENT,
+  BuoyancyComponent,
   CARGO_COMPONENT,
   ELASTIC_TETHER_COMPONENT,
   GENERATED_PROP_COMPONENT,
@@ -45,7 +46,17 @@ import {
 } from '../actors/ElasticTetherMutations.mjs';
 import { ServerChunkColliders } from './ServerChunkColliders.mjs';
 import { parseGeneratedPropId } from '../../shared/world/generatedProp.mjs';
+import {
+  fruitDropWorldPosition,
+  selectFruitDropAnchors,
+} from '../../shared/world/fruitDrop.mjs';
 import { toWorldSeed } from '../../shared/world/worldConfig.mjs';
+import { DEFAULT_WEATHER, isWeatherType } from '../../shared/weather.mjs';
+import { sampleTerrain } from '../../shared/world/terrainContent.mjs';
+import {
+  resolveTerrainMovement,
+  terrainMovementHeight,
+} from '../../shared/world/terrainMovement.mjs';
 
 function roundCoordinate(value) {
   return Math.round(value * 1000) / 1000;
@@ -75,7 +86,11 @@ function resolvePlayerActorArchetype(definition) {
     };
   }
   const archetype = definition.actorArchetypes?.find((candidate) => candidate.id === configuredId);
-  if (!archetype?.components.playerMovement || archetype.components.render.model !== 'line-art-player-slime') {
+  const renderModel = archetype?.components.render.model;
+  if (
+    !archetype?.components.playerMovement
+    || (renderModel !== 'line-art-player-slime' && renderModel !== 'line-art-pbf-slime')
+  ) {
     throw new Error(`场景缺少玩家 Actor 原型：${configuredId}`);
   }
   return archetype;
@@ -96,8 +111,10 @@ export class ServerScene {
     this.spawn = definition.gameplay?.spawn;
     this.playerActorArchetype = resolvePlayerActorArchetype(definition);
     this.worldSeed = toWorldSeed(options.worldSeed);
+    this.terrainEnabled = Boolean(definition.renderer?.world);
     this.now = options.now ?? (() => Date.now());
     this.players = new Map();
+    this.weather = DEFAULT_WEATHER;
     // 一张空间网格同时承载 Actor 与流式世界的静态物件。玩家推出只查身边的
     // 几个格子，成本不随房间里的 Actor 数或世界面积增长。
     this.collision = new CollisionWorld();
@@ -105,6 +122,9 @@ export class ServerScene {
       players: this.players,
       collision: this.collision,
       worldSeed: this.worldSeed,
+      groundHeightAt: this.terrainEnabled
+        ? (x, z) => sampleTerrain(this.worldSeed, x, z).groundY
+        : undefined,
     });
     // 静态碰撞只有流式场景才有；固定摆放的场景里树是布景，没有碰撞体。
     this.chunkColliders = new ServerChunkColliders({
@@ -113,7 +133,7 @@ export class ServerScene {
       enabled: Boolean(definition.renderer?.world),
     });
     // 生成物件和静态碰撞一样跟着玩家滑动，房间启动时一个都不建。
-    // 哪些种类真的产生 Actor，由场景的 gameplay.worldProps 绑定决定。
+    // 哪些种类真的产生 Actor、同 kind 如何分配原型，由 gameplay.worldProps 决定。
     this.generatedProps = new ServerGeneratedPropActors({
       world: this.actorWorld,
       archetypes: definition.actorArchetypes,
@@ -130,20 +150,36 @@ export class ServerScene {
     const spawn = createSpawnPoint(player.slot ?? this.players.size, this.spawn, this.bounds);
     const radius = this.playerActorArchetype.components.render.radius;
     const movement = this.playerActorArchetype.components.playerMovement;
+    const buoyancy = this.playerActorArchetype.components.buoyancy
+      ? new BuoyancyComponent(this.playerActorArchetype.components.buoyancy)
+      : undefined;
     // 出生点是按槽位算的固定圆周，未必避得开树和石头；先把它推到碰撞外面，
     // 否则新玩家会卡在树干里，等第一条输入才被挤出来。
     this.chunkColliders.ensureAround(spawn.x, spawn.z);
     this.generatedProps.ensureAround(spawn.x, spawn.z);
-    const placed = clampToPlayArea(
-      this.collision.resolveCircle(spawn, radius, {
-        verticalProfile: {
-          minimumY: 0,
-          maximumY: radius * 2,
+    const spawnGroundY = this.terrainEnabled
+      ? terrainMovementHeight(
+          sampleTerrain(this.worldSeed, spawn.x, spawn.z),
+          this.actorWorld.context.seaLevel,
+          buoyancy?.draft,
+        )
+      : 0;
+    const collisionPlaced = this.collision.resolveCircle(spawn, radius, {
+      verticalProfile: {
+        minimumY: spawnGroundY,
+        maximumY: spawnGroundY + radius * 2,
+        maximumStepHeight: movement.maximumStepHeight,
+      },
+    });
+    const boundedPlaced = clampToPlayArea(collisionPlaced, this.bounds);
+    const placed = this.terrainEnabled
+      ? resolveTerrainMovement(this.worldSeed, spawn, boundedPlaced, {
+          radius,
           maximumStepHeight: movement.maximumStepHeight,
-        },
-      }),
-      this.bounds,
-    );
+          waterLevel: this.actorWorld.context.seaLevel,
+          buoyancyDraft: buoyancy?.draft,
+        })
+      : { ...boundedPlaced, y: 0 };
     const actor = new ServerPlayerActor(
       player,
       this.playerActorArchetype,
@@ -322,12 +358,7 @@ export class ServerScene {
       }
       // 可再生的每采一次都掉东西；掉血的只在采完那一下掉。
       if ((prop.removed || prop.regrowable) && prop.dropArchetypeId) {
-        this.spawnItemStack(prop.dropArchetypeId, {
-          position: [targetTransform.x, Math.max(0.5, prop.scale * 0.55), targetTransform.z],
-          quantity: prop.dropQuantity,
-          velocity: [0, 2.2, 0],
-          yaw: targetTransform.yaw,
-        });
+        this.spawnGeneratedPropDrop(prop, targetTransform);
       }
       player.actorInteractionSequence = sequence;
       return true;
@@ -441,20 +472,58 @@ export class ServerScene {
     // 否则这一步会从树里穿过去，再被下一个 tick 拉回来。
     this.chunkColliders.ensureAround(next.x, next.z);
     this.generatedProps.ensureAround(next.x, next.z);
-    const resolved = clampToPlayArea(
-      this.collision.resolveCircle(next, player.collisionRadius, {
-        verticalProfile: {
-          minimumY: player.y,
-          maximumY: player.y + player.collisionHeight,
-          maximumStepHeight: player.movement.maximumStepHeight,
-        },
-      }),
-      this.bounds,
-    );
+    const resolved = this.resolvePlayerMovement(player, next);
     const distance = Math.hypot(resolved.x - player.x, resolved.z - player.z);
-    player.setPosition(resolved.x, resolved.z);
+    player.setPosition(resolved.x, resolved.z, resolved.y);
     player.speed = granted > 0 ? distance / granted : 0;
     player.lastInputAt = this.now();
+  }
+
+  /**
+   * 天气是房间级权威离散状态。客户端只能提出一个合法枚举请求，不能上传
+   * 粒子、风速、雾距离或其它表现参数。
+   */
+  setWeather(playerId, weather) {
+    if (!this.players.has(playerId) || !isWeatherType(weather)) return false;
+    this.weather = weather;
+    return true;
+  }
+
+  /**
+   * 地形滑移和物件推出可能互相改变 XZ；最多交替四次，无法同时满足时留在
+   * 上一权威安全位置。固定上限保证复杂岸线附近的成本仍然可预测。
+   */
+  resolvePlayerMovement(player, target) {
+    let candidate = clampToPlayArea(target, this.bounds);
+    const buoyancy = player.getComponent(BUOYANCY_COMPONENT);
+    for (let iteration = 0; iteration < 4; iteration += 1) {
+      const terrainPosition = this.terrainEnabled
+        ? resolveTerrainMovement(this.worldSeed, player, candidate, {
+            radius: player.collisionRadius,
+            maximumStepHeight: player.movement.maximumStepHeight,
+            waterLevel: this.actorWorld.context.seaLevel,
+            buoyancyDraft: buoyancy?.draft,
+          })
+        : { ...candidate, y: player.y };
+      const objectPosition = this.collision.resolveCircle(
+        terrainPosition,
+        player.collisionRadius,
+        {
+          verticalProfile: {
+            minimumY: terrainPosition.y,
+            maximumY: terrainPosition.y + player.collisionHeight,
+            maximumStepHeight: player.movement.maximumStepHeight,
+          },
+        },
+      );
+      const boundedObject = clampToPlayArea(objectPosition, this.bounds);
+      if (Math.hypot(
+        boundedObject.x - terrainPosition.x,
+        boundedObject.z - terrainPosition.z,
+      ) <= 1e-7) return terrainPosition;
+      candidate = boundedObject;
+    }
+    return { x: player.x, y: player.y, z: player.z };
   }
 
   /** 按真实经过的时间补充每名玩家的模拟时间预算。 */
@@ -488,12 +557,79 @@ export class ServerScene {
     );
   }
 
+  /**
+   * 生成物件的掉落出生方式由原型配置。石头等默认在中心掉一堆；普通树把圆木
+   * 从树中心拆开抛出；果树则从客户端画果实时使用的同一批枝头锚点开始下落。
+   */
+  spawnGeneratedPropDrop(prop, sourceTransform) {
+    if (prop.dropSpawnPattern === 'center-scatter') {
+      // 数量先拆成独立 Actor，使每根圆木都有自己的重力、碰撞、滚动和休眠状态。
+      // 出生点刻意保持为树的同一个中心；只用初速度和朝向让它们随后自然散开。
+      const actorCount = Math.max(1, Math.min(prop.dropQuantity, 12));
+      const baseQuantity = Math.floor(prop.dropQuantity / actorCount);
+      let remainder = prop.dropQuantity % actorCount;
+      // createTreeModel 的可见高度约 3.98m，1.95m 是树体的几何中心而不是树根。
+      const originY = (Number(sourceTransform.y) || 0) + prop.scale * 1.95;
+      return Array.from({ length: actorCount }, (_, index) => {
+        const angle = sourceTransform.yaw + ((index + 0.5) / actorCount) * Math.PI * 2;
+        const horizontalSpeed = 0.72 + (index % 3) * 0.08;
+        const quantity = baseQuantity + (remainder-- > 0 ? 1 : 0);
+        return this.spawnItemStack(prop.dropArchetypeId, {
+          position: [sourceTransform.x, originY, sourceTransform.z],
+          quantity,
+          velocity: [
+            Math.cos(angle) * horizontalSpeed,
+            0.96 + (index % 2) * 0.14,
+            Math.sin(angle) * horizontalSpeed,
+          ],
+          // 圆木的长轴与预期滚动轴对齐；客户端再按权威位移累计滚动四元数。
+          yaw: Math.PI / 2 - angle,
+        });
+      });
+    }
+
+    if (prop.dropSpawnPattern !== 'fruit-anchors') {
+      return [this.spawnItemStack(prop.dropArchetypeId, {
+        position: [
+          sourceTransform.x,
+          sourceTransform.y + Math.max(0.5, prop.scale * 0.55),
+          sourceTransform.z,
+        ],
+        quantity: prop.dropQuantity,
+        velocity: [0, 2.2, 0],
+        yaw: sourceTransform.yaw,
+      })];
+    }
+
+    const anchors = selectFruitDropAnchors(prop.dropQuantity);
+    if (anchors.length === 0) return [];
+    const baseQuantity = Math.floor(prop.dropQuantity / anchors.length);
+    let remainder = prop.dropQuantity % anchors.length;
+    return anchors.map((anchor, index) => {
+      const origin = fruitDropWorldPosition(sourceTransform, prop.scale, anchor);
+      // 很小的向外速度让果实落地后自然散开，纵向只给轻微松脱速度，主体仍是重力坠落。
+      const horizontalSpeed = 0.62 + index * 0.08;
+      const quantity = baseQuantity + (remainder-- > 0 ? 1 : 0);
+      return this.spawnItemStack(prop.dropArchetypeId, {
+        position: [origin.x, origin.y, origin.z],
+        quantity,
+        velocity: [
+          Math.cos(origin.angle) * horizontalSpeed,
+          0.18 + (index % 2) * 0.06,
+          Math.sin(origin.angle) * horizontalSpeed,
+        ],
+        yaw: origin.angle,
+      });
+    });
+  }
+
   createSnapshot(viewerPlayerId) {
     const viewer = viewerPlayerId ? this.players.get(viewerPlayerId) : undefined;
     return {
       sceneId: this.id,
       tick: this.tick,
       serverTime: this.now(),
+      weather: this.weather,
       actors: createActorSnapshots(this.actorWorld, { viewer }),
       players: Array.from(this.players.values(), (player) => ({
         id: player.id,

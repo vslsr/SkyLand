@@ -3,7 +3,7 @@
   "schemaVersion": 1,
   "id": "open-world",
   "displayName": "无边草原",
-  "description": "由世界种子确定性生成、按 chunk 流式加载的 512 米大世界。",
+  "description": "普通树间偶有果树，并有可采大石与可拖拽蘑菇的流式草地。",
   "capacity": 16,
   "sceneComponents": [
     {
@@ -21,23 +21,32 @@
       "impulseStrength": 3.4
     }
   ],
-  "actors": [
-    {
-      "id": "elastic-mushroom-01",
-      "archetype": "elastic-mushroom",
-      "localTransform": { "position": [0, 0, 5], "yaw": -0.18 }
-    }
-  ],
+  "actors": [],
   "renderer": {
     "type": "line-art",
     "background": "#fdfbf6",
     "fog": { "color": "#fdfbf6", "near": 22, "far": 52 },
-    "content": { "ground": true, "trees": true, "grass": true, "ocean": false },
+    "content": { "ground": true, "trees": true, "grass": true, "ocean": true },
     "palette": {
       "ground": "#f1eddf",
       "grass": "#c1d7a6",
       "treeTrunk": "#d6bea3",
       "treeNeedles": "#cbdcbc"
+    },
+    "ocean": {
+      "size": 32,
+      "segments": 16,
+      "waveHeight": 0.32,
+      "waveSpeed": 0.82,
+      "noiseScale": 0.085,
+      "noiseStrength": 1.15,
+      "interlaceStrength": 0.42,
+      "surfaceColor": "#c9e6f2",
+      "secondaryColor": "#b7dbea",
+      "deepColor": "#2f6f96",
+      "depthColorRange": 2.5,
+      "gridLineColor": "#5f8195",
+      "gridLineOpacity": 0.25
     },
     "world": {
       "loadRadius": 2,
@@ -46,10 +55,22 @@
     }
   },
   "gameplay": {
-    "playerActor": { "archetype": "player-slime" },
-    "worldProps": { "tree": "generated-tree", "rock": "generated-rock" },
+    "playerActor": { "archetype": "pbf-slime" },
+    "worldProps": {
+      "tree": [
+        { "archetype": "generated-tree", "weight": 5 },
+        { "archetype": "fruit-tree", "weight": 1 }
+      ],
+      "rock": [
+        { "archetype": "large-rock", "weight": 1 }
+      ],
+      "mushroom": [
+        { "archetype": "elastic-mushroom", "weight": 1 }
+      ]
+    },
     "bounds": { "minimumX": -192, "maximumX": 192, "minimumZ": -192, "maximumZ": 192 },
-    "spawn": { "centerX": 0, "centerZ": 0, "radius": 6, "slots": 16 }
+    "spawn": { "centerX": 0, "centerZ": 0, "radius": 6, "slots": 16 },
+    "water": { "seaLevel": -0.4 }
   },
   "camera": {
     "mode": "topdown",

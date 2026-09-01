@@ -1,3 +1,5 @@
+import type { WeatherType } from '../weather/index';
+
 /** 房间快照里的单名玩家，坐标由服务端权威计算。 */
 export interface SnapshotPlayer {
   id: string;
@@ -107,6 +109,7 @@ export interface RoomSnapshot {
   sceneId: string;
   tick: number;
   serverTime: number;
+  weather: WeatherType;
   actors: SnapshotActor[];
   players: SnapshotPlayer[];
 }

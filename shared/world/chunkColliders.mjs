@@ -44,6 +44,8 @@ export const PROP_COLLIDER_TEMPLATES = {
     { halfWidth: 0.48, halfLength: 0.4, minimumY: 0, maximumY: 0.46, layers: COLLISION_LAYER_SOLID },
   ],
   [PROP_KIND.GRASS]: [],
+  // 蘑菇由完整复制的 Actor 提供动态碰撞，不能再派生一份静态盒子。
+  [PROP_KIND.MUSHROOM]: [],
 };
 
 /** 单个 chunk 最多能派生出多少个碰撞体。调用方据此判断内存上界。 */
@@ -71,12 +73,13 @@ export function readChunkColliders(props, count, target = [], options = {}) {
     const templates = PROP_COLLIDER_TEMPLATES[kind];
     if (!templates || templates.length === 0) continue;
     const x = props[offset + PROP_FIELD.X_MM] / 1000;
+    const y = props[offset + PROP_FIELD.Y_MM] / 1000;
     const z = props[offset + PROP_FIELD.Z_MM] / 1000;
     const yaw = props[offset + PROP_FIELD.ROTATION_MRAD] / 1000;
     const scale = props[offset + PROP_FIELD.SCALE_THOUSANDTHS] / 1000;
     // 同一个物件的几个盒子共用一份 transform：它们绑在同一个物件上，
     // 位置永远一致，也省下几个对象。
-    const transform = { x, y: 0, z, yaw };
+    const transform = { x, y, z, yaw };
     // 每个有碰撞体的物件都带上自描述 id：交互查询靠它从碰撞世界反查 Actor，
     // 成本随身边的密度走，而不是随世界里的物件总数走。哪些种类真的有 Actor
     // 由原型注册表决定，这里不需要知道。

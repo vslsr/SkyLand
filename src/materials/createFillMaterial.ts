@@ -4,6 +4,42 @@ export interface FillMaterialEnvironment {
   fogColor: THREE.ColorRepresentation;
   fogNear: number;
   fogFar: number;
+  /**
+   * 场景级共享 uniform。天气系统只改这一份状态，已创建和后续流式创建的
+   * 填充材质、草地与海面会在同一帧得到一致的雾色和室外光照。
+   */
+  runtime?: SceneEnvironmentRuntime;
+}
+
+export interface SceneEnvironmentRuntime {
+  readonly fogColor: THREE.IUniform<THREE.Color>;
+  readonly fogNear: THREE.IUniform<number>;
+  readonly fogFar: THREE.IUniform<number>;
+  readonly ambientColor: THREE.IUniform<THREE.Color>;
+  readonly daylight: THREE.IUniform<number>;
+  readonly sunDirection: THREE.IUniform<THREE.Vector3>;
+}
+
+export function createSceneEnvironment(
+  fogColor: THREE.ColorRepresentation,
+  fogNear: number,
+  fogFar: number,
+): FillMaterialEnvironment {
+  return {
+    fogColor,
+    fogNear,
+    fogFar,
+    runtime: {
+      fogColor: { value: new THREE.Color(fogColor) },
+      fogNear: { value: fogNear },
+      fogFar: { value: fogFar },
+      ambientColor: { value: new THREE.Color(0xffffff) },
+      daylight: { value: 1 },
+      sunDirection: {
+        value: new THREE.Vector3(-0.55, 0.9, 0.35).normalize(),
+      },
+    },
+  };
 }
 
 const VERTEX_SHADER = /* glsl */ `
@@ -32,6 +68,8 @@ const FRAGMENT_SHADER = /* glsl */ `
   #include <common>
 
   uniform vec3 uColor;
+  uniform vec3 uAmbientColor;
+  uniform float uDaylight;
   uniform vec3 uSunDirection;
   uniform vec3 uFogColor;
   uniform float uFogNear;
@@ -47,7 +85,7 @@ const FRAGMENT_SHADER = /* glsl */ `
   void main() {
     vec3 normal = normalize(vWorldNormal);
     float diffuse = max(dot(normal, normalize(uSunDirection)), 0.0);
-    float softLight = 0.78 + diffuse * 0.22;
+    float softLight = 0.76 + diffuse * (0.10 + uDaylight * 0.18);
     float upwardFacing = normal.y * 0.5 + 0.5;
 
     #ifdef USE_VERTEX_TINT
@@ -56,7 +94,8 @@ const FRAGMENT_SHADER = /* glsl */ `
       vec3 baseColor = uColor;
     #endif
 
-    vec3 shadedColor = baseColor * softLight + vec3(0.025) * upwardFacing;
+    vec3 shadedColor = baseColor * uAmbientColor * softLight
+      + uAmbientColor * 0.025 * upwardFacing;
 
     float cameraDistance = distance(cameraPosition, vWorldPosition);
     float fogFactor = smoothstep(uFogNear, uFogFar, cameraDistance);
@@ -82,16 +121,21 @@ export function createFillMaterial(
   environment: FillMaterialEnvironment = { fogColor: 0xfdfbf6, fogNear: 22, fogFar: 52 },
   options: FillMaterialOptions = {},
 ): THREE.ShaderMaterial {
+  const runtime = environment.runtime;
   return new THREE.ShaderMaterial({
     defines: options.vertexTint ? { USE_VERTEX_TINT: '' } : {},
     vertexShader: VERTEX_SHADER,
     fragmentShader: FRAGMENT_SHADER,
     uniforms: {
       uColor: { value: new THREE.Color(color) },
-      uSunDirection: { value: new THREE.Vector3(-0.55, 0.9, 0.35).normalize() },
-      uFogColor: { value: new THREE.Color(environment.fogColor) },
-      uFogNear: { value: environment.fogNear },
-      uFogFar: { value: environment.fogFar },
+      uAmbientColor: runtime?.ambientColor ?? { value: new THREE.Color(0xffffff) },
+      uDaylight: runtime?.daylight ?? { value: 1 },
+      uSunDirection: runtime?.sunDirection ?? {
+        value: new THREE.Vector3(-0.55, 0.9, 0.35).normalize(),
+      },
+      uFogColor: runtime?.fogColor ?? { value: new THREE.Color(environment.fogColor) },
+      uFogNear: runtime?.fogNear ?? { value: environment.fogNear },
+      uFogFar: runtime?.fogFar ?? { value: environment.fogFar },
     },
     side: THREE.DoubleSide,
     polygonOffset: true,

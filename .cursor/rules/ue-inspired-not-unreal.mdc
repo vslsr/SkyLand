@@ -1,0 +1,13 @@
+---
+description: Treat Unreal Engine terminology as architectural inspiration, not as the project's runtime or toolchain
+alwaysApply: true
+---
+
+# UE-inspired terminology, non-UE project
+
+- SkyLand is a Web/TypeScript project that borrows selected architectural ideas and terminology from Unreal Engine; it is not an Unreal Engine project.
+- Terms such as Actor, Component, Replica, CommonUI, lifecycle, replication, and authority refer to SkyLand's own implementations unless the user explicitly asks about Unreal Engine itself.
+- Do not infer the presence of Unreal Engine, C++, Blueprints, UObjects, UPROPERTY/UFUNCTION macros, Gameplay Ability System APIs, `.uproject` files, Unreal modules, or Unreal Editor workflows from those names alone.
+- Resolve behavior and implementation decisions from this repository's TypeScript, JavaScript, Three.js, Rapier, Vite, and Node.js code and its project-specific rules and skills.
+- Unreal Engine concepts may be used as design analogies when helpful, but translate them into SkyLand's existing abstractions and naming rather than proposing UE-specific code, assets, tools, or setup.
+- Only switch to an Unreal Engine-specific workflow or skill when the user explicitly requests Unreal Engine work or the task targets an actual Unreal Engine project or artifact.

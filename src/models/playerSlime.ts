@@ -210,6 +210,7 @@ export function createPlayerSlimeModel(
     length: radius * 2,
     width: radius * 2,
     simpleCollision: {
+      shape: 'cylinder',
       centerX: 0,
       centerZ: 0,
       halfWidth: radius,

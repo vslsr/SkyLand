@@ -20,6 +20,7 @@ class MockRoomManager extends EventEmitter {
 
   leaveRoom(...args) { this.calls.push(['leaveRoom', ...args]); }
   sendInput(...args) { this.calls.push(['sendInput', ...args]); }
+  setWeather(...args) { this.calls.push(['setWeather', ...args]); }
   claimActorControl(...args) { this.calls.push(['claimActorControl', ...args]); }
   releaseActorControl(...args) { this.calls.push(['releaseActorControl', ...args]); }
   sendActorInput(...args) { this.calls.push(['sendActorInput', ...args]); }
@@ -46,6 +47,14 @@ test('RoomConnectionHub 在传输之外处理会话，并标记广播通道', ()
     'room-1',
     'player-1',
     { type: 'player:input', sequence: 1 },
+  ]);
+
+  session.receive({ type: 'weather:set', weather: 'rain' });
+  assert.deepEqual(roomManager.calls.shift(), [
+    'setWeather',
+    'room-1',
+    'player-1',
+    'rain',
   ]);
 
   session.receive({ type: 'actor:event', actorId: 'raft-1', sequence: 1, event: { type: 'damage' } });

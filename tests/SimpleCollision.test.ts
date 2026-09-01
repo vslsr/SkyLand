@@ -19,6 +19,40 @@ test('Actor 模型尺寸会生成稳定的简易碰撞盒', () => {
   assert.ok(Math.abs(crate.halfLength - 0.59) < 1e-12);
   assert.equal(crate.minimumY, 0);
   assert.ok(crate.maximumY > 0.6);
+
+  const pbfSlime = createSimpleCollisionFromRender({
+    model: 'line-art-pbf-slime',
+    radius: 0.95,
+    collisionRadius: 0.52,
+    collisionHeight: 0.72,
+  });
+  assert.equal(pbfSlime.halfWidth, 0.52);
+  assert.equal(pbfSlime.halfLength, 0.52);
+  assert.equal(pbfSlime.shape, 'cylinder');
+  assert.equal(pbfSlime.minimumY, 0);
+  assert.equal(pbfSlime.maximumY, 0.72);
+});
+
+test('圆柱按圆形截面推出，不会在外接方盒的四角形成隐形墙', () => {
+  const collision = createSimpleCollisionDefinition({
+    shape: 'cylinder',
+    halfWidth: 1,
+    halfLength: 1,
+    minimumY: 0,
+    maximumY: 1,
+  });
+  const instance = { collision, transform: { x: 0, z: 0, yaw: 0 } };
+
+  // 到圆心 1.697m，已经在圆柱半径 1m + 移动体半径 0.5m 之外；
+  // 若误用 2x2 方盒，这个位置仍会被盒角挡住。
+  assert.deepEqual(
+    resolveCircleAgainstSimpleCollision({ x: 1.2, z: 1.2 }, 0.5, instance),
+    { x: 1.2, z: 1.2 },
+  );
+
+  const resolved = resolveCircleAgainstSimpleCollision({ x: 1, z: 1 }, 0.5, instance);
+  assert.ok(Math.abs(Math.hypot(resolved.x, resolved.z) - 1.5) < 1e-9);
+  assert.ok(Math.abs(resolved.x - resolved.z) < 1e-9);
 });
 
 test('圆形移动体会从带 yaw 的 Actor 有向盒最近侧面推出', () => {

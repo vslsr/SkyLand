@@ -6,9 +6,13 @@
 //! 一旦两边分裂，「静态物件不走网络」这个前提就不成立了。
 
 use crate::hash::{hash32, value_noise};
+use crate::terrain::{
+    ground_y_mm, terrain_cell_at_mm, TERRAIN_SHAPE_FLAT, TERRAIN_SURFACE_GROUND,
+};
 
-/// 一条放置记录占用的整数个数：kind, x_mm, z_mm, rotation_mrad, scale_thousandths。
-pub const PROP_STRIDE: usize = 5;
+/// 一条放置记录占用的整数个数：kind, x_mm, z_mm, rotation_mrad, scale_thousandths, y_mm。
+/// y 追加在末尾，既有字段下标保持稳定。
+pub const PROP_STRIDE: usize = 6;
 
 /// 单个 chunk 的物件数量上限，等于放置格总数。
 pub const MAX_PROPS: usize = (PROP_GRID * PROP_GRID) as usize;
@@ -16,7 +20,8 @@ pub const MAX_PROPS: usize = (PROP_GRID * PROP_GRID) as usize;
 pub const KIND_TREE: usize = 0;
 pub const KIND_GRASS: usize = 1;
 pub const KIND_ROCK: usize = 2;
-pub const KIND_COUNT: usize = 3;
+pub const KIND_MUSHROOM: usize = 3;
+pub const KIND_COUNT: usize = 4;
 
 const CHUNK_SIZE_MM: i32 = 32_000;
 const PROP_GRID: i32 = 8;
@@ -35,10 +40,12 @@ const OCCUPANCY_FROM_DENSITY: u32 = 48;
 const BASE_TREE_SHARE: u32 = 16;
 const TREE_SHARE_FROM_DENSITY: u32 = 104;
 const ROCK_SHARE: u32 = 32;
+const MUSHROOM_PLANT_SHARE_NUMERATOR: u32 = 3;
+const PLANT_SHARE_DENOMINATOR: u32 = 7;
 const TWO_PI_MRAD: u32 = 6283;
 
-const SCALE_MINIMUM: [u32; KIND_COUNT] = [820, 780, 700];
-const SCALE_MAXIMUM: [u32; KIND_COUNT] = [1360, 1250, 1400];
+const SCALE_MINIMUM: [u32; KIND_COUNT] = [820, 780, 700, 850];
+const SCALE_MAXIMUM: [u32; KIND_COUNT] = [1360, 1250, 1400, 1150];
 
 /// 生成一个 chunk 的全部物件，写入 `out`，返回物件数量。
 /// `out` 的长度必须不小于 `MAX_PROPS * PROP_STRIDE`。
@@ -72,10 +79,15 @@ pub fn generate_props(seed: u32, chunk_x: i32, chunk_z: i32, out: &mut [i32]) ->
 
             let tree_share = BASE_TREE_SHARE + (density * TREE_SHARE_FROM_DENSITY) / 255;
             let kind_roll = (occupancy_hash >> 8) & 0xff;
+            let rock_limit = tree_share + ROCK_SHARE;
+            let mushroom_share =
+                (256 - rock_limit) * MUSHROOM_PLANT_SHARE_NUMERATOR / PLANT_SHARE_DENOMINATOR;
             let kind = if kind_roll < tree_share {
                 KIND_TREE
-            } else if kind_roll < tree_share + ROCK_SHARE {
+            } else if kind_roll < rock_limit {
                 KIND_ROCK
+            } else if kind_roll < rock_limit + mushroom_share {
+                KIND_MUSHROOM
             } else {
                 KIND_GRASS
             };
@@ -85,18 +97,26 @@ pub fn generate_props(seed: u32, chunk_x: i32, chunk_z: i32, out: &mut [i32]) ->
             let minimum = SCALE_MINIMUM[kind];
             let span = SCALE_MAXIMUM[kind] - minimum + 1;
 
-            let offset = count * PROP_STRIDE;
-            out[offset] = kind as i32;
-            out[offset + 1] = origin_x
+            let x_mm = origin_x
                 + cell_x * PROP_CELL_SIZE_MM
                 + PROP_MARGIN_MM
                 + (jitter_hash % JITTER_SPAN_MM) as i32;
-            out[offset + 2] = origin_z
+            let z_mm = origin_z
                 + cell_z * PROP_CELL_SIZE_MM
                 + PROP_MARGIN_MM
                 + ((jitter_hash >> 12) % JITTER_SPAN_MM) as i32;
+            let terrain = terrain_cell_at_mm(seed, x_mm, z_mm);
+            if terrain.surface != TERRAIN_SURFACE_GROUND || terrain.shape != TERRAIN_SHAPE_FLAT {
+                continue;
+            }
+
+            let offset = count * PROP_STRIDE;
+            out[offset] = kind as i32;
+            out[offset + 1] = x_mm;
+            out[offset + 2] = z_mm;
             out[offset + 3] = ((size_hash >> 8) % TWO_PI_MRAD) as i32;
             out[offset + 4] = (minimum + size_hash % span) as i32;
+            out[offset + 5] = ground_y_mm(terrain);
             count += 1;
         }
     }

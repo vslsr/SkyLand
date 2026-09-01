@@ -9,10 +9,12 @@ const ID_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 /** 走高数量合批绘制的堆叠模型。新增一种堆叠物就在这里登记。 */
 const PILE_RENDER_MODELS = new Set([
   'line-art-wood-pile',
+  'line-art-wood-log',
   'line-art-stone-pile',
   'line-art-fruit-pile',
 ]);
 const COLOR_PATTERN = /^#[0-9a-f]{6}$/i;
+const PLAYER_RENDER_MODELS = new Set(['line-art-player-slime', 'line-art-pbf-slime']);
 
 function requireObject(value, path) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
@@ -261,7 +263,37 @@ function validateDropMotion(raw, filename) {
   return {
     gravity: requireNumber(definition.gravity, `${path}.gravity`, 0, 50),
     drag: requireNumber(definition.drag, `${path}.drag`, 0, 50),
+    ...(definition.groundDrag !== undefined ? {
+      groundDrag: requireNumber(definition.groundDrag, `${path}.groundDrag`, 0, 50),
+    } : {}),
+    ...(definition.restitution !== undefined ? {
+      restitution: requireNumber(definition.restitution, `${path}.restitution`, 0, 1),
+    } : {}),
+    ...(definition.radius !== undefined ? {
+      radius: requireNumber(definition.radius, `${path}.radius`, 0, 3),
+    } : {}),
     settleSpeed: requireNumber(definition.settleSpeed, `${path}.settleSpeed`, Number.EPSILON, 10),
+  };
+}
+
+function validateSlimeSurfaceDrag(raw, filename) {
+  const path = `${filename}.components.slimeSurfaceDrag`;
+  const definition = requireObject(raw, path);
+  return {
+    maximumDistance: requireNumber(
+      definition.maximumDistance,
+      `${path}.maximumDistance`,
+      Number.EPSILON,
+      2,
+    ),
+    pullForce: requireNumber(definition.pullForce, `${path}.pullForce`, Number.EPSILON, 300),
+    falloffExponent: requireNumber(definition.falloffExponent, `${path}.falloffExponent`, 1, 8),
+    influenceRadius: requireNumber(
+      definition.influenceRadius,
+      `${path}.influenceRadius`,
+      Number.EPSILON,
+      2,
+    ),
   };
 }
 
@@ -289,9 +321,20 @@ function validateGeneratedProp(raw, filename) {
   const drop = requireObject(definition.drop, dropPath);
   const quantity = requireNumber(drop.quantity, `${dropPath}.quantity`, 1, 1000);
   if (!Number.isInteger(quantity)) throw new TypeError(`${dropPath}.quantity 必须是整数`);
+  if (
+    drop.spawnPattern !== undefined
+    && drop.spawnPattern !== 'center'
+    && drop.spawnPattern !== 'center-scatter'
+    && drop.spawnPattern !== 'fruit-anchors'
+  ) {
+    throw new TypeError(`${dropPath}.spawnPattern 必须是 center、center-scatter 或 fruit-anchors`);
+  }
   const validatedDrop = {
     archetypeId: requireId(drop.archetypeId, `${dropPath}.archetypeId`),
     quantity,
+    ...(drop.spawnPattern !== undefined ? {
+      spawnPattern: drop.spawnPattern,
+    } : {}),
   };
 
   // 两种采集形态互斥：可再生的没有血量，掉血的不会长回来。
@@ -324,6 +367,57 @@ function validateRender(raw, filename) {
       membraneColor: requireColor(render.membraneColor, `${path}.membraneColor`),
       middleColor: requireColor(render.middleColor, `${path}.middleColor`),
       coreColor: requireColor(render.coreColor, `${path}.coreColor`),
+      bubbleColor: requireColor(render.bubbleColor, `${path}.bubbleColor`),
+      inkColor: requireColor(render.inkColor, `${path}.inkColor`),
+      shadowColor: requireColor(render.shadowColor, `${path}.shadowColor`),
+    };
+  }
+  if (render.model === 'line-art-pbf-slime') {
+    const particleCount = requireNumber(render.particleCount, `${path}.particleCount`, 16, 192);
+    const constraintIterations = requireNumber(
+      render.constraintIterations,
+      `${path}.constraintIterations`,
+      1,
+      5,
+    );
+    const bubbleCount = requireNumber(render.bubbleCount, `${path}.bubbleCount`, 0, 24);
+    if (![particleCount, constraintIterations, bubbleCount].every(Number.isInteger)) {
+      throw new TypeError(`${path} 的 particleCount、constraintIterations 和 bubbleCount 必须是整数`);
+    }
+    const radius = requireNumber(render.radius, `${path}.radius`, Number.EPSILON, 2);
+    const collisionRadius = requireNumber(
+      render.collisionRadius,
+      `${path}.collisionRadius`,
+      Number.EPSILON,
+      2,
+    );
+    const collisionHeight = requireNumber(
+      render.collisionHeight,
+      `${path}.collisionHeight`,
+      Number.EPSILON,
+      4,
+    );
+    if (collisionRadius >= radius) {
+      throw new TypeError(`${path}.collisionRadius 必须小于外部蒙皮 radius`);
+    }
+    if (collisionHeight >= radius) {
+      throw new TypeError(`${path}.collisionHeight 必须低于外部蒙皮顶部`);
+    }
+    return {
+      model: render.model,
+      radius,
+      collisionRadius,
+      collisionHeight,
+      particleCount,
+      constraintIterations,
+      gravity: requireNumber(render.gravity, `${path}.gravity`, 0, 50),
+      centerForce: requireNumber(render.centerForce, `${path}.centerForce`, 0, 100),
+      viscosity: requireNumber(render.viscosity, `${path}.viscosity`, 0, 100),
+      bubbleCount,
+      bubbleSpeed: requireNumber(render.bubbleSpeed, `${path}.bubbleSpeed`, 0, 2),
+      surfaceColor: requireColor(render.surfaceColor, `${path}.surfaceColor`),
+      innerColor: requireColor(render.innerColor, `${path}.innerColor`),
+      highlightColor: requireColor(render.highlightColor, `${path}.highlightColor`),
       bubbleColor: requireColor(render.bubbleColor, `${path}.bubbleColor`),
       inkColor: requireColor(render.inkColor, `${path}.inkColor`),
       shadowColor: requireColor(render.shadowColor, `${path}.shadowColor`),
@@ -423,6 +517,16 @@ function validateRender(raw, filename) {
       height: requireNumber(render.height, `${path}.height`, Number.EPSILON, 3),
     };
   }
+  if (render.model === 'line-art-wood-log') {
+    return {
+      model: render.model,
+      woodColor: requireColor(render.woodColor, `${path}.woodColor`),
+      cutColor: requireColor(render.cutColor, `${path}.cutColor`),
+      inkColor: requireColor(render.inkColor, `${path}.inkColor`),
+      radius: requireNumber(render.radius, `${path}.radius`, Number.EPSILON, 1),
+      length: requireNumber(render.length, `${path}.length`, Number.EPSILON, 3),
+    };
+  }
   if (render.model === 'line-art-fruit-pile') {
     return {
       model: render.model,
@@ -452,6 +556,7 @@ function validateActorArchetype(raw, filename) {
   const components = requireObject(definition.components, `${filename}.components`);
   const knownComponents = new Set([
     'playerMovement',
+    'slimeSurfaceDrag',
     'buoyancy',
     'vesselMotor',
     'interactable',
@@ -484,6 +589,9 @@ function validateActorArchetype(raw, filename) {
   const playerMovement = components.playerMovement
     ? validatePlayerMovement(components.playerMovement, filename)
     : undefined;
+  const slimeSurfaceDrag = components.slimeSurfaceDrag
+    ? validateSlimeSurfaceDrag(components.slimeSurfaceDrag, filename)
+    : undefined;
   const interactable = components.interactable
     ? validateInteractable(components.interactable, filename)
     : undefined;
@@ -499,11 +607,14 @@ function validateActorArchetype(raw, filename) {
   if (elasticTether && render?.model !== 'line-art-elastic-mushroom') {
     throw new TypeError(`${filename}.components.elasticTether 需要 line-art-elastic-mushroom render`);
   }
-  if (playerMovement && render?.model !== 'line-art-player-slime') {
-    throw new TypeError(`${filename}.components.playerMovement 需要 line-art-player-slime render`);
+  if (playerMovement && !PLAYER_RENDER_MODELS.has(render?.model)) {
+    throw new TypeError(`${filename}.components.playerMovement 需要玩家史莱姆 render`);
   }
   if (render?.model === 'line-art-player-slime' && !playerMovement) {
     throw new TypeError(`${filename}.components.render line-art-player-slime 需要 playerMovement`);
+  }
+  if (slimeSurfaceDrag && render?.model !== 'line-art-pbf-slime') {
+    throw new TypeError(`${filename}.components.slimeSurfaceDrag 需要 line-art-pbf-slime render`);
   }
   const temperature = components.temperature
     ? validateTemperature(components.temperature, filename)
@@ -559,6 +670,7 @@ function validateActorArchetype(raw, filename) {
     id: requireId(definition.id, `${filename}.id`),
     components: {
       ...(playerMovement ? { playerMovement } : {}),
+      ...(slimeSurfaceDrag ? { slimeSurfaceDrag } : {}),
       ...(components.buoyancy ? { buoyancy: validateBuoyancy(components.buoyancy, filename) } : {}),
       ...(components.vesselMotor ? { vesselMotor: validateVesselMotor(components.vesselMotor, filename) } : {}),
       ...(interactable ? { interactable } : {}),

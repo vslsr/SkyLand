@@ -115,6 +115,13 @@ test('RoomClient 按消息用途选择 control 与 realtime 通道', async () =>
   assert.equal(client.interactWithActor('cargo-1'), 1);
   assert.equal(transport.sent.at(-1)?.channel, 'control');
   assert.equal(decodeSent(transport.sent.at(-1)!.payload).type, 'actor:interact');
+
+  client.setWeather('blizzard');
+  assert.equal(transport.sent.at(-1)?.channel, 'control');
+  assert.deepEqual(decodeSent(transport.sent.at(-1)!.payload), {
+    type: 'weather:set',
+    weather: 'blizzard',
+  });
 });
 
 test('JSON codec 同时接受文本与二进制传输载荷', () => {

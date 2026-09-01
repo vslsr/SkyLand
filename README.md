@@ -5,7 +5,7 @@
 当前包含：
 
 - Three.js 淡色填充与 `EdgesGeometry` 线稿场景
-- 512 × 512 米的大世界：地形与物件由世界种子确定性生成，按 chunk 流式加载
+- 512 × 512 米的大世界：2 米网格台地、四向直坡、两类四向角坡、凹地水域与物件按 chunk 流式加载
 - Rust 编译的 WebAssembly 生成后端，附行为一致的纯 JS 降级实现
 - `Scene` / `SceneManager` 场景生命周期
 - 每个 Scene 独立的 `CommonUIManager` 栈
@@ -192,8 +192,8 @@ bindings.resetAllBindings();
 ## 大世界与 Chunk 系统
 
 场景配置里出现 `renderer.world` 就表示这张地图是流式大世界：地面与物件不再是
-摆好的固定内容，而是由世界种子确定性生成、按 chunk 加载。`config/scenes/open-world.scene.json`
-是内置的这样一张地图，`grassland` 与 `open-meadow` 保持原来的固定场景。
+摆好的固定内容，而是由世界种子确定性生成、按 chunk 加载。`open-world` 与 `orchard`
+是内置的两张流式地图，`grassland` 与 `open-meadow` 保持原来的固定场景。
 
 世界是 16 × 16 个 chunk，每个 chunk 32 米见方，合计 512 × 512 米。世界尺寸是
 生成算法的固有属性，写在 `shared/world/worldConfig.mjs` 里，对所有流式场景都一样；
@@ -207,6 +207,27 @@ bindings.resetAllBindings();
   chunk，玩家会直接看到地块凭空出现。
 
 配错了服务器起不来，并会指出是哪一个场景文件的哪一项。
+
+### 网格地形与水域
+
+`shared/world/terrainContent.mjs` 把地形定义成 `(worldSeed, globalCellX, globalCellZ)`
+的纯函数。每格 2 × 2 米，每个 chunk 固定 16 × 16 格；格记录由高度层、表面类型和
+形状组成。当前表面支持普通地面与水域；形状支持平面、朝世界 ±X/±Z 的四向直坡，
+以及单高角、单低角各自的东北/东南/西南/西北四向转角。一层高 1 米，因此斜坡坡度
+约 26.6°。负高度层是水底，海平面保持在 0。
+
+客户端 `TerrainChunkView` 只为已加载 chunk 建立台地顶面、断崖侧壁、网格线和水格
+水面。水面继续复用海域场景的波浪 Shader，只把覆盖范围从整张大平面改成凹地中的
+局部格子。服务端与客户端移动都调用 `resolveTerrainMovement`：沿本次短位移做固定上限
+的脚印采样，允许沿斜坡连续升降、从断崖向下落地并穿过水块；向上跨层仍按角色的
+`maximumStepHeight` 判断。没有浮力时角色沿河床移动；史莱姆原型携带通用
+`BuoyancyComponent`，深水中由海平面减去吃水提供支撑，浅滩与凸起河床仍会阻挡。
+地形不注册成每格碰撞盒，
+所以内存与查询成本不随地图面积增长。
+
+地形数据不随快照下发；浏览器、服务端和 Rust/WASM 都由同一种子推导。静态物件只在
+平坦普通地面生成，记录末尾追加 `y_mm`，既有字段下标保持不变。出生点附近固定留出
+一块平坦陆地，保证多人出生不会落进水里或悬崖边。
 
 ### 静态物件永远不走网络
 
@@ -236,12 +257,13 @@ WASM 算出的世界必然逐位相同。一旦这里引入浮点，就可能出
 计划本身是纯函数（`shared/world/chunkStream.mjs`），只在跨过 chunk 边界时重算一次；
 每帧最多构建一个 chunk，玩家高速穿越时补齐会晚几帧，但这段延迟被雾效盖住了。
 
-### 每个 chunk 三次 draw call
+### 每个 chunk 的绘制预算
 
-一个 chunk 的地面、树、草、岩石被合批成**一份**填充几何体和**一份**轮廓线几何体，
-颜色随顶点走（`createFillMaterial` 的 `vertexTint`），所以树干与树冠仍是各自的配色，
-但整块地只用一种材质。加上同场景全部 chunk 共用的地面网格线，一个 chunk 固定三次
-draw call，视野内 25 个 chunk 合计 75 次。
+一个 chunk 的树与岩石仍合批成**一份**填充几何体和**一份**轮廓线几何体，颜色随
+顶点走（`createFillMaterial` 的 `vertexTint`）。地形增加普通地面填充/网格两个 pass；
+含水格时再增加水面/水线两个 pass。实例草由 `StreamingGrassSystem` 另占两个 pass。
+因此单块按内容为 4–8 次 draw call，且只存在于加载半径内，数量上界仍由常驻 chunk
+数决定。
 
 `renderer.content` 的 `ground` / `trees` / `grass` 开关在流式场景里改为决定 chunk
 里放什么：关掉某一类就注册一个空模板。放置结果本身不受影响——放置算法在 WASM 与
@@ -263,8 +285,8 @@ chunk 共用一张跟随玩家焦点、按固定步长滑动的 32 米局部弯�
 ### WASM 生成后端
 
 `native/chunkgen` 是一个 `no_std` 的 Rust crate，编译到 `wasm32-unknown-unknown`，
-产物 3.4 KB。它做两件事：放置算法，以及把模板几何体按每个物件的位置、朝向、
-缩放变换后写进一整块连续的顶点缓冲。模板几何体仍由 Three.js 在 JS 侧生成后
+产物约 5.9 KB。它做两件事：放置算法，以及把模板几何体按每个物件的位置、高度、
+朝向、缩放变换后写进一整块连续的顶点缓冲。模板几何体仍由 Three.js 在 JS 侧生成后
 一次性上传，所以线稿模型的定义只有 `src/models/` 一处，Rust 不重复实现三角化。
 
 `shared/world/chunkGenerator.mjs` 里有一份行为完全一致的 JS 实现。WASM 加载失败
@@ -283,7 +305,7 @@ chunk 共用一张跟随玩家焦点、按固定步长滑动的 32 米局部弯�
 
 V8 对这种紧凑的 TypedArray 循环优化得很好，所以端到端只快约 10%。WASM 的价值
 更多在于把逐顶点的工作彻底移出 JS 堆——没有 JIT 预热和 GC 抖动，帧时间更平——
-以及为之后调大视距、加大物件密度、引入地形高度留出余量。剩下 39% 的开销是两条
+以及为之后调大视距、加大物件密度留出余量。剩下 39% 的开销是两条
 路径都要付的切片拷贝，真要继续压缩，下一步是把位置、法线、颜色交错进同一份
 `InterleavedBuffer`，把三次拷贝并成一次。
 
@@ -339,6 +361,7 @@ Actor 不需要重建任何树。格子按需创建、空了立刻回收，所�
 | 树冠 | 不挡 | 两段盒子，最宽 1.2 m，到 4 m 高 |
 | 岩石 | 0.48 × 0.40 m、高 0.46 m | 同左 |
 | 草 | 不挡 | 不挡 |
+| 蘑菇 | Actor 动态碰撞 | Actor 动态碰撞 |
 
 树冠不参与推出的理由和弹性蘑菇一样：放置格只有 4 米，如果两米多宽的树冠也挡路，
 林子里会寸步难行。但镜头必须被树冠挡住，否则第三人称相机会从枝叶中间穿过去。
@@ -380,30 +403,40 @@ revision），装载时按同一个 id 恢复并立刻挂上 `ReplicatedComponen
 
 ### 世界生成物件的原型注册表
 
-一个物件是布景还是可交互 Actor，取决于场景有没有给它绑一个原型。绑定写在
-`gameplay.worldProps` 里，服务端与客户端各自据此建一张种类 → 原型的表；没有
-绑定的种类（当前是草）只有网格，不产生 Actor。
+一个物件是布景还是可交互 Actor，取决于场景有没有给它配置原型变体。变体写在
+`gameplay.worldProps` 里；没有配置的种类（当前是草）只有网格，不产生 Actor。
 
 ```json
 "gameplay": {
-  "worldProps": { "tree": "generated-tree", "rock": "generated-rock" }
+  "worldProps": {
+    "tree": [
+      { "archetype": "generated-tree", "weight": 5 },
+      { "archetype": "fruit-tree", "weight": 1 }
+    ],
+    "rock": [{ "archetype": "large-rock", "weight": 1 }],
+    "mushroom": [{ "archetype": "elastic-mushroom", "weight": 1 }]
+  }
 }
 ```
 
-**绑定归场景，定义归原型。** 原型只描述「它是什么」——多少血、掉什么、交互距离
-多远；承载哪一种物件是地图的事。所以同一种树在雪原和草原上可以是两个不同的
-玩法对象，而不用给原型加一堆按地图分支的字段。`worldProps` 只能出现在带
-`renderer.world` 的流式场景上。
+**变体归场景，定义归原型。** 原型只描述「它是什么」——多少血、掉什么、交互距离
+多远；一张地图里有哪些变体、各占多少是地图的事。`weight` 是 1–1000 的相对权重，
+上例普通树与果树约为 5:1。每条放置记录用
+`(worldSeed, kind, chunkX, chunkZ, propIndex)` 的共享整数哈希选中一项，所以服务端与
+客户端结果一致。可采集生成物只同步偏离态；蘑菇这类会移动、会改变交互关系的对象
+则由服务端发送完整 Actor 快照。单纯增加同 kind 变体不改变位置、缩放或 chunk 顶点，
+因此不需要修改 Rust 放置实现和 WASM ABI。`worldProps` 只能出现在带
+`renderer.world` 的流式场景上；每个 kind 最多配置 16 个不重复原型。
 
 绑定的原型连同它掉落的堆叠原型会被自动带进场景的原型表，作者不用再在
 `runtimeActorArchetypes` 里重复列一遍——那份重复正是「绑了但忘了带进来」这类
 错误的来源。
 
 Actor id 是自描述的：`prop:<种类>:<chunkX>:<chunkZ>:<放置下标>`。种类是冗余的
-——后三项已经唯一确定一格——带上它是为了让「只拿到 id」的一侧不跑生成器就能挑出
-原型：生成物件的快照只发 `{ id, revision, propState }`，没有 `archetypeId`。这份
-冗余不会让客户端说了算：权威侧的 Actor 只可能由服务端从世界种子推导出来，交互
-入口再拿 id 里的种类和 Component 对一次，对不上就拒绝。
+——后三项已经唯一确定一格——带上它之后，「只拿到 id」的一侧可以结合房间种子重新
+运行一次很小的变体哈希，直接得到原型，不必重建整个 chunk。可采集物的快照仍只发
+`{ id, revision, propState }`，没有 `archetypeId`；可拖拽 Actor 则发送完整状态。
+这不会让客户端说了算：权威 Actor 只能由服务端从同一世界种子推导。
 
 掉什么、掉多少写在原型的 `generatedProp.drop` 里，不写在代码分支里；数量按生成
 时的缩放取整，所以大树掉的木材比小树多，两端算出的结果一致。
@@ -414,7 +447,9 @@ Actor id 是自描述的：`prop:<种类>:<chunkX>:<chunkZ>:<放置下标>`。�
 | --- | --- |
 | `worldProps` 只出现在流式场景上 | 固定摆放的场景里没有 chunk 物件可绑 |
 | 绑定的种类名必须已知 | 打错一个字，那一种物件静默地不生成 |
-| 绑定的原型必须有 `generatedProp` | 采集入口拿不到血量与掉落 |
+| 每个 kind 的变体数组必须有 1–16 项，权重为 1–1000 | 无法稳定划分哈希区间 |
+| 同一个 kind 不能重复配置同一原型 | 同一配置被拆成多段，比例难以审查 |
+| 变体原型必须是 `generatedProp` 采集物或 `elasticTether` 弹性 Actor | 生成记录没有可运行的玩法载体 |
 | 绑了 `tree` 就必须开 `renderer.content.trees` | 一片撞得到、采得到、但看不见的树 |
 | 掉落必须指向存在且可堆叠的原型 | 要等玩家采到那一下才炸在交互路径上 |
 
@@ -447,15 +482,17 @@ Actor id 是自描述的：`prop:<种类>:<chunkX>:<chunkZ>:<放置下标>`。�
 
 ### 两张地图绑同一套世界生成
 
-`open-world` 与 `orchard` 用的是同一个世界种子、同一套 chunk 参数，区别只在
-`tree` 绑到了哪个原型：
+`open-world` 与 `orchard` 用的是同一个世界种子、同一套 chunk 参数，区别在各自的
+带权原型表：
 
-| 场景 | `tree` | `rock` |
-| --- | --- | --- |
-| `open-world` 无边草原 | `generated-tree`（生命 3 → `wood-pile` × 5） | `generated-rock`（生命 4 → `stone-pile` × 3） |
-| `orchard` 果林 | `fruit-tree`（冷却 120 秒 → `fruit-pile` × 3） | 同左 |
+| 场景 | `tree` | `rock` | `mushroom` |
+| --- | --- | --- | --- |
+| `open-world` 无边草原 | `generated-tree` 权重 5（生命 3 → 木材）+ `fruit-tree` 权重 1（冷却 120 秒 → 果实） | `large-rock`（生命 5 → 石料） | `elastic-mushroom`（按 E 拖拽） |
+| `orchard` 果林 | `fruit-tree` 权重 1（全是果树） | `generated-rock`（生命 4 → 石料） | 未配置 |
 
-两张地图上每一棵树的位置、朝向、缩放完全一致——换的是玩法，不是世界。
+两张地图上树与石头的位置、朝向、缩放完全一致；变体只决定每条记录承载哪一个玩法
+原型。无边草原把 `elastic-mushroom` 绑定到生成器的 `mushroom` kind，蘑菇会以略低于
+草的频率散布；靠近后按 E 叼住，移动即可拖拽，拉得过远会自动松开。
 
 草没有原型认领，仍然是纯布景。两种采集走的是同一条 `harvest-prop` 代码路径，
 `ServerScene` 里没有任何一处提到树或石头。
@@ -514,7 +551,10 @@ const page: CommonUIPage = {
 
 开发构建额外启用 `IMC.Development`。按 F8 会通过数据化 InputAction 打开 CommonUI
 调试页；页面仍遵守栈顶输入、焦点、Escape/F8 关闭和 Scene 清理规则。调试页可以切换
-Actor 简易碰撞边框，产品构建会移除该 Mapping，不占用 F8。
+Actor 简易碰撞边框、温度标签和房间权威天气。天气按钮只发送切换请求，房间 DS 校验后
+随快照同步当前天气；雨雪等表现由客户端按本地玩家周围的 3×3 chunk 激活，粒子保持世界
+坐标固定，天气光照与雾通过场景共享 uniform 驱动。产品构建会移除
+该 Mapping，不占用 F8。
 
 ## 数据化场景
 

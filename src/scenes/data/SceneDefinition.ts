@@ -53,6 +53,26 @@ export type ActorRenderDefinition =
       shadowColor: string;
     }
   | {
+      model: 'line-art-pbf-slime';
+      radius: number;
+      /** 位于可变形蒙皮内部的权威圆柱半径。 */
+      collisionRadius: number;
+      collisionHeight: number;
+      particleCount: number;
+      constraintIterations: number;
+      gravity: number;
+      centerForce: number;
+      viscosity: number;
+      bubbleCount: number;
+      bubbleSpeed: number;
+      surfaceColor: string;
+      innerColor: string;
+      highlightColor: string;
+      bubbleColor: string;
+      inkColor: string;
+      shadowColor: string;
+    }
+  | {
       model: 'line-art-raft';
       foamColor: string;
       length: number;
@@ -127,6 +147,14 @@ export type ActorRenderDefinition =
       height: number;
     }
   | {
+      model: 'line-art-wood-log';
+      woodColor: string;
+      cutColor: string;
+      inkColor: string;
+      radius: number;
+      length: number;
+    }
+  | {
       model: 'line-art-stone-pile';
       stoneColor: string;
       accentColor: string;
@@ -151,6 +179,13 @@ export interface ActorArchetypeDefinition {
       walkSpeed: number;
       sprintMultiplier: number;
       maximumStepHeight: number;
+    };
+    /** 仅客户端使用：鼠标拖拽混合史莱姆蒙皮时的局部软体参数。 */
+    slimeSurfaceDrag?: {
+      maximumDistance: number;
+      pullForce: number;
+      falloffExponent: number;
+      influenceRadius: number;
     };
     buoyancy?: {
       minimumBeam: number;
@@ -226,6 +261,9 @@ export interface ActorArchetypeDefinition {
     dropMotion?: {
       gravity: number;
       drag: number;
+      groundDrag?: number;
+      restitution?: number;
+      radius?: number;
       settleSpeed: number;
     };
     lifetime?: { lifetimeSeconds: number };
@@ -236,7 +274,11 @@ export interface ActorArchetypeDefinition {
       harvestDamage?: number;
       /** 冷却形态：没有血量，采一次之后过这么多秒自己长回来。与血量互斥。 */
       regrow?: { seconds: number };
-      drop: { archetypeId: string; quantity: number };
+      drop: {
+        archetypeId: string;
+        quantity: number;
+        spawnPattern?: 'center' | 'center-scatter' | 'fruit-anchors';
+      };
     };
     render?: ActorRenderDefinition;
   };
@@ -263,6 +305,10 @@ export interface OceanVisualDefinition {
   interlaceStrength: number;
   surfaceColor: string;
   secondaryColor: string;
+  /** 流式地形水体按海床深度混合到该颜色；固定平面海域可以省略。 */
+  deepColor?: string;
+  /** 达到最深颜色所需的水深（米）。 */
+  depthColorRange?: number;
   gridLineColor: string;
   gridLineOpacity: number;
 }
@@ -282,6 +328,13 @@ export interface WorldStreamingDefinition {
   keepRadius: number;
   /** 岩石的填充色。地面、草、树的颜色沿用 palette。 */
   rockColor: string;
+}
+
+export interface WorldPropVariantDefinition {
+  /** ActorCatalog 净化后的原型 id。 */
+  archetypeId: string;
+  /** 正整数相对权重；同一 kind 的所有项共同划分哈希区间。 */
+  weight: number;
 }
 
 export interface SceneDefinition extends SceneSummary {
@@ -306,8 +359,11 @@ export interface SceneDefinition extends SceneSummary {
   gameplay: {
     playerActor: { archetypeId: string };
     runtimeActorArchetypes?: string[];
-    /** 流式世界里每种物件由哪个原型承载；键是物件种类名。 */
-    worldProps?: Partial<Record<'tree' | 'grass' | 'rock', string>>;
+    /** 流式世界每种物件的带权原型变体；实例选择由世界种子确定。 */
+    worldProps?: Partial<Record<
+      'tree' | 'grass' | 'rock' | 'mushroom',
+      WorldPropVariantDefinition[]
+    >>;
     bounds: SceneBounds;
     spawn: { centerX: number; centerZ: number; radius: number; slots: number };
     water?: { seaLevel: number };

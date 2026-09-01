@@ -29,6 +29,7 @@ export class GeneratedPropComponent extends ActorComponent {
     this.maximumHealth = Math.max(1, Math.trunc(Number(definition.maximumHealth) || 1));
     this.harvestDamage = Math.max(1, Math.trunc(Number(definition.harvestDamage) || 1));
     this.dropArchetypeId = definition.drop?.archetypeId;
+    this.dropSpawnPattern = definition.drop?.spawnPattern ?? 'center';
     this.baseDropQuantity = Math.max(1, Math.trunc(Number(definition.drop?.quantity) || 1));
     this.health = Math.max(0, Math.min(
       this.maximumHealth,

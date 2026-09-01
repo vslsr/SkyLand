@@ -1,5 +1,6 @@
 import type { PlayerInputFrame, RoomSnapshot } from './protocol';
 import type { SceneDefinition } from '../scenes/data/SceneDefinition';
+import type { WeatherType } from '../weather/index';
 
 export interface RoomSummary {
   id: string;
@@ -38,6 +39,7 @@ export type ActorGameplayEvent =
 export type ClientMessage =
   | { type: 'room:join'; roomId: string; name: string }
   | { type: 'room:leave' }
+  | { type: 'weather:set'; weather: WeatherType }
   | {
       type: 'player:input';
       sequence: number;

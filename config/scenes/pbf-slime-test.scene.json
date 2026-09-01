@@ -1,0 +1,50 @@
+{
+  "$schema": "./scene.schema.json",
+  "schemaVersion": 1,
+  "id": "pbf-slime-test",
+  "displayName": "混合软体史莱姆测试",
+  "description": "观察球形软核心、胡克弹簧蒙皮、内部圆柱碰撞、地面黏附与回弹。",
+  "capacity": 4,
+  "sceneComponents": [],
+  "actors": [
+    {
+      "id": "pbf-collision-dummy-center",
+      "archetype": "training-dummy",
+      "localTransform": { "position": [0, 0, 0], "yaw": 0 }
+    },
+    {
+      "id": "pbf-collision-obelisk-left",
+      "archetype": "arcane-focus-obelisk",
+      "localTransform": { "position": [-2.4, 0, -3.2], "yaw": 0.25 }
+    },
+    {
+      "id": "pbf-collision-obelisk-right",
+      "archetype": "arcane-focus-obelisk",
+      "localTransform": { "position": [2.4, 0, -3.2], "yaw": -0.25 }
+    }
+  ],
+  "renderer": {
+    "type": "line-art",
+    "background": "#fbf7ec",
+    "fog": { "color": "#fbf7ec", "near": 1000, "far": 1001 },
+    "content": { "ground": true, "trees": false, "grass": false, "ocean": false },
+    "palette": {
+      "ground": "#eee5cf",
+      "grass": "#d4c99d",
+      "treeTrunk": "#d6bea3",
+      "treeNeedles": "#cbdcbc"
+    }
+  },
+  "gameplay": {
+    "playerActor": { "archetype": "pbf-slime" },
+    "bounds": { "minimumX": -12, "maximumX": 12, "minimumZ": -15, "maximumZ": 9 },
+    "spawn": { "centerX": 0, "centerZ": 3.8, "radius": 1.6, "slots": 4 }
+  },
+  "camera": {
+    "mode": "topdown",
+    "position": [0, 5.2, 14],
+    "yaw": 0,
+    "pitch": -0.18,
+    "moveSpeed": 6.5
+  }
+}

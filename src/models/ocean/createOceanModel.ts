@@ -2,15 +2,11 @@ import * as THREE from 'three';
 import type { FillMaterialEnvironment } from '../../materials/createFillMaterial';
 import { createOceanMaterials } from '../../materials/oceanMaterials';
 import type { OceanVisualDefinition } from '../../scenes/data/SceneDefinition';
+import { sampleOceanFaceTint } from './oceanFaceting';
 
 export interface OceanModel {
   readonly root: THREE.Group;
   readonly animatedMaterials: readonly THREE.ShaderMaterial[];
-}
-
-function seededUnit(value: number): number {
-  const raw = Math.sin(value * 91.731 + 17.17) * 43758.5453;
-  return raw - Math.floor(raw);
 }
 
 /**
@@ -31,8 +27,7 @@ function createFacetedSurfaceGeometry(
   for (let face = 0; face < position.count; face += 3) {
     const x = position.getX(face);
     const z = position.getZ(face);
-    const noise = seededUnit(x * 0.37 + z * 0.61 + face * 0.013);
-    tint.copy(primary).lerp(secondary, 0.2 + noise * 0.62);
+    sampleOceanFaceTint(primary, secondary, x, z, face, tint);
     for (let vertex = 0; vertex < 3; vertex += 1) {
       const offset = (face + vertex) * 3;
       colors[offset] = tint.r;

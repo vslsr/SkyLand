@@ -11,6 +11,7 @@ export function createOceanGridMaterial(
   seaLevel: number,
   environment: FillMaterialEnvironment,
 ): THREE.ShaderMaterial {
+  const runtime = environment.runtime;
   return new THREE.ShaderMaterial({
     vertexShader: OCEAN_GRID_VERTEX_SHADER,
     fragmentShader: OCEAN_GRID_FRAGMENT_SHADER,
@@ -25,9 +26,9 @@ export function createOceanGridMaterial(
       uInterlaceStrength: { value: definition.interlaceStrength },
       uLineColor: { value: new THREE.Color(definition.gridLineColor) },
       uOpacity: { value: definition.gridLineOpacity },
-      uFogColor: { value: new THREE.Color(environment.fogColor) },
-      uFogNear: { value: environment.fogNear },
-      uFogFar: { value: environment.fogFar },
+      uFogColor: runtime?.fogColor ?? { value: new THREE.Color(environment.fogColor) },
+      uFogNear: runtime?.fogNear ?? { value: environment.fogNear },
+      uFogFar: runtime?.fogFar ?? { value: environment.fogFar },
     },
     transparent: true,
     depthWrite: false,

@@ -8,6 +8,7 @@ import type {
   VesselInputFrame,
 } from './messages';
 import type { PlayerInputFrame, RoomSnapshot } from './protocol';
+import type { WeatherType } from '../weather/index';
 import { HttpRoomDirectory, type RoomDirectory } from './RoomDirectory';
 import {
   WebSocketTransport,
@@ -126,6 +127,10 @@ export class RoomClient {
   public leaveRoom(): void {
     this.resetSequences();
     this.send({ type: 'room:leave' }, 'control');
+  }
+
+  public setWeather(weather: WeatherType): void {
+    this.send({ type: 'weather:set', weather }, 'control');
   }
 
   /**

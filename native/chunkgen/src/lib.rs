@@ -19,6 +19,7 @@
 mod hash;
 mod math;
 mod placement;
+mod terrain;
 
 use core::panic::PanicInfo;
 use core::ptr::addr_of_mut;
@@ -29,7 +30,7 @@ fn panic(_info: &PanicInfo) -> ! {
     loop {}
 }
 
-/// 地面铺块的模板下标，排在三种物件之后。
+/// 地面铺块的模板下标，排在所有物件之后。
 const TEMPLATE_GROUND: usize = KIND_COUNT;
 const TEMPLATE_COUNT: usize = KIND_COUNT + 1;
 
@@ -241,7 +242,7 @@ pub extern "C" fn build_chunk_masked(
     // 地面铺块以 chunk 中心为原点，先铺地再放物件，保证同一份缓冲里地面在最前。
     let center_x = chunk_x as f32 * CHUNK_SIZE + CHUNK_SIZE * 0.5;
     let center_z = chunk_z as f32 * CHUNK_SIZE + CHUNK_SIZE * 0.5;
-    if !emit_template(TEMPLATE_GROUND, center_x, center_z, 0.0, 1.0) {
+    if !emit_template(TEMPLATE_GROUND, center_x, 0.0, center_z, 0.0, 1.0) {
         return -1;
     }
 
@@ -257,12 +258,13 @@ pub extern "C" fn build_chunk_masked(
         }
         // 先把这条记录读进局部变量，再调用 emit_template，
         // 避免同时持有两份指向全局状态的可变引用。
-        let (kind, x, z, rotation, scale) = {
+        let (kind, x, y, z, rotation, scale) = {
             let current = state();
             let offset = index * PROP_STRIDE;
             (
                 current.props[offset] as usize,
                 current.props[offset + 1] as f32 / 1000.0,
+                current.props[offset + 5] as f32 / 1000.0,
                 current.props[offset + 2] as f32 / 1000.0,
                 current.props[offset + 3] as f32 / 1000.0,
                 current.props[offset + 4] as f32 / 1000.0,
@@ -271,7 +273,7 @@ pub extern "C" fn build_chunk_masked(
         if kind >= KIND_COUNT {
             continue;
         }
-        if !emit_template(kind, x, z, rotation, scale) {
+        if !emit_template(kind, x, y, z, rotation, scale) {
             return -1;
         }
     }
@@ -281,7 +283,14 @@ pub extern "C" fn build_chunk_masked(
 
 /// 把一个模板按绕 Y 轴旋转 + 等比缩放 + 平移写进输出缓冲。
 /// 等比缩放不改变法线方向，所以法线只做旋转。
-fn emit_template(index: usize, translate_x: f32, translate_z: f32, angle: f32, scale: f32) -> bool {
+fn emit_template(
+    index: usize,
+    translate_x: f32,
+    translate_y: f32,
+    translate_z: f32,
+    angle: f32,
+    scale: f32,
+) -> bool {
     let current = state();
     let template = current.templates[index];
 
@@ -309,7 +318,7 @@ fn emit_template(index: usize, translate_x: f32, translate_z: f32, angle: f32, s
         read += TEMPLATE_FILL_STRIDE;
 
         current.fill_positions[write] = scale * (cosine * position_x + sine * position_z) + translate_x;
-        current.fill_positions[write + 1] = scale * position_y;
+        current.fill_positions[write + 1] = scale * position_y + translate_y;
         current.fill_positions[write + 2] = scale * (cosine * position_z - sine * position_x) + translate_z;
         current.fill_normals[write] = cosine * normal_x + sine * normal_z;
         current.fill_normals[write + 1] = normal_y;
@@ -330,7 +339,7 @@ fn emit_template(index: usize, translate_x: f32, translate_z: f32, angle: f32, s
         read += 3;
 
         current.line_positions[write] = scale * (cosine * position_x + sine * position_z) + translate_x;
-        current.line_positions[write + 1] = scale * position_y;
+        current.line_positions[write + 1] = scale * position_y + translate_y;
         current.line_positions[write + 2] = scale * (cosine * position_z - sine * position_x) + translate_z;
         write += 3;
     }

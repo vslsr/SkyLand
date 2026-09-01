@@ -75,10 +75,11 @@ export const PROP_KIND = {
   TREE: 0,
   GRASS: 1,
   ROCK: 2,
+  MUSHROOM: 3,
 };
 
 /** 物件种类总数，模板注册与遍历都按它来。 */
-export const PROP_KIND_COUNT = 3;
+export const PROP_KIND_COUNT = 4;
 
 /** 房间没有指定种子时使用的默认世界种子。 */
 export const DEFAULT_WORLD_SEED = 0x5c1a2d0b;

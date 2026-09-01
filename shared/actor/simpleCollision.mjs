@@ -1,9 +1,10 @@
 /**
- * Actor 简易碰撞只处理玩法平面的有向盒。它和参考项目的 XZ 包围盒推出算法一致，
- * 但额外支持 Actor yaw；浏览器预测与房间 DS 共用本文件，避免两端使用不同边界。
+ * Actor 简易碰撞处理玩法平面的有向盒与圆柱。浏览器预测与房间 DS 共用本文件，
+ * 避免两端使用不同边界；圆柱在 XZ 平面按真实圆形窄相计算，不再用外接方盒挡住边角。
  */
 
-/** @typedef {{ centerX: number, centerZ: number, halfWidth: number, halfLength: number, minimumY: number, maximumY: number }} SimpleCollisionDefinition */
+/** @typedef {'box' | 'cylinder'} SimpleCollisionShape */
+/** @typedef {{ shape: SimpleCollisionShape, centerX: number, centerZ: number, halfWidth: number, halfLength: number, minimumY: number, maximumY: number }} SimpleCollisionDefinition */
 /** @typedef {{ x: number, z: number }} CollisionPoint */
 /** @typedef {{ x: number, y?: number, z: number, yaw: number }} CollisionTransform */
 /** @typedef {{ collision: SimpleCollisionDefinition, transform: CollisionTransform }} SimpleCollisionInstance */
@@ -25,17 +26,44 @@ function positiveNumber(value, fallback) {
  * 可视模型的 authoring 尺寸就是权威简易碰撞来源。Component 不再要求作者维护
  * 一份容易与模型漂移的重复配置。
  * @param {Record<string, unknown>} render
+ * @param {{ radius?: number }} [dropMotion] 球形掉落物的物理半径；存在时 Transform 表示球心
  * @returns {SimpleCollisionDefinition}
  */
-export function createSimpleCollisionFromRender(render) {
+export function createSimpleCollisionFromRender(render, dropMotion) {
+  const rollingRadius = Math.max(0, finiteNumber(dropMotion?.radius));
+  if (rollingRadius > 0) {
+    return createSimpleCollisionDefinition({
+      shape: 'cylinder',
+      halfWidth: rollingRadius,
+      halfLength: rollingRadius,
+      minimumY: -rollingRadius,
+      maximumY: rollingRadius,
+    });
+  }
   const model = String(render?.model ?? '');
   if (model === 'line-art-player-slime') {
     const radius = positiveNumber(render.radius, 0.42);
     return createSimpleCollisionDefinition({
+      shape: 'cylinder',
       halfWidth: radius,
       halfLength: radius,
       minimumY: 0,
       maximumY: radius * 2,
+    });
+  }
+  if (model === 'line-art-pbf-slime') {
+    const radius = positiveNumber(render.radius, 0.9);
+    const collisionRadius = Math.min(
+      radius * 0.95,
+      positiveNumber(render.collisionRadius, radius * 0.55),
+    );
+    return createSimpleCollisionDefinition({
+      shape: 'cylinder',
+      // 外壳可以先包住障碍并形变；内部圆柱只阻止软核心穿透。
+      halfWidth: collisionRadius,
+      halfLength: collisionRadius,
+      minimumY: 0,
+      maximumY: positiveNumber(render.collisionHeight, radius * 0.76),
     });
   }
   if (model === 'line-art-raft') {
@@ -81,6 +109,7 @@ export function createSimpleCollisionFromRender(render) {
     const radius = positiveNumber(render.radius, 0.5);
     const height = positiveNumber(render.height, 1);
     return createSimpleCollisionDefinition({
+      shape: 'cylinder',
       halfWidth: radius,
       halfLength: radius,
       minimumY: 0,
@@ -110,6 +139,15 @@ export function createSimpleCollisionFromRender(render) {
       maximumY: positiveNumber(render.height, 0.6),
     });
   }
+  if (model === 'line-art-wood-log') {
+    const radius = positiveNumber(render.radius, 0.1);
+    return createSimpleCollisionDefinition({
+      halfWidth: positiveNumber(render.length, 0.8) * 0.5,
+      halfLength: radius,
+      minimumY: -radius,
+      maximumY: radius,
+    });
+  }
   throw new TypeError(`无法为模型 ${model || '<unknown>'} 生成简易碰撞`);
 }
 
@@ -121,6 +159,7 @@ export function createSimpleCollisionDefinition(definition) {
   const minimumY = finiteNumber(definition.minimumY);
   const maximumY = finiteNumber(definition.maximumY, minimumY + 1);
   return {
+    shape: definition.shape === 'cylinder' ? 'cylinder' : 'box',
     centerX: finiteNumber(definition.centerX),
     centerZ: finiteNumber(definition.centerZ),
     halfWidth: positiveNumber(definition.halfWidth, 0.01),
@@ -169,6 +208,29 @@ export function resolveCircleAgainstSimpleCollision(point, radius, instance, ver
   const deltaZ = finiteNumber(point.z) - finiteNumber(transform.z);
   let localX = cosYaw * deltaX - sinYaw * deltaZ - collision.centerX;
   let localZ = sinYaw * deltaX + cosYaw * deltaZ - collision.centerZ;
+
+  if (collision.shape === 'cylinder') {
+    const obstacleRadius = Math.min(collision.halfWidth, collision.halfLength);
+    const separation = obstacleRadius + safeRadius;
+    const distanceSquared = localX * localX + localZ * localZ;
+    if (distanceSquared >= separation * separation - COLLISION_EPSILON) return { ...point };
+    if (distanceSquared > COLLISION_EPSILON) {
+      const scale = separation / Math.sqrt(distanceSquared);
+      localX *= scale;
+      localZ *= scale;
+    } else {
+      // 中心完全重合时选固定的 -X，保证客户端和 DS 得到同一结果。
+      localX = -separation;
+      localZ = 0;
+    }
+    const centeredX = localX + collision.centerX;
+    const centeredZ = localZ + collision.centerZ;
+    return {
+      x: finiteNumber(transform.x) + cosYaw * centeredX + sinYaw * centeredZ,
+      z: finiteNumber(transform.z) - sinYaw * centeredX + cosYaw * centeredZ,
+    };
+  }
+
   const closestX = Math.max(-collision.halfWidth, Math.min(collision.halfWidth, localX));
   const closestZ = Math.max(-collision.halfLength, Math.min(collision.halfLength, localZ));
   const distanceX = localX - closestX;

@@ -23,9 +23,19 @@ async function loadScene(raw) {
 
 test('worldProps 把绑定关系交给场景，原型与掉落一并被带进场景', async () => {
   const scene = await loadScene(await readOpenWorld());
-  assert.deepEqual(scene.gameplay.worldProps, { tree: 'generated-tree', rock: 'generated-rock' });
+  assert.deepEqual(scene.gameplay.worldProps, {
+    tree: [
+      { archetypeId: 'generated-tree', weight: 5 },
+      { archetypeId: 'fruit-tree', weight: 1 },
+    ],
+    rock: [{ archetypeId: 'large-rock', weight: 1 }],
+    mushroom: [{ archetypeId: 'elastic-mushroom', weight: 1 }],
+  });
   const ids = scene.actorArchetypes.map((archetype) => archetype.id);
-  for (const id of ['generated-tree', 'wood-pile', 'generated-rock', 'stone-pile']) {
+  for (const id of [
+    'generated-tree', 'wood-log', 'fruit-tree', 'fruit-pile', 'large-rock', 'stone-pile',
+    'elastic-mushroom',
+  ]) {
     assert.ok(ids.includes(id), `${id} 应该被自动带进场景`);
   }
 });
@@ -34,9 +44,13 @@ test('换一个绑定就换掉这一种物件的玩法，场景其余部分不�
   const raw = await readOpenWorld();
   // 现成原型里只有这两个带 generatedProp；这里用 generated-rock 站位，
   // 代表「雪原地图上的树是另一个原型」这类改绑。
-  raw.gameplay.worldProps = { tree: 'generated-rock' };
+  raw.gameplay.worldProps = {
+    tree: [{ archetype: 'generated-rock', weight: 3 }],
+  };
   const scene = await loadScene(raw);
-  assert.deepEqual(scene.gameplay.worldProps, { tree: 'generated-rock' });
+  assert.deepEqual(scene.gameplay.worldProps, {
+    tree: [{ archetypeId: 'generated-rock', weight: 3 }],
+  });
   const ids = scene.actorArchetypes.map((archetype) => archetype.id);
   assert.ok(ids.includes('generated-rock'));
   assert.ok(ids.includes('stone-pile'), '新绑定的掉落跟着进来');
@@ -52,7 +66,9 @@ test('worldProps 只能用在流式场景上', async () => {
 
 test('worldProps 拒绝未知物件种类', async () => {
   const raw = await readOpenWorld();
-  raw.gameplay.worldProps = { dragon: 'generated-tree' };
+  raw.gameplay.worldProps = {
+    dragon: [{ archetype: 'generated-tree', weight: 1 }],
+  };
   await assert.rejects(loadScene(raw), /不是已知物件种类/);
 });
 
@@ -62,14 +78,39 @@ test('内容关掉的物件不能绑玩法，否则会撞得到却看不见', as
   await assert.rejects(loadScene(raw), /worldProps\.tree 需要开启 renderer\.content\.trees/);
 });
 
-test('worldProps 拒绝没有 generatedProp 的原型', async () => {
+test('worldProps 拒绝既非采集物也非弹性 Actor 的原型', async () => {
   const raw = await readOpenWorld();
-  raw.gameplay.worldProps = { tree: 'wood-pile' };
-  await assert.rejects(loadScene(raw), /wood-pile 缺少 generatedProp/);
+  raw.gameplay.worldProps = {
+    tree: [{ archetype: 'wood-pile', weight: 1 }],
+  };
+  await assert.rejects(loadScene(raw), /wood-pile 不是可采集生成物或可拖拽弹性 Actor/);
 });
 
 test('worldProps 拒绝不存在的原型', async () => {
   const raw = await readOpenWorld();
-  raw.gameplay.worldProps = { tree: 'no-such-archetype' };
+  raw.gameplay.worldProps = {
+    tree: [{ archetype: 'no-such-archetype', weight: 1 }],
+  };
   await assert.rejects(loadScene(raw), /未知 Actor 原型/);
+});
+
+test('worldProps 变体必须非空、权重有效且原型不能重复', async () => {
+  const empty = await readOpenWorld();
+  empty.gameplay.worldProps = { tree: [] };
+  await assert.rejects(loadScene(empty), /必须是 1-16 项的原型变体数组/);
+
+  const badWeight = await readOpenWorld();
+  badWeight.gameplay.worldProps = {
+    tree: [{ archetype: 'generated-tree', weight: 0 }],
+  };
+  await assert.rejects(loadScene(badWeight), /weight 必须是 1-1000 的整数/);
+
+  const duplicate = await readOpenWorld();
+  duplicate.gameplay.worldProps = {
+    tree: [
+      { archetype: 'generated-tree', weight: 1 },
+      { archetype: 'generated-tree', weight: 2 },
+    ],
+  };
+  await assert.rejects(loadScene(duplicate), /不能重复引用原型/);
 });

@@ -27,6 +27,7 @@ import {
 import { readChunkColliders } from '../shared/world/chunkColliders.mjs';
 import { formatGeneratedPropId } from '../shared/world/generatedProp.mjs';
 import { DEFAULT_WORLD_SEED, PROP_KIND } from '../shared/world/worldConfig.mjs';
+import { selectWorldPropVariant } from '../shared/world/worldPropVariants.mjs';
 import { ClientActorSystem } from '../src/actors/ClientActorSystem';
 import {
   THREE_OBJECT_COMPONENT,
@@ -40,7 +41,13 @@ import {
   TEMPERATURE_MARKER_COMPONENT,
   type TemperatureMarkerComponent,
 } from '../src/actors/components/TemperatureMarkerComponent';
+import {
+  HYBRID_SLIME_VISUAL_COMPONENT,
+  type HybridSlimeVisualComponent,
+} from '../src/actors/components/HybridSlimeVisualComponent';
+import { SlimeSurfaceDragComponent } from '../src/actors/components/SlimeSurfaceDragComponent';
 import type { SnapshotActor } from '../src/network/protocol';
+import { createPlayerActorVisual } from '../src/player/PlayerActorVisual';
 import type { SceneDefinition } from '../src/scenes/data/SceneDefinition';
 
 const ocean = {
@@ -100,6 +107,38 @@ const deckPropArchetype: SceneDefinition['actorArchetypes'][number] = {
       length: 0.62,
       width: 0.62,
       height: 0.48,
+    },
+  },
+};
+
+const pbfSlimeArchetype: SceneDefinition['actorArchetypes'][number] = {
+  schemaVersion: 1,
+  id: 'pbf-slime',
+  components: {
+    slimeSurfaceDrag: {
+      maximumDistance: 0.62,
+      pullForce: 72,
+      falloffExponent: 2.2,
+      influenceRadius: 0.52,
+    },
+    render: {
+      model: 'line-art-pbf-slime',
+      radius: 0.95,
+      collisionRadius: 0.52,
+      collisionHeight: 0.72,
+      particleCount: 72,
+      constraintIterations: 2,
+      gravity: 9.8,
+      centerForce: 22,
+      viscosity: 10,
+      bubbleCount: 9,
+      bubbleSpeed: 0.1,
+      surfaceColor: '#90ebcb',
+      innerColor: '#3ca98e',
+      highlightColor: '#d8fff0',
+      bubbleColor: '#e8fff8',
+      inkColor: '#142f2b',
+      shadowColor: '#7bd3bd',
     },
   },
 };
@@ -216,6 +255,33 @@ const woodPileArchetype: SceneDefinition['actorArchetypes'][number] = {
   },
 };
 
+const woodLogArchetype: SceneDefinition['actorArchetypes'][number] = {
+  schemaVersion: 1,
+  id: 'wood-log',
+  components: {
+    interactable: { action: 'pickup-stack', label: '圆木', maximumDistance: 2.4 },
+    itemStack: {
+      itemType: 'wood-log', displayName: '圆木', defaultQuantity: 1,
+      maximumQuantity: 999, compatibilityKey: 'wood-log',
+    },
+    actorResidency: { sleepDelaySeconds: 1, dormantDelaySeconds: 3, dormantEligible: true },
+    dropMotion: {
+      gravity: 9.8,
+      drag: 0.65,
+      groundDrag: 3.1,
+      restitution: 0.18,
+      radius: 0.11,
+      settleSpeed: 0.07,
+    },
+    lifetime: { lifetimeSeconds: 900 },
+    replicationPolicy: { mode: 'aoi', radiusChunks: 2 },
+    render: {
+      model: 'line-art-wood-log', woodColor: '#d6bea3', cutColor: '#eadbc8',
+      inkColor: '#51463e', radius: 0.11, length: 0.88,
+    },
+  },
+};
+
 const stonePileArchetype: SceneDefinition['actorArchetypes'][number] = {
   schemaVersion: 1,
   id: 'stone-pile',
@@ -288,9 +354,11 @@ const definition = {
     campfireArchetype,
     dryHayArchetype,
     woodPileArchetype,
+    woodLogArchetype,
     generatedPropArchetype,
     stonePileArchetype,
     generatedRockArchetype,
+    pbfSlimeArchetype,
   ],
   renderer: {
     type: 'line-art',
@@ -302,7 +370,10 @@ const definition = {
   },
   gameplay: {
     playerActor: { archetypeId: 'player-slime' },
-    worldProps: { tree: 'generated-tree', rock: 'generated-rock' },
+    worldProps: {
+      tree: [{ archetypeId: 'generated-tree', weight: 1 }],
+      rock: [{ archetypeId: 'generated-rock', weight: 1 }],
+    },
     bounds: { minimumX: -10, maximumX: 10, minimumZ: -10, maximumZ: 10 },
     spawn: { centerX: 0, centerZ: 0, radius: 0, slots: 8 },
     water: { seaLevel: 0 },
@@ -654,6 +725,509 @@ test('客户端按权威燃烧状态显示参考 LineLoop 火焰，稳定篝火�
   system.dispose();
 });
 
+test('混合史莱姆用单球核心与休眠弹簧蒙皮，且不会改写权威 Actor 根节点', () => {
+  const system = new ClientActorSystem({
+    definition,
+    environment: { fogColor: '#ffffff', fogNear: 20, fogFar: 60 },
+    now: () => 1_000,
+  });
+  const pbfSlime: SnapshotActor = {
+    id: 'pbf-slime-01',
+    archetypeId: 'pbf-slime',
+    revision: 0,
+    transform: { x: 1.5, y: 0, z: -2.8, yaw: 0.2 },
+  };
+  system.syncSnapshots([pbfSlime], 1_000, 1_000);
+  system.update(0, 0);
+
+  const actor = system.getActor(pbfSlime.id)!;
+  const render = actor.requireComponent(THREE_OBJECT_COMPONENT) as ThreeObjectComponent;
+  const visual = actor.requireComponent(
+    HYBRID_SLIME_VISUAL_COMPONENT,
+  ) as HybridSlimeVisualComponent;
+  const initialSurface = Float32Array.from(
+    visual.rig.surfacePosition.array as ArrayLike<number>,
+  );
+  for (let frame = 1; frame <= 120; frame += 1) {
+    system.update(1 / 60, frame / 60);
+  }
+
+  assert.deepEqual(
+    [render.root.position.x, render.root.position.y, render.root.position.z, render.root.rotation.y],
+    [1.5, 0, -2.8, 0.2],
+  );
+  assert.ok(
+    Math.abs(render.root.rotation.y + visual.rig.root.rotation.y) < 1e-9,
+    '弹簧外壳应抵消权威 Actor yaw，避免把软体蒙皮整团硬转',
+  );
+  assert.equal(visual.simulation.vertexCount, visual.rig.surfaceDirections.length / 3);
+  assert.ok(Array.from(visual.simulation.positions).every(Number.isFinite));
+  const skinY = Array.from(visual.simulation.positions).filter((_, index) => index % 3 === 1);
+  assert.ok(Math.min(...skinY) <= 0.95 * 0.03, '休眠蒙皮底部应直接贴近地面');
+  let rimVertexCount = 0;
+  let maximumRimY = 0;
+  for (let offset = 0; offset < visual.rig.surfaceDirections.length; offset += 3) {
+    if (Math.abs(visual.rig.surfaceDirections[offset + 1]) > 1e-5) continue;
+    rimVertexCount += 1;
+    maximumRimY = Math.max(maximumRimY, visual.simulation.positions[offset + 1]);
+  }
+  assert.ok(rimVertexCount > 0);
+  assert.ok(
+    maximumRimY <= 0.95 * 0.022,
+    '最大平面半径所在的外圈应瘫软到地面，而不是悬在质心高度',
+  );
+  assert.ok(visual.simulation.center[1] < 0.95 * 0.55, '休眠质心不应初始化在空中');
+  assert.ok(Array.from(visual.rig.surfacePosition.array as ArrayLike<number>).every(Number.isFinite));
+  assert.ok(Array.from(visual.rig.surfacePosition.array as ArrayLike<number>).every((value, index) => (
+    Math.abs(value - initialSurface[index]) < 1e-7
+  )), '没有外部碰撞时，出生后的休眠外壳不应自行改变结构');
+  for (let frame = 121; frame <= 360; frame += 1) {
+    system.update(1 / 60, frame / 60);
+  }
+  let previousSurface = Float32Array.from(
+    visual.rig.surfacePosition.array as ArrayLike<number>,
+  );
+  let maximumSettledSurfaceDelta = 0;
+  let maximumSettledPlanarCenter = 0;
+  for (let frame = 361; frame <= 480; frame += 1) {
+    system.update(1 / 60, frame / 60);
+    maximumSettledPlanarCenter = Math.max(
+      maximumSettledPlanarCenter,
+      Math.hypot(visual.simulation.center[0], visual.simulation.center[2]),
+    );
+    const currentSurface = visual.rig.surfacePosition.array as ArrayLike<number>;
+    for (let index = 0; index < currentSurface.length; index += 1) {
+      maximumSettledSurfaceDelta = Math.max(
+        maximumSettledSurfaceDelta,
+        Math.abs(currentSurface[index] - previousSurface[index]),
+      );
+    }
+    previousSurface = Float32Array.from(currentSurface);
+  }
+  assert.ok(
+    maximumSettledPlanarCenter < 0.95 * 0.025,
+    '胡克中心弹簧应阻止软核心在局部空间随机游走',
+  );
+  assert.ok(
+    maximumSettledSurfaceDelta < 0.95 * 0.012,
+    '休眠弹簧蒙皮不应自行产生跳动尖角',
+  );
+  assert.ok(render.visualRoot.getObjectByName('pbf-slime-surface'));
+  assert.equal(render.visualRoot.getObjectByName('pbf-slime-fluid-grid'), undefined);
+  assert.ok(render.visualRoot.getObjectByName('hybrid-slime-spherical-core'));
+  const surfaceMesh = render.visualRoot.getObjectByName('pbf-slime-surface') as THREE.Mesh<
+    THREE.SphereGeometry,
+    THREE.MeshBasicMaterial
+  >;
+  const visualCore = render.visualRoot.getObjectByName(
+    'hybrid-slime-spherical-core',
+  ) as THREE.Mesh<THREE.SphereGeometry, THREE.MeshBasicMaterial>;
+  assert.equal(surfaceMesh.material.transparent, true);
+  assert.equal(surfaceMesh.material.depthWrite, false);
+  assert.equal(surfaceMesh.material.type, 'MeshBasicMaterial');
+  assert.equal(surfaceMesh.material.toneMapped, false);
+  assert.equal(surfaceMesh.material.color.getHexString(), '90ebcb');
+  assert.ok(surfaceMesh.material.opacity > 0.35 && surfaceMesh.material.opacity < 0.55);
+  assert.equal(visualCore.material.transparent, true);
+  assert.equal(visualCore.material.depthWrite, false);
+  assert.ok(visualCore.material.opacity > 0.65);
+  const surfaceBrightness = (
+    surfaceMesh.material.color.r
+    + surfaceMesh.material.color.g
+    + surfaceMesh.material.color.b
+  );
+  const coreBrightness = (
+    visualCore.material.color.r
+    + visualCore.material.color.g
+    + visualCore.material.color.b
+  );
+  assert.ok(
+    coreBrightness < surfaceBrightness * 0.7,
+    '内部球形核心应明显深于半透明薄荷绿外壳',
+  );
+  assert.equal(visual.rig.faceRoot.children.length, 2, '脸部只能保留两只眼睛');
+  assert.equal(
+    visual.rig.faceRoot.children.some((child) => (child as THREE.Line).isLine),
+    false,
+    '史莱姆不应绘制嘴巴',
+  );
+  for (const eye of visual.rig.faceRoot.children as THREE.Mesh<
+    THREE.SphereGeometry,
+    THREE.MeshBasicMaterial
+  >[]) {
+    assert.equal(eye.material.color.getHexString(), '142f2b');
+  }
+  const eyeCenterX = visual.rig.faceRoot.position.x - visual.simulation.center[0];
+  const eyeCenterZ = visual.rig.faceRoot.position.z - visual.simulation.center[2];
+  const eyeCenterRadius = Math.hypot(eyeCenterX, eyeCenterZ);
+  const eyeDirectionX = eyeCenterX / Math.max(1e-6, eyeCenterRadius);
+  const eyeDirectionZ = eyeCenterZ / Math.max(1e-6, eyeCenterRadius);
+  let shellRadiusAtEyeHeight = 0;
+  for (let offset = 0; offset < visual.simulation.positions.length; offset += 3) {
+    if (
+      Math.abs(
+        visual.simulation.positions[offset + 1] - visual.rig.faceRoot.position.y,
+      ) > visual.rig.radius * 0.14
+    ) continue;
+    shellRadiusAtEyeHeight = Math.max(
+      shellRadiusAtEyeHeight,
+      (visual.simulation.positions[offset] - visual.simulation.center[0]) * eyeDirectionX
+        + (visual.simulation.positions[offset + 2] - visual.simulation.center[2]) * eyeDirectionZ,
+    );
+  }
+  assert.ok(
+    eyeCenterRadius + visual.rig.radius * 0.075 < shellRadiusAtEyeHeight,
+    '两只眼球的最前端也必须缩进半透明外壳内部',
+  );
+  assert.ok(
+    Math.hypot(
+      visualCore.position.x - visual.simulation.forceCenter[0],
+      visualCore.position.y - visual.simulation.forceCenter[1],
+      visualCore.position.z - visual.simulation.forceCenter[2],
+    ) < 1e-7,
+    '可见球形核心必须与蒙皮向心力中心重合',
+  );
+  assert.ok(visualCore.renderOrder < surfaceMesh.renderOrder, '核心必须先于透明外壳绘制');
+  assert.equal(render.simpleCollision.shape, 'cylinder');
+  assert.equal(render.simpleCollision.halfWidth, 0.52);
+  assert.equal(render.simpleCollision.halfLength, 0.52);
+  assert.equal(render.simpleCollision.maximumY, 0.72);
+  assert.equal(visual.rig.root.userData.hybridStats.vertexCount, visual.simulation.vertexCount);
+  assert.equal(visual.rig.root.userData.hybridSimulationActive, false);
+  for (let ringVertex = 0; ringVertex < visual.rig.shadowBoundaryVertices.length; ringVertex += 1) {
+    const surfaceOffset = visual.rig.shadowBoundaryVertices[ringVertex] * 3;
+    assert.ok(
+      Math.abs(
+        visual.rig.shadowPosition.getX(ringVertex + 1)
+        - visual.simulation.positions[surfaceOffset]
+      ) < 1e-7,
+    );
+    assert.ok(
+      Math.abs(
+        visual.rig.shadowPosition.getY(ringVertex + 1)
+        + visual.simulation.positions[surfaceOffset + 2]
+      ) < 1e-7,
+    );
+  }
+  assert.ok(
+    Math.abs(render.root.rotation.y + visual.rig.shadowRoot.rotation.y) < 1e-9,
+    '阴影应与外壳使用同一世界朝向，不能再独立旋转或拉伸',
+  );
+  for (const bubble of visual.rig.bubbles) {
+    assert.ok(
+      Math.hypot(
+        bubble.mesh.position.x - visual.simulation.center[0] * 0.72,
+        bubble.mesh.position.z - visual.simulation.center[2] * 0.72,
+      ) < 0.95 * 0.17,
+      '内部气泡必须留在核心附近，不能穿出蒙皮形成随机凸块',
+    );
+  }
+  system.dispose();
+});
+
+test('史莱姆表面拖拽只拉动命中邻域，接近上限时衰减并在释放后回弹', () => {
+  const render = pbfSlimeArchetype.components.render;
+  const dragDefinition = pbfSlimeArchetype.components.slimeSurfaceDrag;
+  assert.ok(render?.model === 'line-art-pbf-slime');
+  assert.ok(dragDefinition);
+  const visual = createPlayerActorVisual('surface-drag-player', render, 3.2);
+  const hybrid = visual.component!;
+  const drag = new SlimeSurfaceDragComponent(
+    hybrid.rig,
+    hybrid.simulation,
+    dragDefinition,
+  );
+  const initialSurface = Float32Array.from(hybrid.simulation.positions);
+  let topOffset = 0;
+  for (let offset = 3; offset < initialSurface.length; offset += 3) {
+    if (initialSurface[offset + 1] > initialSurface[topOffset + 1]) topOffset = offset;
+  }
+
+  // 动态几何的标准三角拾取短暂漏报时，窄范围顶点容错仍应命中肉眼可见表面。
+  const surfaceRaycast = hybrid.rig.surface.raycast;
+  hybrid.rig.surface.raycast = () => undefined;
+  assert.equal(drag.beginDrag({
+    origin: [0, 3, 0],
+    direction: [0, -1, 0],
+  }), true);
+  hybrid.rig.surface.raycast = surfaceRaycast;
+  assert.equal(drag.updateDrag({
+    origin: [3, 3, 0],
+    direction: [0, -1, 0],
+  }), true);
+  for (let frame = 0; frame < 150; frame += 1) {
+    visual.update(1 / 60, frame / 60, 0, 0, { velocityX: 0, velocityZ: 0 });
+  }
+
+  const pulledSurface = hybrid.simulation.positions;
+  const selectedExtension = pulledSurface[topOffset] - initialSurface[topOffset];
+  const statsWhileDragging = hybrid.simulation.stats();
+  assert.ok(selectedExtension > render.radius * 0.08, '命中表面应产生可见的局部拉伸');
+  assert.ok(
+    selectedExtension <= dragDefinition.maximumDistance + 1e-5,
+    '即使鼠标远超表面，形变也不能越过 maximumDistance',
+  );
+  assert.equal(statsWhileDragging.surfaceDragActive, true);
+  assert.ok(statsWhileDragging.surfaceDragExtensionRatio > 0);
+  assert.ok(
+    statsWhileDragging.surfaceDragForceScale < 1,
+    '蒙皮越接近最大伸长，实际拉力比例应越小',
+  );
+
+  let farSideMaximumDelta = 0;
+  for (let offset = 0; offset < pulledSurface.length; offset += 3) {
+    if (hybrid.rig.surfaceDirections[offset + 1] > -0.65) continue;
+    farSideMaximumDelta = Math.max(
+      farSideMaximumDelta,
+      Math.abs(pulledSurface[offset] - initialSurface[offset]),
+    );
+  }
+  assert.ok(
+    farSideMaximumDelta < selectedExtension * 0.35,
+    '拖拽应集中在命中邻域，不能把整团史莱姆当作刚体平移',
+  );
+
+  drag.endDrag();
+  for (let frame = 150; frame < 510; frame += 1) {
+    visual.update(1 / 60, frame / 60, 0, 0, { velocityX: 0, velocityZ: 0 });
+  }
+  const releasedExtension = Math.abs(
+    hybrid.simulation.positions[topOffset] - initialSurface[topOffset],
+  );
+  assert.equal(hybrid.simulation.stats().surfaceDragActive, false);
+  assert.ok(releasedExtension < selectedExtension * 0.2, '松开后应由原有胡克弹簧平滑回弹');
+  visual.dispose();
+});
+
+test('混合史莱姆的软核心产生黏地拖后，内部圆柱碰撞令接触侧蒙皮凹陷', () => {
+  const render = pbfSlimeArchetype.components.render;
+  assert.ok(render?.model === 'line-art-pbf-slime');
+  const visual = createPlayerActorVisual('pbf-player', render, 3.2);
+  const rig = visual.model.pbfSlimeVisualRig!;
+
+  visual.model.root.rotation.y = 0;
+  for (let frame = 0; frame < 120; frame += 1) {
+    visual.update(1 / 60, frame / 60, 0, 0, { velocityX: 0, velocityZ: 0 });
+  }
+  assert.equal(rig.root.userData.hybridSimulationActive, false);
+  const settledSurface = Float32Array.from(visual.component!.simulation.positions);
+  const averageSideRadius = (surface: ArrayLike<number>): number => {
+    let radiusSum = 0;
+    let count = 0;
+    for (let offset = 0; offset < rig.surfaceDirections.length; offset += 3) {
+      const directionX = Math.abs(rig.surfaceDirections[offset]);
+      const directionY = rig.surfaceDirections[offset + 1];
+      if (directionX < 0.55 || directionY < 0.2) continue;
+      radiusSum += Math.abs(surface[offset]);
+      count += 1;
+    }
+    return radiusSum / Math.max(1, count);
+  };
+  const settledSideRadius = averageSideRadius(settledSurface);
+
+  visual.update(1 / 60, 120 / 60, 3.2, 0, { velocityX: 0, velocityZ: 3.2 });
+  const firstMovingForceBias = (
+    visual.component!.simulation.forceCenter[2] - visual.component!.simulation.center[2]
+  );
+  assert.ok(
+    firstMovingForceBias > render.radius * 0.005
+      && firstMovingForceBias < render.radius * 0.05,
+    '移动首帧向心核心应开始前移，但不能瞬间跳到完整速度偏移量',
+  );
+  for (let frame = 121; frame < 210; frame += 1) {
+    visual.update(1 / 60, frame / 60, 3.2, 0, { velocityX: 0, velocityZ: 3.2 });
+  }
+  assert.ok(settledSurface.some((value, index) => (
+    Math.abs(value - visual.component!.simulation.positions[index]) > render.radius * 0.02
+  )), '移动锚点应通过胡克弹簧带动蒙皮，而不是整团刚体平移');
+  assert.ok(
+    visual.component!.simulation.center[2] < -render.radius * 0.1,
+    '内部质量中心应平滑拖在 Actor 根节点后方',
+  );
+  assert.ok(
+    visual.component!.simulation.forceCenter[2]
+      > visual.component!.simulation.center[2] + render.radius * 0.12,
+    '蒙皮的中心力应向 +Z 移动方向偏移，同时允许质量中心留在后方',
+  );
+  assert.ok(
+    Math.hypot(
+      rig.core.position.x - visual.component!.simulation.forceCenter[0],
+      rig.core.position.y - visual.component!.simulation.forceCenter[1],
+      rig.core.position.z - visual.component!.simulation.forceCenter[2],
+    ) < 1e-7,
+    '移动时可见核心必须持续跟随向心力中心，而不是滞后的质量中心',
+  );
+  assert.ok(
+    averageSideRadius(visual.component!.simulation.positions) < settledSideRadius * 0.92,
+    '移动时中上层蒙皮应受到随速度增强的向心弹簧力',
+  );
+
+  const surface = rig.surfacePosition.array as Float32Array;
+  let upperZ = 0;
+  let upperCount = 0;
+  let lowerZ = 0;
+  let lowerCount = 0;
+  for (let offset = 0; offset < surface.length; offset += 3) {
+    if (rig.surfaceDirections[offset + 1] > 0.35) {
+      upperZ += surface[offset + 2];
+      upperCount += 1;
+    } else if (rig.surfaceDirections[offset + 1] < -0.35) {
+      lowerZ += surface[offset + 2];
+      lowerCount += 1;
+    }
+  }
+  assert.ok(
+    upperZ / upperCount > lowerZ / lowerCount + render.radius * 0.08,
+    '上层应跟随角色，黏地接触层应明显滞留在后方',
+  );
+  let frontWidth = 0;
+  let frontWidthCount = 0;
+  let rearWidth = 0;
+  let rearWidthCount = 0;
+  for (let offset = 0; offset < rig.surfaceDirections.length; offset += 3) {
+    const directionY = rig.surfaceDirections[offset + 1];
+    const directionZ = rig.surfaceDirections[offset + 2];
+    if (directionY < 0.2 || directionY > 0.8) continue;
+    if (directionZ > 0.45) {
+      frontWidth += Math.abs(surface[offset]);
+      frontWidthCount += 1;
+    } else if (directionZ < -0.45) {
+      rearWidth += Math.abs(surface[offset]);
+      rearWidthCount += 1;
+    }
+  }
+  assert.ok(
+    frontWidth / frontWidthCount < rearWidth / rearWidthCount * 0.94,
+    '移动方向的水滴前端应比黏地后部更窄',
+  );
+  assert.deepEqual(
+    [rig.shadow.scale.x, rig.shadow.scale.y, rig.shadow.scale.z],
+    [1, 1, 1],
+    '阴影不能再用独立缩放伪造拖尾',
+  );
+  for (let ringVertex = 0; ringVertex < rig.shadowBoundaryVertices.length; ringVertex += 1) {
+    const surfaceOffset = rig.shadowBoundaryVertices[ringVertex] * 3;
+    assert.ok(
+      Math.abs(rig.shadowPosition.getX(ringVertex + 1) - surface[surfaceOffset]) < 1e-7,
+    );
+    assert.ok(
+      Math.abs(rig.shadowPosition.getY(ringVertex + 1) + surface[surfaceOffset + 2]) < 1e-7,
+    );
+  }
+
+  const movingLag = Math.abs(visual.component!.simulation.center[2]);
+  visual.update(1 / 60, 210 / 60, 0, 0, { velocityX: 0, velocityZ: 0 });
+  assert.ok(
+    Math.abs(visual.component!.simulation.center[2]) > movingLag * 0.85,
+    '停止首帧仍应保留大部分拖后量，而不是瞬间弹回',
+  );
+
+  visual.model.root.rotation.y = Math.PI / 2;
+  const forceCenterBeforeTurn = Float32Array.from(visual.component!.simulation.forceCenter);
+  visual.update(1 / 60, 211 / 60, 3.2, Math.PI / 2, {
+    velocityX: 3.2,
+    velocityZ: 0,
+  });
+  assert.ok(
+    Math.hypot(
+      visual.component!.simulation.forceCenter[0] - forceCenterBeforeTurn[0],
+      visual.component!.simulation.forceCenter[2] - forceCenterBeforeTurn[2],
+    ) < render.radius * 0.05,
+    '转向首帧核心只能逐步补间，不能从旧方向闪到新方向',
+  );
+  assert.ok(
+    visual.component!.simulation.forceCenter[0] > forceCenterBeforeTurn[0]
+      && visual.component!.simulation.forceCenter[2] < forceCenterBeforeTurn[2],
+    '核心补间位移必须沿旧向心力中心指向新向心力中心的方向',
+  );
+
+  const firstTurnFaceYaw = rig.faceRoot.rotation.y;
+  assert.ok(firstTurnFaceYaw > 0 && firstTurnFaceYaw < Math.PI / 2);
+  assert.ok(Math.abs(visual.model.root.rotation.y + rig.root.rotation.y) < 1e-9);
+
+  for (let frame = 212; frame <= 330; frame += 1) {
+    visual.update(1 / 60, frame / 60, 3.2, Math.PI / 2, {
+      velocityX: 3.2,
+      velocityZ: 0,
+    });
+  }
+  assert.equal(visual.component?.type, HYBRID_SLIME_VISUAL_COMPONENT);
+  assert.ok(visual.model.root.getObjectByName('pbf-slime-surface'));
+  assert.ok(Math.abs(rig.faceRoot.rotation.y - Math.PI / 2) < 0.001);
+
+  const beforeCollisionSurface = Float32Array.from(rig.surfacePosition.array);
+  visual.update(1 / 60, 331 / 60, 0, Math.PI / 2, {
+    velocityX: 0,
+    velocityZ: 0,
+    collisionDisplacement: { x: 0.04, z: 0 },
+  });
+  assert.equal(rig.root.userData.hybridSimulationActive, true);
+  let contactSideIndentation = 0;
+  let contactSideCount = 0;
+  for (let offset = 0; offset < rig.surfaceDirections.length; offset += 3) {
+    if (rig.surfaceDirections[offset] < 0.65) continue;
+    contactSideIndentation += (
+      beforeCollisionSurface[offset] - rig.surfacePosition.array[offset]
+    );
+    contactSideCount += 1;
+  }
+  assert.ok(
+    contactSideIndentation / contactSideCount > render.radius * 0.12,
+    '圆柱被阻挡时，朝向障碍的一侧蒙皮必须向核心凹陷',
+  );
+
+  for (let frame = 332; frame <= 344; frame += 1) {
+    visual.update(1 / 60, frame / 60, 0, Math.PI / 2, {
+      velocityX: 0,
+      velocityZ: 0,
+      collisionDisplacement: { x: 0.04, z: 0 },
+    });
+  }
+  assert.ok(beforeCollisionSurface.some((value, index) => (
+    Math.abs(value - rig.surfacePosition.array[index]) > render.radius * 0.02
+  )), '真实碰撞必须让可见弹簧蒙皮发生适应性形变');
+  const adaptingError = visual.component!.simulation.stats().maximumSkinError;
+
+  for (let frame = 345; frame <= 392; frame += 1) {
+    visual.update(1 / 60, frame / 60, 0, Math.PI / 2, {
+      velocityX: 0,
+      velocityZ: 0,
+      collisionDisplacement: { x: 0.04, z: 0 },
+    });
+  }
+  assert.ok(
+    visual.component!.simulation.stats().maximumSkinError < adaptingError * 0.6,
+    '持续顶住同一碰撞面时只允许平滑恢复，不应每帧重复注入冲击',
+  );
+  for (let frame = 393; frame <= 512; frame += 1) {
+    visual.update(1 / 60, frame / 60, 0, Math.PI / 2, {
+      velocityX: 0,
+      velocityZ: 0,
+    });
+  }
+  assert.equal(
+    rig.root.userData.hybridSimulationActive,
+    false,
+    '碰撞适应结束后必须进入休眠，避免长期低幅抖动',
+  );
+  assert.ok(
+    Math.hypot(
+      visual.component!.simulation.center[0],
+      visual.component!.simulation.center[2],
+    ) < render.radius * 0.001,
+  );
+  assert.ok(
+    Math.hypot(
+      visual.component!.simulation.forceCenter[0] - visual.component!.simulation.center[0],
+      visual.component!.simulation.forceCenter[2] - visual.component!.simulation.center[2],
+    ) < render.radius * 1e-6,
+    '停止后偏心吸引点应回到球形核心，水滴形平滑恢复',
+  );
+  assert.equal(visual.collisionRadius, 0.52);
+  assert.ok(visual.collisionRadius < render.radius * 0.6, '权威圆柱必须留在可变形蒙皮内部');
+  visual.dispose();
+});
+
 test('高数量物品 Actor 保留交互与碰撞身份，但用批次绘制而没有独立 Object3D', () => {
   const system = new ClientActorSystem({
     definition,
@@ -740,6 +1314,54 @@ test('木堆与石堆各自成批：合批系统按渲染模型分派模板，�
   system.dispose();
 });
 
+test('圆木使用参考项目的八边形单根模型，并按权威位移滚动', () => {
+  let now = 1_000;
+  const system = new ClientActorSystem({
+    definition,
+    environment: { fogColor: '#ffffff', fogNear: 20, fogFar: 60 },
+    now: () => now,
+  });
+  const snapshot = (x: number): SnapshotActor => ({
+    id: 'drop-wood-log-roll',
+    archetypeId: 'wood-log',
+    revision: 0,
+    transform: { x, y: 0.11, z: 0, yaw: 0 },
+    interactable: { action: 'pickup-stack', label: '圆木', enabled: true, revision: 0 },
+    itemStack: {
+      itemType: 'wood-log', displayName: '圆木', quantity: 1, maximumQuantity: 999, revision: 0,
+    },
+    residency: { state: 'active', revision: 0 },
+  });
+
+  system.syncSnapshots([snapshot(0)], 1_000, now);
+  system.update(0, 0);
+  const fill = system.root.getObjectByName(
+    'wood-log:active:normal:single-fill',
+  ) as THREE.InstancedMesh;
+  assert.ok(fill, '单根圆木应进入独立的高数量合批');
+  fill.geometry.computeBoundingBox();
+  const size = new THREE.Vector3();
+  fill.geometry.boundingBox!.getSize(size);
+  assert.ok(size.x > size.y * 3, '参考模型应保持细长的八边形圆柱比例');
+
+  const matrix = new THREE.Matrix4();
+  const position = new THREE.Vector3();
+  const before = new THREE.Quaternion();
+  const scale = new THREE.Vector3();
+  fill.getMatrixAt(0, matrix);
+  matrix.decompose(position, before, scale);
+
+  now = 1_100;
+  system.syncSnapshots([snapshot(0.55)], 1_100, now);
+  now = 1_220;
+  system.update(0, 0);
+  const after = new THREE.Quaternion();
+  fill.getMatrixAt(0, matrix);
+  matrix.decompose(position, after, scale);
+  assert.ok(before.angleTo(after) > 0.1, '权威水平位移应转换为圆木的滚动角');
+  system.dispose();
+});
+
 const fruitPileArchetype: SceneDefinition['actorArchetypes'][number] = {
   schemaVersion: 1,
   id: 'fruit-pile',
@@ -750,7 +1372,14 @@ const fruitPileArchetype: SceneDefinition['actorArchetypes'][number] = {
       defaultQuantity: 1, maximumQuantity: 999, compatibilityKey: 'fruit-standard',
     },
     actorResidency: { sleepDelaySeconds: 1, dormantDelaySeconds: 3, dormantEligible: true },
-    dropMotion: { gravity: 9.8, drag: 4.5, settleSpeed: 0.08 },
+    dropMotion: {
+      gravity: 9.8,
+      drag: 0.45,
+      groundDrag: 2.4,
+      restitution: 0.28,
+      radius: 0.14,
+      settleSpeed: 0.08,
+    },
     lifetime: { lifetimeSeconds: 300 },
     replicationPolicy: { mode: 'aoi', radiusChunks: 2 },
     render: {
@@ -767,7 +1396,7 @@ const fruitTreeArchetype: SceneDefinition['actorArchetypes'][number] = {
     interactable: { action: 'harvest-prop', label: '果树', maximumDistance: 2.6 },
     generatedProp: {
       regrow: { seconds: 120 },
-      drop: { archetypeId: 'fruit-pile', quantity: 3 },
+      drop: { archetypeId: 'fruit-pile', quantity: 3, spawnPattern: 'fruit-anchors' },
     },
     replicationPolicy: { mode: 'aoi', radiusChunks: 2 },
   },
@@ -777,8 +1406,130 @@ const fruitTreeArchetype: SceneDefinition['actorArchetypes'][number] = {
 const orchardDefinition = {
   ...definition,
   actorArchetypes: [...definition.actorArchetypes, fruitTreeArchetype, fruitPileArchetype],
-  gameplay: { ...definition.gameplay, worldProps: { tree: 'fruit-tree' } },
+  gameplay: {
+    ...definition.gameplay,
+    worldProps: { tree: [{ archetypeId: 'fruit-tree', weight: 1 }] },
+  },
 } satisfies SceneDefinition;
+
+test('单颗果实按权威位移旋转，sleeping 后不再累积滚动角', () => {
+  let now = 1_000;
+  const system = new ClientActorSystem({
+    definition: orchardDefinition,
+    environment: { fogColor: '#ffffff', fogNear: 20, fogFar: 60 },
+    now: () => now,
+  });
+  const snapshot = (x: number, state: 'active' | 'sleeping'): SnapshotActor => ({
+    id: 'drop-fruit-roll',
+    archetypeId: 'fruit-pile',
+    revision: state === 'active' ? 0 : 1,
+    transform: { x, y: 0.14, z: 0, yaw: 0 },
+    interactable: { action: 'pickup-stack', label: '果实', enabled: true, revision: 0 },
+    itemStack: {
+      itemType: 'fruit', displayName: '果实', quantity: 1, maximumQuantity: 999, revision: 0,
+    },
+    residency: { state, revision: state === 'active' ? 0 : 1 },
+  });
+
+  system.syncSnapshots([snapshot(0, 'active')], 1_000, now);
+  system.update(0, 0);
+  const collision = system.getActor('drop-fruit-roll')!
+    .requireComponent(SIMPLE_COLLISION_COMPONENT) as SimpleCollisionComponent;
+  assert.equal(collision.halfWidth, 0.14, '滚动物使用配置的球半径，不沿用整堆碰撞盒');
+
+  now = 1_100;
+  system.syncSnapshots([snapshot(0.7, 'active')], 1_100, now);
+  now = 1_220;
+  system.update(0, 0);
+  const activeFill = system.root.getObjectByName(
+    'fruit-pile:active:normal:single-fill',
+  ) as THREE.InstancedMesh;
+  const matrix = new THREE.Matrix4();
+  const position = new THREE.Vector3();
+  const rotation = new THREE.Quaternion();
+  const scale = new THREE.Vector3();
+  activeFill.getMatrixAt(0, matrix);
+  matrix.decompose(position, rotation, scale);
+  assert.ok(Math.abs(rotation.z) > 0.1, '沿 +X 位移时果实应绕 Z 轴产生滚动角');
+
+  now = 1_300;
+  system.syncSnapshots([snapshot(0.7, 'sleeping')], 1_200, now);
+  now = 1_420;
+  system.update(0, 0);
+  const sleepingFill = system.root.getObjectByName(
+    'fruit-pile:sleeping:normal:single-fill',
+  ) as THREE.InstancedMesh;
+  const sleepingRotation = new THREE.Quaternion();
+  sleepingFill.getMatrixAt(0, matrix);
+  matrix.decompose(position, sleepingRotation, scale);
+  assert.ok(rotation.angleTo(sleepingRotation) < 1e-6, '休眠后没有位移就不应继续自转');
+  system.dispose();
+});
+
+const mixedTreeVariants = [
+  { archetypeId: 'generated-tree', weight: 5 },
+  { archetypeId: 'fruit-tree', weight: 1 },
+];
+
+const mixedForestDefinition = {
+  ...definition,
+  actorArchetypes: [...definition.actorArchetypes, fruitTreeArchetype, fruitPileArchetype],
+  gameplay: {
+    ...definition.gameplay,
+    worldProps: {
+      ...definition.gameplay.worldProps,
+      tree: mixedTreeVariants,
+    },
+  },
+} satisfies SceneDefinition;
+
+test('客户端用同一世界种子为每棵树选择确定的普通树或果树原型', () => {
+  const worldSeed = 0x5c1a2d0b;
+  const system = new ClientActorSystem({
+    definition: mixedForestDefinition,
+    environment: { fogColor: '#ffffff', fogNear: 20, fogFar: 60 },
+    worldSeed,
+  });
+  const props = new Int32Array(PROP_BUFFER_LENGTH);
+  const propCount = generateChunkProps(worldSeed, -1, 0, props);
+  system.mountGeneratedPropChunk('-1:0', -1, 0, props, propCount);
+
+  const treeArchetypes: string[] = [];
+  for (let propIndex = 0; propIndex < propCount; propIndex += 1) {
+    const kind = props[propIndex * PROP_STRIDE + PROP_FIELD.KIND];
+    if (kind !== PROP_KIND.TREE) continue;
+    const actorId = formatGeneratedPropId(kind, -1, 0, propIndex);
+    const actor = system.getActor(actorId)!;
+    const expected = selectWorldPropVariant(
+      worldSeed,
+      kind,
+      -1,
+      0,
+      propIndex,
+      mixedTreeVariants,
+    );
+    assert.equal(actor.archetypeId, expected?.archetypeId);
+    treeArchetypes.push(actor.archetypeId);
+  }
+  assert.ok(treeArchetypes.includes('generated-tree'));
+  assert.ok(treeArchetypes.includes('fruit-tree'));
+  system.update(0, 0);
+  const fruitRoot = system.root.getObjectByName('generated-prop-fruit')!;
+  const fruitFill = fruitRoot.children.find(
+    (child) => (child as THREE.InstancedMesh).isInstancedMesh,
+  ) as THREE.InstancedMesh;
+  assert.equal(
+    fruitFill.count,
+    Array.from({ length: propCount }, (_, propIndex) => {
+      const actorId = formatGeneratedPropId(PROP_KIND.TREE, -1, 0, propIndex);
+      const actor = system.getActor(actorId);
+      if (actor?.archetypeId !== 'fruit-tree') return 0;
+      return (actor.requireComponent(GENERATED_PROP_COMPONENT) as GeneratedPropComponent).dropQuantity;
+    }).reduce((total, count) => total + count, 0),
+    '只有哈希选中的果树挂果，普通树不应出现果子',
+  );
+  system.dispose();
+});
 
 test('果子按服务端时钟自己熟：冷却中不画也不能交互，到期后无需新快照就恢复', () => {
   let now = 1_000_000;
@@ -815,6 +1566,7 @@ test('果子按服务端时钟自己熟：冷却中不画也不能交互，到�
 
   const actorId = formatGeneratedPropId(PROP_KIND.TREE, -1, 0, propIndex);
   const actor = system.getActor(actorId)!;
+  const fruitCount = (actor.requireComponent(GENERATED_PROP_COMPONENT) as GeneratedPropComponent).dropQuantity;
   const interactable = actor.requireComponent(INTERACTABLE_COMPONENT) as InteractableComponent;
   assert.equal(interactable.enabled, true);
 
@@ -828,7 +1580,7 @@ test('果子按服务端时钟自己熟：冷却中不画也不能交互，到�
   // 快照缓冲有 120ms 插值延迟，要等这一帧真的被采样到。
   now += 200;
   system.update(0, 0);
-  assert.equal(fill.count, ripeCount - 5, '这一棵的五颗果子应该消失');
+  assert.equal(fill.count, ripeCount - fruitCount, '这一棵配置数量的果子应该消失');
   assert.equal(interactable.enabled, false, '冷却中不该还提示可采');
 
   // 时间过去，没有任何新快照，果子自己回来。

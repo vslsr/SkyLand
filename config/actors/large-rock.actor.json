@@ -1,0 +1,18 @@
+{
+  "$schema": "./actor.schema.json",
+  "schemaVersion": 1,
+  "id": "large-rock",
+  "components": {
+    "interactable": {
+      "action": "harvest-prop",
+      "label": "大石头",
+      "maximumDistance": 2.4
+    },
+    "generatedProp": {
+      "maximumHealth": 5,
+      "harvestDamage": 1,
+      "drop": { "archetypeId": "stone-pile", "quantity": 4 }
+    },
+    "replicationPolicy": { "mode": "aoi", "radiusChunks": 2 }
+  }
+}

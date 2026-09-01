@@ -8,6 +8,7 @@ export class SimpleCollisionComponent extends ActorComponent {
   constructor(definition) {
     super(SIMPLE_COLLISION_COMPONENT);
     const collision = createSimpleCollisionDefinition(definition);
+    this.shape = collision.shape;
     this.centerX = collision.centerX;
     this.centerZ = collision.centerZ;
     this.halfWidth = collision.halfWidth;
@@ -16,4 +17,3 @@ export class SimpleCollisionComponent extends ActorComponent {
     this.maximumY = collision.maximumY;
   }
 }
-

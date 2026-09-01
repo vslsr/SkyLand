@@ -14,6 +14,8 @@ import { createDryHayModel } from './createDryHayModel';
 import { createFruitPileModel } from './createFruitPileModel';
 import { createStonePileModel } from './createStonePileModel';
 import { createWoodPileModel } from './createWoodPileModel';
+import { createWoodLogModel } from './createWoodLogModel';
+import { createPbfSlimeModel } from './createPbfSlimeModel';
 
 export function createActorVisualModel(
   environment: FillMaterialEnvironment,
@@ -21,6 +23,9 @@ export function createActorVisualModel(
 ): ActorVisualModel {
   if (definition.model === 'line-art-player-slime') {
     return createPlayerSlimeModel(definition);
+  }
+  if (definition.model === 'line-art-pbf-slime') {
+    return createPbfSlimeModel(definition);
   }
   if (definition.model === 'line-art-raft') {
     return createBuoyancyRaftModel(environment, definition);
@@ -48,6 +53,9 @@ export function createActorVisualModel(
   }
   if (definition.model === 'line-art-wood-pile') {
     return createWoodPileModel(environment, definition);
+  }
+  if (definition.model === 'line-art-wood-log') {
+    return createWoodLogModel(environment, definition);
   }
   if (definition.model === 'line-art-stone-pile') {
     return createStonePileModel(environment, definition);

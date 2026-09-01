@@ -178,6 +178,8 @@
             "interlaceStrength": { "type": "number", "minimum": 0, "maximum": 0.75 },
             "surfaceColor": { "$ref": "#/$defs/color" },
             "secondaryColor": { "$ref": "#/$defs/color" },
+            "deepColor": { "$ref": "#/$defs/color" },
+            "depthColorRange": { "type": "number", "exclusiveMinimum": 0, "maximum": 32 },
             "gridLineColor": { "$ref": "#/$defs/color" },
             "gridLineOpacity": { "type": "number", "minimum": 0, "maximum": 1 }
           }
@@ -216,12 +218,13 @@
         },
         "worldProps": {
           "type": "object",
-          "description": "流式世界里每种物件由哪个原型承载；只在 renderer.world 存在时可用",
+          "description": "流式世界里每种物件的带权原型变体；同一放置记录由世界种子哈希确定选择结果",
           "additionalProperties": false,
           "properties": {
-            "tree": { "type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$" },
-            "grass": { "type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$" },
-            "rock": { "type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$" }
+            "tree": { "$ref": "#/$defs/worldPropVariants" },
+            "grass": { "$ref": "#/$defs/worldPropVariants" },
+            "rock": { "$ref": "#/$defs/worldPropVariants" },
+            "mushroom": { "$ref": "#/$defs/worldPropVariants" }
           }
         },
         "bounds": {
@@ -328,6 +331,23 @@
     "color": {
       "type": "string",
       "pattern": "^#[0-9A-Fa-f]{6}$"
+    },
+    "worldPropVariants": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 16,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["archetype", "weight"],
+        "properties": {
+          "archetype": {
+            "type": "string",
+            "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+          },
+          "weight": { "type": "integer", "minimum": 1, "maximum": 1000 }
+        }
+      }
     }
   }
 }

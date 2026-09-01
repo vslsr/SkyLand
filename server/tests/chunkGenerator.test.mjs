@@ -11,6 +11,7 @@ import {
 import { instantiateChunkGenerator } from '../../shared/world/chunkGeneratorWasm.mjs';
 import { DEFAULT_WORLD_SEED } from '../../shared/world/worldConfig.mjs';
 import { setPropSkipped } from '../../shared/world/generatedProp.mjs';
+import { PROP_FIELD, PROP_STRIDE } from '../../shared/world/chunkContent.mjs';
 
 const WASM_PATH = fileURLToPath(new URL('../../shared/world/wasm/chunkgen.wasm', import.meta.url));
 
@@ -35,6 +36,7 @@ const TEMPLATES = [
   createTestTemplate(1.2, [0.2, 0.6, 0.3], 3),
   createTestTemplate(0.4, [0.7, 0.8, 0.6], 1),
   createTestTemplate(0.7, [0.5, 0.5, 0.5], 2),
+  { fill: new Float32Array(0), line: new Float32Array(0) },
   createTestTemplate(16, [0.94, 0.93, 0.87], 0),
 ];
 
@@ -104,9 +106,12 @@ test('两个后端合批出的顶点结构一致，数值只差浮点精度', as
 test('顶点数量与放置结果对得上', async () => {
   const { wasm } = await createBackends();
   const built = wasm.buildChunk(0, 0);
-  const verticesPerTemplate = TEMPLATES[0].fill.length / TEMPLATE_FILL_STRIDE;
-  // 地面一份，加上每个物件一份，各模板顶点数相同，所以可以直接乘。
-  assert.equal(built.fillPositions.length / 3, (built.propCount + 1) * verticesPerTemplate);
+  let expected = TEMPLATES[GROUND_TEMPLATE_INDEX].fill.length / TEMPLATE_FILL_STRIDE;
+  for (let index = 0; index < built.propCount; index += 1) {
+    const kind = built.props[index * PROP_STRIDE + PROP_FIELD.KIND];
+    expected += TEMPLATES[kind].fill.length / TEMPLATE_FILL_STRIDE;
+  }
+  assert.equal(built.fillPositions.length / 3, expected);
 });
 
 test('换种子会换掉整个世界', async () => {

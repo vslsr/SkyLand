@@ -171,7 +171,7 @@ export class HighCountActorSystem {
           const transform = actor.requireComponent(TRANSFORM_COMPONENT);
           const motion = actor.requireComponent(DROP_MOTION_COMPONENT);
           const groundY = world.context.groundHeightAt?.(transform.x, transform.z) ?? 0;
-          transform.setWorldTransform([transform.x, groundY, transform.z], transform.yaw);
+          transform.setWorldTransform([transform.x, groundY + motion.radius, transform.z], transform.yaw);
           motion.velocityX = 0;
           motion.velocityY = 0;
           motion.velocityZ = 0;
@@ -192,17 +192,81 @@ export class HighCountActorSystem {
     const motion = actor.requireComponent(DROP_MOTION_COMPONENT);
     const residency = actor.requireComponent(ACTOR_RESIDENCY_COMPONENT);
     const delta = Math.max(0, Math.min(deltaSeconds, 0.1));
-    const damping = Math.exp(-motion.drag * delta);
+    const currentGroundY = world.context.groundHeightAt?.(transform.x, transform.z) ?? 0;
+    const groundLevel = currentGroundY + motion.radius;
+    const restingBeforeStep = (
+      transform.y <= groundLevel + 1e-4
+      && Math.abs(motion.velocityY) <= motion.settleSpeed
+    );
+    const damping = Math.exp(-(restingBeforeStep ? motion.groundDrag : motion.drag) * delta);
     motion.velocityX *= damping;
     motion.velocityZ *= damping;
     motion.velocityY -= motion.gravity * delta;
     let x = transform.x + motion.velocityX * delta;
     let y = transform.y + motion.velocityY * delta;
     let z = transform.z + motion.velocityZ * delta;
-    const groundY = world.context.groundHeightAt?.(x, z) ?? 0;
+    const groundY = (world.context.groundHeightAt?.(x, z) ?? 0) + motion.radius;
+    let restingOnGround = false;
     if (y <= groundY) {
       y = groundY;
-      motion.velocityY = 0;
+      const reboundSpeed = Math.max(0, -motion.velocityY) * motion.restitution;
+      // 离散步长下，静止球每帧也会先被重力拉出一个很小的负速度；把这部分
+      // 数值抖动纳入阈值，否则恢复系数会让它永远在地面上微弹、无法 sleep。
+      const bounceThreshold = Math.max(
+        motion.settleSpeed,
+        motion.gravity * delta * motion.restitution * 1.1,
+      );
+      if (reboundSpeed > bounceThreshold) {
+        motion.velocityY = reboundSpeed;
+      } else {
+        motion.velocityY = 0;
+        restingOnGround = true;
+      }
+    }
+
+    // 球形掉落物只查询当前位置附近的空间格。果实落地以后会撞开树干、石头和
+    // 其它掉落物；推出方向同时作为接触法线，用恢复系数反射水平速度。
+    if (motion.radius > 0 && world.context.collision) {
+      const resolved = world.context.collision.resolveCircle({ x, z }, motion.radius, {
+        accept: (candidate) => candidate.actor !== actor,
+        verticalProfile: {
+          minimumY: y - motion.radius,
+          maximumY: y + motion.radius,
+          maximumStepHeight: 0,
+        },
+      });
+      const pushX = resolved.x - x;
+      const pushZ = resolved.z - z;
+      const pushLength = Math.hypot(pushX, pushZ);
+      if (pushLength > 1e-7) {
+        const normalX = pushX / pushLength;
+        const normalZ = pushZ / pushLength;
+        const inwardSpeed = motion.velocityX * normalX + motion.velocityZ * normalZ;
+        if (inwardSpeed < 0) {
+          const impulse = -(1 + motion.restitution) * inwardSpeed;
+          motion.velocityX += normalX * impulse;
+          motion.velocityZ += normalZ * impulse;
+        }
+        x = resolved.x;
+        z = resolved.z;
+      }
+    }
+
+    const bounds = world.context.bounds;
+    if (bounds) {
+      const minimumX = bounds.minimumX + motion.radius;
+      const maximumX = bounds.maximumX - motion.radius;
+      const minimumZ = bounds.minimumZ + motion.radius;
+      const maximumZ = bounds.maximumZ - motion.radius;
+      const boundedX = Math.max(minimumX, Math.min(maximumX, x));
+      const boundedZ = Math.max(minimumZ, Math.min(maximumZ, z));
+      if (boundedX !== x) motion.velocityX *= -motion.restitution;
+      if (boundedZ !== z) motion.velocityZ *= -motion.restitution;
+      x = boundedX;
+      z = boundedZ;
+    }
+
+    if (restingOnGround) {
       motion.groundedSeconds += delta;
     } else {
       motion.groundedSeconds = 0;

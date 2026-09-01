@@ -82,11 +82,12 @@ export function createJavaScriptChunkGenerator() {
    * 等比缩放不改变法线方向，因此法线只做旋转。
    * @param {number} index
    * @param {number} translateX
+   * @param {number} translateY
    * @param {number} translateZ
    * @param {number} angle
    * @param {number} scale
    */
-  function emitTemplate(index, translateX, translateZ, angle, scale) {
+  function emitTemplate(index, translateX, translateY, translateZ, angle, scale) {
     const template = templates[index];
     if (!template) return true;
 
@@ -111,7 +112,7 @@ export function createJavaScriptChunkGenerator() {
       const tintBlue = template.fill[read + 8];
 
       fillPositions[write] = scale * (cosine * positionX + sine * positionZ) + translateX;
-      fillPositions[write + 1] = scale * positionY;
+      fillPositions[write + 1] = scale * positionY + translateY;
       fillPositions[write + 2] = scale * (cosine * positionZ - sine * positionX) + translateZ;
       fillNormals[write] = cosine * normalX + sine * normalZ;
       fillNormals[write + 1] = normalY;
@@ -130,7 +131,7 @@ export function createJavaScriptChunkGenerator() {
       const positionZ = template.line[read + 2];
 
       linePositions[write] = scale * (cosine * positionX + sine * positionZ) + translateX;
-      linePositions[write + 1] = scale * positionY;
+      linePositions[write + 1] = scale * positionY + translateY;
       linePositions[write + 2] = scale * (cosine * positionZ - sine * positionX) + translateZ;
       write += 3;
     }
@@ -160,6 +161,7 @@ export function createJavaScriptChunkGenerator() {
       emitTemplate(
         GROUND_TEMPLATE_INDEX,
         chunkX * CHUNK_SIZE + CHUNK_SIZE / 2,
+        0,
         chunkZ * CHUNK_SIZE + CHUNK_SIZE / 2,
         0,
         1,
@@ -171,6 +173,7 @@ export function createJavaScriptChunkGenerator() {
         const filled = emitTemplate(
           props[offset + PROP_FIELD.KIND],
           props[offset + PROP_FIELD.X_MM] / 1000,
+          props[offset + PROP_FIELD.Y_MM] / 1000,
           props[offset + PROP_FIELD.Z_MM] / 1000,
           props[offset + PROP_FIELD.ROTATION_MRAD] / 1000,
           props[offset + PROP_FIELD.SCALE_THOUSANDTHS] / 1000,

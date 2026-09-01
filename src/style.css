@@ -524,6 +524,24 @@ body.has-interaction-target .crosshair {
   border-color: #8b4058;
 }
 
+.debug-menu__weather-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.debug-menu__weather-button {
+  min-height: 30px;
+  padding: 0 11px;
+  border-radius: 999px;
+}
+
+.debug-menu__weather-button[aria-pressed="true"] {
+  color: #fdfbf6;
+  background: #8ca071;
+  border-color: #728562;
+}
+
 .room-toolbar {
   display: flex;
   gap: 12px;
