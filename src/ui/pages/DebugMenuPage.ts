@@ -28,7 +28,7 @@ export class DebugMenuPage extends ModalWindow {
       id: 'development-debug-menu',
       kicker: 'DEVELOPMENT ONLY · F8',
       title: '调试菜单',
-      description: '检查运行时 Actor 状态，并向房间服务端请求切换权威天气。',
+      description: '检查玩家同步与运行时 Actor 状态，并向房间服务端请求调试操作。',
       size: 'compact',
     });
 

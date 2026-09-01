@@ -251,6 +251,7 @@ export class RoomConnectionHub {
     this.appendPlayerTransformLogEvents(session, sessionId, events);
     const recording = this.transformLogSessions.get(sessionId);
     if (!recording) return;
+    if (recording.stopReason) return;
     recording.stopReason = reason;
     if (!this.roomManager.stopPlayerTransformLog(
       recording.roomId,
