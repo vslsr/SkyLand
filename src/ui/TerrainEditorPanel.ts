@@ -51,6 +51,7 @@ export class TerrainEditorPanel {
       this.tools.append(button);
       this.buttons.set(tool.operation, button);
     }
+    this.tab.append(createIcon('terrain-panel', { className: 'terrain-editor__tab-icon' }));
     this.tab.addEventListener('click', () => this.setExpanded(!this.expanded));
     this.render();
   }

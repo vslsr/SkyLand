@@ -760,17 +760,25 @@ body.is-topdown .virtual-controls.is-desktop-debug {
 
 .terrain-editor__tab {
   pointer-events: auto;
-  writing-mode: vertical-rl;
-  padding: 14px 6px;
-  border: 1px solid rgba(73, 52, 38, 0.28);
+  /* 竖排两个汉字：高度要留够，否则会被裁成半个字。 */
+  /* 标签用图标而不是竖排文字：竖排 CJK 依赖字体的 vmtx 度量，缺了就会叠字，
+     而这是按机器而不是按代码变的。文字说明留在 title / aria-label 里。 */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 64px;
+  padding: 0;
+  border: 1px solid rgba(73, 52, 38, 0.55);
   border-left: none;
-  border-radius: 0 12px 12px 0;
-  background: rgba(253, 251, 246, 0.92);
-  color: #493426;
-  font: 600 12px/1.4 system-ui, sans-serif;
-  letter-spacing: 0.24em;
+  border-radius: 0 14px 14px 0;
+  /* 世界底色是接近纯白的 #fdfbf6，标签必须比它明显暗一档才找得到。 */
+  background: rgba(247, 242, 233, 0.97);
+  box-shadow: 2px 0 10px rgba(73, 52, 38, 0.16);
+  color: #35281f;
+  font: 600 13px/1 system-ui, sans-serif;
   cursor: pointer;
-  transition: background 120ms ease, color 120ms ease;
+  transition: background 120ms ease, color 120ms ease, box-shadow 120ms ease;
 }
 
 .terrain-editor__tab:hover,
@@ -823,6 +831,12 @@ body.is-topdown .virtual-controls.is-desktop-debug {
 }
 
 .terrain-editor__icon {
+  width: 20px;
+  height: 20px;
+  display: block;
+}
+
+.terrain-editor__tab-icon {
   width: 20px;
   height: 20px;
   display: block;

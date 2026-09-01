@@ -35,6 +35,12 @@ const ICON_PATHS = {
     <path d="M15.5 12.5v7" />
     <path d="M3.5 8.5 7 5h10l3.5 3.5" />
   `,
+  'terrain-panel': `
+    <path d="M3 18.5h18" />
+    <path d="m3 18.5 5.5-7 3.5 4 3-3.5 6 6.5" />
+    <path d="M15.5 8.5h5" />
+    <path d="M18 6v5" />
+  `,
   'terrain-reset': `
     <path d="M20 12a8 8 0 1 1-2.6-5.9" />
     <path d="M20 4v4.5h-4.5" />
