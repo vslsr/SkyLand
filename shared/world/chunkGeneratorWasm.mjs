@@ -66,6 +66,7 @@ export function createWasmChunkGenerator(instance) {
       exports.set_seed(seed >>> 0);
     },
 
+
     registerTemplate(index, template) {
       const fillOffset = uploadToArena(template.fill);
       const lineOffset = uploadToArena(template.line);
@@ -105,6 +106,30 @@ export function createWasmChunkGenerator(instance) {
       };
     },
   };
+}
+
+/**
+ * 读取 WASM 侧单格地形的打包 code，格式与 JS 的 `encodeTerrainCell` 一致。
+ *
+ * **它刻意不挂在 ChunkGenerator 接口上**：JS 降级后端没有对应实现，挂上去就成了
+ * 一个「只在 WASM 路径可用」的方法，迟早有人在降级路径上调它。
+ *
+ * 生成路径也用不到它——物件的 y 已经写在放置记录里。它只服务跨后端比对：
+ * 物件只落在平地上（见 `placement.rs` 的 FLAT/GROUND 过滤），放置记录因此
+ * 永远采样不到斜坡、角点和水面，而那几支正是形状选择里最容易分裂的部分。
+ *
+ * @param {WebAssembly.Instance} instance
+ * @param {number} worldSeed
+ * @param {number} globalCellX
+ * @param {number} globalCellZ
+ * @returns {number}
+ */
+export function readWasmTerrainCellCode(instance, worldSeed, globalCellX, globalCellZ) {
+  const read = /** @type {Record<string, any>} */ (instance.exports).terrain_cell_code_at;
+  if (typeof read !== 'function') {
+    throw new Error('chunkgen.wasm 缺少 terrain_cell_code_at 导出，可能是产物没有重建');
+  }
+  return read(worldSeed >>> 0, globalCellX | 0, globalCellZ | 0);
 }
 
 /**

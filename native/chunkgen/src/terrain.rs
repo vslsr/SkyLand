@@ -39,6 +39,14 @@ const TERRAIN_DIAGONAL_NEIGHBORS: [(i32, i32, u32); 4] = [
     (-1, -1, TERRAIN_SHAPE_CORNER_HIGH_SOUTH_WEST),
     (-1, 1, TERRAIN_SHAPE_CORNER_HIGH_NORTH_WEST),
 ];
+/// 打包格式与 JS 的 `encodeTerrainCell` 必须一致：
+/// 高 8 位是有符号高度层，第 4 位是表面，低 4 位是形状。
+const TERRAIN_SHAPE_MASK: i32 = 0b1111;
+const TERRAIN_SURFACE_SHIFT: i32 = 4;
+const TERRAIN_HEIGHT_SHIFT: i32 = 8;
+const TERRAIN_MINIMUM_HEIGHT_LEVEL: i32 = -128;
+const TERRAIN_MAXIMUM_HEIGHT_LEVEL: i32 = 127;
+
 const TERRAIN_CELL_SIZE_MM: i32 = 2_000;
 const TERRAIN_HEIGHT_STEP_MM: i32 = 1_000;
 const TERRAIN_NOISE_SALT: u32 = 0x74c3_19ad;
@@ -159,4 +167,26 @@ pub fn terrain_cell_at_mm(seed: u32, x_mm: i32, z_mm: i32) -> TerrainCell {
 #[inline]
 pub fn ground_y_mm(cell: TerrainCell) -> i32 {
     cell.height_level * TERRAIN_HEIGHT_STEP_MM
+}
+
+/// 把一格打包成与 JS `encodeTerrainCell` 逐位相同的整数。
+///
+/// 生成路径不走这里——放置算法直接用 `TerrainCell`。这个导出只为跨后端比对
+/// 存在：物件只落在平地上，所以放置记录里的 y 永远采样不到斜坡、角点和水面，
+/// 而那几支恰恰是形状选择里最容易分裂的部分。有了它，
+/// `server/tests/terrainParity.test.mjs` 才能逐格扫过全部形状。
+#[no_mangle]
+pub extern "C" fn terrain_cell_code_at(seed: u32, global_cell_x: i32, global_cell_z: i32) -> i32 {
+    let cell = terrain_cell_at(seed, global_cell_x, global_cell_z);
+    // 与 JS 同样先钳制再取低 8 位：不钳制的话越界高度在两端会一个饱和一个回绕。
+    let height = if cell.height_level < TERRAIN_MINIMUM_HEIGHT_LEVEL {
+        TERRAIN_MINIMUM_HEIGHT_LEVEL
+    } else if cell.height_level > TERRAIN_MAXIMUM_HEIGHT_LEVEL {
+        TERRAIN_MAXIMUM_HEIGHT_LEVEL
+    } else {
+        cell.height_level
+    };
+    ((height & 0xff) << TERRAIN_HEIGHT_SHIFT)
+        | (((cell.surface as i32) & 1) << TERRAIN_SURFACE_SHIFT)
+        | ((cell.shape as i32) & TERRAIN_SHAPE_MASK)
 }

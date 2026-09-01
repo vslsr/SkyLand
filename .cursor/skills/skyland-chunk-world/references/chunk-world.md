@@ -38,6 +38,11 @@
 
 `server/tests/chunkGenerator.test.mjs` 在 81 个 chunk 上比对两个后端的放置记录，逐位不一致就报红。**只改一侧、或者忘了 `npm run build:wasm`，都会被它抓住。**
 
+地形另有一层：`server/tests/terrainParity.test.mjs` 在同一片 chunk 上**逐格**比对
+`terrain.rs` 与 `terrainContent.mjs`（20736 格），并断言扫描区里 13 种形状和水面
+全部出现过。那条覆盖率断言是护栏：物件只落在平地上，如果哪天生成参数变得扫不出斜坡，
+必须在这里报错，而不是让比对悄悄退回只覆盖平地。
+
 顶点数值允许有约 1e-6 的差异：Rust 侧用的是自己实现的多项式三角函数（`native/chunkgen/src/math.rs`），与 `Math.sin` 有极小偏差。这只影响朝向的呈现，不影响放置，测试对这一项用的是容差而不是逐位比较。
 
 ## 必须成对修改的常量
@@ -86,8 +91,19 @@
 | `prop_ptr()` / `prop_count()` / `prop_stride()` | 放置记录。 |
 | `fill_position_ptr()` / `fill_normal_ptr()` / `fill_tint_ptr()` / `fill_vertex_count()` | 合批后的填充顶点。 |
 | `line_position_ptr()` / `line_vertex_count()` | 合批后的轮廓线顶点。 |
+| `terrain_cell_code_at(seed, cellX, cellZ)` | 单格地形的打包 code，格式与 JS 的 `encodeTerrainCell` 一致。只服务跨后端比对，生成路径不走它。 |
 
 输出视图指向 wasm 内存，下一次 `build_chunk` 就会被覆盖，所以 JS 侧必须切片拷贝出来。
+
+`terrain_cell_code_at` 是唯一一个不参与生成的导出，它存在的理由是**放置记录盖不住地形**：
+`placement.rs` 只在 `FLAT` + `GROUND` 的格子上放物件，所以放置记录里的 `y_mm` 永远采样
+不到斜坡、角点和水面——而那几支正是 `terrain.rs` 与 `terrainContent.mjs` 之间最容易分裂的
+部分。实测过：把两个对角形状对调之后，`chunkGenerator.test.mjs` 的放置比对仍然全绿，
+只有 `terrainParity.test.mjs` 会报红。
+
+它刻意**没有**挂到 `ChunkGenerator` 接口上（而是 `chunkGeneratorWasm.mjs` 的独立导出
+`readWasmTerrainCellCode`）：JS 降级后端没有对应实现，挂上去就成了一个只在 WASM 路径
+可用的方法。
 
 模板几何体由 Three.js 在 JS 侧生成后一次性上传，Rust 不重复实现三角化——线稿模型的定义只有 `src/models/` 一处。模板注册进的是**实例**的线性内存，而每个场景配色不同，所以 wasm 模块只编译一次、每个流式场景实例化一份。
 
