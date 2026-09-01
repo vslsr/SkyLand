@@ -52,6 +52,10 @@ export {
   ItemStackComponent,
 } from './components/ItemStackComponent.mjs';
 export {
+  GENERATED_TREE_COMPONENT,
+  GeneratedTreeComponent,
+} from './components/GeneratedTreeComponent.mjs';
+export {
   LIFETIME_COMPONENT,
   LifetimeComponent,
 } from './components/LifetimeComponent.mjs';
@@ -59,6 +63,10 @@ export {
   REPLICATION_POLICY_COMPONENT,
   ReplicationPolicyComponent,
 } from './components/ReplicationPolicyComponent.mjs';
+export {
+  REPLICATED_COMPONENT,
+  ReplicatedComponent,
+} from './components/ReplicatedComponent.mjs';
 export {
   PLAYER_MOVEMENT_COMPONENT,
   PlayerMovementComponent,

@@ -24,6 +24,7 @@ import {
   generateChunkProps,
 } from './chunkContent.mjs';
 import { PROP_KIND } from './worldConfig.mjs';
+import { formatGeneratedTreeId, isPropSkipped } from './generatedTree.mjs';
 
 /**
  * 每种物件的碰撞模板，单位缩放下的尺寸。放置记录里的 scale 会等比乘上去。
@@ -58,13 +59,16 @@ export const MAXIMUM_COLLIDERS_PER_PROP = Object.values(PROP_COLLIDER_TEMPLATES)
  * @param {Int32Array} props 放置记录缓冲区
  * @param {number} count 记录条数
  * @param {object[]} [target] 复用的输出数组
+ * @param {{ skipMask?: import('./generatedTree.mjs').PropSkipMask, chunkX?: number, chunkZ?: number }} [options]
  * @returns {object[]}
  */
-export function readChunkColliders(props, count, target = []) {
+export function readChunkColliders(props, count, target = [], options = {}) {
   target.length = 0;
   for (let index = 0; index < count; index += 1) {
+    if (isPropSkipped(index, options.skipMask)) continue;
     const offset = index * PROP_STRIDE;
-    const templates = PROP_COLLIDER_TEMPLATES[props[offset + PROP_FIELD.KIND]];
+    const kind = props[offset + PROP_FIELD.KIND];
+    const templates = PROP_COLLIDER_TEMPLATES[kind];
     if (!templates || templates.length === 0) continue;
     const x = props[offset + PROP_FIELD.X_MM] / 1000;
     const z = props[offset + PROP_FIELD.Z_MM] / 1000;
@@ -73,6 +77,11 @@ export function readChunkColliders(props, count, target = []) {
     // 同一个物件的几个盒子共用一份 transform：它们绑在同一棵树上，
     // 位置永远一致，也省下几个对象。
     const transform = { x, y: 0, z, yaw };
+    const actorId = kind === PROP_KIND.TREE
+      && Number.isInteger(options.chunkX)
+      && Number.isInteger(options.chunkZ)
+      ? formatGeneratedTreeId(options.chunkX, options.chunkZ, index)
+      : undefined;
     for (const template of templates) {
       target.push({
         collision: {
@@ -85,6 +94,7 @@ export function readChunkColliders(props, count, target = []) {
         },
         transform,
         layers: template.layers,
+        ...(actorId ? { actorId } : {}),
       });
     }
   }
@@ -101,10 +111,11 @@ export function readChunkColliders(props, count, target = []) {
  * @param {number} chunkX
  * @param {number} chunkZ
  * @param {Int32Array} [buffer] 复用的放置缓冲区
+ * @param {import('./generatedTree.mjs').PropSkipMask} [skipMask]
  * @returns {object[]}
  */
-export function buildChunkColliders(worldSeed, chunkX, chunkZ, buffer) {
+export function buildChunkColliders(worldSeed, chunkX, chunkZ, buffer, skipMask) {
   const props = buffer ?? new Int32Array(PROP_BUFFER_LENGTH);
   const count = generateChunkProps(worldSeed, chunkX, chunkZ, props);
-  return readChunkColliders(props, count);
+  return readChunkColliders(props, count, [], { skipMask, chunkX, chunkZ });
 }

@@ -324,6 +324,49 @@ test('史莱姆靠近时显示当前设备的世界交互键，按映射键可�
   input.dispose();
 });
 
+test('靠近生成树时显示砍伐提示，并直接发送自描述 Actor id', () => {
+  let now = 0;
+  const sent: string[] = [];
+  const prompts: Array<string | undefined> = [];
+  const device = new TestKeyboardDevice(() => now);
+  const scheme = createPlayerInputScheme({ storage: null });
+  const input = new InputSubsystem({
+    actions: scheme.actions,
+    config: scheme.config,
+    contexts: scheme.contexts,
+    devices: [device],
+    now: () => now,
+  });
+  const tree: ActorInteractionCandidate = {
+    actorId: 'tree:-1:0:12',
+    label: '树木',
+    action: 'chop-tree',
+    carrierActorId: null,
+    holderPlayerId: null,
+  };
+  const controller = new ActorInteractionController(input, {
+    getPlayerId: () => 'player-1',
+    getPlayerPosition: () => ({ x: -2, z: 1 }),
+    findOwnedActorId: () => undefined,
+    pick: () => undefined,
+    findNearby: () => tree,
+    getInputLabel: () => 'E',
+    setHoveredActorId: () => undefined,
+    sendInteraction: (actorId) => sent.push(actorId),
+    setPrompt: (prompt) => prompts.push(prompt),
+  });
+  device.emit('Keyboard.KeyE', true);
+  input.update();
+  controller.update({
+    position: [0, 5, 8],
+    axes: { right: [1, 0, 0], up: [0, 1, 0], forward: [0, -0.5, -1] },
+  });
+  assert.deepEqual(sent, ['tree:-1:0:12']);
+  assert.equal(prompts.at(-1), 'E · 砍伐「树木」');
+  controller.dispose();
+  input.dispose();
+});
+
 test('弹性蘑菇 Replica 拉长并在释放后回弹，标记组件始终可面向相机', () => {
   let now = 1_000;
   const system = new ClientActorSystem({

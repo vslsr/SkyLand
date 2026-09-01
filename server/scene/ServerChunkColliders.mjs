@@ -23,6 +23,11 @@ import {
   toChunkKey,
 } from '../../shared/world/chunkKey.mjs';
 import { isChunkInsideWorld, toWorldSeed } from '../../shared/world/worldConfig.mjs';
+import {
+  createPropSkipMask,
+  isPropSkipped,
+  setPropSkipped as updatePropSkipMask,
+} from '../../shared/world/generatedTree.mjs';
 
 const DEFAULT_RESIDENT_RADIUS = 1;
 const DEFAULT_KEEP_RADIUS = 2;
@@ -48,6 +53,8 @@ export class ServerChunkColliders {
     );
     /** @type {Set<string>} 已经登记进碰撞世界的 chunk key。 */
     this.resident = new Set();
+    /** 只保存偏离默认生成结果的 chunk；数量与被砍过的树成正比。 */
+    this.skipMasks = new Map();
     /** 上一次重算时的焦点 chunk 签名，用来跳过没有跨界的 tick。 */
     this.focusSignature = '';
     /** 放置记录缓冲区复用，避免每装载一个 chunk 都新建一次。 */
@@ -56,6 +63,31 @@ export class ServerChunkColliders {
 
   get residentCount() {
     return this.resident.size;
+  }
+
+  get skippedPropCount() {
+    let count = 0;
+    for (const mask of this.skipMasks.values()) {
+      count += popcount(mask.low) + popcount(mask.high);
+    }
+    return count;
+  }
+
+  getSkipMask(chunkX, chunkZ) {
+    return this.skipMasks.get(toChunkKey(chunkX, chunkZ)) ?? createPropSkipMask();
+  }
+
+  /** 树状态偏离时仅重建所在 chunk 的静态碰撞组。 */
+  setPropSkipped(chunkX, chunkZ, propIndex, skipped = true) {
+    if (!isChunkInsideWorld(chunkX, chunkZ)) return false;
+    const key = toChunkKey(chunkX, chunkZ);
+    const previous = this.skipMasks.get(key);
+    if (isPropSkipped(propIndex, previous) === skipped) return false;
+    const next = updatePropSkipMask(previous, propIndex, skipped);
+    if (next.low === 0 && next.high === 0) this.skipMasks.delete(key);
+    else this.skipMasks.set(key, next);
+    if (this.resident.has(key)) this.rebuild(chunkX, chunkZ, key);
+    return true;
   }
 
   /**
@@ -99,6 +131,7 @@ export class ServerChunkColliders {
   clear() {
     for (const key of this.resident) this.world.removeStaticGroup(key);
     this.resident.clear();
+    this.skipMasks.clear();
     this.focusSignature = '';
   }
 
@@ -109,13 +142,23 @@ export class ServerChunkColliders {
         if (!isChunkInsideWorld(chunkX, chunkZ)) continue;
         const key = toChunkKey(chunkX, chunkZ);
         if (this.resident.has(key)) continue;
-        this.world.setStaticGroup(
-          key,
-          buildChunkColliders(this.worldSeed, chunkX, chunkZ, this.propBuffer),
-        );
+        this.rebuild(chunkX, chunkZ, key);
         this.resident.add(key);
       }
     }
+  }
+
+  rebuild(chunkX, chunkZ, key = toChunkKey(chunkX, chunkZ)) {
+    this.world.setStaticGroup(
+      key,
+      buildChunkColliders(
+        this.worldSeed,
+        chunkX,
+        chunkZ,
+        this.propBuffer,
+        this.skipMasks.get(key),
+      ),
+    );
   }
 
   /** @param {Array<{ chunkX: number, chunkZ: number }>} centers */
@@ -138,4 +181,14 @@ export class ServerChunkColliders {
       this.resident.delete(key);
     }
   }
+}
+
+function popcount(value) {
+  let bits = value >>> 0;
+  let count = 0;
+  while (bits !== 0) {
+    bits = (bits & (bits - 1)) >>> 0;
+    count += 1;
+  }
+  return count;
 }

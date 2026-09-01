@@ -19,6 +19,8 @@ import {
   HazardComponent,
   HEAT_EMITTER_COMPONENT,
   HeatEmitterComponent,
+  GENERATED_TREE_COMPONENT,
+  GeneratedTreeComponent,
   AttachmentSystem,
   INTERACTABLE_COMPONENT,
   InteractableComponent,
@@ -30,6 +32,8 @@ import {
   PlayerMovementComponent,
   REPLICATION_POLICY_COMPONENT,
   ReplicationPolicyComponent,
+  REPLICATED_COMPONENT,
+  ReplicatedComponent,
   SimpleCollisionComponent,
   TEMPERATURE_COMPONENT,
   TemperatureComponent,
@@ -87,6 +91,12 @@ export function createServerActor(spawn, archetype, runtime = {}) {
   if (archetype.components.replicationPolicy) {
     actor.addComponent(new ReplicationPolicyComponent(archetype.components.replicationPolicy));
   }
+  if (archetype.components.generatedTree) {
+    actor.addComponent(new GeneratedTreeComponent(
+      archetype.components.generatedTree,
+      runtime.generatedTree,
+    ));
+  }
   const temperature = actor.getComponent(TEMPERATURE_COMPONENT);
   const combustible = actor.getComponent(COMBUSTIBLE_COMPONENT);
   const stack = actor.getComponent(ITEM_STACK_COMPONENT);
@@ -99,7 +109,10 @@ export function createServerActor(spawn, archetype, runtime = {}) {
     combustible.fuel = runtime.thermal.fuel ?? combustible.fuel;
     combustible.burning = runtime.thermal.burning ?? combustible.burning;
   }
-  actor.addComponent(new SimpleCollisionComponent(createSimpleCollisionFromRender(archetype.components.render)));
+  if (archetype.components.render) {
+    actor.addComponent(new SimpleCollisionComponent(createSimpleCollisionFromRender(archetype.components.render)));
+  }
+  if (runtime.replicated !== false) actor.addComponent(new ReplicatedComponent());
   return actor;
 }
 
@@ -157,7 +170,7 @@ export function createServerActorWorld(sceneDefinition, options = {}) {
 
 export function createActorSnapshots(world, options = {}) {
   const viewer = options.viewer;
-  return world.query(TRANSFORM_COMPONENT)
+  return world.query(TRANSFORM_COMPONENT, REPLICATED_COMPONENT)
     // 动态玩家 Actor 走独立 players 快照，避免和本地预测实体重复渲染。
     .filter((actor) => !actor.hasComponents(PLAYER_MOVEMENT_COMPONENT))
     .filter((actor) => {
@@ -182,6 +195,19 @@ export function createActorSnapshots(world, options = {}) {
     const combustible = actor.getComponent(COMBUSTIBLE_COMPONENT);
     const itemStack = actor.getComponent(ITEM_STACK_COMPONENT);
     const residency = actor.getComponent(ACTOR_RESIDENCY_COMPONENT);
+    const generatedTree = actor.getComponent(GENERATED_TREE_COMPONENT);
+    // 生成树的 id 已经携带 archetype 与位置地址。偏离态只发 id + 状态，
+    // 默认 Interactable 与最大生命由两端同一原型提供。
+    if (generatedTree) {
+      return {
+        id: actor.id,
+        revision: generatedTree.revision,
+        treeState: {
+          health: generatedTree.health,
+          removed: generatedTree.removed,
+        },
+      };
+    }
     return {
       id: actor.id,
       archetypeId: actor.archetypeId,

@@ -124,7 +124,7 @@ export class HighCountActorBatchSystem {
     const groups = new Map<string, Actor[]>();
     for (const actor of world.query(TRANSFORM_COMPONENT, ITEM_STACK_COMPONENT) as Actor[]) {
       const archetype = this.archetypes.get(actor.archetypeId);
-      if (archetype?.components.render.model !== 'line-art-wood-pile') continue;
+      if (archetype?.components.render?.model !== 'line-art-wood-pile') continue;
       const residency = actor.getComponent(ACTOR_RESIDENCY_COMPONENT) as ActorResidencyComponent | undefined;
       const combustible = actor.getComponent(COMBUSTIBLE_COMPONENT) as CombustibleComponent | undefined;
       const key = `${actor.archetypeId}:${residency?.state ?? 'active'}:${combustible?.burning ? 'burning' : 'normal'}`;

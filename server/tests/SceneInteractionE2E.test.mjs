@@ -7,6 +7,13 @@ import { RoomConnectionHub } from '../network/RoomConnectionHub.mjs';
 import { WebSocketGateway } from '../network/WebSocketGateway.mjs';
 import { RoomProcessManager } from '../rooms/RoomProcessManager.mjs';
 import { SceneCatalog } from '../scenes/SceneCatalog.mjs';
+import { generateChunkContent } from '../../shared/world/chunkContent.mjs';
+import { formatGeneratedTreeId } from '../../shared/world/generatedTree.mjs';
+import {
+  MAXIMUM_CHUNK_COORDINATE,
+  MINIMUM_CHUNK_COORDINATE,
+  PROP_KIND,
+} from '../../shared/world/worldConfig.mjs';
 
 function waitForJson(socket, predicate, timeoutMs = 7_000) {
   return new Promise((resolve, reject) => {
@@ -199,4 +206,104 @@ test('真实 WebSocket 贯通史莱姆叼取、移动拉伸和自动脱离', asy
   const mushroom = actorFrom(released, 'elastic-mushroom-01');
   assert.equal(mushroom.interactable.enabled, true);
   assert.equal(mushroom.elasticTether.releaseRevision, 1);
+});
+
+test('真实 WebSocket 贯通流式树砍伐、偏离态快照和木材掉落', async (context) => {
+  const sceneCatalog = await SceneCatalog.load();
+  const roomManager = new RoomProcessManager({ sceneCatalog });
+  const room = await roomManager.createRoom('流式树闭环测试', 'open-world');
+  const roomRecord = roomManager.rooms.get(room.id);
+  assert.ok(roomRecord);
+  const server = http.createServer();
+  const connectionHub = new RoomConnectionHub(roomManager);
+  const gateway = new WebSocketGateway(server, connectionHub);
+  let socket;
+
+  context.after(async () => {
+    socket?.terminate();
+    gateway.close();
+    connectionHub.close();
+    const childExited = roomRecord.child.exitCode == null
+      ? once(roomRecord.child, 'exit')
+      : Promise.resolve();
+    roomManager.shutdown();
+    await childExited;
+    if (server.listening) await new Promise((resolve) => server.close(resolve));
+  });
+
+  server.listen(0, '127.0.0.1');
+  await once(server, 'listening');
+  const address = server.address();
+  assert.equal(typeof address, 'object');
+  socket = new WebSocket(`ws://127.0.0.1:${address.port}/ws`);
+  const connected = waitForJson(socket, (message) => message.type === 'connected');
+  await once(socket, 'open');
+  await connected;
+
+  const joinedState = waitForJson(socket, (message) => message.type === 'room:joined');
+  socket.send(JSON.stringify({ type: 'room:join', roomId: room.id, name: '网络樵夫' }));
+  const joined = await joinedState;
+  const initial = await waitForJson(socket, (message) => (
+    message.type === 'room:snapshot'
+    && message.snapshot.players.some((player) => player.id === joined.player.id)
+  ));
+  const player = initial.snapshot.players.find((candidate) => candidate.id === joined.player.id);
+
+  let target;
+  for (let chunkZ = MINIMUM_CHUNK_COORDINATE; chunkZ <= MAXIMUM_CHUNK_COORDINATE; chunkZ += 1) {
+    for (let chunkX = MINIMUM_CHUNK_COORDINATE; chunkX <= MAXIMUM_CHUNK_COORDINATE; chunkX += 1) {
+      const props = generateChunkContent(room.worldSeed, chunkX, chunkZ);
+      props.forEach((prop, propIndex) => {
+        if (prop.kind !== PROP_KIND.TREE) return;
+        const distance = Math.hypot(prop.x - player.x, prop.z - player.z);
+        if (!target || distance < target.distance) {
+          target = {
+            id: formatGeneratedTreeId(chunkX, chunkZ, propIndex),
+            x: prop.x,
+            z: prop.z,
+            distance,
+          };
+        }
+      });
+    }
+  }
+  assert.ok(target);
+
+  const directionX = (target.x - player.x) / Math.max(target.distance, 0.001);
+  const directionZ = (target.z - player.z) / Math.max(target.distance, 0.001);
+  let movementSequence = 0;
+  const nearbyState = waitForJson(socket, (message) => {
+    if (message.type !== 'room:snapshot') return false;
+    const current = message.snapshot.players.find((candidate) => candidate.id === joined.player.id);
+    return current && Math.hypot(current.x - target.x, current.z - target.z) <= 2.4;
+  }, 10_000);
+  const movement = setInterval(() => {
+    movementSequence += 1;
+    socket.send(JSON.stringify({
+      type: 'player:input',
+      sequence: movementSequence,
+      deltaSeconds: 0.05,
+      move: { x: directionX, z: directionZ },
+      sprint: true,
+      yaw: 0,
+    }));
+  }, 40);
+  await nearbyState.finally(() => clearInterval(movement));
+
+  const felledState = waitForJson(socket, (message) => {
+    if (message.type !== 'room:snapshot') return false;
+    const tree = actorFrom(message, target.id);
+    return tree?.treeState.removed === true
+      && message.snapshot.actors.some((actor) => (
+        actor.archetypeId === 'wood-pile' && actor.itemStack?.itemType === 'wood'
+      ));
+  });
+  for (let sequence = 1; sequence <= 3; sequence += 1) {
+    socket.send(JSON.stringify({ type: 'actor:interact', actorId: target.id, sequence }));
+  }
+  const felled = await felledState;
+  const tree = actorFrom(felled, target.id);
+  assert.equal(tree.transform, undefined);
+  assert.equal(tree.treeState.health, 0);
+  assert.equal(tree.treeState.removed, true);
 });

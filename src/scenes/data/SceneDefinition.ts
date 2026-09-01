@@ -154,7 +154,7 @@ export interface ActorArchetypeDefinition {
       inputTimeoutMs: number;
     };
     interactable?: {
-      action: 'cargo-toggle' | 'mushroom-bite' | 'pickup-stack';
+      action: 'cargo-toggle' | 'mushroom-bite' | 'pickup-stack' | 'chop-tree';
       label: string;
       maximumDistance: number;
     };
@@ -214,7 +214,12 @@ export interface ActorArchetypeDefinition {
     };
     lifetime?: { lifetimeSeconds: number };
     replicationPolicy?: { mode: 'always' | 'aoi'; radiusChunks: number };
-    render: ActorRenderDefinition;
+    generatedTree?: {
+      maximumHealth: number;
+      chopDamage: number;
+      woodQuantity: number;
+    };
+    render?: ActorRenderDefinition;
   };
 }
 

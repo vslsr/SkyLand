@@ -10,6 +10,7 @@ import {
 } from '../../shared/world/chunkGenerator.mjs';
 import { instantiateChunkGenerator } from '../../shared/world/chunkGeneratorWasm.mjs';
 import { DEFAULT_WORLD_SEED } from '../../shared/world/worldConfig.mjs';
+import { setPropSkipped } from '../../shared/world/generatedTree.mjs';
 
 const WASM_PATH = fileURLToPath(new URL('../../shared/world/wasm/chunkgen.wasm', import.meta.url));
 
@@ -113,4 +114,21 @@ test('换种子会换掉整个世界', async () => {
   const before = Array.from(wasm.buildChunk(2, 2).props);
   wasm.setSeed(DEFAULT_WORLD_SEED + 1);
   assert.notDeepEqual(Array.from(wasm.buildChunk(2, 2).props), before);
+});
+
+test('两个后端使用同一跳过掩码挖掉物件，但完整放置记录保持不变', async () => {
+  const { wasm, javascript } = await createBackends();
+  const baseline = javascript.buildChunk(-3, 2);
+  assert.ok(baseline.propCount > 0);
+  const mask = setPropSkipped(undefined, 0, true);
+  const fromWasm = wasm.buildChunk(-3, 2, mask);
+  const fromJavaScript = javascript.buildChunk(-3, 2, mask);
+
+  assert.deepEqual(Array.from(fromWasm.props), Array.from(baseline.props));
+  assert.deepEqual(Array.from(fromJavaScript.props), Array.from(baseline.props));
+  assert.equal(fromWasm.fillPositions.length, fromJavaScript.fillPositions.length);
+  assert.equal(
+    fromJavaScript.fillPositions.length,
+    baseline.fillPositions.length - TEMPLATES[0].fill.length / TEMPLATE_FILL_STRIDE * 3,
+  );
 });

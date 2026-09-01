@@ -4,6 +4,7 @@
  */
 export class AttachmentSystem {
   update(world) {
-    world.resolveTransforms();
+    // 大量无父子关系的派生 Actor（树、掉落物）不需要每 tick 重算根 Transform。
+    world.resolveTransforms({ attachedOnly: true });
   }
 }

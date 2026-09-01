@@ -397,7 +397,7 @@ function validateSceneDefinition(raw, filename, actorCatalog) {
     const archetype = actorComposition.actorArchetypes.find(
       (definition) => definition.id === target.archetypeId,
     );
-    if (archetype?.components.render.model !== 'line-art-training-dummy') {
+    if (archetype?.components.render?.model !== 'line-art-training-dummy') {
       throw new TypeError(
         `${filename}.sceneComponents 的 ability-lab 目标需要 line-art-training-dummy render`,
       );

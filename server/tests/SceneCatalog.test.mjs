@@ -62,7 +62,7 @@ test('loads every selectable map from an independent scene JSON', async () => {
   assert.equal(catalog.require('open-meadow').renderer.content.trees, false);
   const openWorld = catalog.require('open-world');
   assert.deepEqual(openWorld.sceneComponents[0], grassland.sceneComponents[1]);
-  assert.deepEqual(openWorld.gameplay.runtimeActorArchetypes, ['wood-pile']);
+  assert.deepEqual(openWorld.gameplay.runtimeActorArchetypes, ['generated-tree', 'wood-pile']);
   const thermalLab = catalog.require('thermal-lab');
   assert.deepEqual(
     thermalLab.actors.map((actor) => [actor.id, actor.archetypeId]),

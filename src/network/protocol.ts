@@ -16,11 +16,12 @@ export type ActorEventType = 'cargo:add' | 'cargo:remove' | 'damage';
 
 export interface SnapshotActor {
   id: string;
-  archetypeId: string;
+  /** 生成树由自描述 id 推导原型；普通网络 Actor 必填。 */
+  archetypeId?: string;
   /** 离散复制状态；切换父节点时不做插值。 */
   parentActorId?: string | null;
   revision: number;
-  transform: {
+  transform?: {
     x: number;
     y: number;
     z: number;
@@ -53,7 +54,7 @@ export interface SnapshotActor {
     revision: number;
   };
   interactable?: {
-    action: 'cargo-toggle' | 'mushroom-bite' | 'pickup-stack';
+    action: 'cargo-toggle' | 'mushroom-bite' | 'pickup-stack' | 'chop-tree';
     label: string;
     enabled: boolean;
     revision: number;
@@ -90,6 +91,12 @@ export interface SnapshotActor {
   residency?: {
     state: 'active' | 'sleeping';
     revision: number;
+  };
+  treeState?: {
+    health: number;
+    maximumHealth?: number;
+    removed: boolean;
+    revision?: number;
   };
 }
 

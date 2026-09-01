@@ -92,3 +92,17 @@ test('clear 把这一份静态碰撞全部撤走', () => {
   assert.equal(residency.residentCount, 0);
   assert.equal(world.colliderCount, 0);
 });
+
+test('树 override 只重建所在 chunk，并在卸载重载后继续生效', () => {
+  const { world, residency } = createResidency();
+  residency.ensureAround(0, 0);
+  const before = world.colliderCount;
+  assert.equal(residency.setPropSkipped(0, 0, 0, true), true);
+  assert.equal(residency.skippedPropCount, 1);
+  assert.ok(world.colliderCount <= before);
+  assert.equal(residency.setPropSkipped(0, 0, 0, true), false);
+
+  residency.sync([{ x: CHUNK_SIZE * 6 + 1, z: CHUNK_SIZE * 6 + 1 }]);
+  residency.ensureAround(0, 0);
+  assert.equal(residency.getSkipMask(0, 0).low & 1, 1);
+});

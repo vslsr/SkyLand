@@ -1,13 +1,20 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { COLLISION_LAYER } from '../../shared/collision/collisionLayers.mjs';
-import { generateChunkContent } from '../../shared/world/chunkContent.mjs';
+import {
+  PROP_BUFFER_LENGTH,
+  PROP_FIELD,
+  PROP_STRIDE,
+  generateChunkContent,
+  generateChunkProps,
+} from '../../shared/world/chunkContent.mjs';
 import {
   MAXIMUM_COLLIDERS_PER_PROP,
   PROP_COLLIDER_TEMPLATES,
   buildChunkColliders,
 } from '../../shared/world/chunkColliders.mjs';
 import { CHUNK_SIZE, PROP_KIND } from '../../shared/world/worldConfig.mjs';
+import { formatGeneratedTreeId, setPropSkipped } from '../../shared/world/generatedTree.mjs';
 
 const SEED = 0x5c1a2d0b;
 
@@ -79,4 +86,30 @@ test('单个物件派生出的碰撞体数量有固定上界', () => {
   for (const templates of Object.values(PROP_COLLIDER_TEMPLATES)) {
     assert.ok(templates.length <= MAXIMUM_COLLIDERS_PER_PROP);
   }
+});
+
+test('树碰撞携带派生 Actor id，跳过掩码会整棵移除', () => {
+  const props = new Int32Array(PROP_BUFFER_LENGTH);
+  const count = generateChunkProps(SEED, -2, 1, props);
+  let propIndex = -1;
+  for (let index = 0; index < count; index += 1) {
+    if (props[index * PROP_STRIDE + PROP_FIELD.KIND] === PROP_KIND.TREE) {
+      propIndex = index;
+      break;
+    }
+  }
+  assert.ok(propIndex >= 0);
+  const actorId = formatGeneratedTreeId(-2, 1, propIndex);
+  const baseline = buildChunkColliders(SEED, -2, 1);
+  assert.equal(baseline.filter((collider) => collider.actorId === actorId).length, 3);
+
+  const masked = buildChunkColliders(
+    SEED,
+    -2,
+    1,
+    undefined,
+    setPropSkipped(undefined, propIndex, true),
+  );
+  assert.equal(masked.some((collider) => collider.actorId === actorId), false);
+  assert.equal(masked.length, baseline.length - 3);
 });

@@ -19,9 +19,12 @@ import {
   BUOYANCY_COMPONENT,
   CARGO_COMPONENT,
   ELASTIC_TETHER_COMPONENT,
+  GENERATED_TREE_COMPONENT,
   INTERACTABLE_COMPONENT,
   INVENTORY_COMPONENT,
   ITEM_STACK_COMPONENT,
+  REPLICATED_COMPONENT,
+  ReplicatedComponent,
   SIMPLE_COLLISION_COMPONENT,
   TRANSFORM_COMPONENT,
   VESSEL_MOTOR_COMPONENT,
@@ -31,6 +34,7 @@ import {
   createActorSnapshots,
   createServerActorWorld,
 } from '../actors/ServerActorFactory.mjs';
+import { createServerGeneratedTreeActors } from '../actors/ServerGeneratedTreeActors.mjs';
 import { ServerPlayerActor } from '../actors/ServerPlayerActor.mjs';
 import {
   addVesselCargo,
@@ -42,19 +46,22 @@ import {
   releaseElasticTether,
 } from '../actors/ElasticTetherMutations.mjs';
 import { ServerChunkColliders } from './ServerChunkColliders.mjs';
+import { parseGeneratedTreeId } from '../../shared/world/generatedTree.mjs';
+import { toWorldSeed } from '../../shared/world/worldConfig.mjs';
 
 function roundCoordinate(value) {
   return Math.round(value * 1000) / 1000;
 }
 
-const ACTOR_ID_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+const ACTOR_ID_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,95}$/;
 
 function clamp(value, minimum, maximum) {
   return Math.max(minimum, Math.min(maximum, value));
 }
 
 function sanitizeActorId(value) {
-  const id = String(value ?? '').slice(0, 48);
+  const id = String(value ?? '');
+  if (id.length > 96) return undefined;
   return ACTOR_ID_PATTERN.test(id) ? id : undefined;
 }
 
@@ -90,6 +97,7 @@ export class ServerScene {
     this.bounds = definition.gameplay?.bounds ?? PLAYER_BOUNDS;
     this.spawn = definition.gameplay?.spawn;
     this.playerActorArchetype = resolvePlayerActorArchetype(definition);
+    this.worldSeed = toWorldSeed(options.worldSeed);
     this.players = new Map();
     // 一张空间网格同时承载 Actor 与流式世界的静态物件。玩家推出只查身边的
     // 几个格子，成本不随房间里的 Actor 数或世界面积增长。
@@ -97,11 +105,22 @@ export class ServerScene {
     this.actorWorld = createServerActorWorld(definition, {
       players: this.players,
       collision: this.collision,
+      worldSeed: this.worldSeed,
     });
+    const generatedTreeArchetype = definition.actorArchetypes?.find(
+      (archetype) => archetype.components.generatedTree,
+    );
+    this.generatedTreeCount = definition.renderer?.world && definition.renderer.content?.trees
+      ? createServerGeneratedTreeActors(
+        this.actorWorld,
+        generatedTreeArchetype,
+        this.worldSeed,
+      )
+      : 0;
     // 静态碰撞只有流式场景才有；固定摆放的场景里树是布景，没有碰撞体。
     this.chunkColliders = new ServerChunkColliders({
       world: this.collision,
-      worldSeed: options.worldSeed,
+      worldSeed: this.worldSeed,
       enabled: Boolean(definition.renderer?.world),
     });
     this.tick = 0;
@@ -272,6 +291,37 @@ export class ServerScene {
       if (distance > interactable.maximumDistance) return false;
       const pickedUp = this.actorWorld.context.highCountActors?.pickup(this.actorWorld, target.id, player) ?? 0;
       if (pickedUp <= 0) return false;
+      player.actorInteractionSequence = sequence;
+      return true;
+    }
+
+    if (interactable.action === 'chop-tree') {
+      const tree = target.getComponent(GENERATED_TREE_COMPONENT);
+      const identity = parseGeneratedTreeId(target.id);
+      if (
+        !tree
+        || !identity
+        || identity.chunkX !== tree.chunkX
+        || identity.chunkZ !== tree.chunkZ
+        || identity.propIndex !== tree.propIndex
+      ) return false;
+      const distance = Math.hypot(targetTransform.x - player.x, targetTransform.z - player.z);
+      if (distance > interactable.maximumDistance) return false;
+      if (!tree.applyDamage()) return false;
+      if (!target.hasComponents(REPLICATED_COMPONENT)) {
+        target.addComponent(new ReplicatedComponent());
+      }
+      interactable.revision += 1;
+      if (tree.removed) {
+        interactable.enabled = false;
+        this.chunkColliders.setPropSkipped(tree.chunkX, tree.chunkZ, tree.propIndex, true);
+        this.spawnItemStack('wood-pile', {
+          position: [targetTransform.x, Math.max(0.5, tree.scale * 0.55), targetTransform.z],
+          quantity: tree.woodQuantity,
+          velocity: [0, 2.2, 0],
+          yaw: targetTransform.yaw,
+        });
+      }
       player.actorInteractionSequence = sequence;
       return true;
     }

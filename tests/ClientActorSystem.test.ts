@@ -6,6 +6,8 @@ import {
   type BuoyancyComponent,
   COMBUSTIBLE_COMPONENT,
   type CombustibleComponent,
+  GENERATED_TREE_COMPONENT,
+  type GeneratedTreeComponent,
   ITEM_STACK_COMPONENT,
   type ItemStackComponent,
   SIMPLE_COLLISION_COMPONENT,
@@ -13,6 +15,16 @@ import {
   TRANSFORM_COMPONENT,
   type TransformComponent,
 } from '../shared/actor/index.mjs';
+import { CollisionWorld } from '../shared/collision/index.mjs';
+import {
+  PROP_BUFFER_LENGTH,
+  PROP_FIELD,
+  PROP_STRIDE,
+  generateChunkProps,
+} from '../shared/world/chunkContent.mjs';
+import { readChunkColliders } from '../shared/world/chunkColliders.mjs';
+import { formatGeneratedTreeId } from '../shared/world/generatedTree.mjs';
+import { DEFAULT_WORLD_SEED, PROP_KIND } from '../shared/world/worldConfig.mjs';
 import { ClientActorSystem } from '../src/actors/ClientActorSystem';
 import {
   THREE_OBJECT_COMPONENT,
@@ -202,6 +214,16 @@ const woodPileArchetype: SceneDefinition['actorArchetypes'][number] = {
   },
 };
 
+const generatedTreeArchetype: SceneDefinition['actorArchetypes'][number] = {
+  schemaVersion: 1,
+  id: 'generated-tree',
+  components: {
+    interactable: { action: 'chop-tree', label: '树木', maximumDistance: 2.6 },
+    generatedTree: { maximumHealth: 3, chopDamage: 1, woodQuantity: 5 },
+    replicationPolicy: { mode: 'aoi', radiusChunks: 2 },
+  },
+};
+
 const definition = {
   schemaVersion: 1,
   id: 'water',
@@ -224,6 +246,7 @@ const definition = {
     campfireArchetype,
     dryHayArchetype,
     woodPileArchetype,
+    generatedTreeArchetype,
   ],
   renderer: {
     type: 'line-art',
@@ -621,5 +644,66 @@ test('高数量物品 Actor 保留交互与碰撞身份，但用批次绘制而�
   assert.equal(fills.length, 1);
   assert.equal(fills[0].count, 1);
   assert.equal(outlines.length, 1);
+  system.dispose();
+});
+
+test('流式树按 Chunk 构造无网格 Actor，偏离态可在无 Transform 快照中应用且不会误删', () => {
+  let now = 1_000;
+  const collision = new CollisionWorld();
+  const overrides: Array<{ chunkX: number; chunkZ: number; propIndex: number; removed: boolean }> = [];
+  const system = new ClientActorSystem({
+    definition,
+    environment: { fogColor: '#ffffff', fogNear: 20, fogFar: 60 },
+    collision,
+    now: () => now,
+  });
+  system.setGeneratedTreeOverrideTarget((chunkX, chunkZ, propIndex, removed) => {
+    overrides.push({ chunkX, chunkZ, propIndex, removed });
+  });
+
+  const props = new Int32Array(PROP_BUFFER_LENGTH);
+  const propCount = generateChunkProps(DEFAULT_WORLD_SEED, -1, 0, props);
+  let propIndex = -1;
+  for (let index = 0; index < propCount; index += 1) {
+    if (props[index * PROP_STRIDE + PROP_FIELD.KIND] === PROP_KIND.TREE) {
+      propIndex = index;
+      break;
+    }
+  }
+  assert.ok(propIndex >= 0);
+  collision.setStaticGroup('-1:0', readChunkColliders(props, propCount, [], {
+    chunkX: -1,
+    chunkZ: 0,
+  }));
+  system.mountGeneratedTreeChunk('-1:0', -1, 0, props, propCount);
+  system.update(0, 0);
+
+  const actorId = formatGeneratedTreeId(-1, 0, propIndex);
+  const actor = system.getActor(actorId)!;
+  assert.ok(actor);
+  assert.equal(actor.hasComponents(THREE_OBJECT_COMPONENT), false);
+  const transform = actor.requireComponent(TRANSFORM_COMPONENT) as TransformComponent;
+  assert.equal(
+    system.findNearbyInteractableActor({ x: transform.x + 0.2, z: transform.z })?.actorId,
+    actorId,
+  );
+
+  system.syncSnapshots([{
+    id: actorId,
+    revision: 3,
+    treeState: { health: 0, removed: true },
+  }], 1_000);
+  system.update(0, 0);
+  const tree = actor.requireComponent(GENERATED_TREE_COMPONENT) as GeneratedTreeComponent;
+  assert.equal(tree.removed, true);
+  assert.deepEqual(overrides.at(-1), { chunkX: -1, chunkZ: 0, propIndex, removed: true });
+
+  now = 1_100;
+  system.syncSnapshots([], 1_100);
+  now = 1_230;
+  system.update(0, 0);
+  assert.equal(system.getActor(actorId), actor);
+  system.unmountGeneratedTreeChunk('-1:0');
+  assert.equal(system.getActor(actorId), undefined);
   system.dispose();
 });

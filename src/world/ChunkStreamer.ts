@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import type { ChunkGenerator } from '../../shared/world/chunkGenerator.mjs';
-import { toChunkCoordinate } from '../../shared/world/chunkKey.mjs';
+import { parseChunkKey, toChunkCoordinate, toChunkKey } from '../../shared/world/chunkKey.mjs';
 import { planChunkStream } from '../../shared/world/chunkStream.mjs';
 import {
   CHUNK_BUILD_BUDGET_PER_FRAME,
@@ -9,6 +9,10 @@ import {
 } from '../../shared/world/worldConfig.mjs';
 import type { CollisionWorld } from '../../shared/collision/index.mjs';
 import { readChunkColliders } from '../../shared/world/chunkColliders.mjs';
+import {
+  isPropSkipped,
+  setPropSkipped as updatePropSkipMask,
+} from '../../shared/world/generatedTree.mjs';
 import { StreamingGrassSystem, type GrassInteractionTarget } from '../grass';
 import type { FillMaterialEnvironment } from '../materials/createFillMaterial';
 import { OUTLINE_MATERIAL, GROUND_GRID_MATERIAL } from '../materials/lineMaterials';
@@ -37,6 +41,19 @@ export interface ChunkStreamerOptions {
    * 所以参与碰撞的物件数量跟着 keepRadius 走，不跟世界面积走。
    */
   collision?: CollisionWorld;
+  onChunkMounted?: (
+    key: string,
+    chunkX: number,
+    chunkZ: number,
+    props: Int32Array,
+    propCount: number,
+  ) => void;
+  onChunkUnmounted?: (key: string) => void;
+}
+
+interface PropSkipMask {
+  low: number;
+  high: number;
 }
 
 /**
@@ -59,6 +76,10 @@ export class ChunkStreamer implements SceneVisualSystem {
   private readonly gridGeometry: THREE.BufferGeometry;
   private readonly grass?: StreamingGrassSystem;
   private readonly collision?: CollisionWorld;
+  private readonly onChunkMounted?: ChunkStreamerOptions['onChunkMounted'];
+  private readonly onChunkUnmounted?: ChunkStreamerOptions['onChunkUnmounted'];
+  /** 只保存被动过的 chunk，默认世界仍不占状态内存。 */
+  private readonly skipMasks = new Map<string, PropSkipMask>();
   private pending: PendingChunk[] = [];
   private generator?: ChunkGenerator;
   private readonly worldSeed: number;
@@ -70,6 +91,8 @@ export class ChunkStreamer implements SceneVisualSystem {
     this.root.name = 'chunk-streamer';
     this.world = options.world;
     this.collision = options.collision;
+    this.onChunkMounted = options.onChunkMounted;
+    this.onChunkUnmounted = options.onChunkUnmounted;
     this.worldSeed = toWorldSeed(options.worldSeed ?? DEFAULT_WORLD_SEED);
     this.fillMaterial = createChunkFillMaterial(options.environment);
     this.gridGeometry = createChunkGridGeometry();
@@ -107,6 +130,23 @@ export class ChunkStreamer implements SceneVisualSystem {
 
   public get pendingCount(): number {
     return this.pending.length;
+  }
+
+  /** 应用服务端树偏离态；已加载时只重建这一块。 */
+  public setPropSkipped(
+    chunkX: number,
+    chunkZ: number,
+    propIndex: number,
+    skipped = true,
+  ): boolean {
+    const key = toChunkKey(chunkX, chunkZ);
+    const previous = this.skipMasks.get(key);
+    if (isPropSkipped(propIndex, previous) === skipped) return false;
+    const next = updatePropSkipMask(previous, propIndex, skipped);
+    if (next.low === 0 && next.high === 0) this.skipMasks.delete(key);
+    else this.skipMasks.set(key, next);
+    if (this.views.has(key)) this.rebuild(key);
+    return true;
   }
 
   /**
@@ -147,6 +187,7 @@ export class ChunkStreamer implements SceneVisualSystem {
     this.grass?.dispose();
     this.gridGeometry.dispose();
     this.fillMaterial.dispose();
+    this.skipMasks.clear();
     this.generator = undefined;
   }
 
@@ -169,7 +210,8 @@ export class ChunkStreamer implements SceneVisualSystem {
   private mount(chunk: PendingChunk): boolean {
     if (!this.generator) return false;
     try {
-      const data = this.generator.buildChunk(chunk.chunkX, chunk.chunkZ);
+      const skipMask = this.skipMasks.get(chunk.key);
+      const data = this.generator.buildChunk(chunk.chunkX, chunk.chunkZ, skipMask);
       const view = new ChunkView(
         chunk.key,
         chunk.chunkX,
@@ -180,9 +222,23 @@ export class ChunkStreamer implements SceneVisualSystem {
       );
       this.grass?.mountChunk(chunk.key, data);
       // 碰撞体由同一批放置记录派生，和几何体同生共死，不会出现「看得见但撞不到」。
-      this.collision?.setStaticGroup(chunk.key, readChunkColliders(data.props, data.propCount));
+      this.collision?.setStaticGroup(
+        chunk.key,
+        readChunkColliders(data.props, data.propCount, [], {
+          skipMask,
+          chunkX: chunk.chunkX,
+          chunkZ: chunk.chunkZ,
+        }),
+      );
       this.views.set(chunk.key, view);
       this.root.add(view.root);
+      this.onChunkMounted?.(
+        chunk.key,
+        chunk.chunkX,
+        chunk.chunkZ,
+        data.props,
+        data.propCount,
+      );
       return true;
     } catch (error) {
       // 单个 chunk 建不出来不该拖垮整个场景，跳过它，下次重新规划时再试。
@@ -195,9 +251,17 @@ export class ChunkStreamer implements SceneVisualSystem {
     const view = this.views.get(key);
     if (!view) return;
     this.views.delete(key);
+    this.onChunkUnmounted?.(key);
     this.grass?.unmountChunk(key);
     this.collision?.removeStaticGroup(key);
     view.dispose();
+  }
+
+  private rebuild(key: string): void {
+    const coordinate = parseChunkKey(key);
+    if (!coordinate || !this.views.has(key)) return;
+    this.unmount(key);
+    this.mount({ ...coordinate, key });
   }
 
   /** 清空全部 chunk 并让下一次 update 重新规划。 */

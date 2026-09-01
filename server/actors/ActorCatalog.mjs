@@ -112,8 +112,8 @@ function validatePlayerMovement(raw, filename) {
 function validateInteractable(raw, filename) {
   const path = `${filename}.components.interactable`;
   const definition = requireObject(raw, path);
-  if (!['cargo-toggle', 'mushroom-bite', 'pickup-stack'].includes(definition.action)) {
-    throw new TypeError(`${path}.action 暂只支持 cargo-toggle、mushroom-bite 或 pickup-stack`);
+  if (!['cargo-toggle', 'mushroom-bite', 'pickup-stack', 'chop-tree'].includes(definition.action)) {
+    throw new TypeError(`${path}.action 暂不支持：${definition.action}`);
   }
   return {
     action: definition.action,
@@ -275,6 +275,18 @@ function validateReplicationPolicy(raw, filename) {
   return { mode: definition.mode, radiusChunks };
 }
 
+function validateGeneratedTree(raw, filename) {
+  const path = `${filename}.components.generatedTree`;
+  const definition = requireObject(raw, path);
+  const maximumHealth = requireNumber(definition.maximumHealth, `${path}.maximumHealth`, 1, 1000);
+  const chopDamage = requireNumber(definition.chopDamage, `${path}.chopDamage`, 1, 1000);
+  const woodQuantity = requireNumber(definition.woodQuantity, `${path}.woodQuantity`, 1, 1000);
+  if (![maximumHealth, chopDamage, woodQuantity].every(Number.isInteger)) {
+    throw new TypeError(`${path} 的生命、伤害与木材数量必须是整数`);
+  }
+  return { maximumHealth, chopDamage, woodQuantity };
+}
+
 function validateRender(raw, filename) {
   const path = `${filename}.components.render`;
   const render = requireObject(raw, path);
@@ -407,6 +419,7 @@ function validateActorArchetype(raw, filename) {
     'dropMotion',
     'lifetime',
     'replicationPolicy',
+    'generatedTree',
     'render',
   ]);
   for (const componentName of Object.keys(components)) {
@@ -414,7 +427,13 @@ function validateActorArchetype(raw, filename) {
       throw new TypeError(`${filename}.components 包含未知 Component：${componentName}`);
     }
   }
-  const render = validateRender(components.render, filename);
+  const render = components.render ? validateRender(components.render, filename) : undefined;
+  const generatedTree = components.generatedTree
+    ? validateGeneratedTree(components.generatedTree, filename)
+    : undefined;
+  if (!render && !generatedTree) {
+    throw new TypeError(`${filename}.components 至少需要 render 或 generatedTree`);
+  }
   const playerMovement = components.playerMovement
     ? validatePlayerMovement(components.playerMovement, filename)
     : undefined;
@@ -430,13 +449,13 @@ function validateActorArchetype(raw, filename) {
   if (interactable?.action === 'mushroom-bite' && !elasticTether) {
     throw new TypeError(`${filename}.components.interactable mushroom-bite 需要 elasticTether`);
   }
-  if (elasticTether && render.model !== 'line-art-elastic-mushroom') {
+  if (elasticTether && render?.model !== 'line-art-elastic-mushroom') {
     throw new TypeError(`${filename}.components.elasticTether 需要 line-art-elastic-mushroom render`);
   }
-  if (playerMovement && render.model !== 'line-art-player-slime') {
+  if (playerMovement && render?.model !== 'line-art-player-slime') {
     throw new TypeError(`${filename}.components.playerMovement 需要 line-art-player-slime render`);
   }
-  if (render.model === 'line-art-player-slime' && !playerMovement) {
+  if (render?.model === 'line-art-player-slime' && !playerMovement) {
     throw new TypeError(`${filename}.components.render line-art-player-slime 需要 playerMovement`);
   }
   const temperature = components.temperature
@@ -460,10 +479,10 @@ function validateActorArchetype(raw, filename) {
   if (combustible && !temperature) {
     throw new TypeError(`${filename}.components.combustible 需要 temperature`);
   }
-  if (render.model === 'line-art-campfire' && !heatEmitter) {
+  if (render?.model === 'line-art-campfire' && !heatEmitter) {
     throw new TypeError(`${filename}.components.render line-art-campfire 需要 heatEmitter`);
   }
-  if (render.model === 'line-art-dry-hay' && (!temperature || !combustible)) {
+  if (render?.model === 'line-art-dry-hay' && (!temperature || !combustible)) {
     throw new TypeError(`${filename}.components.render line-art-dry-hay 需要 temperature 和 combustible`);
   }
   if (interactable?.action === 'pickup-stack' && !itemStack) {
@@ -475,8 +494,17 @@ function validateActorArchetype(raw, filename) {
   if (itemStack && interactable?.action !== 'pickup-stack') {
     throw new TypeError(`${filename}.components.itemStack 需要 pickup-stack interactable`);
   }
-  if (render.model === 'line-art-wood-pile' && !itemStack) {
+  if (render?.model === 'line-art-wood-pile' && !itemStack) {
     throw new TypeError(`${filename}.components.render line-art-wood-pile 需要 itemStack`);
+  }
+  if (generatedTree && interactable?.action !== 'chop-tree') {
+    throw new TypeError(`${filename}.components.generatedTree 需要 chop-tree interactable`);
+  }
+  if (interactable?.action === 'chop-tree' && !generatedTree) {
+    throw new TypeError(`${filename}.components.interactable chop-tree 需要 generatedTree`);
+  }
+  if (generatedTree && !replicationPolicy) {
+    throw new TypeError(`${filename}.components.generatedTree 需要 replicationPolicy`);
   }
   return {
     schemaVersion: 1,
@@ -497,7 +525,8 @@ function validateActorArchetype(raw, filename) {
       ...(dropMotion ? { dropMotion } : {}),
       ...(lifetime ? { lifetime } : {}),
       ...(replicationPolicy ? { replicationPolicy } : {}),
-      render,
+      ...(generatedTree ? { generatedTree } : {}),
+      ...(render ? { render } : {}),
     },
   };
 }

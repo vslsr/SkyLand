@@ -52,7 +52,7 @@ export class PlayerEntity extends Actor {
     archetype: ActorArchetypeDefinition,
   ) {
     super(playerId, archetype.id);
-    if (!archetype.components.playerMovement || archetype.components.render.model !== 'line-art-player-slime') {
+    if (!archetype.components.playerMovement || archetype.components.render?.model !== 'line-art-player-slime') {
       throw new Error(`玩家 Actor 原型无效：${archetype.id}`);
     }
     const movement = this.addComponent(new PlayerMovementComponent(

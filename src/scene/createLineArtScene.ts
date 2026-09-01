@@ -26,6 +26,13 @@ export function createLineArtScene(
   const collisionWorld = new CollisionWorld();
   let grassInteraction: GrassInteractionTarget | undefined;
   let actorSnapshotTarget: ClientActorSystem | undefined;
+  if (definition.actors.length > 0 || (definition.gameplay.runtimeActorArchetypes?.length ?? 0) > 0) {
+    actorSnapshotTarget = new ClientActorSystem({
+      definition,
+      environment,
+      collision: collisionWorld,
+    });
+  }
   scene.background = new THREE.Color(renderer.background);
   scene.fog = new THREE.Fog(renderer.fog.color, renderer.fog.near, renderer.fog.far);
   if (renderer.world) {
@@ -37,6 +44,10 @@ export function createLineArtScene(
       worldSeed,
       environment,
       collision: collisionWorld,
+      onChunkMounted: (key, chunkX, chunkZ, props, propCount) => {
+        actorSnapshotTarget?.mountGeneratedTreeChunk(key, chunkX, chunkZ, props, propCount);
+      },
+      onChunkUnmounted: (key) => actorSnapshotTarget?.unmountGeneratedTreeChunk(key),
       templates: {
         content: renderer.content,
         environment,
@@ -49,6 +60,11 @@ export function createLineArtScene(
         },
       },
     });
+    actorSnapshotTarget?.setGeneratedTreeOverrideTarget(
+      (chunkX, chunkZ, propIndex, removed) => {
+        streamer.setPropSkipped(chunkX, chunkZ, propIndex, removed);
+      },
+    );
     scene.add(streamer.root);
     visualSystems.push(streamer);
     grassInteraction = streamer.grassInteraction;
@@ -83,11 +99,9 @@ export function createLineArtScene(
     scene.add(ocean.root);
     visualSystems.push(ocean);
   }
-  if (definition.actors.length > 0 || (definition.gameplay.runtimeActorArchetypes?.length ?? 0) > 0) {
-    const actors = new ClientActorSystem({ definition, environment, collision: collisionWorld });
-    scene.add(actors.root);
-    visualSystems.push(actors);
-    actorSnapshotTarget = actors;
+  if (actorSnapshotTarget) {
+    scene.add(actorSnapshotTarget.root);
+    visualSystems.push(actorSnapshotTarget);
   }
   return { scene, visualSystems, grassInteraction, actorSnapshotTarget, collisionWorld };
 }

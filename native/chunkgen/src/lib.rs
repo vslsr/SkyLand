@@ -219,6 +219,18 @@ pub extern "C" fn set_seed(seed: u32) {
 /// 生成并合批一个 chunk。返回 0 表示成功，-1 表示顶点缓冲不够用。
 #[no_mangle]
 pub extern "C" fn build_chunk(chunk_x: i32, chunk_z: i32) -> i32 {
+    build_chunk_masked(chunk_x, chunk_z, 0, 0)
+}
+
+/// 生成并合批一个 chunk，同时跳过最多 64 个放置记录中的指定项。
+/// 掩码只影响几何体写入，完整 props 仍会返回给碰撞与派生 Actor 使用。
+#[no_mangle]
+pub extern "C" fn build_chunk_masked(
+    chunk_x: i32,
+    chunk_z: i32,
+    skip_low: u32,
+    skip_high: u32,
+) -> i32 {
     {
         let current = state();
         current.fill_count = 0;
@@ -235,6 +247,14 @@ pub extern "C" fn build_chunk(chunk_x: i32, chunk_z: i32) -> i32 {
 
     let count = state().prop_count as usize;
     for index in 0..count {
+        let skipped = if index < 32 {
+            ((skip_low >> index) & 1) != 0
+        } else {
+            ((skip_high >> (index - 32)) & 1) != 0
+        };
+        if skipped {
+            continue;
+        }
         // 先把这条记录读进局部变量，再调用 emit_template，
         // 避免同时持有两份指向全局状态的可变引用。
         let (kind, x, z, rotation, scale) = {

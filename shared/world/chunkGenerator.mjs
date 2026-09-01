@@ -13,6 +13,7 @@
 import { PROP_KIND_COUNT } from './worldConfig.mjs';
 import { PROP_BUFFER_LENGTH, PROP_FIELD, PROP_STRIDE, generateChunkProps } from './chunkContent.mjs';
 import { CHUNK_SIZE } from './worldConfig.mjs';
+import { isPropSkipped } from './generatedTree.mjs';
 
 /** 地面铺块的模板下标，排在三种物件之后。与 Rust 侧的常量一致。 */
 export const GROUND_TEMPLATE_INDEX = PROP_KIND_COUNT;
@@ -56,7 +57,7 @@ export const TEMPLATE_FILL_STRIDE = 9;
  * @property {'wasm' | 'javascript'} kind
  * @property {(seed: number) => void} setSeed
  * @property {(index: number, template: ChunkTemplate) => void} registerTemplate
- * @property {(chunkX: number, chunkZ: number) => ChunkGeometryData} buildChunk
+ * @property {(chunkX: number, chunkZ: number, skipMask?: import('./generatedTree.mjs').PropSkipMask) => ChunkGeometryData} buildChunk
  */
 
 /**
@@ -150,7 +151,7 @@ export function createJavaScriptChunkGenerator() {
       templates[index] = template;
     },
 
-    buildChunk(chunkX, chunkZ) {
+    buildChunk(chunkX, chunkZ, skipMask) {
       fillCount = 0;
       lineCount = 0;
       const propCount = generateChunkProps(seed, chunkX, chunkZ, props);
@@ -165,6 +166,7 @@ export function createJavaScriptChunkGenerator() {
       );
 
       for (let index = 0; index < propCount; index += 1) {
+        if (isPropSkipped(index, skipMask)) continue;
         const offset = index * PROP_STRIDE;
         const filled = emitTemplate(
           props[offset + PROP_FIELD.KIND],

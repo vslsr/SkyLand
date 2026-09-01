@@ -81,8 +81,11 @@ export function createWasmChunkGenerator(instance) {
       }
     },
 
-    buildChunk(chunkX, chunkZ) {
-      if (exports.build_chunk(chunkX, chunkZ) !== 0) {
+    buildChunk(chunkX, chunkZ, skipMask) {
+      const status = skipMask
+        ? exports.build_chunk_masked(chunkX, chunkZ, skipMask.low >>> 0, skipMask.high >>> 0)
+        : exports.build_chunk(chunkX, chunkZ);
+      if (status !== 0) {
         throw new Error(`chunk ${chunkX}:${chunkZ} 的顶点数超出 chunkgen.wasm 的缓冲区上限`);
       }
 

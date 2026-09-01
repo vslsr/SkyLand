@@ -9,6 +9,7 @@ export class ActorWorld {
     this.componentIndex = new Map();
     this.queryCache = new Map();
     this.actorListCache = undefined;
+    this.hierarchyRoots = new Set();
     this.systems = [];
     this.pendingMutations = [];
     this.updating = false;
@@ -59,6 +60,7 @@ export class ActorWorld {
     const parent = parentActorId ? this.getActor(parentActorId) : undefined;
     if (parentActorId && !parent) throw new Error(`不存在父 Actor：${parentActorId}`);
     const changed = actor.setParent(parent, options);
+    if (changed) this.rebuildHierarchyRoots();
     this.resolveTransforms();
     return changed;
   }
@@ -108,7 +110,7 @@ export class ActorWorld {
     }
   }
 
-  resolveTransforms() {
+  resolveTransforms(options = {}) {
     const visit = (actor, parentTransform) => {
       const transform = actor.getComponent('transform');
       if (transform) {
@@ -117,8 +119,11 @@ export class ActorWorld {
       }
       for (const child of actor.children) visit(child, transform ?? parentTransform);
     };
-    for (const actor of this.actorMap.values()) {
-      if (!actor.parent) visit(actor, undefined);
+    const roots = options.attachedOnly ? this.hierarchyRoots : this.actorMap.values();
+    for (const actor of roots) {
+      if (!actor.parent && (!options.attachedOnly || actor.childActors.size > 0)) {
+        visit(actor, undefined);
+      }
     }
   }
 
@@ -129,6 +134,7 @@ export class ActorWorld {
     this.componentIndex.clear();
     this.queryCache.clear();
     this.actorListCache = undefined;
+    this.hierarchyRoots.clear();
     for (const actor of actors) actor.dispose();
   }
 
@@ -143,6 +149,7 @@ export class ActorWorld {
     for (const componentType of actor.components.keys()) this.indexComponent(actor, componentType);
     this.invalidateActorCollections();
     actor.beginPlay(this);
+    if (!actor.parent && actor.childActors.size > 0) this.hierarchyRoots.add(actor);
   }
 
   removeActorNow(actorId, options) {
@@ -156,6 +163,7 @@ export class ActorWorld {
       this.actorMap.delete(actor.id);
       this.invalidateActorCollections();
       actor.dispose();
+      this.rebuildHierarchyRoots();
       return true;
     }
     const subtree = [];
@@ -170,6 +178,7 @@ export class ActorWorld {
     }
     this.invalidateActorCollections();
     for (const current of subtree) current.dispose();
+    this.rebuildHierarchyRoots();
     return true;
   }
 
@@ -206,5 +215,12 @@ export class ActorWorld {
   invalidateActorCollections() {
     this.actorListCache = undefined;
     this.queryCache.clear();
+  }
+
+  rebuildHierarchyRoots() {
+    this.hierarchyRoots.clear();
+    for (const actor of this.actorMap.values()) {
+      if (!actor.parent && actor.childActors.size > 0) this.hierarchyRoots.add(actor);
+    }
   }
 }

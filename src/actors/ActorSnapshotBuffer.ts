@@ -14,12 +14,12 @@ function blendNumber(from: number, to: number, amount: number): number {
 function blendActor(from: SnapshotActor, to: SnapshotActor, amount: number): SnapshotActor {
   return {
     ...to,
-    transform: {
+    ...(from.transform && to.transform ? { transform: {
       x: blendNumber(from.transform.x, to.transform.x, amount),
       y: blendNumber(from.transform.y, to.transform.y, amount),
       z: blendNumber(from.transform.z, to.transform.z, amount),
       yaw: lerpAngle(from.transform.yaw, to.transform.yaw, amount),
-    },
+    } } : {}),
     // parentActorId 与 localTransform 都是离散复制状态，保留 `to` 的值；
     // 画面只对服务端已经解算好的最终世界 transform 插值。
     ...(from.vessel && to.vessel ? {
