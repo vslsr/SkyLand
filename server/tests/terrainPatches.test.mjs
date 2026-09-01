@@ -112,6 +112,22 @@ test('孤立深坑保持干燥，只有低于海平面且四邻域接水时才�
   assert.equal(preservedBed.waterDepth, 0);
 });
 
+test('显式注水会原子降低过高河床并形成可见水深', () => {
+  const seaLevel = -0.4;
+  const patches = new TerrainPatchStore(DEFAULT_WORLD_SEED);
+  const editor = new TerrainEditor(patches, { seaLevel });
+  const before = editor.readCell(0, 0);
+  assert.equal(before.surface, TERRAIN_SURFACE.GROUND);
+  assert.equal(before.waterDepth, 0);
+
+  assert.equal(editor.flood(0, 0), true);
+  const flooded = editor.readCell(0, 0);
+  assert.equal(flooded.surface, TERRAIN_SURFACE.WATER);
+  assert.ok(flooded.bedY < seaLevel);
+  assert.ok(flooded.waterDepth > 0);
+  assert.equal(patches.size, 1, '注水的河床与 surface 应由同一个 patch 原子保存');
+});
+
 test('稀疏编辑器抬高、下挖和四向斜坡都只改目标字段', () => {
   const patches = new TerrainPatchStore(DEFAULT_WORLD_SEED);
   const editor = new TerrainEditor(patches, { seaLevel: -0.4 });

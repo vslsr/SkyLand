@@ -571,7 +571,7 @@ export class ServerScene {
       case 'raise': return this.terrainEditor.raise(cellX, cellZ, 1);
       case 'lower': return this.terrainEditor.lower(cellX, cellZ, 1);
       case 'flatten': return this.terrainEditor.flatten(cellX, cellZ);
-      case 'water': return this.terrainEditor.setSurface(cellX, cellZ, TERRAIN_SURFACE.WATER);
+      case 'water': return this.terrainEditor.flood(cellX, cellZ);
       case 'ground': return this.terrainEditor.setSurface(cellX, cellZ, TERRAIN_SURFACE.GROUND);
       case 'reset': return this.terrainEditor.reset(cellX, cellZ);
       default: return false;

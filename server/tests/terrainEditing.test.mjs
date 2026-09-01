@@ -126,6 +126,30 @@ test('够不到的格子改不动', async () => {
   assert.equal(scene.terrainPatches.size, 0);
 });
 
+test('注水编辑会产生真实水深而不是只有变暗的干河床', async () => {
+  const { scene } = await createScene();
+  const cell = nearbyGroundCell(scene);
+  assert.ok(cell);
+  const { centerX, centerZ } = standNextTo(scene, cell.cellX, cell.cellZ);
+
+  const changed = scene.editTerrain('builder', {
+    sequence: 1,
+    cellX: cell.cellX,
+    cellZ: cell.cellZ,
+    operation: 'water',
+  });
+
+  assert.equal(changed.length, 1);
+  const flooded = scene.terrainEditor.readCell(cell.cellX, cell.cellZ);
+  assert.equal(flooded.surface, TERRAIN_SURFACE.WATER);
+  assert.ok(flooded.waterDepth > 0);
+  assert.ok(flooded.bedY < scene.actorWorld.context.seaLevel);
+  assert.equal(
+    sampleTerrain(SEED, centerX, centerZ, {}, scene.terrainCellCodeAt).surface,
+    TERRAIN_SURFACE.WATER,
+  );
+});
+
 test('重放的序号不生效，未知操作也不生效', async () => {
   const { scene } = await createScene();
   const cell = nearbyGroundCell(scene);

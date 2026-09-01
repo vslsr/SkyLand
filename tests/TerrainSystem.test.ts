@@ -367,11 +367,9 @@ test('TerrainWorld 射线、斜坡采样与浮力高度保持一致', () => {
 
 test('TerrainWorld 的稀疏编辑会同时驱动采样与 chunk 水面几何，并可恢复默认值', () => {
   const world = new TerrainWorld(SEED, -0.4);
-  assert.equal(world.editor.lower(0, 0), true);
+  assert.equal(world.editor.flood(0, 0), true);
   assert.equal(world.patches.size, 1);
   assert.equal(world.sampleGroundHeight(1, 1), -1);
-  assert.equal(world.sampleWaterDepth(1, 1), 0, '远离水域的深坑不能自动积水');
-  assert.equal(world.editor.setSurface(0, 0, TERRAIN_SURFACE.WATER), true);
   assert.ok(Math.abs(world.sampleWaterDepth(1, 1) - 0.6) < 1e-6);
 
   const terrain = createTerrainChunkGeometry({

@@ -182,6 +182,27 @@ export class TerrainEditor {
     return this.setCell(globalCellX, globalCellZ, { surface });
   }
 
+  /**
+   * 显式注水必须形成真实水深。只切换 WATER 标志而保留海平面以上的地面，
+   * 会得到一格变暗的“干河床”且不会生成水面；这里原子地降到最近可见水层。
+   */
+  flood(globalCellX, globalCellZ) {
+    requireInteger(globalCellX, 'globalCellX');
+    requireInteger(globalCellZ, 'globalCellZ');
+    const previous = this.patches.cellCodeAt(globalCellX, globalCellZ);
+    const shape = terrainCellShape(previous);
+    let heightLevel = terrainCellHeightLevel(previous);
+    let code = encodeTerrainCell(heightLevel, TERRAIN_SURFACE.WATER, shape);
+    while (
+      !terrainCellHasWater(code, this.seaLevel)
+      && heightLevel > MINIMUM_HEIGHT_LEVEL
+    ) {
+      heightLevel -= 1;
+      code = encodeTerrainCell(heightLevel, TERRAIN_SURFACE.WATER, shape);
+    }
+    return this.patches.setCellCode(globalCellX, globalCellZ, code);
+  }
+
   setShape(globalCellX, globalCellZ, shape) {
     return this.setCell(globalCellX, globalCellZ, { shape });
   }
