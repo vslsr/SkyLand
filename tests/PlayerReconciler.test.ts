@@ -59,6 +59,27 @@ test('正常范围内的误差被平滑地拉回而不是瞬移', () => {
   assert.ok(Math.abs(target.position.x - 0.5) < 0.001, '最终收敛到服务器位置');
 });
 
+test('跳跃 Y 与水平位置使用同一输入序号平滑和解', () => {
+  const reconciler = new PlayerReconciler();
+  const state = { x: 0, y: 0.8, z: 0 };
+  const target: ReconcilerTarget = {
+    get position() { return state; },
+    get verticalPosition() { return state.y; },
+    setPosition(x, z) { state.x = x; state.z = z; },
+    setVerticalPosition(y) { state.y = y; },
+    translate(x, z) { state.x += x; state.z += z; },
+    translateVertical(y) { state.y += y; },
+  };
+  reconciler.recordPrediction(1, 0, 0, 0.8);
+  reconciler.acceptAuthoritative(1, 0.2, 0, target, 1.1);
+  reconciler.update(1 / 60, target);
+  assert.ok(state.x > 0 && state.x < 0.2);
+  assert.ok(state.y > 0.8 && state.y < 1.1);
+  settle(reconciler, target);
+  assert.ok(Math.abs(state.x - 0.2) < 0.001);
+  assert.ok(Math.abs(state.y - 1.1) < 0.001);
+});
+
 test('误差过大时直接瞬移到服务器位置', () => {
   const reconciler = new PlayerReconciler();
   const target = createTarget(0, 0);

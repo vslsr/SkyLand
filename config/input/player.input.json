@@ -21,6 +21,11 @@
       "trigger": { "type": "pressed" }
     },
     {
+      "id": "IA_Player_Jump",
+      "valueType": "digital",
+      "trigger": { "type": "pressed" }
+    },
+    {
       "id": "IA_Player_Primary",
       "valueType": "digital",
       "trigger": { "type": "pressed" }
@@ -76,6 +81,7 @@
       { "tag": "Input.Player.Move", "actionId": "IA_Player_Move" },
       { "tag": "Input.Vessel.Move", "actionId": "IA_Vessel_Move" },
       { "tag": "Input.Player.Sprint", "actionId": "IA_Player_Sprint" },
+      { "tag": "Input.Player.Jump", "actionId": "IA_Player_Jump" },
       { "tag": "Input.Player.Primary", "actionId": "IA_Player_Primary" },
       { "tag": "Input.Player.Interact", "actionId": "IA_Player_Interact" },
       { "tag": "Input.World.Interact", "actionId": "IA_World_Interact" },
@@ -115,6 +121,8 @@
         { "id": "Sprint.Touch.Button", "deviceKind": "touch", "control": "Virtual.SprintButton", "actionId": "IA_Player_Sprint" },
         { "id": "Sprint.Gamepad.Button", "deviceKind": "gamepad", "control": "Gamepad.LeftStickButton", "actionId": "IA_Player_Sprint" },
 
+        { "id": "Jump.Keyboard.Primary", "deviceKind": "keyboardMouse", "control": "Keyboard.Space", "actionId": "IA_Player_Jump" },
+
         { "id": "Primary.Mouse.Button", "deviceKind": "keyboardMouse", "control": "Mouse.Button0", "actionId": "IA_Player_Primary" },
         { "id": "Primary.Gamepad.Button", "deviceKind": "gamepad", "control": "Gamepad.ButtonSouth", "actionId": "IA_Player_Primary" },
         { "id": "Primary.Gamepad.Trigger", "deviceKind": "gamepad", "control": "Gamepad.RightTrigger", "actionId": "IA_Player_Primary" },
@@ -129,7 +137,6 @@
         { "id": "AbilityLab.Keyboard.Rage", "deviceKind": "keyboardMouse", "control": "Keyboard.Digit3", "actionId": "IA_AbilityLab_Rage" },
         { "id": "AbilityLab.Keyboard.Silence", "deviceKind": "keyboardMouse", "control": "Keyboard.Digit4", "actionId": "IA_AbilityLab_Silence" },
         { "id": "AbilityLab.Keyboard.Reset", "deviceKind": "keyboardMouse", "control": "Keyboard.Digit0", "actionId": "IA_AbilityLab_Reset" },
-        { "id": "Dodge.Keyboard.Primary", "deviceKind": "keyboardMouse", "control": "Keyboard.Space", "actionId": "IA_Player_Dodge" },
         { "id": "Dodge.Touch.Button", "deviceKind": "touch", "control": "Virtual.DodgeButton", "actionId": "IA_Player_Dodge" },
         { "id": "Dodge.Gamepad.Button", "deviceKind": "gamepad", "control": "Gamepad.ButtonEast", "actionId": "IA_Player_Dodge" }
       ]
@@ -162,6 +169,7 @@
       "Keyboard.Digit4": "4",
       "Keyboard.F8": "F8",
       "Keyboard.ShiftLeft": "Shift",
+      "Keyboard.Space": "Space",
       "Mouse.Button0": "鼠标左键",
       "Virtual.MoveStick": "触摸摇杆",
       "Virtual.SprintButton": "RUN",
@@ -190,7 +198,8 @@
         "entries": [
           { "label": "移动", "mappingIds": ["Move.Keyboard.Up", "Move.Keyboard.Left", "Move.Keyboard.Down", "Move.Keyboard.Right"], "joinWith": "/" },
           { "label": "朝向", "text": "鼠标" },
-          { "label": "加速", "mappingIds": ["Sprint.Keyboard.Primary"] }
+          { "label": "加速", "mappingIds": ["Sprint.Keyboard.Primary"] },
+          { "label": "跳跃", "mappingIds": ["Jump.Keyboard.Primary"] }
         ]
       },
       {

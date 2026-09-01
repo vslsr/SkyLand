@@ -24,6 +24,7 @@ import {
   INTERACTABLE_COMPONENT,
   INVENTORY_COMPONENT,
   ITEM_STACK_COMPONENT,
+  sampleBuoyancyBobOffset,
   SIMPLE_COLLISION_COMPONENT,
   TRANSFORM_COMPONENT,
   VESSEL_MOTOR_COMPONENT,
@@ -127,6 +128,8 @@ export class ServerScene {
     this.terrainCellCodeAt = this.terrainPatches
       ? (globalCellX, globalCellZ) => this.terrainPatches.cellCodeAt(globalCellX, globalCellZ)
       : undefined;
+    this.fixedWaterWorld = definition.renderer?.content?.ocean === true
+      && definition.renderer?.content?.ground === false;
     this.now = options.now ?? (() => Date.now());
     this.players = new Map();
     this.weather = DEFAULT_WEATHER;
@@ -202,8 +205,14 @@ export class ServerScene {
       placed,
       this.now(),
     );
+    actor.setPosition(
+      actor.x,
+      actor.z,
+      this.playerVerticalHeightAt(actor, actor.x, actor.z, this.now() / 1000),
+    );
     this.actorWorld.addActor(actor);
     this.players.set(player.id, actor);
+    actor.syncWaterMovementEffect(this.isWaterAt(actor.x, actor.z));
   }
 
   removePlayer(playerId) {
@@ -537,20 +546,38 @@ export class ServerScene {
     player.yaw = normalizeAngle(toFiniteNumber(message?.yaw, player.yaw));
 
     const move = sanitizeMoveInput({ ...message?.move, sprint: message?.sprint === true });
-    const next = applyPlayerMovement(
+    player.jump.setPressed(message?.jump === true);
+    player.syncWaterMovementEffect(
+      player.jump.grounded && this.isWaterAt(player.x, player.z),
+    );
+    const nextHorizontal = applyPlayerMovement(
       { x: player.x, z: player.z },
       move,
       granted,
       this.bounds,
-      player.movement,
+      player.movementForSimulation,
     );
+    const next = {
+      ...nextHorizontal,
+      y: player.jump.integrate(player.y, granted),
+    };
     // 玩家可能刚加入或刚跨过边界，先确认脚下这一片的静态碰撞体已经就位，
     // 否则这一步会从树里穿过去，再被下一个 tick 拉回来。
     this.chunkColliders.ensureAround(next.x, next.z);
     this.generatedProps.ensureAround(next.x, next.z);
     const resolved = this.resolvePlayerMovement(player, next);
     const distance = Math.hypot(resolved.x - player.x, resolved.z - player.z);
-    player.setPosition(resolved.x, resolved.z, resolved.y);
+    const supportY = this.playerSupportHeightAt(
+      player,
+      resolved.x,
+      resolved.z,
+      this.now() / 1000,
+    );
+    const finalY = player.jump.resolveGround(resolved.y, supportY);
+    player.setPosition(resolved.x, resolved.z, finalY);
+    player.syncWaterMovementEffect(
+      player.jump.grounded && this.isWaterAt(player.x, player.z),
+    );
     player.speed = granted > 0 ? distance / granted : 0;
     player.lastInputAt = this.now();
   }
@@ -572,24 +599,49 @@ export class ServerScene {
   resolvePlayerMovement(player, target) {
     let candidate = clampToPlayArea(target, this.bounds);
     const buoyancy = player.getComponent(BUOYANCY_COMPONENT);
+    const targetY = Number.isFinite(target.y) ? target.y : player.y;
+    const supportY = this.playerSupportHeightAt(
+      player,
+      player.x,
+      player.z,
+      this.now() / 1000,
+    );
+    const terrainStepHeight = player.jump.traversableStepHeight(
+      player.movement.maximumStepHeight,
+      supportY,
+      targetY,
+    );
     for (let iteration = 0; iteration < 4; iteration += 1) {
       const terrainPosition = this.terrainEnabled
         ? resolveTerrainMovement(this.worldSeed, player, candidate, {
             radius: player.collisionRadius,
-            maximumStepHeight: player.movement.maximumStepHeight,
+            maximumStepHeight: terrainStepHeight,
             waterLevel: this.actorWorld.context.seaLevel,
             buoyancyDraft: buoyancy?.draft,
             cellCodeAt: this.terrainCellCodeAt,
           })
         : { ...candidate, y: player.y };
+      const verticalPosition = {
+        ...terrainPosition,
+        y: player.jump.isAirborne
+          ? targetY
+          : this.playerSupportHeightAt(
+              player,
+              terrainPosition.x,
+              terrainPosition.z,
+              this.now() / 1000,
+            ),
+      };
       const objectPosition = this.collision.resolveCircle(
-        terrainPosition,
+        verticalPosition,
         player.collisionRadius,
         {
           verticalProfile: {
-            minimumY: terrainPosition.y,
-            maximumY: terrainPosition.y + player.collisionHeight,
-            maximumStepHeight: player.movement.maximumStepHeight,
+            minimumY: verticalPosition.y,
+            maximumY: verticalPosition.y + player.collisionHeight,
+            maximumStepHeight: player.jump.isAirborne
+              ? 0
+              : player.movement.maximumStepHeight,
           },
         },
       );
@@ -597,10 +649,58 @@ export class ServerScene {
       if (Math.hypot(
         boundedObject.x - terrainPosition.x,
         boundedObject.z - terrainPosition.z,
-      ) <= 1e-7) return terrainPosition;
+      ) <= 1e-7) return verticalPosition;
       candidate = boundedObject;
     }
-    return { x: player.x, y: player.y, z: player.z };
+    return { x: player.x, y: player.jump.isAirborne ? targetY : player.y, z: player.z };
+  }
+
+  isWaterAt(x, z) {
+    if (this.fixedWaterWorld) return true;
+    return this.terrainEnabled
+      && sampleTerrain(this.worldSeed, x, z, {}, this.terrainCellCodeAt).surface
+        === TERRAIN_SURFACE.WATER;
+  }
+
+  /**
+   * 玩家权威 Y：地面/海床支撑先由共享地形决定，水中再叠加有界解析浮动。
+   * 每名玩家每 tick 只采样一次，成本与在线玩家数成正比，不扫描水面或 chunk。
+   */
+  playerVerticalHeightAt(player, x, z, timeSeconds) {
+    if (player.jump?.isAirborne) return player.y;
+    return this.playerSupportHeightAt(player, x, z, timeSeconds);
+  }
+
+  playerSupportHeightAt(player, x, z, timeSeconds) {
+    const buoyancy = player.getComponent(BUOYANCY_COMPONENT);
+    const water = Boolean(buoyancy) && this.isWaterAt(x, z);
+    if (this.terrainEnabled) {
+      const terrain = sampleTerrain(this.worldSeed, x, z, {}, this.terrainCellCodeAt);
+      const support = terrainMovementHeight(
+        terrain,
+        this.actorWorld.context.seaLevel,
+        buoyancy?.draft,
+      );
+      if (!water || !buoyancy) return support;
+      return Math.max(
+        terrain.groundY,
+        support + sampleBuoyancyBobOffset(
+          player.id,
+          timeSeconds,
+          buoyancy.bobAmplitude,
+          buoyancy.bobFrequency,
+        ),
+      );
+    }
+    if (!water || !buoyancy) return 0;
+    return this.actorWorld.context.seaLevel
+      - buoyancy.draft
+      + sampleBuoyancyBobOffset(
+        player.id,
+        timeSeconds,
+        buoyancy.bobAmplitude,
+        buoyancy.bobFrequency,
+      );
   }
 
   /** 按真实经过的时间补充每名玩家的模拟时间预算。 */
@@ -616,6 +716,13 @@ export class ServerScene {
         player.timeBudget + elapsedSeconds,
       );
       if (now - player.lastInputAt > MOVEMENT_IDLE_TIMEOUT_MS) player.speed = 0;
+      if (!player.jump?.isAirborne) {
+        player.setPosition(
+          player.x,
+          player.z,
+          this.playerVerticalHeightAt(player, player.x, player.z, now / 1000),
+        );
+      }
     }
     // Actor 的碰撞盒由 ActorColliderIndex 在 tick 内同步，这里不用再管。
     this.actorWorld.update(elapsedSeconds, now / 1000);
@@ -712,10 +819,13 @@ export class ServerScene {
         id: player.id,
         name: player.name,
         x: roundCoordinate(player.x),
+        y: roundCoordinate(player.y),
         z: roundCoordinate(player.z),
         yaw: roundCoordinate(player.yaw),
         speed: roundCoordinate(player.speed),
         sequence: player.sequence,
+        verticalVelocity: roundCoordinate(player.jump.verticalVelocity),
+        grounded: player.jump.grounded,
         inventory: player.requireComponent(INVENTORY_COMPONENT).snapshot(),
         inventoryRevision: player.requireComponent(INVENTORY_COMPONENT).revision,
       })),

@@ -30,6 +30,7 @@ import {
   LifetimeComponent,
   PLAYER_MOVEMENT_COMPONENT,
   PlayerMovementComponent,
+  PlayerJumpComponent,
   REPLICATION_POLICY_COMPONENT,
   ReplicationPolicyComponent,
   REPLICATED_COMPONENT,
@@ -46,6 +47,7 @@ import { createSimpleCollisionFromRender } from '../../shared/actor/simpleCollis
 import { ActorColliderIndex } from './ActorColliderIndex.mjs';
 import { ActorSimpleCollisionSystem } from './ActorSimpleCollisionSystem.mjs';
 import { BuoyancySystem } from './BuoyancySystem.mjs';
+import { GameAbilitySystem } from '../../shared/abilities/index.mjs';
 import { VesselHazardSystem } from './VesselHazardSystem.mjs';
 import { VesselMotorSystem } from './VesselMotorSystem.mjs';
 import { ElasticTetherSystem } from './ElasticTetherSystem.mjs';
@@ -58,6 +60,7 @@ export function createServerActor(spawn, archetype, runtime = {}) {
   actor.addComponent(new TransformComponent(spawn.localTransform));
   if (archetype.components.buoyancy) actor.addComponent(new BuoyancyComponent(archetype.components.buoyancy));
   if (archetype.components.playerMovement) actor.addComponent(new PlayerMovementComponent(archetype.components.playerMovement));
+  if (archetype.components.playerJump) actor.addComponent(new PlayerJumpComponent(archetype.components.playerJump));
   if (archetype.components.vesselMotor) {
     actor.addComponent(new VesselMotorComponent(archetype.components.vesselMotor));
     actor.addComponent(new ActorControlComponent());
@@ -132,6 +135,7 @@ export function createServerActorWorld(sceneDefinition, options = {}) {
   // 碰撞索引在「Actor 已经移动完」和「tick 结束」两个位置各跑一次，
   // 见 ActorColliderIndex 的说明。
   const colliderIndex = new ActorColliderIndex();
+  world.addSystem(new GameAbilitySystem());
   world.addSystem(new BuoyancySystem());
   world.addSystem(new VesselMotorSystem());
   world.addSystem(colliderIndex);

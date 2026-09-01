@@ -20,7 +20,10 @@ import type { FillMaterialEnvironment } from '../materials/createFillMaterial';
 import { createOceanMaterials, type OceanMaterials } from '../materials/oceanMaterials';
 import { createWaterSplashMaterial } from '../materials/createWaterSplashMaterial';
 import { OUTLINE_MATERIAL, GROUND_GRID_MATERIAL } from '../materials/lineMaterials';
-import { createChunkFillMaterial } from '../models/chunkMesh';
+import {
+  createChunkFillMaterial,
+  createChunkGroundFillMaterial,
+} from '../models/chunkMesh';
 import { registerChunkTemplates, type ChunkTemplateOptions } from '../models/chunkTemplates';
 import type { SceneUpdateContext, SceneVisualSystem } from '../scene/SceneVisualSystem';
 import type {
@@ -84,6 +87,7 @@ export class ChunkStreamer implements SceneVisualSystem {
   private readonly world: WorldStreamingDefinition;
   private readonly views = new Map<string, ChunkView>();
   private readonly fillMaterial: THREE.Material;
+  private readonly groundFillMaterial: THREE.Material;
   private readonly waterMaterials?: OceanMaterials;
   private readonly waterShoreMaterial?: THREE.ShaderMaterial;
   private readonly waterSplashMaterial?: THREE.ShaderMaterial;
@@ -130,6 +134,7 @@ export class ChunkStreamer implements SceneVisualSystem {
       }
     });
     this.fillMaterial = createChunkFillMaterial(options.environment);
+    this.groundFillMaterial = createChunkGroundFillMaterial(options.environment);
     if (options.ocean) {
       this.waterMaterials = createOceanMaterials(
         options.ocean,
@@ -259,6 +264,7 @@ export class ChunkStreamer implements SceneVisualSystem {
     this.waterSplashMaterial?.dispose();
     this.unsubscribeTerrainPatches();
     this.fillMaterial.dispose();
+    this.groundFillMaterial.dispose();
     this.skipMasks.clear();
     this.generator = undefined;
   }
@@ -291,6 +297,7 @@ export class ChunkStreamer implements SceneVisualSystem {
         data,
         {
           fill: this.fillMaterial,
+          groundFill: this.groundFillMaterial,
           outline: OUTLINE_MATERIAL,
           grid: GROUND_GRID_MATERIAL,
           water: this.waterMaterials,

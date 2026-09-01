@@ -5,10 +5,14 @@ export interface SnapshotPlayer {
   id: string;
   name: string;
   x: number;
+  /** 服务端权威浮力/地形高度；旧快照缺省时客户端仍可回退本地地形采样。 */
+  y?: number;
   z: number;
   yaw: number;
   speed: number;
   sequence: number;
+  verticalVelocity?: number;
+  grounded?: boolean;
   inventory?: Array<{ itemType: string; quantity: number }>;
   inventoryRevision?: number;
 }
@@ -118,6 +122,7 @@ export interface RoomSnapshot {
 export interface PlayerInputFrame {
   move: { x: number; z: number };
   sprint: boolean;
+  jump?: boolean;
   yaw: number;
 }
 
@@ -126,7 +131,10 @@ export interface InterpolatedPlayerState {
   id: string;
   name: string;
   x: number;
+  y?: number;
   z: number;
   yaw: number;
   speed: number;
+  verticalVelocity?: number;
+  grounded?: boolean;
 }

@@ -157,6 +157,7 @@ export class RoomClient {
       deltaSeconds,
       move: input.move,
       sprint: input.sprint,
+      jump: input.jump,
       yaw: input.yaw,
     }, 'realtime');
     if (!sent) return undefined;

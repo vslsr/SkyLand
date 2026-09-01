@@ -154,6 +154,46 @@ test('非法数值不会污染权威状态', () => {
   assert.ok(Number.isFinite(player.yaw));
 });
 
+test('房间权威跳跃同步 Y，空中仍按 airControl 接受方向输入并最终落地', () => {
+  const clock = createClock();
+  const scene = new ServerScene('grassland', { now: clock.now });
+  scene.addPlayer({ id: 'jump-player', name: '弹跳史莱姆', slot: 0 });
+  const before = scene.createSnapshot().players[0];
+
+  scene.applyInput('jump-player', {
+    sequence: 1,
+    deltaSeconds: 0.05,
+    move: { x: 1, z: 0 },
+    sprint: false,
+    jump: true,
+  });
+  const airborne = scene.createSnapshot().players[0];
+  assert.equal(airborne.grounded, false);
+  assert.ok(airborne.verticalVelocity > 0);
+  assert.ok(airborne.y > before.y);
+  assert.ok(airborne.x > before.x, '空中方向键仍应产生水平位移');
+  assert.ok(
+    airborne.x - before.x < PLAYER_MOVE_SPEED * 0.05,
+    '空中水平位移应应用 Actor 配置的 airControl',
+  );
+
+  for (let sequence = 2; sequence <= 30; sequence += 1) {
+    clock.advance(0.05);
+    scene.update();
+    scene.applyInput('jump-player', {
+      sequence,
+      deltaSeconds: 0.05,
+      move: { x: 0, z: 0 },
+      jump: false,
+    });
+    if (scene.createSnapshot().players[0].grounded) break;
+  }
+  const landed = scene.createSnapshot().players[0];
+  assert.equal(landed.grounded, true);
+  assert.equal(landed.verticalVelocity, 0);
+  assert.ok(Math.abs(landed.y - before.y) < 0.001);
+});
+
 test('房间服务端校验天气枚举并通过快照同步当前天气', () => {
   const scene = new ServerScene('grassland');
   scene.addPlayer({ id: 'player-1', name: '旅人', slot: 0 });

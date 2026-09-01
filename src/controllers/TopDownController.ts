@@ -21,6 +21,12 @@ import {
 import type { PlayerInputFrame } from '../network/protocol';
 import type { SceneBounds } from '../scenes/data/SceneDefinition';
 import type * as THREE from 'three';
+import type { PlayerJumpComponent } from '../../shared/actor/index.mjs';
+
+export interface PlayerCollisionMotion {
+  minimumY: number;
+  airborne: boolean;
+}
 
 export interface TopDownControllerOptions {
   enabled?: boolean;
@@ -29,10 +35,16 @@ export interface TopDownControllerOptions {
   bounds?: SceneBounds;
   collisionRadius?: number;
   movement?: { walkSpeed: number; sprintMultiplier: number };
+  jumpAbility?: PlayerJumpComponent;
+  /** 在本帧读取 GAS 移动属性前同步环境 GameplayEffect。 */
+  updateMovementState?: () => void;
+  /** 返回 GAS Movement.Speed 的 CurrentValue。 */
+  resolveWalkSpeed?: () => number;
   resolveCollision?: (
     position: { x: number; z: number },
     radius: number,
     from: { x: number; z: number },
+    motion: PlayerCollisionMotion,
   ) => { x: number; y?: number; z: number };
   sampleGroundHeight?: (x: number, z: number) => number;
   raycastGround?: (
@@ -61,6 +73,9 @@ export class TopDownController {
   private readonly bounds: SceneBounds;
   private readonly collisionRadius: number;
   private readonly movement: { walkSpeed: number; sprintMultiplier: number };
+  private readonly jumpAbility?: PlayerJumpComponent;
+  private readonly updateMovementState?: TopDownControllerOptions['updateMovementState'];
+  private readonly resolveWalkSpeed?: TopDownControllerOptions['resolveWalkSpeed'];
   private readonly resolveCollision?: TopDownControllerOptions['resolveCollision'];
   private readonly sampleGroundHeight?: TopDownControllerOptions['sampleGroundHeight'];
   private readonly raycastGround?: TopDownControllerOptions['raycastGround'];
@@ -76,6 +91,8 @@ export class TopDownController {
   private pendingCollisionDisplacementX = 0;
   private pendingCollisionDisplacementZ = 0;
   private sprinting = false;
+  private jumpHeld = false;
+  private jumpRequestPending = false;
   private mouseFacingActive = false;
   private mouseFacingSuppressed = false;
 
@@ -95,6 +112,9 @@ export class TopDownController {
       walkSpeed: PLAYER_MOVE_SPEED,
       sprintMultiplier: PLAYER_SPRINT_MULTIPLIER,
     };
+    this.jumpAbility = options.jumpAbility;
+    this.updateMovementState = options.updateMovementState;
+    this.resolveWalkSpeed = options.resolveWalkSpeed;
     this.resolveCollision = options.resolveCollision;
     this.sampleGroundHeight = options.sampleGroundHeight;
     this.raycastGround = options.raycastGround;
@@ -148,6 +168,18 @@ export class TopDownController {
     return { x: this.player.position.x, z: this.player.position.z };
   }
 
+  public get verticalPosition(): number {
+    return this.player.position.y;
+  }
+
+  public get verticalVelocity(): number {
+    return this.jumpAbility?.verticalVelocity ?? 0;
+  }
+
+  public get isGrounded(): boolean {
+    return this.jumpAbility?.grounded ?? true;
+  }
+
   /**
    * 返回自上次读取后被场景碰撞阻挡的位移。它只用于客户端表现冲击，读取后清零；
    * 权威位置仍完全由现有移动、碰撞和服务器和解路径决定。
@@ -165,8 +197,14 @@ export class TopDownController {
     return {
       move: { x: this.moveX, z: this.moveZ },
       sprint: this.sprinting,
+      jump: this.jumpHeld || this.jumpRequestPending,
       yaw: normalizeAngle(this.facingYaw),
     };
+  }
+
+  /** 输入包成功发出后清除短按锁存；仍按住 Space 时 jump 会继续保持 true。 */
+  public acknowledgeInputFrame(): void {
+    this.jumpRequestPending = false;
   }
 
   public setInputEnabled(enabled: boolean): void {
@@ -178,6 +216,9 @@ export class TopDownController {
       this.moveX = 0;
       this.moveZ = 0;
       this.sprinting = false;
+      this.jumpHeld = false;
+      this.jumpRequestPending = false;
+      this.jumpAbility?.setPressed(false);
       this.mouseFacingActive = false;
     }
   }
@@ -195,16 +236,29 @@ export class TopDownController {
       z: clampToRange(z, this.bounds.minimumZ, this.bounds.maximumZ),
     };
     const resolved: { x: number; y?: number; z: number } =
-      this.resolveCollision?.(bounded, this.collisionRadius, previous) ?? bounded;
+      this.resolveCollision?.(bounded, this.collisionRadius, previous, {
+        minimumY: this.player.position.y,
+        airborne: this.jumpAbility?.isAirborne ?? false,
+      }) ?? bounded;
     const finalX = clampToRange(resolved.x, this.bounds.minimumX, this.bounds.maximumX);
     const finalZ = clampToRange(resolved.z, this.bounds.minimumZ, this.bounds.maximumZ);
     this.pendingCollisionDisplacementX += bounded.x - finalX;
     this.pendingCollisionDisplacementZ += bounded.z - finalZ;
     this.player.position.x = finalX;
-    this.player.position.y = resolved.y
-      ?? this.sampleGroundHeight?.(finalX, finalZ)
-      ?? this.player.position.y;
+    if (!(this.jumpAbility?.isAirborne ?? false)) {
+      this.player.position.y = resolved.y
+        ?? this.sampleGroundHeight?.(finalX, finalZ)
+        ?? this.player.position.y;
+    }
     this.player.position.z = finalZ;
+  }
+
+  public setVerticalPosition(y: number): void {
+    if (Number.isFinite(y)) this.player.position.y = y;
+  }
+
+  public translateVertical(deltaY: number): void {
+    if (Number.isFinite(deltaY)) this.player.position.y += deltaY;
   }
 
   /** 表面拖拽命中玩家自身时暂停左键朝向，避免同一次手势同时旋转 Actor。 */
@@ -221,7 +275,14 @@ export class TopDownController {
     // 镜头必须先解算：即使输入被 UI 接管，角色仍可能被服务端和解拉着走，
     // 这时镜头照样要躲开挡在中间的树。
     this.updateCameraBoom(deltaSeconds);
+    this.updateVerticalMotion(deltaSeconds);
     if (!this.enabled) return;
+    this.updateMovementState?.();
+    const resolvedWalkSpeed = this.resolveWalkSpeed?.() ?? this.movement.walkSpeed;
+    const walkSpeed = Number.isFinite(resolvedWalkSpeed)
+      ? Math.max(0, resolvedWalkSpeed)
+      : this.movement.walkSpeed;
+    const controlledWalkSpeed = walkSpeed * (this.jumpAbility?.horizontalControlScale ?? 1);
 
     const localX = this.movementInput.x;
     const localY = this.movementInput.y;
@@ -246,10 +307,13 @@ export class TopDownController {
         { x: this.moveX, z: this.moveZ, sprint: this.sprinting },
         deltaSeconds,
         this.bounds,
-        this.movement,
+        {
+          walkSpeed: controlledWalkSpeed,
+          sprintMultiplier: this.movement.sprintMultiplier,
+        },
       );
       this.setPosition(next.x, next.z);
-      const speed = this.movement.walkSpeed
+      const speed = controlledWalkSpeed
         * (this.sprinting ? this.movement.sprintMultiplier : 1);
       this.currentSpeed += (speed - this.currentSpeed) * Math.min(1, deltaSeconds * 12);
     } else {
@@ -272,6 +336,22 @@ export class TopDownController {
     }
     this.facingYaw = normalizeAngle(this.facingYaw);
     this.player.rotation.y = this.facingYaw;
+    this.resolveLanding();
+  }
+
+  private updateVerticalMotion(deltaSeconds: number): void {
+    if (!this.jumpAbility) return;
+    this.player.position.y = this.jumpAbility.integrate(this.player.position.y, deltaSeconds);
+    this.resolveLanding();
+  }
+
+  private resolveLanding(): void {
+    if (!this.jumpAbility) return;
+    const groundY = this.sampleGroundHeight?.(
+      this.player.position.x,
+      this.player.position.z,
+    ) ?? 0;
+    this.player.position.y = this.jumpAbility.resolveGround(this.player.position.y, groundY);
   }
 
   /**
@@ -339,6 +419,7 @@ export class TopDownController {
     this.inputDisposers.push(
       input.bind(PlayerInputTags.Move, (event) => this.handleMoveInput(event)),
       input.bind(PlayerInputTags.Sprint, (event) => this.handleSprintInput(event)),
+      input.bind(PlayerInputTags.Jump, (event) => this.handleJumpInput(event)),
       input.bind(PlayerInputTags.Primary, (event) => this.handlePrimaryInput(event)),
     );
   }
@@ -367,6 +448,16 @@ export class TopDownController {
       && event.phase !== 'completed'
       && event.phase !== 'canceled'
       && event.value === true;
+  }
+
+  private handleJumpInput(event: InputActionEvent): void {
+    const active = this.enabled
+      && event.phase !== 'completed'
+      && event.phase !== 'canceled'
+      && event.value === true;
+    if (active && !this.jumpHeld) this.jumpRequestPending = true;
+    this.jumpHeld = active;
+    this.jumpAbility?.setPressed(active);
   }
 
   private handlePrimaryInput(event: InputActionEvent): void {

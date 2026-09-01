@@ -97,9 +97,12 @@ const FRAGMENT_SHADER = /* glsl */ `
     vec3 shadedColor = baseColor * uAmbientColor * softLight
       + uAmbientColor * 0.025 * upwardFacing;
 
-    float cameraDistance = distance(cameraPosition, vWorldPosition);
-    float fogFactor = smoothstep(uFogNear, uFogFar, cameraDistance);
-    vec3 finalColor = mix(shadedColor, uFogColor, fogFactor);
+    vec3 finalColor = shadedColor;
+    #ifdef USE_DISTANCE_FOG
+      float cameraDistance = distance(cameraPosition, vWorldPosition);
+      float fogFactor = smoothstep(uFogNear, uFogFar, cameraDistance);
+      finalColor = mix(shadedColor, uFogColor, fogFactor);
+    #endif
 
     gl_FragColor = vec4(finalColor, 1.0);
     #include <encodings_fragment>
@@ -114,6 +117,11 @@ export interface FillMaterialOptions {
    * 否则每换一种颜色就要多一次 draw call，合批也就白做了。
    */
   vertexTint?: boolean;
+  /**
+   * 是否把场景距离雾混入填充色。地表按参考项目保持纸面本色，应传 false；
+   * 普通物件默认仍参与远景雾化，用来遮住 chunk 流送边缘。
+   */
+  fog?: boolean;
 }
 
 export function createFillMaterial(
@@ -122,8 +130,11 @@ export function createFillMaterial(
   options: FillMaterialOptions = {},
 ): THREE.ShaderMaterial {
   const runtime = environment.runtime;
+  const defines: Record<string, string> = {};
+  if (options.vertexTint) defines.USE_VERTEX_TINT = '';
+  if (options.fog !== false) defines.USE_DISTANCE_FOG = '';
   return new THREE.ShaderMaterial({
-    defines: options.vertexTint ? { USE_VERTEX_TINT: '' } : {},
+    defines,
     vertexShader: VERTEX_SHADER,
     fragmentShader: FRAGMENT_SHADER,
     uniforms: {

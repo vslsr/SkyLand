@@ -1,0 +1,122 @@
+import assert from 'node:assert/strict';
+import test from 'node:test';
+import {
+  IN_WATER_STATE_TAG,
+  MOVE_SPEED_ATTRIBUTE,
+  WATER_MOVEMENT_EFFECT_ID,
+} from '../../shared/abilities/index.mjs';
+import { sampleBuoyancyBobOffset } from '../../shared/actor/buoyancyMotion.mjs';
+import {
+  terrainCellCodeAt,
+  terrainCellSurface,
+  sampleTerrain,
+} from '../../shared/world/terrainContent.mjs';
+import {
+  TERRAIN_CELL_SIZE,
+  TERRAIN_SURFACE,
+} from '../../shared/world/terrainConfig.mjs';
+import { DEFAULT_WORLD_SEED } from '../../shared/world/worldConfig.mjs';
+import { terrainMovementHeight } from '../../shared/world/terrainMovement.mjs';
+import { ServerScene } from '../scene/ServerScene.mjs';
+
+function findCell(surface) {
+  for (let z = -64; z < 64; z += 1) {
+    for (let x = -64; x < 64; x += 1) {
+      if (terrainCellSurface(terrainCellCodeAt(DEFAULT_WORLD_SEED, x, z)) === surface) {
+        return {
+          x: (x + 0.5) * TERRAIN_CELL_SIZE,
+          z: (z + 0.5) * TERRAIN_CELL_SIZE,
+        };
+      }
+    }
+  }
+  throw new Error(`没有找到测试地形表面：${surface}`);
+}
+
+function createDefinition(spawn) {
+  return {
+    id: 'player-water-gas-test',
+    renderer: { world: {} },
+    gameplay: {
+      bounds: { minimumX: -128, maximumX: 128, minimumZ: -128, maximumZ: 128 },
+      spawn: { centerX: spawn.x, centerZ: spawn.z, radius: 0, slots: 1 },
+      playerActor: { archetypeId: 'player-slime' },
+      water: { seaLevel: 0 },
+    },
+    actorArchetypes: [{
+      id: 'player-slime',
+      components: {
+        playerMovement: {
+          walkSpeed: 3.2,
+          sprintMultiplier: 1.65,
+          maximumStepHeight: 0.2,
+        },
+        buoyancy: {
+          minimumBeam: 0.84,
+          minimumLength: 0.84,
+          maximumTrimRadians: 0,
+          minimumDraft: 0.08,
+          maximumDraft: 0.28,
+          bobAmplitude: 0.3,
+          bobFrequency: 0.55,
+          parts: [
+            { id: 'body', mass: 40, buoyancy: 80, integrity: 1, localX: 0, localZ: 0 },
+          ],
+        },
+        render: { model: 'line-art-player-slime', radius: 0.42 },
+      },
+    }],
+  };
+}
+
+test('玩家进水时 GAS 减速，权威 Y 即使没有输入也按大振幅浮力持续上下变化', () => {
+  let now = 1_000_000;
+  const water = findCell(TERRAIN_SURFACE.WATER);
+  const ground = findCell(TERRAIN_SURFACE.GROUND);
+  const scene = new ServerScene(createDefinition(water), {
+    worldSeed: DEFAULT_WORLD_SEED,
+    now: () => now,
+  });
+  scene.addPlayer({ id: 'water-player', name: '涉水玩家', slot: 0 });
+
+  const player = scene.players.get('water-player');
+  const abilities = player.gameAbility.abilitySystem;
+  assert.equal(abilities.attributes.getBaseValue(MOVE_SPEED_ATTRIBUTE), 3.2);
+  assert.equal(abilities.attributes.getCurrentValue(MOVE_SPEED_ATTRIBUTE), 1.6);
+  assert.equal(abilities.hasTag(IN_WATER_STATE_TAG), true);
+  assert.deepEqual(
+    abilities.createSnapshot().effects.map((effect) => effect.effectId),
+    [WATER_MOVEMENT_EFFECT_ID],
+  );
+  const terrain = sampleTerrain(DEFAULT_WORLD_SEED, water.x, water.z);
+  const support = terrainMovementHeight(terrain, 0, player.getComponent('buoyancy').draft);
+  const expectedInitialY = Math.max(
+    terrain.groundY,
+    support + sampleBuoyancyBobOffset('water-player', now / 1000, 0.3, 0.55),
+  );
+  assert.ok(Math.abs(player.y - expectedInitialY) < 1e-9);
+  const initialY = player.y;
+  now += 400;
+  scene.update();
+  assert.ok(Math.abs(player.y - initialY) > 0.2, '±0.30m 浮动应该有明显的上下位移');
+  assert.equal(scene.createSnapshot('water-player').players[0].y, Math.round(player.y * 1000) / 1000);
+
+  const beforeX = player.x;
+  scene.applyInput(player.id, {
+    sequence: 1,
+    deltaSeconds: 0.05,
+    move: { x: 1, z: 0 },
+  });
+  assert.ok(Math.abs(player.x - beforeX - 1.6 * 0.05) < 1e-6);
+  assert.equal(abilities.createSnapshot().effects.length, 1, '水中连续输入不能重复堆叠效果');
+
+  player.setPosition(ground.x, ground.z);
+  scene.applyInput(player.id, {
+    sequence: 2,
+    deltaSeconds: 0,
+    move: { x: 0, z: 0 },
+  });
+  assert.equal(abilities.attributes.getCurrentValue(MOVE_SPEED_ATTRIBUTE), 3.2);
+  assert.equal(abilities.hasTag(IN_WATER_STATE_TAG), false);
+  assert.equal(abilities.createSnapshot().effects.length, 0);
+});

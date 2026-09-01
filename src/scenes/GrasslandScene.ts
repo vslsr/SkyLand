@@ -404,7 +404,14 @@ export class GrasslandScene extends Scene {
 
     // 自己的那条不走插值：直接交给和解，把预测拉回服务器的结论。
     const own = snapshot.players.find((player) => player.id === this.joinedRoom?.player.id);
-    if (own) this.player?.applyAuthoritativeState(own.sequence, own.x, own.z);
+    if (own) this.player?.applyAuthoritativeState(
+      own.sequence,
+      own.x,
+      own.z,
+      own.y,
+      own.verticalVelocity,
+      own.grounded,
+    );
   }
 
   private handleDisconnect(): void {
@@ -471,6 +478,9 @@ export class GrasslandScene extends Scene {
     const elapsed = this.timeSinceInputSent;
     this.timeSinceInputSent = 0;
     const sequence = this.roomClient.sendPlayerInput(this.player.controller.inputFrame, elapsed);
-    if (sequence !== undefined) this.player.recordPrediction(sequence);
+    if (sequence !== undefined) {
+      this.player.recordPrediction(sequence);
+      this.player.controller.acknowledgeInputFrame();
+    }
   }
 }

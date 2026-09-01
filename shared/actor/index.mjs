@@ -16,6 +16,7 @@ export {
   BuoyancyComponent,
   recalculateBuoyancyComponent,
 } from './components/BuoyancyComponent.mjs';
+export { sampleBuoyancyBobOffset } from './buoyancyMotion.mjs';
 export {
   CARGO_COMPONENT,
   CargoComponent,
@@ -72,6 +73,10 @@ export {
   PLAYER_MOVEMENT_COMPONENT,
   PlayerMovementComponent,
 } from './components/PlayerMovementComponent.mjs';
+export {
+  PLAYER_JUMP_COMPONENT,
+  PlayerJumpComponent,
+} from './components/PlayerJumpComponent.mjs';
 export {
   SIMPLE_COLLISION_COMPONENT,
   SimpleCollisionComponent,

@@ -35,6 +35,8 @@ export class BuoyancyComponent extends ActorComponent {
     this.maximumTrimRadians = definition.maximumTrimRadians;
     this.minimumDraft = definition.minimumDraft;
     this.maximumDraft = definition.maximumDraft;
+    this.bobAmplitude = Math.max(0, Number(definition.bobAmplitude) || 0);
+    this.bobFrequency = Math.max(0, Number(definition.bobFrequency) || 0);
     this.state = 'afloat';
     this.draft = definition.minimumDraft;
     this.staticRoll = 0;

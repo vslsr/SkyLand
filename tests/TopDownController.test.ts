@@ -14,6 +14,13 @@ import { BufferedInputDevice } from '../src/input/devices/BufferedInputDevice';
 import { PlayerEntity } from '../src/player/PlayerEntity';
 import type { ActorArchetypeDefinition } from '../src/scenes/data/SceneDefinition';
 import { normalizeAngle } from '../shared/playerMovement.mjs';
+import { AbilitySystem } from '../src/abilities/index';
+import { PlayerJumpComponent } from '../shared/actor/index.mjs';
+import {
+  MOVE_SPEED_ATTRIBUTE,
+  WaterMovementEffectController,
+  createPlayerMovementAttributes,
+} from '../shared/abilities/playerMovementEffects.mjs';
 
 class TestKeyboardMouseDevice extends BufferedInputDevice {
   public constructor(private readonly now: () => number) {
@@ -146,6 +153,115 @@ test('TopDown 只把碰撞解算阻挡的位移作为一次性视觉冲击输出
 
   controller.setPosition(0.1, 0.2);
   assert.equal(controller.consumeCollisionDisplacement(), undefined, '未受阻的移动不能唤醒流体结构');
+
+  controller.dispose();
+  input.dispose();
+});
+
+test('TopDown 本地预测读取 GAS Movement.Speed，涉水 Effect 使位移降低 50%', () => {
+  let now = 0;
+  const device = new TestKeyboardMouseDevice(() => now);
+  const scheme = createPlayerInputScheme({ storage: null });
+  const input = new InputSubsystem({
+    actions: scheme.actions,
+    config: scheme.config,
+    contexts: scheme.contexts,
+    devices: [device],
+    now: () => now,
+  });
+  const gas = new AbilitySystem({
+    ownerId: 'local-water-player',
+    attributes: createPlayerMovementAttributes(3.2),
+  });
+  const waterEffect = new WaterMovementEffectController(gas);
+  let inWater = false;
+  const { canvas } = createCanvas();
+  const controller = new TopDownController(canvas, new Object3D(), input, {
+    movement: { walkSpeed: 3.2, sprintMultiplier: 1.65 },
+    updateMovementState: () => waterEffect.sync(inWater),
+    resolveWalkSpeed: () => waterEffect.moveSpeed,
+  });
+
+  device.emit('Keyboard.KeyW', true);
+  now = 16;
+  input.update();
+  controller.update(0.1);
+  const groundPosition = controller.position;
+  assert.ok(Math.abs(Math.hypot(groundPosition.x, groundPosition.z) - 0.32) < 1e-9);
+
+  inWater = true;
+  controller.update(0.1);
+  const waterPosition = controller.position;
+  assert.ok(Math.abs(Math.hypot(
+    waterPosition.x - groundPosition.x,
+    waterPosition.z - groundPosition.z,
+  ) - 0.16) < 1e-9);
+  assert.equal(gas.attributes.getCurrentValue(MOVE_SPEED_ATTRIBUTE), 1.6);
+
+  inWater = false;
+  controller.update(0.1);
+  const leftWaterPosition = controller.position;
+  assert.ok(Math.abs(Math.hypot(
+    leftWaterPosition.x - waterPosition.x,
+    leftWaterPosition.z - waterPosition.z,
+  ) - 0.32) < 1e-9);
+  assert.equal(gas.attributes.getCurrentValue(MOVE_SPEED_ATTRIBUTE), 3.2);
+
+  waterEffect.dispose();
+  controller.dispose();
+  input.dispose();
+});
+
+test('Space 触发本地跳跃预测，短按被锁存且空中方向输入继续移动', () => {
+  let now = 0;
+  const device = new TestKeyboardMouseDevice(() => now);
+  const scheme = createPlayerInputScheme({ storage: null });
+  const input = new InputSubsystem({
+    actions: scheme.actions,
+    config: scheme.config,
+    contexts: scheme.contexts,
+    devices: [device],
+    now: () => now,
+  });
+  const root = new Object3D();
+  const jump = new PlayerJumpComponent({
+    impulse: 7,
+    gravity: 22,
+    maximumFallSpeed: 20,
+    airControl: 0.85,
+  });
+  const { canvas } = createCanvas();
+  const controller = new TopDownController(canvas, root, input, {
+    movement: { walkSpeed: 3.2, sprintMultiplier: 1.65 },
+    jumpAbility: jump,
+    sampleGroundHeight: () => 0,
+  });
+
+  device.emit('Keyboard.Space', true);
+  device.emit('Keyboard.KeyW', true);
+  now = 16;
+  input.update(now);
+  controller.update(0.05);
+  assert.equal(controller.isGrounded, false);
+  assert.ok(controller.verticalPosition > 0);
+  assert.ok(Math.hypot(controller.position.x, controller.position.z) > 0);
+  assert.equal(controller.inputFrame.jump, true);
+
+  device.emit('Keyboard.Space', false);
+  now = 32;
+  input.update(now);
+  assert.equal(controller.inputFrame.jump, true, '短按必须保留到下一份网络输入发出');
+  controller.acknowledgeInputFrame();
+  assert.equal(controller.inputFrame.jump, false);
+
+  device.emit('Keyboard.KeyW', false);
+  for (let frame = 0; frame < 30 && !controller.isGrounded; frame += 1) {
+    now += 50;
+    input.update(now);
+    controller.update(0.05);
+  }
+  assert.equal(controller.isGrounded, true);
+  assert.equal(controller.verticalPosition, 0);
 
   controller.dispose();
   input.dispose();

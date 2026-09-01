@@ -36,6 +36,16 @@ test('Player InputAction、InputConfig、Context 与设备提示来自同一份 
     'Input.Player.Move',
   );
   assert.equal(
+    PlayerInputSchemeDefinition.inputConfig.bindings.find((binding) => binding.actionId === 'IA_Player_Jump')?.tag,
+    'Input.Player.Jump',
+  );
+  assert.equal(
+    PlayerInputSchemeDefinition.inputMappingContexts[0].mappings.find((mapping) => (
+      mapping.id === 'Jump.Keyboard.Primary'
+    ))?.control,
+    'Keyboard.Space',
+  );
+  assert.equal(
     PlayerInputSchemeDefinition.inputMappingContexts[0].mappings.find((mapping) => (
       mapping.id === 'Move.Keyboard.Up'
     ))?.control,

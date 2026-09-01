@@ -1228,6 +1228,80 @@ test('混合史莱姆的软核心产生黏地拖后，内部圆柱碰撞令接�
   visual.dispose();
 });
 
+test('混合史莱姆起跳时向心点上移并收起贴地软边，落地后恢复穹顶', () => {
+  const render = pbfSlimeArchetype.components.render;
+  assert.ok(render?.model === 'line-art-pbf-slime');
+  const visual = createPlayerActorVisual('jump-visual-player', render, 3.2);
+  const simulation = visual.component!.simulation;
+  const minimumSurfaceY = (): number => {
+    let minimum = Number.POSITIVE_INFINITY;
+    for (let offset = 1; offset < simulation.positions.length; offset += 3) {
+      minimum = Math.min(minimum, simulation.positions[offset]);
+    }
+    return minimum;
+  };
+
+  for (let frame = 0; frame < 120; frame += 1) {
+    visual.update(1 / 60, frame / 60, 0, 0, {
+      velocityX: 0,
+      velocityZ: 0,
+      verticalVelocity: 0,
+      grounded: true,
+    });
+  }
+  const groundedCenterY = simulation.forceCenter[1];
+  const groundedLowestY = minimumSurfaceY();
+  let groundedPlanarRadius = 0;
+  for (let offset = 0; offset < simulation.positions.length; offset += 3) {
+    groundedPlanarRadius += Math.hypot(
+      simulation.positions[offset],
+      simulation.positions[offset + 2],
+    );
+  }
+
+  for (let frame = 120; frame < 180; frame += 1) {
+    visual.update(1 / 60, frame / 60, 0, 0, {
+      velocityX: 0,
+      velocityZ: 0,
+      verticalVelocity: 7,
+      grounded: false,
+    });
+  }
+  const airborneLowestY = minimumSurfaceY();
+  let airbornePlanarRadius = 0;
+  for (let offset = 0; offset < simulation.positions.length; offset += 3) {
+    airbornePlanarRadius += Math.hypot(
+      simulation.positions[offset],
+      simulation.positions[offset + 2],
+    );
+  }
+  assert.ok(
+    simulation.forceCenter[1] > groundedCenterY + render.radius * 0.08,
+    '竖直冲量必须把胡克弹簧向心点向上偏移',
+  );
+  assert.ok(
+    airborneLowestY > groundedLowestY + render.radius * 0.04,
+    '空中底圈应脱离局部地面，不再保持贴地钉扎',
+  );
+  assert.ok(
+    airbornePlanarRadius < groundedPlanarRadius * 0.94,
+    '空中向心力应把软边向内收紧',
+  );
+
+  for (let frame = 180; frame < 480; frame += 1) {
+    visual.update(1 / 60, frame / 60, 0, 0, {
+      velocityX: 0,
+      velocityZ: 0,
+      verticalVelocity: 0,
+      grounded: true,
+    });
+  }
+  assert.ok(Math.abs(simulation.forceCenter[1] - groundedCenterY) < render.radius * 0.002);
+  assert.ok(Math.abs(minimumSurfaceY() - groundedLowestY) < render.radius * 0.004);
+  assert.equal(simulation.isActive, false, '落地恢复后应重新休眠，不能持续抖动');
+  visual.dispose();
+});
+
 test('高数量物品 Actor 保留交互与碰撞身份，但用批次绘制而没有独立 Object3D', () => {
   const system = new ClientActorSystem({
     definition,

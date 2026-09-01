@@ -13,6 +13,9 @@ export interface HybridSlimeMotionPresentation {
   movementSpeed: number;
   movementVelocityX?: number;
   movementVelocityZ?: number;
+  /** 跳跃表现输入；由同一运动演示对象携带，当前软体驱动可按需消费。 */
+  verticalVelocity?: number;
+  grounded?: boolean;
   /** 控制器被环境圆柱碰撞阻挡的位移，只在新接触时注入蒙皮。 */
   collisionDisplacementX?: number;
   collisionDisplacementZ?: number;
@@ -66,7 +69,10 @@ export class HybridSlimeVisualComponent extends ActorComponent {
     const frameSeconds = Math.max(0, Math.min(deltaSeconds, 0.1));
     this.collisionContactSeconds = Math.max(0, this.collisionContactSeconds - frameSeconds);
     if (motion) this.updateMotionPresentation(frameSeconds, motion);
-    else this.simulation.setDriveVelocity(0, 0);
+    else {
+      this.simulation.setDriveVelocity(0, 0);
+      this.simulation.setAirborneMotion(0, true);
+    }
     if (this.simulation.update(frameSeconds)) this.applySimulationSurface();
     this.updateContents(elapsedSeconds, motion?.authorityYaw ?? 0);
     this.updateDebugState();
@@ -86,6 +92,10 @@ export class HybridSlimeVisualComponent extends ActorComponent {
       ? motion.movementVelocityZ as number
       : Math.cos(authorityYaw) * speed;
     this.simulation.setDriveVelocity(driveVelocityX, driveVelocityZ);
+    this.simulation.setAirborneMotion(
+      Number.isFinite(motion.verticalVelocity) ? motion.verticalVelocity as number : 0,
+      motion.grounded !== false,
+    );
 
     if (!this.hasMotionPresentation) {
       this.fluidFacingYaw = authorityYaw;

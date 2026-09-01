@@ -3,7 +3,17 @@ import { INTERPOLATION_DELAY_MS, SNAPSHOT_BUFFER_SIZE } from '../../shared/netwo
 import type { InterpolatedPlayerState, RoomSnapshot, SnapshotPlayer } from './protocol';
 
 function toState(player: SnapshotPlayer): InterpolatedPlayerState {
-  return { id: player.id, name: player.name, x: player.x, z: player.z, yaw: player.yaw, speed: player.speed };
+  return {
+    id: player.id,
+    name: player.name,
+    x: player.x,
+    ...(Number.isFinite(player.y) ? { y: player.y } : {}),
+    z: player.z,
+    yaw: player.yaw,
+    speed: player.speed,
+    verticalVelocity: player.verticalVelocity,
+    grounded: player.grounded,
+  };
 }
 
 function blend(from: SnapshotPlayer, to: SnapshotPlayer, amount: number): InterpolatedPlayerState {
@@ -11,9 +21,16 @@ function blend(from: SnapshotPlayer, to: SnapshotPlayer, amount: number): Interp
     id: to.id,
     name: to.name,
     x: from.x + (to.x - from.x) * amount,
+    ...(Number.isFinite(from.y) && Number.isFinite(to.y)
+      ? { y: from.y! + (to.y! - from.y!) * amount }
+      : (Number.isFinite(to.y) ? { y: to.y } : {})),
     z: from.z + (to.z - from.z) * amount,
     yaw: lerpAngle(from.yaw, to.yaw, amount),
     speed: from.speed + (to.speed - from.speed) * amount,
+    verticalVelocity: Number.isFinite(from.verticalVelocity) && Number.isFinite(to.verticalVelocity)
+      ? from.verticalVelocity! + (to.verticalVelocity! - from.verticalVelocity!) * amount
+      : to.verticalVelocity ?? from.verticalVelocity,
+    grounded: amount < 0.5 ? from.grounded : to.grounded,
   };
 }
 

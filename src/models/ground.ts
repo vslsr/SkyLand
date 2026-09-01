@@ -37,7 +37,11 @@ export function createGroundModel(
   ground.position.z = GROUND_CENTER_Z;
 
   const planeGeometry = new THREE.PlaneGeometry(GROUND_WIDTH, GROUND_DEPTH);
-  const plane = createOutlinedObject(planeGeometry, createFillMaterial(color, environment));
+  // 参考项目的纸面地板不参与天气距离雾；雾仍由天空、远景物件和粒子表达。
+  const plane = createOutlinedObject(
+    planeGeometry,
+    createFillMaterial(color, environment, { fog: false }),
+  );
   plane.rotation.x = -Math.PI / 2;
   ground.add(plane);
   ground.add(createGroundGrid());

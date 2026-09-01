@@ -5,6 +5,16 @@ import {
   createFillMaterial,
   createSceneEnvironment,
 } from '../src/materials/createFillMaterial';
+import { GROUND_GRID_MATERIAL } from '../src/materials/lineMaterials';
+import {
+  createChunkFillMaterial,
+  createChunkGroundFillMaterial,
+} from '../src/models/chunkMesh';
+import { createGroundModel } from '../src/models/ground';
+import {
+  GRASS_FILL_FRAGMENT_SHADER,
+  GRASS_OUTLINE_FRAGMENT_SHADER,
+} from '../src/shaders/grass';
 import { WEATHER_PARTICLE_LIMITS, WeatherSystem } from '../src/weather/index';
 
 function createSystem(): {
@@ -120,4 +130,29 @@ test('晴天与多云共享同一套场景雾和光照 uniform', () => {
 
   material.dispose();
   system.dispose();
+});
+
+test('固定地面、流式台地、网格与地面草叶不混入天气距离雾', () => {
+  const environment = createSceneEnvironment('#fdfbf6', 22, 52);
+  const propMaterial = createChunkFillMaterial(environment);
+  const terrainMaterial = createChunkGroundFillMaterial(environment);
+  assert.ok('USE_DISTANCE_FOG' in propMaterial.defines);
+  assert.ok(!('USE_DISTANCE_FOG' in terrainMaterial.defines));
+  assert.ok('USE_VERTEX_TINT' in terrainMaterial.defines);
+  assert.equal(GROUND_GRID_MATERIAL.fog, false);
+
+  const fixedGround = createGroundModel('#f1eddf', environment);
+  const fixedGroundMesh = fixedGround.getObjectByProperty('type', 'Mesh') as THREE.Mesh;
+  const fixedGroundMaterial = fixedGroundMesh.material as THREE.ShaderMaterial;
+  assert.ok(!('USE_DISTANCE_FOG' in fixedGroundMaterial.defines));
+  assert.ok(!GRASS_FILL_FRAGMENT_SHADER.includes('uFogColor'));
+  assert.ok(!GRASS_OUTLINE_FRAGMENT_SHADER.includes('uFogColor'));
+
+  propMaterial.dispose();
+  terrainMaterial.dispose();
+  fixedGround.traverse((object) => {
+    const renderable = object as THREE.Mesh & { material?: THREE.Material };
+    renderable.geometry?.dispose();
+    renderable.material?.dispose();
+  });
 });

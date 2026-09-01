@@ -54,6 +54,7 @@ export class SceneRenderer implements GrassInteractionTarget {
   private collisionWorld?: CollisionWorld;
   private terrainWorld?: TerrainWorld;
   private terrainHighlight?: THREE.LineSegments;
+  private fixedWaterWorld = false;
   private currentWeather: WeatherType = DEFAULT_WEATHER;
   private simpleCollisionVisible = false;
   private temperatureVisible = false;
@@ -172,34 +173,47 @@ export class SceneRenderer implements GrassInteractionTarget {
     moverHeight = radius * 2,
     from: { x: number; z: number } = position,
     buoyancyDraft?: number,
+    motion?: { minimumY: number; airborne: boolean },
   ): { x: number; y?: number; z: number } {
     // Actor 的盒子每帧刷新一次，先让 Actor System 兑现待登记的变更。
     this.actorSnapshotTarget?.refreshColliders();
+    const supportY = this.terrainWorld?.sampleMovementHeight(
+      from.x,
+      from.z,
+      buoyancyDraft,
+    ) ?? 0;
+    const moverMinimumY = motion?.airborne && Number.isFinite(motion.minimumY)
+      ? motion.minimumY
+      : supportY;
+    const terrainStepHeight = motion?.airborne
+      ? Math.max(maximumStepHeight, moverMinimumY - supportY)
+      : maximumStepHeight;
     let candidate = position;
     for (let iteration = 0; iteration < 4; iteration += 1) {
       const terrainPosition = this.terrainWorld?.resolveMovement(
         from,
         candidate,
         radius,
-        maximumStepHeight,
+        terrainStepHeight,
         buoyancyDraft,
       ) ?? { ...candidate, y: 0 };
+      const actorY = motion?.airborne ? moverMinimumY : terrainPosition.y;
       const objectPosition = this.collisionWorld?.resolveCircle(terrainPosition, radius, {
         verticalProfile: {
-          minimumY: terrainPosition.y,
-          maximumY: terrainPosition.y + Math.max(0, moverHeight),
-          maximumStepHeight,
+          minimumY: actorY,
+          maximumY: actorY + Math.max(0, moverHeight),
+          maximumStepHeight: motion?.airborne ? 0 : maximumStepHeight,
         },
       }) ?? terrainPosition;
       if (Math.hypot(
         objectPosition.x - terrainPosition.x,
         objectPosition.z - terrainPosition.z,
-      ) <= 1e-7) return terrainPosition;
+      ) <= 1e-7) return { x: terrainPosition.x, y: actorY, z: terrainPosition.z };
       candidate = objectPosition;
     }
     return {
       x: from.x,
-      y: this.terrainWorld?.sampleMovementHeight(from.x, from.z, buoyancyDraft) ?? 0,
+      y: motion?.airborne ? moverMinimumY : supportY,
       z: from.z,
     };
   }
@@ -210,6 +224,10 @@ export class SceneRenderer implements GrassInteractionTarget {
 
   public samplePlayerHeight(x: number, z: number, buoyancyDraft?: number): number {
     return this.terrainWorld?.sampleMovementHeight(x, z, buoyancyDraft) ?? 0;
+  }
+
+  public isWaterAt(x: number, z: number): boolean {
+    return this.terrainWorld?.isWaterAt(x, z) ?? this.fixedWaterWorld;
   }
 
   public raycastGround(
@@ -317,11 +335,14 @@ export class SceneRenderer implements GrassInteractionTarget {
       throw new Error(`不支持的场景渲染器：${definition.renderer.type as string}`);
     }
     this.currentWeather = DEFAULT_WEATHER;
+    this.fixedWaterWorld = definition.renderer.content.ocean === true
+      && definition.renderer.content.ground === false;
     this.replaceScene(createLineArtScene(definition, worldSeed));
   }
 
   public showEmptyScene(): void {
     this.currentWeather = DEFAULT_WEATHER;
+    this.fixedWaterWorld = false;
     this.replaceScene({ scene: createEmptyScene(), visualSystems: [] });
   }
 

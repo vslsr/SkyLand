@@ -83,6 +83,22 @@ function validateBuoyancy(raw, filename) {
     maximumTrimRadians: requireNumber(definition.maximumTrimRadians, `${filename}.components.buoyancy.maximumTrimRadians`, 0, 0.25),
     minimumDraft,
     maximumDraft,
+    bobAmplitude: definition.bobAmplitude === undefined
+      ? 0
+      : requireNumber(
+          definition.bobAmplitude,
+          `${filename}.components.buoyancy.bobAmplitude`,
+          0,
+          0.75,
+        ),
+    bobFrequency: definition.bobFrequency === undefined
+      ? 0
+      : requireNumber(
+          definition.bobFrequency,
+          `${filename}.components.buoyancy.bobFrequency`,
+          0,
+          2,
+        ),
     parts,
   };
 }
@@ -273,6 +289,22 @@ function validateDropMotion(raw, filename) {
       radius: requireNumber(definition.radius, `${path}.radius`, 0, 3),
     } : {}),
     settleSpeed: requireNumber(definition.settleSpeed, `${path}.settleSpeed`, Number.EPSILON, 10),
+  };
+}
+
+function validatePlayerJump(raw, filename) {
+  const path = `${filename}.components.playerJump`;
+  const definition = requireObject(raw, path);
+  return {
+    impulse: requireNumber(definition.impulse, `${path}.impulse`, Number.EPSILON, 30),
+    gravity: requireNumber(definition.gravity, `${path}.gravity`, Number.EPSILON, 60),
+    maximumFallSpeed: requireNumber(
+      definition.maximumFallSpeed,
+      `${path}.maximumFallSpeed`,
+      Number.EPSILON,
+      60,
+    ),
+    airControl: requireNumber(definition.airControl, `${path}.airControl`, 0, 1),
   };
 }
 
@@ -556,6 +588,7 @@ function validateActorArchetype(raw, filename) {
   const components = requireObject(definition.components, `${filename}.components`);
   const knownComponents = new Set([
     'playerMovement',
+    'playerJump',
     'slimeSurfaceDrag',
     'buoyancy',
     'vesselMotor',
@@ -589,6 +622,9 @@ function validateActorArchetype(raw, filename) {
   const playerMovement = components.playerMovement
     ? validatePlayerMovement(components.playerMovement, filename)
     : undefined;
+  const playerJump = components.playerJump
+    ? validatePlayerJump(components.playerJump, filename)
+    : undefined;
   const slimeSurfaceDrag = components.slimeSurfaceDrag
     ? validateSlimeSurfaceDrag(components.slimeSurfaceDrag, filename)
     : undefined;
@@ -609,6 +645,9 @@ function validateActorArchetype(raw, filename) {
   }
   if (playerMovement && !PLAYER_RENDER_MODELS.has(render?.model)) {
     throw new TypeError(`${filename}.components.playerMovement 需要玩家史莱姆 render`);
+  }
+  if (playerJump && (!playerMovement || !PLAYER_RENDER_MODELS.has(render?.model))) {
+    throw new TypeError(`${filename}.components.playerJump 需要玩家移动与玩家史莱姆 render`);
   }
   if (render?.model === 'line-art-player-slime' && !playerMovement) {
     throw new TypeError(`${filename}.components.render line-art-player-slime 需要 playerMovement`);
@@ -670,6 +709,7 @@ function validateActorArchetype(raw, filename) {
     id: requireId(definition.id, `${filename}.id`),
     components: {
       ...(playerMovement ? { playerMovement } : {}),
+      ...(playerJump ? { playerJump } : {}),
       ...(slimeSurfaceDrag ? { slimeSurfaceDrag } : {}),
       ...(components.buoyancy ? { buoyancy: validateBuoyancy(components.buoyancy, filename) } : {}),
       ...(components.vesselMotor ? { vesselMotor: validateVesselMotor(components.vesselMotor, filename) } : {}),

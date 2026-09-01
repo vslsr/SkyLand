@@ -104,9 +104,6 @@ export const GRASS_FILL_FRAGMENT_SHADER = /* glsl */ `
   uniform vec3 uAmbientColor;
   uniform float uDaylight;
   uniform vec3 uSunDirection;
-  uniform vec3 uFogColor;
-  uniform float uFogNear;
-  uniform float uFogFar;
 
   varying vec3 vWorldPosition;
   varying vec3 vWorldNormal;
@@ -123,9 +120,8 @@ export const GRASS_FILL_FRAGMENT_SHADER = /* glsl */ `
     vec3 color = uFillColor * uAmbientColor * paperVariation * softLight
       + uAmbientColor * touchHighlight;
 
-    float cameraDistance = distance(cameraPosition, vWorldPosition);
-    float fogFactor = smoothstep(uFogNear, uFogFar, cameraDistance);
-    gl_FragColor = vec4(mix(color, uFogColor, fogFactor), 1.0);
+    // 地面草叶保持参考项目的纸面颜色，不叠加天气距离雾。
+    gl_FragColor = vec4(color, 1.0);
     #include <encodings_fragment>
   }
 `;
@@ -143,9 +139,6 @@ export const GRASS_OUTLINE_VERTEX_SHADER = /* glsl */ `
 
 export const GRASS_OUTLINE_FRAGMENT_SHADER = /* glsl */ `
   uniform vec3 uLineColor;
-  uniform vec3 uFogColor;
-  uniform float uFogNear;
-  uniform float uFogFar;
 
   varying vec3 vWorldPosition;
   varying float vDistanceLod;
@@ -158,9 +151,7 @@ export const GRASS_OUTLINE_FRAGMENT_SHADER = /* glsl */ `
       discard;
     }
 
-    float cameraDistance = distance(cameraPosition, vWorldPosition);
-    float fogFactor = smoothstep(uFogNear, uFogFar, cameraDistance);
-    gl_FragColor = vec4(mix(uLineColor, uFogColor, fogFactor), 1.0);
+    gl_FragColor = vec4(uLineColor, 1.0);
     #include <encodings_fragment>
   }
 `;
