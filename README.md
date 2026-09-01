@@ -345,12 +345,38 @@ Actor 不需要重建任何树。格子按需创建、空了立刻回收，所�
 一个盒子带一个层掩码（`COLLISION_LAYER.MOVEMENT` / `CAMERA`），两种用途共用
 同一张网格。
 
-### 服务端的静态碰撞常驻策略
+### 服务端的 chunk 常驻策略
 
-房间 DS 不建几何体，但必须知道树在哪。`server/scene/ServerChunkColliders.mjs`
-只保留每名玩家所在 chunk 周围一圈的碰撞体，走出两圈之后卸载——最多
-玩家数 × 25 个 chunk，与世界面积无关。重算只在有人跨过 chunk 边界时发生，
-焦点没变的 tick 直接返回。
+房间 DS 上有两样东西要跟着玩家在大世界里滑动，它们装载的内容不同，但「什么时候
+装、什么时候卸」完全一样，所以那一份策略只有一个实现：
+`server/scene/ChunkResidency.mjs`。它维护常驻集合，装什么由 `onLoad` / `onUnload`
+决定。两条纪律和客户端 `ChunkStreamer` 一致：常驻集合的上界是
+玩家数 × (2 × keepRadius + 1)²，与世界面积无关；`keepRadius` 严格大于
+`residentRadius`，站在边界上来回走不会反复建了拆，而且没有人跨过边界的 tick
+直接返回，不做任何集合运算。
+
+| 使用者 | 装载内容 | residentRadius / keepRadius |
+| --- | --- | --- |
+| `server/scene/ServerChunkColliders.mjs` | chunk 静态碰撞体 | 1 / 2 |
+| `server/actors/ServerGeneratedTreeActors.mjs` | 可交互的生成树 Actor | 2 / 3 |
+
+房间 DS 不建几何体，但必须知道树在哪，否则玩家会被客户端预测挡住、又被服务端
+和解拉回去。碰撞体只服务玩家自己的推出解算，所以一圈就够。
+
+生成树的半径更大，而且**不能小于原型的 `replicationPolicy.radiusChunks`**：AOI
+之内的树必须有 Actor，否则被砍倒的树没有快照条目，客户端会把它画回来。这个下界
+在构造时直接从原型里取，两个半径不会各写一份之后悄悄失配。
+
+整个世界有约 2000 棵树。全部常驻的话，每一个按 Component 查询的 System 都要为
+它们付钱——`TemperatureSystem` 的热源收集是 `query(transform)`，会 10 Hz 扫全世界
+的树。改成跟着玩家滑动之后，一名玩家在场时 ActorWorld 里带 Transform 的 Actor
+从 1913 个降到 162 个，而且不再随世界变大而增长。
+
+树的玩法状态用**偏离态**保存：卸载时只记下被砍过或已倒下的树（血量、是否倒下、
+revision），装载时按同一个 id 恢复并立刻挂上 `ReplicatedComponent`。完好的树什么
+都不记，所以状态量跟着「玩家改动过多少棵树」走，而不是跟着「世界里有多少棵树」走。
+被砍倒这一位同时写进 `ServerChunkColliders` 的 skip 掩码，静态碰撞和几何体因此
+一起消失。
 
 ### 第三人称相机悬臂
 

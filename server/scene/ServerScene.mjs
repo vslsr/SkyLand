@@ -23,8 +23,6 @@ import {
   INTERACTABLE_COMPONENT,
   INVENTORY_COMPONENT,
   ITEM_STACK_COMPONENT,
-  REPLICATED_COMPONENT,
-  ReplicatedComponent,
   SIMPLE_COLLISION_COMPONENT,
   TRANSFORM_COMPONENT,
   VESSEL_MOTOR_COMPONENT,
@@ -34,7 +32,7 @@ import {
   createActorSnapshots,
   createServerActorWorld,
 } from '../actors/ServerActorFactory.mjs';
-import { createServerGeneratedTreeActors } from '../actors/ServerGeneratedTreeActors.mjs';
+import { ServerGeneratedTreeActors } from '../actors/ServerGeneratedTreeActors.mjs';
 import { ServerPlayerActor } from '../actors/ServerPlayerActor.mjs';
 import {
   addVesselCargo,
@@ -107,21 +105,20 @@ export class ServerScene {
       collision: this.collision,
       worldSeed: this.worldSeed,
     });
-    const generatedTreeArchetype = definition.actorArchetypes?.find(
-      (archetype) => archetype.components.generatedTree,
-    );
-    this.generatedTreeCount = definition.renderer?.world && definition.renderer.content?.trees
-      ? createServerGeneratedTreeActors(
-        this.actorWorld,
-        generatedTreeArchetype,
-        this.worldSeed,
-      )
-      : 0;
     // 静态碰撞只有流式场景才有；固定摆放的场景里树是布景，没有碰撞体。
     this.chunkColliders = new ServerChunkColliders({
       world: this.collision,
       worldSeed: this.worldSeed,
       enabled: Boolean(definition.renderer?.world),
+    });
+    // 生成树和静态碰撞一样跟着玩家滑动，房间启动时一棵都不建。
+    this.generatedTrees = new ServerGeneratedTreeActors({
+      world: this.actorWorld,
+      archetype: definition.actorArchetypes?.find(
+        (archetype) => archetype.components.generatedTree,
+      ),
+      worldSeed: this.worldSeed,
+      enabled: Boolean(definition.renderer?.world && definition.renderer.content?.trees),
     });
     this.tick = 0;
     this.now = options.now ?? (() => Date.now());
@@ -135,6 +132,7 @@ export class ServerScene {
     // 出生点是按槽位算的固定圆周，未必避得开树和石头；先把它推到碰撞外面，
     // 否则新玩家会卡在树干里，等第一条输入才被挤出来。
     this.chunkColliders.ensureAround(spawn.x, spawn.z);
+    this.generatedTrees.ensureAround(spawn.x, spawn.z);
     const placed = clampToPlayArea(
       this.collision.resolveCircle(spawn, radius, {
         verticalProfile: {
@@ -308,9 +306,8 @@ export class ServerScene {
       const distance = Math.hypot(targetTransform.x - player.x, targetTransform.z - player.z);
       if (distance > interactable.maximumDistance) return false;
       if (!tree.applyDamage()) return false;
-      if (!target.hasComponents(REPLICATED_COMPONENT)) {
-        target.addComponent(new ReplicatedComponent());
-      }
+      // 立刻登记偏离态：这一片 chunk 卸载再装回来时，树要保持被砍过的样子。
+      this.generatedTrees.recordDeviation(target);
       interactable.revision += 1;
       if (tree.removed) {
         interactable.enabled = false;
@@ -433,6 +430,7 @@ export class ServerScene {
     // 玩家可能刚加入或刚跨过边界，先确认脚下这一片的静态碰撞体已经就位，
     // 否则这一步会从树里穿过去，再被下一个 tick 拉回来。
     this.chunkColliders.ensureAround(next.x, next.z);
+    this.generatedTrees.ensureAround(next.x, next.z);
     const resolved = clampToPlayArea(
       this.collision.resolveCircle(next, player.collisionRadius, {
         verticalProfile: {
@@ -465,8 +463,9 @@ export class ServerScene {
     }
     // Actor 的碰撞盒由 ActorColliderIndex 在 tick 内同步，这里不用再管。
     this.actorWorld.update(elapsedSeconds, now / 1000);
-    // 常驻的静态碰撞跟着玩家走；没人跨过 chunk 边界时这一步直接返回。
+    // 常驻的静态碰撞与生成树都跟着玩家走；没人跨过 chunk 边界时直接返回。
     this.chunkColliders.sync(this.players.values());
+    this.generatedTrees.sync(this.players.values());
   }
 
   /** 树木、矿脉或战利品系统调用这一入口生成一个可自动合并的物品堆。 */
