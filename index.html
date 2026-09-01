@@ -40,6 +40,17 @@
           <span id="vessel-event" class="vessel-status__event"></span>
         </aside>
 
+        <aside id="terrain-editor" class="terrain-editor" aria-label="地形编辑" hidden>
+          <button
+            id="terrain-editor-toggle"
+            class="terrain-editor__tab"
+            type="button"
+            aria-expanded="false"
+            aria-controls="terrain-editor-tools"
+          >地形</button>
+          <div id="terrain-editor-tools" class="terrain-editor__tools" role="group" hidden></div>
+        </aside>
+
         <div id="interaction-prompt" class="interaction-prompt" hidden></div>
 
         <div id="crosshair" class="crosshair" aria-hidden="true"></div>

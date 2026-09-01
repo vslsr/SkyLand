@@ -13,6 +13,7 @@ import {
 } from '../input/index';
 import { SceneControlRouter } from '../controllers/SceneControlRouter';
 import { ActorInteractionController } from '../controllers/ActorInteractionController';
+import { TerrainEditController } from '../controllers/TerrainEditController';
 import { VesselControlController } from '../controllers/VesselControlController';
 import { RoomClient, type JoinedRoom, type RoomSummary } from '../network/RoomClient';
 import { SnapshotBuffer } from '../network/SnapshotBuffer';
@@ -23,6 +24,7 @@ import { SceneRenderer } from '../rendering/SceneRenderer';
 import { createSceneRuntimeComponent, SceneComponentHost } from '../scene/components';
 import { INPUT_SEND_INTERVAL_SECONDS } from '../../shared/networkTuning.mjs';
 import { HudController } from '../ui/HudController';
+import { TerrainEditorPanel } from '../ui/TerrainEditorPanel';
 import { CreateRoomPage, type CreateRoomFormValue } from '../ui/pages/CreateRoomPage';
 import { DebugMenuPage } from '../ui/pages/DebugMenuPage';
 import { GameMenuPage } from '../ui/pages/GameMenuPage';
@@ -52,6 +54,8 @@ export class GrasslandScene extends Scene {
   private readonly controls: SceneControlRouter;
   private readonly vesselControls: VesselControlController;
   private readonly actorInteractions: ActorInteractionController;
+  private readonly terrainEdits: TerrainEditController;
+  private readonly terrainEditorPanel = new TerrainEditorPanel();
   private readonly gameInteractions = new GameInteractionLayer();
   private readonly hud = new HudController();
   private readonly roomClient = new RoomClient();
@@ -136,6 +140,13 @@ export class GrasslandScene extends Scene {
       releaseControl: (actorId) => this.roomClient.releaseActorControl(actorId),
       sendInput: (actorId, input) => { this.roomClient.sendVesselInput(actorId, input); },
     });
+    this.terrainEdits = new TerrainEditController(this.input, {
+      pickCell: (frame) => this.renderer.pickTerrainCell(frame.position, frame.axes.forward),
+      highlight: (cell) => this.renderer.setTerrainHighlight(cell),
+      sendEdit: (cellX, cellZ, operation) => {
+        this.roomClient.editTerrain(cellX, cellZ, operation);
+      },
+    });
     this.actorInteractions = new ActorInteractionController(this.input, {
       getPlayerId: () => this.joinedRoom?.player.id,
       getPlayerPosition: () => this.player?.controller.position,
@@ -170,7 +181,12 @@ export class GrasslandScene extends Scene {
     this.gameMenuPage.onRequestClose(() => this.commonUI.pop(this.gameMenuPage));
     this.gameMenuPage.onExit(() => this.exitCurrentRoom());
     this.roomClient.onRoomUpdate((room) => this.handleRoomUpdate(room));
+    this.terrainEditorPanel.onOperationChange((operation) => {
+      this.terrainEdits.setOperation(operation);
+    });
     this.roomClient.onSnapshot((snapshot) => this.handleSnapshot(snapshot));
+    // 地形覆盖只从服务端来：客户端不做本地预测，避免脚下的世界两端不一致。
+    this.roomClient.onTerrainPatch((cells) => this.renderer.applyTerrainPatches(cells));
     this.roomClient.onDisconnect(() => this.handleDisconnect());
     this.renderer.addWorldObject(this.remotePlayers.root);
   }
@@ -180,7 +196,14 @@ export class GrasslandScene extends Scene {
     this.vesselControls.update(deltaSeconds);
     this.controls.update(deltaSeconds, elapsedSeconds);
     this.renderer.update(deltaSeconds, elapsedSeconds, this.currentFocus());
-    this.actorInteractions.update(this.controls.frame);
+    if (this.terrainEdits.active) {
+      // 编辑模式独占 WorldInteract：同一次点击不能既改地形又去交互 Actor。
+      this.terrainEdits.update(this.controls.frame);
+      this.actorInteractions.reset();
+    } else {
+      this.terrainEdits.update(this.controls.frame);
+      this.actorInteractions.update(this.controls.frame);
+    }
     const playerId = this.joinedRoom?.player.id;
     this.hud.setVesselStatus(playerId ? this.renderer.getVesselHudState(playerId) : undefined);
     this.player?.update(deltaSeconds, elapsedSeconds);
@@ -286,6 +309,8 @@ export class GrasslandScene extends Scene {
       return;
     }
     this.joinedRoom = joined;
+    // 只有带 renderer.world 的流式地图才有可编辑地形。
+    this.terrainEditorPanel.setAvailable(Boolean(joined.scene.renderer.world));
     this.sceneComponents.clear();
     this.snapshots.clear();
     this.vesselControls.reset();
@@ -354,6 +379,7 @@ export class GrasslandScene extends Scene {
     if (!this.joinedRoom) return;
     this.roomClient.leaveRoom();
     this.joinedRoom = undefined;
+    this.terrainEditorPanel.setAvailable(false);
     this.destroyPlayer();
     this.hud.setDisconnected();
     this.commonUI.clear();
@@ -384,6 +410,7 @@ export class GrasslandScene extends Scene {
   private handleDisconnect(): void {
     if (!this.joinedRoom) return;
     this.joinedRoom = undefined;
+    this.terrainEditorPanel.setAvailable(false);
     this.destroyPlayer();
     this.hud.setDisconnected();
     if (this.isActive && this.commonUI.size === 0) {

@@ -52,7 +52,23 @@ export type ClientMessage =
   | { type: 'actor:release'; actorId: string }
   | { type: 'actor:input'; actorId: string; sequence: number; throttle: number; steering: number }
   | { type: 'actor:event'; actorId: string; sequence: number; event: ActorGameplayEvent }
-  | { type: 'actor:interact'; actorId: string; sequence: number };
+  | { type: 'actor:interact'; actorId: string; sequence: number }
+  | {
+      type: 'terrain:edit';
+      sequence: number;
+      cellX: number;
+      cellZ: number;
+      operation: TerrainEditOperation;
+    };
+
+/** 地形编辑操作。服务端有同名分支，改这里就要同步改 ServerScene.applyTerrainOperation。 */
+export type TerrainEditOperation =
+  | 'raise'
+  | 'lower'
+  | 'flatten'
+  | 'water'
+  | 'ground'
+  | 'reset';
 
 /**
  * 服务端消息会随功能继续扩展；公共信封只约束现有客户端真正读取的字段，
@@ -65,4 +81,6 @@ export interface ServerMessage {
   snapshot?: RoomSnapshot;
   scene?: SceneDefinition;
   message?: string;
+  /** room:terrain 携带的地形覆盖格；只有服务端确认过的编辑会出现在这里。 */
+  cells?: Array<{ cellX: number; cellZ: number; code: number }>;
 }

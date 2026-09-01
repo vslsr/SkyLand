@@ -52,7 +52,10 @@ import {
 } from '../../shared/world/fruitDrop.mjs';
 import { toWorldSeed } from '../../shared/world/worldConfig.mjs';
 import { DEFAULT_WEATHER, isWeatherType } from '../../shared/weather.mjs';
+import { TERRAIN_CELL_SIZE, TERRAIN_SURFACE } from '../../shared/world/terrainConfig.mjs';
 import { sampleTerrain } from '../../shared/world/terrainContent.mjs';
+import { TerrainEditor } from '../../shared/world/terrainEditing.mjs';
+import { TerrainPatchStore } from '../../shared/world/terrainPatches.mjs';
 import {
   resolveTerrainMovement,
   terrainMovementHeight,
@@ -63,6 +66,9 @@ function roundCoordinate(value) {
 }
 
 const ACTOR_ID_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,95}$/;
+
+/** 玩家能编辑到的最远距离（米）。和交互一样按权威坐标校验。 */
+const TERRAIN_EDIT_RANGE = 12;
 
 function clamp(value, minimum, maximum) {
   return Math.max(minimum, Math.min(maximum, value));
@@ -112,6 +118,15 @@ export class ServerScene {
     this.playerActorArchetype = resolvePlayerActorArchetype(definition);
     this.worldSeed = toWorldSeed(options.worldSeed);
     this.terrainEnabled = Boolean(definition.renderer?.world);
+    // 地形编辑的权威副本。共享层的采样入口都接受 cellCodeAt 覆盖，所以只要
+    // 把这一个函数传下去，移动、出生点和掉落落地就都走编辑后的地形。
+    this.terrainPatches = this.terrainEnabled ? new TerrainPatchStore(this.worldSeed) : undefined;
+    this.terrainEditor = this.terrainPatches
+      ? new TerrainEditor(this.terrainPatches, { seaLevel: definition.gameplay?.water?.seaLevel ?? 0 })
+      : undefined;
+    this.terrainCellCodeAt = this.terrainPatches
+      ? (globalCellX, globalCellZ) => this.terrainPatches.cellCodeAt(globalCellX, globalCellZ)
+      : undefined;
     this.now = options.now ?? (() => Date.now());
     this.players = new Map();
     this.weather = DEFAULT_WEATHER;
@@ -123,7 +138,7 @@ export class ServerScene {
       collision: this.collision,
       worldSeed: this.worldSeed,
       groundHeightAt: this.terrainEnabled
-        ? (x, z) => sampleTerrain(this.worldSeed, x, z).groundY
+        ? (x, z) => sampleTerrain(this.worldSeed, x, z, {}, this.terrainCellCodeAt).groundY
         : undefined,
     });
     // 静态碰撞只有流式场景才有；固定摆放的场景里树是布景，没有碰撞体。
@@ -159,7 +174,7 @@ export class ServerScene {
     this.generatedProps.ensureAround(spawn.x, spawn.z);
     const spawnGroundY = this.terrainEnabled
       ? terrainMovementHeight(
-          sampleTerrain(this.worldSeed, spawn.x, spawn.z),
+          sampleTerrain(this.worldSeed, spawn.x, spawn.z, {}, this.terrainCellCodeAt),
           this.actorWorld.context.seaLevel,
           buoyancy?.draft,
         )
@@ -178,6 +193,7 @@ export class ServerScene {
           maximumStepHeight: movement.maximumStepHeight,
           waterLevel: this.actorWorld.context.seaLevel,
           buoyancyDraft: buoyancy?.draft,
+          cellCodeAt: this.terrainCellCodeAt,
         })
       : { ...boundedPlaced, y: 0 };
     const actor = new ServerPlayerActor(
@@ -437,6 +453,66 @@ export class ServerScene {
   }
 
   /**
+   * 应用一次地形编辑，返回被改动的格子供房间广播。
+   *
+   * 距离用**权威玩家坐标**和格心算，客户端报哪一格都无所谓：够不到就不生效。
+   * 编辑范围还必须落在活动区内，否则玩家能改到自己永远走不到的世界边缘。
+   *
+   * @returns {Array<{ cellX: number, cellZ: number, code: number }>} 空数组表示没生效
+   */
+  editTerrain(playerId, message) {
+    const player = this.players.get(playerId);
+    if (!player || !this.terrainEditor) return [];
+    const sequence = Math.floor(toFiniteNumber(message?.sequence, 0));
+    if (sequence <= player.terrainEditSequence) return [];
+
+    const cellX = Math.floor(toFiniteNumber(message?.cellX, Number.NaN));
+    const cellZ = Math.floor(toFiniteNumber(message?.cellZ, Number.NaN));
+    if (!Number.isInteger(cellX) || !Number.isInteger(cellZ)) return [];
+    const centerX = (cellX + 0.5) * TERRAIN_CELL_SIZE;
+    const centerZ = (cellZ + 0.5) * TERRAIN_CELL_SIZE;
+    if (Math.hypot(centerX - player.x, centerZ - player.z) > TERRAIN_EDIT_RANGE) return [];
+    if (
+      centerX < this.bounds.minimumX || centerX > this.bounds.maximumX
+      || centerZ < this.bounds.minimumZ || centerZ > this.bounds.maximumZ
+    ) return [];
+
+    let changed = false;
+    try {
+      changed = this.applyTerrainOperation(cellX, cellZ, message?.operation);
+    } catch {
+      // 越界高度、未知形状之类由编辑器抛出。这些都是无效请求，不是服务器故障。
+      return [];
+    }
+    player.terrainEditSequence = sequence;
+    if (!changed) return [];
+
+    // 注意：树和石头的静态碰撞盒来自放置记录里的 y_mm，那是**基础地形**的高度，
+    // 不跟着 patch 走。所以在物件脚下改地形，物件会浮起或陷进去。要修就得让
+    // 两端都用 patch 后的地形重算物件 y，那是另一件事，先记在这里。
+    return [{ cellX, cellZ, code: this.terrainPatches.cellCodeAt(cellX, cellZ) }];
+  }
+
+  /** @returns {boolean} 覆盖层有没有真的改变 */
+  applyTerrainOperation(cellX, cellZ, operation) {
+    switch (operation) {
+      case 'raise': return this.terrainEditor.raise(cellX, cellZ, 1);
+      case 'lower': return this.terrainEditor.lower(cellX, cellZ, 1);
+      case 'flatten': return this.terrainEditor.flatten(cellX, cellZ);
+      case 'water': return this.terrainEditor.setSurface(cellX, cellZ, TERRAIN_SURFACE.WATER);
+      case 'ground': return this.terrainEditor.setSurface(cellX, cellZ, TERRAIN_SURFACE.GROUND);
+      case 'reset': return this.terrainEditor.reset(cellX, cellZ);
+      default: return false;
+    }
+  }
+
+  /** 房间新成员加入时用来补齐已有编辑。 */
+  readTerrainPatches() {
+    if (!this.terrainPatches) return [];
+    return this.terrainPatches.entries();
+  }
+
+  /**
    * 校验并应用一条输入。位移在收到消息时立即结算，
    * 这样客户端按真实帧时间做的预测才能和服务端对齐。
    */
@@ -503,6 +579,7 @@ export class ServerScene {
             maximumStepHeight: player.movement.maximumStepHeight,
             waterLevel: this.actorWorld.context.seaLevel,
             buoyancyDraft: buoyancy?.draft,
+            cellCodeAt: this.terrainCellCodeAt,
           })
         : { ...candidate, y: player.y };
       const objectPosition = this.collision.resolveCircle(

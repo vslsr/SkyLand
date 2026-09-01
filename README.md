@@ -229,6 +229,38 @@ bindings.resetAllBindings();
 平坦普通地面生成，记录末尾追加 `y_mm`，既有字段下标保持不变。出生点附近固定留出
 一块平坦陆地，保证多人出生不会落进水里或悬崖边。
 
+`terrain.rs` 与 `terrainContent.mjs` 的逐位一致由
+`server/tests/terrainParity.test.mjs` 逐格保证——**不能只靠放置记录的比对**：物件只
+落在平地上，那条路径永远采样不到斜坡、角点和水面。详见
+`.cursor/skills/skyland-chunk-world/references/chunk-world.md`。
+
+### 稀疏地形编辑
+
+玩家改过的格子进 `TerrainPatchStore`：按 chunk 分桶，只保存与默认生成结果不同的
+那些，写回默认值会把记录删掉。内存因此跟着「被真正编辑过的格数」走，而不是世界
+面积。共享层的每个采样入口（`sampleTerrain`、`resolveTerrainMovement`）都接受一个
+`cellCodeAt` 覆盖，所以接上编辑层只是把同一个函数传下去。
+
+**服务端是唯一权威。** `ServerScene` 持有 patch store，移动、出生点和掉落落地全部
+读它。客户端**不做本地预测**：`terrain:edit` 发出去，服务端校验通过后广播
+`terrain:patch` 回来，那时才写进本地覆盖层。地形直接决定人站在哪里，抢跑一帧再被
+拉回去比晚一个 RTT 难受得多。
+
+服务端的校验：序号必须递增（挡重放）、距离按**权威玩家坐标**和格心算（够不到就
+不生效）、目标格必须落在活动区内。编辑和其它输入共用同一个令牌桶，连点不会绕过
+限流。新成员加入房间时，房间进程把已有 patch 单独发给他，否则他脚下的世界和服务端
+不是同一个。
+
+界面是屏幕左侧的一条竖栏（`src/ui/TerrainEditorPanel.ts`），小标签点一下展开。
+**收起等于关闭编辑功能**，不只是把按钮藏起来：当前工具会被清空，
+`TerrainEditController` 收到 undefined 之后既不高亮也不响应点击。圆形按钮上下排列，
+选中的那个变成深底浅字，准星指向的地形格实时高亮，点击提交一次修改。图标走
+`src/ui/icons/IconSprite.ts` 的 SVG sprite：路径数据按 ID 定义一份，用的地方
+`<use href="#icon-...">` 引用。
+
+**已知限制**：树和石头的静态碰撞盒来自放置记录里的 `y_mm`，那是**基础地形**的高度，
+不跟着 patch 走。所以在物件脚下改地形，物件会浮起或陷进去。
+
 ### 静态物件永远不走网络
 
 树、草、岩石不是数据，而是一个函数的输出：

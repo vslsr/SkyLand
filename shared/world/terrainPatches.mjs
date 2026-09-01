@@ -6,7 +6,7 @@
  * 与整张世界面积成正比。
  */
 
-import { toChunkKey } from './chunkKey.mjs';
+import { parseChunkKey, toChunkKey } from './chunkKey.mjs';
 import {
   TERRAIN_GRID,
   TERRAIN_SHAPE,
@@ -145,6 +145,27 @@ export class TerrainPatchStore {
       values[index * 2 + 1] = entries[index][1];
     }
     return values;
+  }
+
+  /**
+   * 扁平枚举全部覆盖格。新成员加入房间时用它一次补齐已有编辑。
+   * 稀疏存储，所以长度是「被编辑过的格数」而不是世界面积。
+   * @returns {Array<{ cellX: number, cellZ: number, code: number }>}
+   */
+  entries() {
+    const result = [];
+    for (const [key, cells] of this.#chunks) {
+      const coordinate = parseChunkKey(key);
+      if (!coordinate) continue;
+      for (const [localIndex, code] of cells) {
+        result.push({
+          cellX: coordinate.chunkX * TERRAIN_GRID + (localIndex % TERRAIN_GRID),
+          cellZ: coordinate.chunkZ * TERRAIN_GRID + Math.floor(localIndex / TERRAIN_GRID),
+          code,
+        });
+      }
+    }
+    return result;
   }
 
   subscribe(listener) {

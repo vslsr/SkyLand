@@ -54,11 +54,17 @@ process.on('message', (message) => {
     case 'room:initialize':
       initialize(message);
       break;
-    case 'player:join':
+    case 'player:join': {
       if (!scene) break;
       scene.addPlayer(message.player);
+      // 新成员要先拿到别人已经改过的地形，否则他脚下的世界和服务端不是同一个。
+      const existing = scene.readTerrainPatches();
+      if (existing.length > 0) {
+        send({ type: 'room:terrain', playerId: message.player.id, cells: existing });
+      }
       sendSummary();
       break;
+    }
     case 'player:leave':
       if (!scene) break;
       scene.removePlayer(message.playerId);
@@ -92,6 +98,13 @@ process.on('message', (message) => {
       if (!scene) break;
       scene.interactWithActor(message.playerId, message.interaction ?? {});
       break;
+    case 'terrain:edit': {
+      if (!scene) break;
+      // 没通过校验就是空数组，不广播任何东西——请求方也不会收到确认。
+      const cells = scene.editTerrain(message.playerId, message.edit ?? {});
+      if (cells.length > 0) send({ type: 'room:terrain', cells });
+      break;
+    }
     case 'room:shutdown':
       shutdown();
       break;

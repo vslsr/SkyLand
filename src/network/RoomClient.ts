@@ -7,6 +7,7 @@ import type {
   RoomSummary,
   VesselInputFrame,
 } from './messages';
+import type { TerrainEditOperation } from './messages';
 import type { PlayerInputFrame, RoomSnapshot } from './protocol';
 import type { WeatherType } from '../weather/index';
 import { HttpRoomDirectory, type RoomDirectory } from './RoomDirectory';
@@ -27,6 +28,14 @@ export type { PlayerInputFrame, RoomSnapshot } from './protocol';
 type RoomUpdateListener = (room: RoomSummary) => void;
 type SnapshotListener = (snapshot: RoomSnapshot) => void;
 type DisconnectListener = () => void;
+
+/** 服务端确认过的一格地形覆盖。code 的打包格式见 terrainConfig.mjs。 */
+export interface TerrainPatchCell {
+  cellX: number;
+  cellZ: number;
+  code: number;
+}
+type TerrainPatchListener = (cells: readonly TerrainPatchCell[]) => void;
 
 export interface RoomClientOptions {
   transport?: GameTransport;
@@ -52,10 +61,12 @@ export class RoomClient {
   private readonly roomListeners = new Set<RoomUpdateListener>();
   private readonly snapshotListeners = new Set<SnapshotListener>();
   private readonly disconnectListeners = new Set<DisconnectListener>();
+  private readonly terrainListeners = new Set<TerrainPatchListener>();
   private inputSequence = 0;
   private readonly actorInputSequences = new Map<string, number>();
   private readonly actorEventSequences = new Map<string, number>();
   private actorInteractionSequence = 0;
+  private terrainEditSequence = 0;
 
   public constructor(options: RoomClientOptions = {}) {
     this.transport = options.transport ?? new WebSocketTransport();
@@ -208,6 +219,28 @@ export class RoomClient {
     return () => this.snapshotListeners.delete(listener);
   }
 
+  public onTerrainPatch(listener: TerrainPatchListener): () => void {
+    this.terrainListeners.add(listener);
+    return () => this.terrainListeners.delete(listener);
+  }
+
+  /**
+   * 请求修改一格地形。**不做本地预测**：服务端校验通过后会广播回来，
+   * 那时才真正写进本地覆盖层。地形直接决定站在哪里，抢跑一帧再被拉回去
+   * 比晚一个 RTT 难受得多。
+   */
+  public editTerrain(
+    cellX: number,
+    cellZ: number,
+    operation: TerrainEditOperation,
+  ): number | undefined {
+    const sequence = this.terrainEditSequence + 1;
+    const sent = this.send({ type: 'terrain:edit', sequence, cellX, cellZ, operation }, 'control');
+    if (!sent) return undefined;
+    this.terrainEditSequence = sequence;
+    return sequence;
+  }
+
   public onDisconnect(listener: DisconnectListener): () => void {
     this.disconnectListeners.add(listener);
     return () => this.disconnectListeners.delete(listener);
@@ -224,6 +257,8 @@ export class RoomClient {
       for (const listener of this.roomListeners) listener(message.room);
     } else if (message?.type === 'room:snapshot' && message.snapshot) {
       for (const listener of this.snapshotListeners) listener(message.snapshot);
+    } else if (message?.type === 'room:terrain' && Array.isArray(message.cells)) {
+      for (const listener of this.terrainListeners) listener(message.cells as TerrainPatchCell[]);
     } else if (message?.type === 'room:closed') {
       this.transport.close();
     }
@@ -247,5 +282,6 @@ export class RoomClient {
     this.actorInputSequences.clear();
     this.actorEventSequences.clear();
     this.actorInteractionSequence = 0;
+    this.terrainEditSequence = 0;
   }
 }

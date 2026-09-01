@@ -740,3 +740,97 @@ body.is-topdown .virtual-controls.is-desktop-debug {
     transition-duration: 0.01ms !important;
   }
 }
+
+/* 地形编辑栏：贴在屏幕左侧中部，收起时只剩一条小标签。 */
+.terrain-editor {
+  position: absolute;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  pointer-events: none;
+  z-index: 4;
+}
+
+.terrain-editor[hidden] {
+  display: none;
+}
+
+.terrain-editor__tab {
+  pointer-events: auto;
+  writing-mode: vertical-rl;
+  padding: 14px 6px;
+  border: 1px solid rgba(73, 52, 38, 0.28);
+  border-left: none;
+  border-radius: 0 12px 12px 0;
+  background: rgba(253, 251, 246, 0.92);
+  color: #493426;
+  font: 600 12px/1.4 system-ui, sans-serif;
+  letter-spacing: 0.24em;
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease;
+}
+
+.terrain-editor__tab:hover,
+.terrain-editor__tab:focus-visible {
+  background: #fff;
+  color: #1d1712;
+}
+
+.terrain-editor.is-expanded .terrain-editor__tab {
+  background: #35281f;
+  color: #f6efe4;
+  border-color: #35281f;
+}
+
+.terrain-editor__tools {
+  pointer-events: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px 10px;
+  border: 1px solid rgba(73, 52, 38, 0.24);
+  border-radius: 999px;
+  background: rgba(253, 251, 246, 0.94);
+  box-shadow: 0 8px 24px rgba(73, 52, 38, 0.14);
+}
+
+.terrain-editor__tools[hidden] {
+  display: none;
+}
+
+.terrain-editor__tool {
+  width: 40px;
+  height: 40px;
+  display: grid;
+  place-items: center;
+  border: 1px solid rgba(73, 52, 38, 0.3);
+  border-radius: 50%;
+  background: #fdfbf6;
+  color: #493426;
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease, transform 120ms ease;
+}
+
+.terrain-editor__tool:hover,
+.terrain-editor__tool:focus-visible {
+  transform: scale(1.06);
+  background: #fff;
+}
+
+.terrain-editor__icon {
+  width: 20px;
+  height: 20px;
+  display: block;
+}
+
+/* 选中的工具用深色实心，和未选中的浅底一眼分得开。 */
+.terrain-editor__tool.is-active {
+  background: #35281f;
+  border-color: #35281f;
+  color: #f6efe4;
+}

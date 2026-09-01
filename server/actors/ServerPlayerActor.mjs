@@ -29,6 +29,7 @@ export class ServerPlayerActor extends Actor {
     this.speed = 0;
     this.sequence = 0;
     this.actorInteractionSequence = 0;
+    this.terrainEditSequence = 0;
     this.timeBudget = INPUT_TIME_BUDGET_SECONDS;
     this.lastInputAt = now;
     // ServerScene.players 过去保存普通对象；保留可枚举坐标，兼容监控/测试里

@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { TERRAIN_CELL_SIZE } from '../../shared/world/terrainConfig.mjs';
 import type { Actor } from '../../shared/actor/Actor.mjs';
 import type { CollisionWorld } from '../../shared/collision/index.mjs';
 import type { CameraFrame } from '../camera/CameraTransform';
@@ -52,6 +53,7 @@ export class SceneRenderer implements GrassInteractionTarget {
   private weatherTarget?: WeatherVisualTarget;
   private collisionWorld?: CollisionWorld;
   private terrainWorld?: TerrainWorld;
+  private terrainHighlight?: THREE.LineSegments;
   private currentWeather: WeatherType = DEFAULT_WEATHER;
   private simpleCollisionVisible = false;
   private temperatureVisible = false;
@@ -217,6 +219,52 @@ export class SceneRenderer implements GrassInteractionTarget {
     return this.terrainWorld?.raycast(origin, direction);
   }
 
+  /** 射线命中的地形格。UI 用它决定高亮哪一格、点下去改哪一格。 */
+  public pickTerrainCell(
+    origin: readonly [number, number, number],
+    direction: readonly [number, number, number],
+  ): { cellX: number; cellZ: number } | undefined {
+    const hit = this.terrainWorld?.raycast(origin, direction);
+    if (!hit) return undefined;
+    return {
+      cellX: Math.floor(hit.x / TERRAIN_CELL_SIZE),
+      cellZ: Math.floor(hit.z / TERRAIN_CELL_SIZE),
+    };
+  }
+
+  /**
+   * 写入服务端确认过的地形覆盖。patch store 的订阅者会据此重建受影响的 chunk。
+   * 客户端不做本地预测，所以这是覆盖层唯一的写入口。
+   */
+  public applyTerrainPatches(
+    cells: readonly { cellX: number; cellZ: number; code: number }[],
+  ): void {
+    const terrain = this.terrainWorld;
+    if (!terrain) return;
+    for (const cell of cells) terrain.setCellCode(cell.cellX, cell.cellZ, cell.code);
+  }
+
+  /** 高亮一格地形；传 undefined 收起高亮。 */
+  public setTerrainHighlight(cell?: { cellX: number; cellZ: number }): void {
+    if (!cell || !this.terrainWorld) {
+      if (this.terrainHighlight) this.terrainHighlight.visible = false;
+      return;
+    }
+    if (!this.terrainHighlight) {
+      this.terrainHighlight = createTerrainHighlight();
+      this.addWorldObject(this.terrainHighlight);
+    }
+    const centerX = (cell.cellX + 0.5) * TERRAIN_CELL_SIZE;
+    const centerZ = (cell.cellZ + 0.5) * TERRAIN_CELL_SIZE;
+    // 贴着格心的地面画，抬高一点避免和地形共面闪烁。
+    this.terrainHighlight.position.set(
+      centerX,
+      this.terrainWorld.sampleGroundHeight(centerX, centerZ) + 0.05,
+      centerZ,
+    );
+    this.terrainHighlight.visible = true;
+  }
+
   /**
    * 第三人称相机悬臂的探针：从角色到期望机位扫掠一个球，返回最早的命中位置
    * （线段参数 0–1，没挡住就是 1）。查询走 CAMERA 层，所以树冠这类
@@ -312,4 +360,32 @@ export class SceneRenderer implements GrassInteractionTarget {
       this.camera.updateProjectionMatrix();
     }
   }
+}
+
+/**
+ * 一格地形的高亮框：贴地的方框加四个角柱，线稿风格下比半透明面片更清楚，
+ * 也不需要额外的透明排序。
+ */
+function createTerrainHighlight(): THREE.LineSegments {
+  const half = TERRAIN_CELL_SIZE / 2;
+  const corner = TERRAIN_CELL_SIZE * 0.22;
+  const points: number[] = [];
+  const square: Array<[number, number]> = [
+    [-half, -half], [half, -half], [half, half], [-half, half],
+  ];
+  for (let index = 0; index < square.length; index += 1) {
+    const [fromX, fromZ] = square[index];
+    const [toX, toZ] = square[(index + 1) % square.length];
+    points.push(fromX, 0, fromZ, toX, 0, toZ);
+    // 角柱：从地面往上一小截，斜坡上也能一眼看出选中的是哪一格。
+    points.push(fromX, 0, fromZ, fromX, corner, fromZ);
+  }
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.Float32BufferAttribute(points, 3));
+  const material = new THREE.LineBasicMaterial({ color: 0xf0a33c, depthTest: false });
+  const lines = new THREE.LineSegments(geometry, material);
+  lines.name = 'terrain-edit-highlight';
+  lines.renderOrder = 999;
+  lines.frustumCulled = false;
+  return lines;
 }

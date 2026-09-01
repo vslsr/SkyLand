@@ -19,6 +19,13 @@ export class RoomConnectionHub {
         this.broadcastToRoom(roomId, { type: 'room:snapshot', snapshot }, 'realtime');
       }
     };
+    this.handleTerrain = (roomId, cells, playerId) => {
+      if (playerId) {
+        this.sendToPlayer(roomId, playerId, { type: 'room:terrain', cells }, 'control');
+      } else {
+        this.broadcastToRoom(roomId, { type: 'room:terrain', cells }, 'control');
+      }
+    };
     this.handleSummary = (room) => {
       this.broadcastToRoom(room.id, { type: 'room:summary', room }, 'control');
     };
@@ -31,6 +38,7 @@ export class RoomConnectionHub {
     };
 
     roomManager.on('snapshot', this.handleSnapshot);
+    roomManager.on('terrain', this.handleTerrain);
     roomManager.on('summary', this.handleSummary);
     roomManager.on('closed', this.handleRoomClosed);
   }
@@ -55,6 +63,7 @@ export class RoomConnectionHub {
 
   close() {
     this.roomManager.off('snapshot', this.handleSnapshot);
+    this.roomManager.off('terrain', this.handleTerrain);
     this.roomManager.off('summary', this.handleSummary);
     this.roomManager.off('closed', this.handleRoomClosed);
     for (const session of Array.from(this.sessions)) this.closeSession(session);
@@ -110,6 +119,12 @@ export class RoomConnectionHub {
         case 'actor:interact':
           if (session.roomId && session.playerId && this.consumeInputToken(session)) {
             this.roomManager.interactWithActor(session.roomId, session.playerId, message);
+          }
+          break;
+        case 'terrain:edit':
+          // 和其它输入共用同一个令牌桶：连点编辑不会绕过限流。
+          if (session.roomId && session.playerId && this.consumeInputToken(session)) {
+            this.roomManager.editTerrain(session.roomId, session.playerId, message);
           }
           break;
         default:

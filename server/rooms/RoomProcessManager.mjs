@@ -188,6 +188,10 @@ export class RoomProcessManager extends EventEmitter {
 
   handleWorkerMessage(record, message) {
     if (!message || typeof message !== 'object') return;
+    if (message.type === 'room:terrain') {
+      this.emit('terrain', record.id, message.cells, message.playerId);
+      return;
+    }
     if (message.type === 'room:snapshot') {
       this.emit('snapshot', record.id, message.snapshot, message.playerId);
     }
@@ -239,6 +243,12 @@ export class RoomProcessManager extends EventEmitter {
     const record = this.rooms.get(roomId);
     if (!record || !record.players.has(playerId)) return;
     record.child.send({ type: 'actor:event', playerId, event });
+  }
+
+  editTerrain(roomId, playerId, edit) {
+    const record = this.rooms.get(roomId);
+    if (!record?.child?.connected) return;
+    record.child.send({ type: 'terrain:edit', playerId, edit });
   }
 
   interactWithActor(roomId, playerId, interaction) {

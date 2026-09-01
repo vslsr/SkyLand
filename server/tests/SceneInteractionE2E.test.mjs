@@ -10,6 +10,7 @@ import { SceneCatalog } from '../scenes/SceneCatalog.mjs';
 import { generateChunkContent } from '../../shared/world/chunkContent.mjs';
 import { formatGeneratedPropId } from '../../shared/world/generatedProp.mjs';
 import { selectWorldPropVariant } from '../../shared/world/worldPropVariants.mjs';
+import { TERRAIN_CELL_SIZE } from '../../shared/world/terrainConfig.mjs';
 import {
   MAXIMUM_CHUNK_COORDINATE,
   MINIMUM_CHUNK_COORDINATE,
@@ -365,4 +366,74 @@ test('真实 WebSocket 贯通流式树砍伐、偏离态快照和圆木掉落', 
   assert.equal(tree.transform, undefined);
   assert.equal(tree.propState.health, 0);
   assert.equal(tree.propState.removed, true);
+});
+
+test('真实 WebSocket 贯通地形编辑：DS 校验后广播，够不到的请求被丢弃', async (context) => {
+  const sceneCatalog = await SceneCatalog.load();
+  const roomManager = new RoomProcessManager({ sceneCatalog });
+  const room = await roomManager.createRoom('地形编辑闭环测试', 'open-world');
+  const roomRecord = roomManager.rooms.get(room.id);
+  assert.ok(roomRecord);
+  const server = http.createServer();
+  const connectionHub = new RoomConnectionHub(roomManager);
+  const gateway = new WebSocketGateway(server, connectionHub);
+  let socket;
+
+  context.after(async () => {
+    socket?.terminate();
+    gateway.close();
+    connectionHub.close();
+    const childExited = roomRecord.child.exitCode == null
+      ? once(roomRecord.child, 'exit')
+      : Promise.resolve();
+    roomManager.shutdown();
+    await childExited;
+    if (server.listening) await new Promise((resolve) => server.close(resolve));
+  });
+
+  server.listen(0, '127.0.0.1');
+  await once(server, 'listening');
+  const address = server.address();
+  socket = new WebSocket('ws://127.0.0.1:' + address.port + '/ws');
+  const connected = waitForJson(socket, (message) => message.type === 'connected');
+  await once(socket, 'open');
+  await connected;
+
+  const joinedState = waitForJson(socket, (message) => message.type === 'room:joined');
+  socket.send(JSON.stringify({ type: 'room:join', roomId: room.id, name: '建造者' }));
+  const joined = await joinedState;
+
+  // 等一份快照拿到权威出生坐标：编辑距离是拿它算的，不能用客户端自己猜的位置。
+  const spawnState = await waitForJson(socket, (message) => (
+    message.type === 'room:snapshot'
+    && message.snapshot.players.some((player) => player.id === joined.player.id)
+  ));
+  const me = spawnState.snapshot.players.find((player) => player.id === joined.player.id);
+  const cellX = Math.floor(me.x / TERRAIN_CELL_SIZE);
+  const cellZ = Math.floor(me.z / TERRAIN_CELL_SIZE);
+
+  const patched = waitForJson(socket, (message) => message.type === 'room:terrain');
+  socket.send(JSON.stringify({
+    type: 'terrain:edit', sequence: 1, cellX, cellZ, operation: 'raise',
+  }));
+  const broadcast = await patched;
+  assert.equal(broadcast.cells.length, 1);
+  assert.equal(broadcast.cells[0].cellX, cellX);
+  assert.equal(broadcast.cells[0].cellZ, cellZ);
+  assert.equal(typeof broadcast.cells[0].code, 'number');
+
+  // 够不到的那一格不该产生任何广播。用一条随后必定到达的快照做「没有发生」的界标。
+  let unexpected;
+  const listener = (data) => {
+    const message = JSON.parse(data.toString());
+    if (message.type === 'room:terrain') unexpected = message;
+  };
+  socket.on('message', listener);
+  socket.send(JSON.stringify({
+    type: 'terrain:edit', sequence: 2, cellX: cellX + 60, cellZ, operation: 'raise',
+  }));
+  await waitForJson(socket, (message) => message.type === 'room:snapshot');
+  await waitForJson(socket, (message) => message.type === 'room:snapshot');
+  socket.off('message', listener);
+  assert.equal(unexpected, undefined, '够不到的编辑不该广播');
 });
