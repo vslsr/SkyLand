@@ -8,7 +8,7 @@ test('loads every selectable map from an independent scene JSON', async () => {
 
   assert.deepEqual(
     scenes.map((scene) => scene.id),
-    ['ability-lab', 'grass-test', 'grassland', 'open-meadow', 'open-world', 'thermal-lab', 'water'],
+    ['ability-lab', 'grass-test', 'grassland', 'open-meadow', 'open-world', 'orchard', 'thermal-lab', 'water'],
   );
   const abilityLab = catalog.require('ability-lab');
   assert.equal(abilityLab.capacity, 1);
@@ -116,4 +116,22 @@ test('流式场景带上 world 配置，固定场景没有', async () => {
   assert.equal(openWorld.renderer.world.loadRadius, 2);
   assert.equal(openWorld.renderer.world.keepRadius, 3);
   assert.equal(catalog.require('grassland').renderer.world, undefined);
+});
+
+
+test('果林把 tree 绑到可再生的果树上，和无边草原共用同一套世界生成', async () => {
+  const catalog = await SceneCatalog.load();
+  const orchard = catalog.require('orchard');
+  assert.deepEqual(orchard.gameplay.worldProps, { tree: 'fruit-tree', rock: 'generated-rock' });
+
+  const fruitTree = orchard.actorArchetypes.find((archetype) => archetype.id === 'fruit-tree');
+  assert.equal(fruitTree.components.generatedProp.regrow.seconds, 120);
+  // 可再生的没有血量，两种采集形态在配置层就是互斥的。
+  assert.equal(fruitTree.components.generatedProp.maximumHealth, undefined);
+  assert.ok(orchard.actorArchetypes.some((archetype) => archetype.id === 'fruit-pile'));
+
+  // 世界生成本身不受绑定影响：两张地图的 chunk 参数完全一致。
+  const openWorld = catalog.require('open-world');
+  assert.deepEqual(orchard.renderer.world, openWorld.renderer.world);
+  assert.deepEqual(orchard.gameplay.bounds, openWorld.gameplay.bounds);
 });

@@ -73,6 +73,15 @@ export class ActorSnapshotBuffer {
     this.clockOffset = undefined;
   }
 
+  /**
+   * 把本地时钟换算成服务端时钟。可再生物件的冷却是绝对服务端时间，
+   * 直接拿本地 Date.now() 比会被两端时钟差整个偏掉。
+   * 还没收到任何快照时返回 undefined。
+   */
+  public serverTimeAt(nowMs: number): number | undefined {
+    return this.clockOffset === undefined ? undefined : nowMs - this.clockOffset;
+  }
+
   public sample(nowMs = Date.now()): readonly SnapshotActor[] {
     if (this.frames.length === 0 || this.clockOffset === undefined) return [];
     const renderTime = nowMs - this.clockOffset - INTERPOLATION_DELAY_MS;

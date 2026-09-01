@@ -1,0 +1,40 @@
+{
+  "$schema": "./scene.schema.json",
+  "schemaVersion": 1,
+  "id": "orchard",
+  "displayName": "果林",
+  "description": "和无边草原同一套世界生成，树换成了可反复采摘的果树。",
+  "capacity": 16,
+  "sceneComponents": [],
+  "actors": [],
+  "renderer": {
+    "type": "line-art",
+    "background": "#fdfaf2",
+    "fog": { "color": "#fdfaf2", "near": 22, "far": 52 },
+    "content": { "ground": true, "trees": true, "grass": true, "ocean": false },
+    "palette": {
+      "ground": "#f3ecd9",
+      "grass": "#c7d79f",
+      "treeTrunk": "#cbb094",
+      "treeNeedles": "#b9d2a4"
+    },
+    "world": {
+      "loadRadius": 2,
+      "keepRadius": 3,
+      "rockColor": "#d4d0c6"
+    }
+  },
+  "gameplay": {
+    "playerActor": { "archetype": "player-slime" },
+    "worldProps": { "tree": "fruit-tree", "rock": "generated-rock" },
+    "bounds": { "minimumX": -192, "maximumX": 192, "minimumZ": -192, "maximumZ": 192 },
+    "spawn": { "centerX": 0, "centerZ": 0, "radius": 6, "slots": 16 }
+  },
+  "camera": {
+    "mode": "topdown",
+    "position": [0, 4.2, 13.5],
+    "yaw": 0,
+    "pitch": -0.12,
+    "moveSpeed": 6.5
+  }
+}

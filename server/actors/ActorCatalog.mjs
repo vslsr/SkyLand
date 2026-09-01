@@ -7,7 +7,11 @@ export const DEFAULT_ACTOR_DIRECTORY = fileURLToPath(new URL('../../config/actor
 const ID_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 
 /** 走高数量合批绘制的堆叠模型。新增一种堆叠物就在这里登记。 */
-const PILE_RENDER_MODELS = new Set(['line-art-wood-pile', 'line-art-stone-pile']);
+const PILE_RENDER_MODELS = new Set([
+  'line-art-wood-pile',
+  'line-art-stone-pile',
+  'line-art-fruit-pile',
+]);
 const COLOR_PATTERN = /^#[0-9a-f]{6}$/i;
 
 function requireObject(value, path) {
@@ -281,20 +285,33 @@ function validateReplicationPolicy(raw, filename) {
 function validateGeneratedProp(raw, filename) {
   const path = `${filename}.components.generatedProp`;
   const definition = requireObject(raw, path);
+  const dropPath = `${path}.drop`;
+  const drop = requireObject(definition.drop, dropPath);
+  const quantity = requireNumber(drop.quantity, `${dropPath}.quantity`, 1, 1000);
+  if (!Number.isInteger(quantity)) throw new TypeError(`${dropPath}.quantity 必须是整数`);
+  const validatedDrop = {
+    archetypeId: requireId(drop.archetypeId, `${dropPath}.archetypeId`),
+    quantity,
+  };
+
+  // 两种采集形态互斥：可再生的没有血量，掉血的不会长回来。
+  // 同时写两套只会让「这一下到底扣血还是进冷却」变成靠读代码才能知道的事。
+  if (definition.regrow !== undefined) {
+    if (definition.maximumHealth !== undefined || definition.harvestDamage !== undefined) {
+      throw new TypeError(`${path}.regrow 与 maximumHealth / harvestDamage 不能同时出现`);
+    }
+    const regrowPath = `${path}.regrow`;
+    const regrow = requireObject(definition.regrow, regrowPath);
+    const seconds = requireNumber(regrow.seconds, `${regrowPath}.seconds`, 1, 86_400);
+    return { regrow: { seconds }, drop: validatedDrop };
+  }
+
   const maximumHealth = requireNumber(definition.maximumHealth, `${path}.maximumHealth`, 1, 1000);
   const harvestDamage = requireNumber(definition.harvestDamage, `${path}.harvestDamage`, 1, 1000);
   if (![maximumHealth, harvestDamage].every(Number.isInteger)) {
     throw new TypeError(`${path} 的生命与伤害必须是整数`);
   }
-  const dropPath = `${path}.drop`;
-  const drop = requireObject(definition.drop, dropPath);
-  const quantity = requireNumber(drop.quantity, `${dropPath}.quantity`, 1, 1000);
-  if (!Number.isInteger(quantity)) throw new TypeError(`${dropPath}.quantity 必须是整数`);
-  return {
-    maximumHealth,
-    harvestDamage,
-    drop: { archetypeId: requireId(drop.archetypeId, `${dropPath}.archetypeId`), quantity },
-  };
+  return { maximumHealth, harvestDamage, drop: validatedDrop };
 }
 
 function validateRender(raw, filename) {
@@ -401,6 +418,16 @@ function validateRender(raw, filename) {
       model: render.model,
       woodColor: requireColor(render.woodColor, `${path}.woodColor`),
       cutColor: requireColor(render.cutColor, `${path}.cutColor`),
+      inkColor: requireColor(render.inkColor, `${path}.inkColor`),
+      radius: requireNumber(render.radius, `${path}.radius`, Number.EPSILON, 3),
+      height: requireNumber(render.height, `${path}.height`, Number.EPSILON, 3),
+    };
+  }
+  if (render.model === 'line-art-fruit-pile') {
+    return {
+      model: render.model,
+      fruitColor: requireColor(render.fruitColor, `${path}.fruitColor`),
+      accentColor: requireColor(render.accentColor, `${path}.accentColor`),
       inkColor: requireColor(render.inkColor, `${path}.inkColor`),
       radius: requireNumber(render.radius, `${path}.radius`, Number.EPSILON, 3),
       height: requireNumber(render.height, `${path}.height`, Number.EPSILON, 3),

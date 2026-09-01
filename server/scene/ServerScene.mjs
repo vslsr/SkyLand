@@ -96,6 +96,7 @@ export class ServerScene {
     this.spawn = definition.gameplay?.spawn;
     this.playerActorArchetype = resolvePlayerActorArchetype(definition);
     this.worldSeed = toWorldSeed(options.worldSeed);
+    this.now = options.now ?? (() => Date.now());
     this.players = new Map();
     // 一张空间网格同时承载 Actor 与流式世界的静态物件。玩家推出只查身边的
     // 几个格子，成本不随房间里的 Actor 数或世界面积增长。
@@ -119,9 +120,9 @@ export class ServerScene {
       worldProps: definition.gameplay?.worldProps,
       worldSeed: this.worldSeed,
       enabled: Boolean(definition.renderer?.world),
+      now: () => this.now() / 1000,
     });
     this.tick = 0;
-    this.now = options.now ?? (() => Date.now());
     this.lastRefillAt = this.now();
   }
 
@@ -308,21 +309,25 @@ export class ServerScene {
       ) return false;
       const distance = Math.hypot(targetTransform.x - player.x, targetTransform.z - player.z);
       if (distance > interactable.maximumDistance) return false;
-      if (!prop.applyDamage()) return false;
+      // 可再生的在冷却里会被 harvest 拒掉，不需要在这里单独判一次。
+      if (!prop.harvest(this.now() / 1000)) return false;
       // 立刻登记偏离态：这一片 chunk 卸载再装回来时，它要保持被采过的样子。
       this.generatedProps.recordDeviation(target);
       interactable.revision += 1;
       if (prop.removed) {
+        // 采完就永久消失：几何体与静态碰撞一起撤走。可再生的什么都不动——
+        // 树还在原地，只是暂时没果子。
         interactable.enabled = false;
         this.chunkColliders.setPropSkipped(prop.chunkX, prop.chunkZ, prop.propIndex, true);
-        if (prop.dropArchetypeId) {
-          this.spawnItemStack(prop.dropArchetypeId, {
-            position: [targetTransform.x, Math.max(0.5, prop.scale * 0.55), targetTransform.z],
-            quantity: prop.dropQuantity,
-            velocity: [0, 2.2, 0],
-            yaw: targetTransform.yaw,
-          });
-        }
+      }
+      // 可再生的每采一次都掉东西；掉血的只在采完那一下掉。
+      if ((prop.removed || prop.regrowable) && prop.dropArchetypeId) {
+        this.spawnItemStack(prop.dropArchetypeId, {
+          position: [targetTransform.x, Math.max(0.5, prop.scale * 0.55), targetTransform.z],
+          quantity: prop.dropQuantity,
+          velocity: [0, 2.2, 0],
+          yaw: targetTransform.yaw,
+        });
       }
       player.actorInteractionSequence = sequence;
       return true;

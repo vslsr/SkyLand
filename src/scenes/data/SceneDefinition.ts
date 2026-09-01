@@ -133,6 +133,14 @@ export type ActorRenderDefinition =
       inkColor: string;
       radius: number;
       height: number;
+    }
+  | {
+      model: 'line-art-fruit-pile';
+      fruitColor: string;
+      accentColor: string;
+      inkColor: string;
+      radius: number;
+      height: number;
     };
 
 export interface ActorArchetypeDefinition {
@@ -223,8 +231,11 @@ export interface ActorArchetypeDefinition {
     lifetime?: { lifetimeSeconds: number };
     replicationPolicy?: { mode: 'always' | 'aoi'; radiusChunks: number };
     generatedProp?: {
-      maximumHealth: number;
-      harvestDamage: number;
+      /** 掉血形态：采到 0 就永久消失。与 regrow 互斥。 */
+      maximumHealth?: number;
+      harvestDamage?: number;
+      /** 冷却形态：没有血量，采一次之后过这么多秒自己长回来。与血量互斥。 */
+      regrow?: { seconds: number };
       drop: { archetypeId: string; quantity: number };
     };
     render?: ActorRenderDefinition;

@@ -203,8 +203,14 @@ export function createActorSnapshots(world, options = {}) {
         id: actor.id,
         revision: generatedProp.revision,
         propState: {
-          health: generatedProp.health,
           removed: generatedProp.removed,
+          // 两种采集形态只发各自用得上的那一项：可再生的没有血量，
+          // 掉血的没有冷却。发一个恒等于 1 的 health 只会误导后来的人。
+          ...(generatedProp.regrowable
+            // 绝对服务端秒数。客户端拿它自己判断长回来没有，
+            // 所以「恢复」那一刻不需要再发一条快照。
+            ? { readyAt: generatedProp.readyAt }
+            : { health: generatedProp.health }),
         },
       };
     }

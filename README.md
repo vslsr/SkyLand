@@ -418,12 +418,44 @@ Actor id 是自描述的：`prop:<种类>:<chunkX>:<chunkZ>:<放置下标>`。�
 | 绑了 `tree` 就必须开 `renderer.content.trees` | 一片撞得到、采得到、但看不见的树 |
 | 掉落必须指向存在且可堆叠的原型 | 要等玩家采到那一下才炸在交互路径上 |
 
-`open-world` 目前绑了两种：
+### 两种采集形态
 
-| 物件 | 绑定的原型 | 生命 | 掉落 |
-| --- | --- | --- | --- |
-| `tree` | `generated-tree` | 3 | `wood-pile` × 5 |
-| `rock` | `generated-rock` | 4 | `stone-pile` × 3 |
+原型的 `generatedProp` 里有没有 `regrow` 决定这个物件怎么被采：
+
+| | 没有 `regrow` | 有 `regrow` |
+| --- | --- | --- |
+| 状态 | `maximumHealth` / `harvestDamage` | 没有血量 |
+| 采集 | 掉血，掉到 0 才掉东西 | 每采一次都掉东西 |
+| 采完 | 永久消失，几何体与静态碰撞一起撤走 | 原地不动，进入冷却 |
+| 恢复 | 不会 | 冷却结束自己恢复 |
+
+两者互斥，`ActorCatalog` 在加载时就拒绝同时写两套——否则「这一下到底扣血还是
+进冷却」得读代码才知道。
+
+冷却用的是**绝对服务端时间** `readyAt`，和 `LifetimeComponent` 一个范式：chunk
+卸载期间时间照样流逝，装回来时比一次就知道长回来没有，长回来的直接丢掉偏离态
+记录，回到「没被动过」。**没有定时器，没有逐 tick 扫描。**
+
+`readyAt` 原样复制给客户端，两端各自判断熟没熟，所以「长回来」这一刻**不需要
+再发一条快照**。客户端拿的是快照缓冲换算过的服务端时钟，不是本地 `Date.now()`
+——两端时钟差几分钟是常事，用本地时间会把整个冷却算偏。
+
+果子不进 chunk 合批：合批器只能按放置记录里的 kind 选模板，没有逐实例的状态
+通道，要让「同一棵树有果子/没果子」两种外观就得改 WASM 的 ABI。
+`GeneratedPropFruitSystem` 拿已有的派生 Actor 单独铺一层实例化网格，代价是每帧
+多两次绘制，换来的是放置算法与 WASM 一行不动。
+
+### 两张地图绑同一套世界生成
+
+`open-world` 与 `orchard` 用的是同一个世界种子、同一套 chunk 参数，区别只在
+`tree` 绑到了哪个原型：
+
+| 场景 | `tree` | `rock` |
+| --- | --- | --- |
+| `open-world` 无边草原 | `generated-tree`（生命 3 → `wood-pile` × 5） | `generated-rock`（生命 4 → `stone-pile` × 3） |
+| `orchard` 果林 | `fruit-tree`（冷却 120 秒 → `fruit-pile` × 3） | 同左 |
+
+两张地图上每一棵树的位置、朝向、缩放完全一致——换的是玩法，不是世界。
 
 草没有原型认领，仍然是纯布景。两种采集走的是同一条 `harvest-prop` 代码路径，
 `ServerScene` 里没有任何一处提到树或石头。

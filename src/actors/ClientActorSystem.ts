@@ -80,6 +80,7 @@ import {
   FireVisualComponent,
 } from './components/FireVisualComponent';
 import { FireVisualSystem } from './systems/FireVisualSystem';
+import { GeneratedPropFruitSystem } from './systems/GeneratedPropFruitSystem';
 import { HighCountActorBatchSystem } from './systems/HighCountActorBatchSystem';
 import {
   TEMPERATURE_MARKER_COMPONENT,
@@ -103,9 +104,12 @@ export interface ClientActorSystemOptions {
 }
 
 type PropStateSnapshot = {
-  health: number;
+  /** 掉血形态才有；可再生物件没有血量。 */
+  health?: number;
   maximumHealth?: number;
   removed: boolean;
+  /** 可再生物件下一次可采的绝对服务端秒数。 */
+  readyAt?: number;
   revision: number;
 };
 type PropOverrideTarget = (chunkX: number, chunkZ: number, propIndex: number, removed: boolean) => void;
@@ -125,6 +129,7 @@ export class ClientActorSystem implements SceneVisualSystem {
   private readonly closestRayPoint = new THREE.Vector3();
   private readonly collision: CollisionWorld;
   private readonly highCountBatches: HighCountActorBatchSystem;
+  private readonly fruit: GeneratedPropFruitSystem;
   /** actorId → 登记进碰撞世界的实例，逐帧复用，避免每帧产生一批临时对象。 */
   private readonly colliderInstances = new Map<string, {
     collision: SimpleCollisionComponent;
@@ -164,6 +169,7 @@ export class ClientActorSystem implements SceneVisualSystem {
     this.now = options.now ?? (() => Date.now());
     this.collision = options.collision ?? new CollisionWorld();
     this.highCountBatches = new HighCountActorBatchSystem(options.environment, this.archetypes);
+    this.fruit = new GeneratedPropFruitSystem(options.environment, this.archetypes);
     // 客户端不运行 AttachmentSystem：最终世界坐标来自快照插值，不能被
     // localTransform 再次解算覆盖。
     this.world.addSystem(new ActorTransformSystem(this.root));
@@ -247,6 +253,12 @@ export class ClientActorSystem implements SceneVisualSystem {
     this.applySnapshotSet(this.snapshots.sample(this.now()));
     this.world.update(deltaSeconds, elapsedSeconds);
     this.highCountBatches.sync(this.world);
+    // 果子的熟没熟由绝对服务端时间决定，所以这里用换算过的服务端时钟，
+    // 而不是本地 Date.now()。
+    const serverTime = this.snapshots.serverTimeAt(this.now());
+    this.fruit.sync(this.world, serverTime === undefined ? undefined : serverTime / 1000);
+    // 和高数量批次一样按需挂进场景：没有果树的地图不会多出一层空节点。
+    if (this.fruit.instanceCount > 0 && !this.fruit.root.parent) this.root.add(this.fruit.root);
     if (this.highCountBatches.root.children.length > 0 && !this.highCountBatches.root.parent) {
       this.root.add(this.highCountBatches.root);
     }
@@ -316,6 +328,7 @@ export class ClientActorSystem implements SceneVisualSystem {
     for (const actorId of this.colliderInstances.keys()) this.collision.removeDynamic(actorId);
     this.colliderInstances.clear();
     this.highCountBatches.dispose();
+    this.fruit.dispose();
     this.world.dispose();
   }
 
