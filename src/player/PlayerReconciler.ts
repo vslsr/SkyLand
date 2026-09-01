@@ -5,12 +5,13 @@ export interface ReconcilerTarget {
   rewindAndReplay(
     authoritative: AuthoritativeCharacterState,
     pendingInputs: readonly PlayerInputStep[],
-  ): { replayed: number; residualDistance: number; snapped: boolean };
+  ): { replayed: number; residualDistance: number; corrected: boolean; snapped: boolean };
 }
 
 export interface PlayerReconciliationResult {
   replayed: number;
   residualDistance: number;
+  corrected: boolean;
   snapped: boolean;
 }
 

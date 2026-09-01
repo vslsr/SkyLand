@@ -14,8 +14,10 @@ import {
 } from '../actors/components/SlimeSurfaceDragComponent';
 import { SlimeSurfaceDragController } from '../controllers/SlimeSurfaceDragController';
 import {
+  DEFAULT_TOP_DOWN_CAMERA_OFFSET,
   TopDownController,
 } from '../controllers/TopDownController';
+import type { Vec3 } from '../math/vec3';
 import type { GrassInteractionTarget } from '../grass';
 import type { InputSubsystem } from '../input/index';
 import type {
@@ -57,11 +59,13 @@ export interface PlayerAuthoritativeApplyResult {
   pendingAfter: number;
   replayed?: number;
   residualDistance?: number;
+  corrected?: boolean;
   snapped?: boolean;
 }
 
 interface PlayerWorldInteraction extends GrassInteractionTarget {
   sampleGroundHeight?(x: number, z: number): number;
+  onTerrainChanged?(listener: () => void): () => void;
   samplePlayerHeight?(x: number, z: number, buoyancyDraft?: number): number;
   isWaterAt?(x: number, z: number): boolean;
   getPhysicsWorld?(): PhysicsWorld | undefined;
@@ -69,12 +73,6 @@ interface PlayerWorldInteraction extends GrassInteractionTarget {
     origin: readonly [number, number, number],
     direction: readonly [number, number, number],
   ): { x: number; y: number; z: number } | undefined;
-  /** 第三人称相机悬臂的遮挡探针，见 SceneRenderer.sweepCameraProbe。 */
-  sweepCameraProbe?(
-    start: readonly [number, number, number],
-    end: readonly [number, number, number],
-    radius: number,
-  ): number;
 }
 
 export class PlayerEntity extends Actor {
@@ -89,6 +87,7 @@ export class PlayerEntity extends Actor {
   private readonly jumpAbility: PlayerJumpComponent;
   private readonly buoyancyHeight?: PlayerBuoyancyHeightController;
   private readonly isWaterAt?: (x: number, z: number) => boolean;
+  private readonly unsubscribeTerrainChanges?: () => void;
   private readonly pendingInputSteps: PlayerInputStep[] = [];
 
   public constructor(
@@ -99,6 +98,7 @@ export class PlayerEntity extends Actor {
     bounds: SceneBounds,
     grassInteraction: PlayerWorldInteraction,
     archetype: ActorArchetypeDefinition,
+    topDownCameraOffset: Vec3 = DEFAULT_TOP_DOWN_CAMERA_OFFSET,
   ) {
     super(playerId, archetype.id);
     const render = archetype.components.render;
@@ -133,7 +133,6 @@ export class PlayerEntity extends Actor {
           ?? createDefaultSlimeSurfaceDragDefinition(this.visual.radius),
       )) as SlimeSurfaceDragComponent
       : undefined;
-    const cameraProbe = grassInteraction.sweepCameraProbe?.bind(grassInteraction);
     const sampleGroundHeight = grassInteraction.sampleGroundHeight?.bind(grassInteraction);
     const sampleBasePlayerHeight = buoyancy && grassInteraction.samplePlayerHeight
       ? (x: number, z: number): number => grassInteraction.samplePlayerHeight!(x, z, buoyancy.draft)
@@ -152,6 +151,7 @@ export class PlayerEntity extends Actor {
     this.model.root.position.set(spawn.x, samplePlayerHeight?.(spawn.x, spawn.z) ?? 0, spawn.z);
     this.controller = new TopDownController(canvas, this.model.root, input, {
       enabled: false,
+      cameraOffset: topDownCameraOffset,
       bounds,
       collisionRadius: this.visual.collisionRadius,
       collisionHeight: this.visual.collisionHeight,
@@ -177,8 +177,13 @@ export class PlayerEntity extends Actor {
       ),
       sampleGroundHeight: samplePlayerHeight,
       raycastGround,
-      cameraCollisionEnabled: Boolean(grassInteraction.getPhysicsWorld?.()),
-      cameraProbe,
+      // 玩法 TopDown 保持 Scene 配置的完整构图；树木和建筑可以遮挡，但不能把镜头推近。
+      cameraCollisionEnabled: false,
+    });
+    this.unsubscribeTerrainChanges = grassInteraction.onTerrainChanged?.(() => {
+      const position = this.controller.position;
+      const groundY = sampleGroundHeight?.(position.x, position.z);
+      if (groundY !== undefined) this.controller.ensureTerrainSupport(groundY);
     });
     this.slimeSurfaceDragController = slimeSurfaceDrag
       ? new SlimeSurfaceDragController(
@@ -325,6 +330,7 @@ export class PlayerEntity extends Actor {
   }
 
   public override dispose(): void {
+    this.unsubscribeTerrainChanges?.();
     this.waterMovementEffect.dispose();
     this.slimeSurfaceDragController?.dispose();
     this.controller.dispose();

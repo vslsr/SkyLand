@@ -371,6 +371,7 @@ export class GrasslandScene extends Scene {
         joined.player.spawn,
         joined.scene.gameplay.bounds,
         playerArchetype,
+        joined.scene.camera.position,
       );
     } else {
       this.controls.setPlayerController(undefined);
@@ -528,6 +529,7 @@ export class GrasslandScene extends Scene {
     spawn: { x: number; z: number },
     bounds: JoinedRoom['scene']['gameplay']['bounds'],
     archetype: ActorArchetypeDefinition,
+    topDownCameraOffset: JoinedRoom['scene']['camera']['position'],
   ): void {
     if (this.player) return;
     this.player = new PlayerEntity(
@@ -538,6 +540,7 @@ export class GrasslandScene extends Scene {
       bounds,
       this.renderer,
       archetype,
+      topDownCameraOffset,
     );
     this.renderer.addWorldObject(this.player.object3D);
     this.controls.setPlayerController(this.player.controller);

@@ -17,6 +17,7 @@ const OFFSET: Vec3 = [5.5, 7.5, 8.5];
 function createTopDownController(options: {
   cameraCollisionEnabled?: boolean;
   cameraProbe: CameraProbe;
+  cameraOffset?: Vec3;
 }): TopDownController {
   const canvas = {
     addEventListener: () => undefined,
@@ -125,6 +126,30 @@ test('TopDown 控制器显式开启后才会按碰撞结果收缩镜头', () => 
 
   assert.equal(probeCount, 1);
   assert.ok(Math.abs(controller.cameraDistance - 0.4) < 1e-12);
+  assert.equal(
+    controller.frame.position[1],
+    PIVOT[1] + OFFSET[1],
+    '遮挡收缩不能覆盖玩法 Scene 配置的 TopDown 高度',
+  );
+  assert.equal(
+    controller.frame.position[0],
+    PIVOT[0] + OFFSET[0] * 0.4,
+    '遮挡仍应收缩 XZ 平面距离',
+  );
+  controller.dispose();
+});
+
+test('TopDown 使用玩法 Scene 的完整 camera.position 作为焦点偏移', () => {
+  const sceneOffset: Vec3 = [0, 9, 14];
+  const controller = createTopDownController({
+    cameraOffset: sceneOffset,
+    cameraProbe: () => 1,
+  });
+
+  assert.deepEqual(
+    controller.frame.position,
+    [PIVOT[0] + sceneOffset[0], PIVOT[1] + sceneOffset[1], PIVOT[2] + sceneOffset[2]],
+  );
   controller.dispose();
 });
 
@@ -133,6 +158,7 @@ test('TopDown 镜头平滑追随玩家，传送重置时才立即对齐', () => 
     cameraProbe: () => 1,
   });
   const initialX = controller.frame.position[0];
+  const initialY = controller.frame.position[1];
 
   controller.setPosition(6, 0);
   assert.equal(controller.frame.position[0], initialX, '移动发生时镜头不能瞬切到玩家新位置');
@@ -142,10 +168,23 @@ test('TopDown 镜头平滑追随玩家，传送重置时才立即对齐', () => 
   assert.ok(firstFrameX > initialX, '镜头应当开始追随');
   assert.ok(firstFrameX < initialX + 6, '第一帧不能直接追到目标');
 
+  controller.setVerticalPosition(3);
+  assert.equal(controller.frame.position[1], initialY, '纵向移动发生时镜头也不能瞬切');
+  controller.update(1 / 60);
+  const verticalTarget = 3 + PIVOT[1] + OFFSET[1];
+  assert.ok(
+    controller.frame.position[1] > initialY && controller.frame.position[1] < verticalTarget,
+    '跳跃或上下坡时镜头 Y 轴必须连续追随',
+  );
+
   for (let frame = 0; frame < 120; frame += 1) controller.update(1 / 60);
   assert.ok(
     Math.abs(controller.frame.position[0] - (initialX + 6)) < 1e-6,
     '平滑追随最终必须收敛到玩家',
+  );
+  assert.ok(
+    Math.abs(controller.frame.position[1] - verticalTarget) < 1e-6,
+    '纵向平滑追随最终必须恢复玩法 Scene 配置的视角高度',
   );
 
   controller.setPosition(-6, 0);
@@ -157,27 +196,43 @@ test('TopDown 镜头平滑追随玩家，传送重置时才立即对齐', () => 
   controller.dispose();
 });
 
-test('切换到 TopDown 时在两套机位之间平滑过渡，而不是瞬切', () => {
+test('TopDown 长帧不会让镜头单帧瞬切到移动单位', () => {
+  const controller = createTopDownController({ cameraProbe: () => 1 });
+  const initialX = controller.frame.position[0];
+
+  controller.setPosition(6, 0);
+  controller.update(1);
+
+  assert.ok(controller.frame.position[0] > initialX, '长帧后镜头仍应继续追随');
+  assert.ok(
+    controller.frame.position[0] < initialX + 3,
+    '卡顿产生的长 delta 不能令阻尼在单帧内追到目标',
+  );
+  controller.dispose();
+});
+
+test('切换到 TopDown 时平滑过渡平面机位，但立即恢复原视角高度', () => {
   const axes: CameraAxes = {
     right: [1, 0, 0],
     up: [0, 1, 0],
     forward: [0, 0, -1],
   };
-  const createController = (cameraX: number): SceneCameraController => ({
+  const createController = (cameraX: number, cameraY: number): SceneCameraController => ({
     frame: {
-      position: [cameraX, 4, 8],
+      position: [cameraX, cameraY, 8],
       axes,
-      viewMatrix: createCameraViewMatrix([cameraX, 4, 8], axes),
+      viewMatrix: createCameraViewMatrix([cameraX, cameraY, 8], axes),
     },
     setInputEnabled: () => undefined,
     update: () => undefined,
   });
-  const fly = createController(0);
-  const topDown = createController(10);
+  const fly = createController(0, 2);
+  const topDown = createController(10, 7.75);
   const router = new SceneControlRouter(fly, { cameraTransitionDurationSeconds: 0.4 });
 
   router.setPlayerController(topDown);
   assert.equal(router.frame.position[0], 0, '切换当帧必须保持原机位');
+  assert.equal(router.frame.position[1], 7.75, '切换当帧就必须恢复 TopDown 原视角高度');
 
   router.update(0.2, 0.2);
   assert.ok(router.frame.position[0] > 0 && router.frame.position[0] < 10);

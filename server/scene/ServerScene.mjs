@@ -193,6 +193,7 @@ export class ServerScene {
       enabled: Boolean(definition.renderer?.world),
       cellCodeAt: this.terrainCellCodeAt,
       terrainPatches: this.terrainPatches,
+      onTerrainChanged: () => this.liftPlayersAboveTerrain(),
     });
     // 生成物件和静态碰撞一样跟着玩家滑动，房间启动时一个都不建。
     // 哪些种类真的产生 Actor、同 kind 如何分配原型，由 gameplay.worldProps 决定。
@@ -575,6 +576,27 @@ export class ServerScene {
       case 'reset': return this.terrainEditor.reset(cellX, cellZ);
       default: return false;
     }
+  }
+
+  liftPlayersAboveTerrain() {
+    if (!this.terrainEnabled) return 0;
+    let lifted = 0;
+    for (const player of this.players.values()) {
+      const groundY = sampleTerrain(
+        this.worldSeed,
+        player.x,
+        player.z,
+        {},
+        this.terrainCellCodeAt,
+      ).groundY;
+      if (groundY <= player.y + 1e-6) continue;
+      player.setPosition(player.x, player.z, groundY);
+      player.characterState.vy = 0;
+      player.characterState.grounded = true;
+      this.physics.setCharacterTranslation(player.id, player.characterState);
+      lifted += 1;
+    }
+    return lifted;
   }
 
   /** 房间新成员加入时用来补齐已有编辑。 */

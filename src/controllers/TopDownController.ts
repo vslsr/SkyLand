@@ -38,6 +38,7 @@ import { SimulationClock } from '../../shared/physics/simulationClock.mjs';
 import {
   RECONCILE_RATE,
   RECONCILE_SNAP_DISTANCE,
+  RECONCILE_TOLERANCE,
   SIMULATION_STEP_SECONDS,
 } from '../../shared/networkTuning.mjs';
 
@@ -59,6 +60,7 @@ export interface PlayerCollisionMotion {
 
 export interface TopDownControllerOptions {
   enabled?: boolean;
+  /** 相对于阻尼焦点的完整 Scene 相机偏移。 */
   cameraOffset?: Vec3;
   /** TopDown 镜头追随玩家的收敛速度；越大越紧，默认保留轻微粘滞感。 */
   cameraFollowSharpness?: number;
@@ -105,6 +107,7 @@ export interface TopDownControllerOptions {
 
 /** 悬臂支点的离地高度：史莱姆胸口附近，不是脚下，免得镜头贴地。 */
 const CAMERA_PIVOT_HEIGHT = 0.25;
+export const DEFAULT_TOP_DOWN_CAMERA_OFFSET: Vec3 = [5.5, 7.5, 8.5];
 
 export class TopDownController {
   private readonly canvas: HTMLCanvasElement;
@@ -162,7 +165,7 @@ export class TopDownController {
     this.canvas = canvas;
     this.player = player;
     this.enabled = options.enabled ?? true;
-    this.cameraOffset = options.cameraOffset ?? [5.5, 7.5, 8.5];
+    this.cameraOffset = [...(options.cameraOffset ?? DEFAULT_TOP_DOWN_CAMERA_OFFSET)];
     this.bounds = options.bounds ?? PLAYER_BOUNDS;
     this.collisionRadius = Math.max(0, options.collisionRadius ?? 0);
     this.movement = options.movement ?? {
@@ -217,12 +220,12 @@ export class TopDownController {
 
   public get frame(): CameraFrame {
     const target = this.cameraFollow.position;
-    // 悬臂只改长度不改方向，所以三条相机轴与无遮挡时完全一致：
-    // 鼠标射线投影、朝向解算都不需要为镜头收缩单独处理。
+    // 遮挡只收缩 XZ 平面的悬臂距离，Scene 配置的相机高度不能被一起压低。
+    // XZ 朝向保持不变；俯仰轴按最终机位重算，鼠标射线始终与实际画面一致。
     const ratio = this.cameraDistanceRatio;
     const position: Vec3 = [
       target[0] + this.cameraOffset[0] * ratio,
-      target[1] + this.cameraOffset[1] * ratio,
+      target[1] + this.cameraOffset[1],
       target[2] + this.cameraOffset[2] * ratio,
     ];
     const forward = normalize([
@@ -326,13 +329,14 @@ export class TopDownController {
   }
 
   /**
-   * 逻辑状态立即回到服务端确认点，再重放所有尚未确认的本地输入。
-   * 可见位置只保留一个衰减偏移，永远不会反过来污染物理状态。
+   * 从服务端确认点重放所有尚未确认的本地输入，再和当前预测作比较。
+   * 容差内保留本地预测；超出容差时只平滑逻辑修正量，不能把固定步插值延迟
+   * 误当成网络误差。普通和解也不能清空固定步余量，否则快照会周期性打断移动。
    */
   public rewindAndReplay(
     authoritative: AuthoritativeCharacterState,
     pendingInputs: readonly PlayerInputStep[],
-  ): { replayed: number; residualDistance: number; snapped: boolean } {
+  ): { replayed: number; residualDistance: number; corrected: boolean; snapped: boolean } {
     if (!this.characterState || !this.characterParams || !this.physicsWorld || !this.characterId) {
       this.setPosition(authoritative.x, authoritative.z);
       this.setVerticalPosition(authoritative.y);
@@ -342,14 +346,10 @@ export class TopDownController {
         authoritative.vz,
         authoritative.grounded,
       );
-      return { replayed: 0, residualDistance: 0, snapped: true };
+      return { replayed: 0, residualDistance: 0, corrected: true, snapped: true };
     }
 
-    const rendered = {
-      x: this.player.position.x,
-      y: this.player.position.y,
-      z: this.player.position.z,
-    };
+    const predicted = createCharacterState(this.characterState);
     copyCharacterState(this.characterState, authoritative);
     this.physicsWorld.setCharacterTranslation(this.characterId, this.characterState);
     this.physicsWorld.prepareQueries();
@@ -363,27 +363,68 @@ export class TopDownController {
         this.characterParams,
       );
     }
-    this.previousSimulationPosition = {
-      x: this.characterState.x,
-      y: this.characterState.y,
-      z: this.characterState.z,
-    };
-    this.simulationClock.reset();
-    const errorX = rendered.x - this.characterState.x;
-    const errorY = rendered.y - this.characterState.y;
-    const errorZ = rendered.z - this.characterState.z;
+
+    const errorX = predicted.x - this.characterState.x;
+    const errorY = predicted.y - this.characterState.y;
+    const errorZ = predicted.z - this.characterState.z;
     const residualDistance = Math.hypot(errorX, errorY, errorZ);
+    const groundedChanged = predicted.grounded !== this.characterState.grounded;
+
+    if (residualDistance <= RECONCILE_TOLERANCE && !groundedChanged) {
+      // 快照坐标按毫米量化。容差内把预测位置写回，避免每份快照都让 Rapier
+      // 从略有不同的地形三角面起点重新出发；速度等运动状态仍采用重放结果。
+      const reconciledMotion = {
+        vx: this.characterState.vx,
+        vy: this.characterState.vy,
+        vz: this.characterState.vz,
+        grounded: this.characterState.grounded,
+        jumpPressed: this.characterState.jumpPressed,
+      };
+      copyCharacterState(this.characterState, predicted);
+      Object.assign(this.characterState, reconciledMotion);
+      this.physicsWorld.setCharacterTranslation(this.characterId, this.characterState);
+      this.physicsWorld.prepareQueries();
+      this.jumpAbility?.applyAuthoritativeState(
+        this.characterState.vy,
+        this.characterState.grounded,
+      );
+      return {
+        replayed: ordered.length,
+        residualDistance,
+        corrected: false,
+        snapped: false,
+      };
+    }
+
     const snapped = residualDistance > RECONCILE_SNAP_DISTANCE;
-    this.renderOffsetX = snapped ? 0 : errorX;
-    this.renderOffsetY = snapped ? 0 : errorY;
-    this.renderOffsetZ = snapped ? 0 : errorZ;
-    if (snapped) this.resetCamera();
+    if (snapped) {
+      this.previousSimulationPosition = {
+        x: this.characterState.x,
+        y: this.characterState.y,
+        z: this.characterState.z,
+      };
+      this.renderOffsetX = 0;
+      this.renderOffsetY = 0;
+      this.renderOffsetZ = 0;
+      this.simulationClock.reset();
+      this.resetCamera();
+      this.refreshRenderPosition(1);
+    } else {
+      // 同量平移插值区间并反向累加修正偏移：当前画面连续，但偏移只包含
+      // 预测与权威的逻辑差，不会吞入正常的一帧固定步插值延迟。
+      this.previousSimulationPosition.x -= errorX;
+      this.previousSimulationPosition.y -= errorY;
+      this.previousSimulationPosition.z -= errorZ;
+      this.renderOffsetX += errorX;
+      this.renderOffsetY += errorY;
+      this.renderOffsetZ += errorZ;
+      this.refreshRenderPosition(this.simulationClock.alpha);
+    }
     this.jumpAbility?.applyAuthoritativeState(
       this.characterState.vy,
       this.characterState.grounded,
     );
-    this.refreshRenderPosition(1);
-    return { replayed: ordered.length, residualDistance, snapped };
+    return { replayed: ordered.length, residualDistance, corrected: true, snapped };
   }
 
   /** 输入包成功发出后清除短按锁存；仍按住 Space 时 jump 会继续保持 true。 */
@@ -457,6 +498,29 @@ export class TopDownController {
       return;
     }
     this.player.position.y = y;
+  }
+
+  /**
+   * 地形 patch 可能把一张新三角面直接生成在角色脚点之上。Rapier 的角色控制器
+   * 只解算下一次位移，不会自动修复这种由静态碰撞重建造成的初始穿透，因此这里
+   * 在地面确实高过脚点时做一次向上重定位。下降的地形仍交给重力自然处理。
+   */
+  public ensureTerrainSupport(minimumY: number): boolean {
+    if (!Number.isFinite(minimumY) || minimumY <= this.verticalPosition + 1e-6) return false;
+    if (this.characterState && this.physicsWorld && this.characterId) {
+      this.characterState.y = minimumY;
+      this.characterState.vy = 0;
+      this.characterState.grounded = true;
+      this.physicsWorld.setCharacterTranslation(this.characterId, this.characterState);
+      this.previousSimulationPosition.y = minimumY;
+      this.renderOffsetY = 0;
+      this.jumpAbility?.applyAuthoritativeState(0, true);
+      this.refreshRenderPosition(1);
+      return true;
+    }
+    this.player.position.y = minimumY;
+    this.jumpAbility?.applyAuthoritativeState(0, true);
+    return true;
   }
 
   public translateVertical(deltaY: number): void {

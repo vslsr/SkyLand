@@ -63,6 +63,8 @@ export class CameraFrameTransition {
     const progress = Math.min(1, this.elapsedSeconds / this.durationSeconds);
     const amount = progress * progress * (3 - 2 * progress);
     const position = mixVector(this.source.position, target.position, amount);
+    // 只过渡平面机位；高度始终采用 TopDown 目标值，避免切换期间镜头被压低。
+    position[1] = target.position[1];
     const forward = normalizedOr(
       mixVector(this.source.axes.forward, target.axes.forward, amount),
       target.axes.forward,

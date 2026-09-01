@@ -42,7 +42,7 @@
   },
   "camera": {
     "mode": "topdown",
-    "position": [0, 5.2, 14],
+    "position": [5.5, 7.5, 8.5],
     "yaw": 0,
     "pitch": -0.18,
     "moveSpeed": 6.5

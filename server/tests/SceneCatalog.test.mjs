@@ -23,6 +23,23 @@ test('loads every selectable map from an independent scene JSON', async () => {
   const abilityLab = catalog.require('ability-lab');
   assert.equal(abilityLab.capacity, 1);
   assert.equal(abilityLab.camera.mode, 'topdown');
+  for (const sceneId of [
+    'ability-lab',
+    'grass-test',
+    'grassland',
+    'open-meadow',
+    'open-world',
+    'orchard',
+    'pbf-slime-test',
+    'thermal-lab',
+  ]) {
+    const scene = catalog.require(sceneId);
+    assert.deepEqual(
+      scene.camera.position,
+      [5.5, 7.5, 8.5],
+      `${scene.id} 应配置统一的斜向 TopDown 偏移`,
+    );
+  }
   assert.deepEqual(abilityLab.gameplay.playerActor, { archetypeId: 'player-slime' });
   assert.deepEqual(abilityLab.sceneComponents, [{
     type: 'ability-lab',

@@ -42,7 +42,7 @@ test('零延迟权威状态重放未确认步后与原预测逐位相同', () =>
       for (const input of pending) {
         stepCharacter(state, input, SIMULATION_STEP_SECONDS, physics, params);
       }
-      return { replayed: pending.length, residualDistance: 0, snapped: false };
+      return { replayed: pending.length, residualDistance: 0, corrected: false, snapped: false };
     },
   };
   const reconciler = new PlayerReconciler();

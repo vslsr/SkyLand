@@ -15,6 +15,12 @@ export interface TerrainRayHit {
   distance: number;
 }
 
+export interface TerrainChange {
+  globalCellX: number;
+  globalCellZ: number;
+  affectedChunks: readonly { chunkX: number; chunkZ: number; key: string }[];
+}
+
 interface TerrainSample {
   groundY: number;
   surface: number;
@@ -49,6 +55,11 @@ export class TerrainWorld {
 
   public resetCell(globalCellX: number, globalCellZ: number): boolean {
     return this.patches.resetCell(globalCellX, globalCellZ);
+  }
+
+  /** 统一观察任意来源的地形修改，而不是依赖某个编辑器或网络入口。 */
+  public subscribe(listener: (change: TerrainChange) => void): () => void {
+    return this.patches.subscribe(listener);
   }
 
   public sampleGroundHeight(x: number, z: number): number {

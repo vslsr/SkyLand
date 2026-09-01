@@ -2,8 +2,10 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { TERRAIN_CELL_SIZE, TERRAIN_SURFACE } from '../../shared/world/terrainConfig.mjs';
 import {
+  encodeTerrainCell,
   sampleTerrain,
   terrainCellHeightLevel,
+  terrainCellShape,
   terrainCellSurface,
 } from '../../shared/world/terrainContent.mjs';
 import { SceneCatalog } from '../scenes/SceneCatalog.mjs';
@@ -73,6 +75,39 @@ test('抬高一格会写进权威覆盖层，并立刻改变服务端算出的�
   assert.equal(
     terrainCellHeightLevel(changed[0].code),
     terrainCellHeightLevel(scene.terrainPatches.cellCodeAt(cell.cellX, cell.cellZ)),
+  );
+});
+
+test('任意来源抬高玩家脚下地形都会把权威角色移到新地面', async () => {
+  const { scene, player } = await createScene();
+  const cell = nearbyGroundCell(scene);
+  assert.ok(cell);
+  const { centerX, centerZ } = standNextTo(scene, cell.cellX, cell.cellZ);
+  const before = sampleTerrain(SEED, centerX, centerZ, {}, scene.terrainCellCodeAt).groundY;
+  player.setPosition(centerX, centerZ, before);
+  scene.physics.setCharacterTranslation(player.id, player.characterState);
+
+  const beforeCode = scene.terrainPatches.cellCodeAt(cell.cellX, cell.cellZ);
+  // 绕过 ServerScene.editTerrain，模拟爆炸、机关或其他玩法系统直接写覆盖层。
+  assert.equal(scene.terrainPatches.setCellCode(
+    cell.cellX,
+    cell.cellZ,
+    encodeTerrainCell(
+      terrainCellHeightLevel(beforeCode) + 1,
+      terrainCellSurface(beforeCode),
+      terrainCellShape(beforeCode),
+    ),
+  ), true);
+
+  const after = sampleTerrain(SEED, centerX, centerZ, {}, scene.terrainCellCodeAt).groundY;
+  assert.ok(after > before);
+  assert.equal(player.y, after);
+  assert.equal(player.characterState.y, after);
+  assert.equal(player.characterState.vy, 0);
+  assert.equal(player.characterState.grounded, true);
+  assert.ok(
+    Math.abs(scene.physics.getCharacterTranslation(player.id).y - after) < 1e-6,
+    'Rapier 的 f32 角色坐标应与新地面高度一致',
   );
 });
 

@@ -170,6 +170,11 @@ export class SceneRenderer implements GrassInteractionTarget {
     return this.terrainWorld?.sampleGroundHeight(x, z) ?? 0;
   }
 
+  /** 当前场景任意来源的地形 patch 通知。 */
+  public onTerrainChanged(listener: () => void): () => void {
+    return this.terrainWorld?.subscribe(listener) ?? (() => undefined);
+  }
+
   public samplePlayerHeight(x: number, z: number, buoyancyDraft?: number): number {
     return this.terrainWorld?.sampleMovementHeight(x, z, buoyancyDraft) ?? 0;
   }

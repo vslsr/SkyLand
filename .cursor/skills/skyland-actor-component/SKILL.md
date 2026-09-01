@@ -55,6 +55,7 @@ Use a semantic message such as `actor:interact` when an action changes relations
 
 - Use `skyland-scene-authoring` when only placing supported archetypes or changing scene renderer/gameplay/camera data.
 - Use `skyland-input-system` when changing key, touch, Gamepad, trigger, rebinding, or prompt semantics. Actor controllers consume tags and must not listen to DOM events directly.
+- Use `skyland-collision-partition` for player movement physics, Actor/simple-collision shapes or layers, Rapier registration, grounding, camera probes, and client/server collision parity. This skill still owns the Actor Component and snapshot state that supplies that authoring, but not the character solver.
 - Follow `.cursor/rules/line-art-reference.mdc` for Actor geometry and keep procedural models under `src/models/`.
 
 ## Verify

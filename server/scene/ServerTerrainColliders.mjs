@@ -25,6 +25,8 @@ export class ServerTerrainColliders {
       for (const chunk of change.affectedChunks) {
         if (this.residency.has(chunk.key)) this.rebuild(chunk.chunkX, chunk.chunkZ, chunk.key);
       }
+      // 所有常驻 trimesh 替换完成后再通知角色系统处理新地面造成的初始穿透。
+      options.onTerrainChanged?.(change);
     });
   }
 
@@ -56,4 +58,3 @@ export class ServerTerrainColliders {
     this.unsubscribePatches?.();
   }
 }
-

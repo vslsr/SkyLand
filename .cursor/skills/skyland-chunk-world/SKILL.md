@@ -32,7 +32,8 @@ Change one and you must change the other, rebuild the WASM, and commit the rebui
 - **Add a prop kind**: touches both implementations, the template registry, and buffer capacity. See below.
 - **Change loading policy** (when chunks load and unload): edit `shared/world/chunkStream.mjs` only. It is pure and has no WASM counterpart.
 - **Change rendering only** (materials, batching, draw calls): edit `src/models/chunkMesh.ts`, `src/models/chunkTemplates.ts` or `src/world/`. Placement is untouched, so no WASM rebuild.
-- **Change what blocks the player or the camera**: use `skyland-collision-partition`. Collider shapes live in `shared/world/chunkColliders.mjs`, are derived from the placement records, and have no WASM counterpart.
+- **Change what blocks the player or the camera**: use `skyland-collision-partition`. Authoring shapes live in `shared/world/chunkColliders.mjs`, then both client and DS map the same shapes into the shared Rapier `PhysicsWorld`; the shapes have no WASM counterpart.
+- **Change terrain collision topology, grounding, slopes, or chunk collider residency**: use `skyland-collision-partition`. Rendering and Rapier must share `shared/world/terrainCollisionMesh.mjs`; this is separate from deterministic prop placement.
 
 ## Keep generation deterministic
 
@@ -63,8 +64,8 @@ Both implementations carry the kind list and its scale table, and the ground tem
 4. `src/models/`: add the model, and register its template in `src/models/chunkTemplates.ts`.
    Then give it a collision template in `shared/world/chunkColliders.mjs` — an empty
    array if it should not collide (grass), a box list otherwise. A prop kind with no
-   entry there is visible but not solid, and the camera boom will pass straight
-   through it.
+   entry there is visible but not solid; `skyland-collision-partition` owns how that
+   authoring reaches Rapier movement and camera query groups.
 5. Give it a colour. Prop colours come from the scene: either reuse `renderer.palette`, or add a field to `renderer.world` and validate it in `server/scenes/SceneCatalog.mjs`, `config/scenes/scene.schema.json` and `src/scenes/data/SceneDefinition.ts` together.
 6. Rebuild the WASM and run the full suite.
 

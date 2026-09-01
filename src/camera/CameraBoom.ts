@@ -59,7 +59,7 @@ export class CameraBoom {
     this.extendSpeed = Math.max(0, options.extendSpeed ?? DEFAULT_EXTEND_SPEED);
   }
 
-  /** 当前悬臂长度占原长的比例。相机位置 = 支点 + 偏移 × 这个比例。 */
+  /** 当前悬臂水平距离占原长的比例；TopDown 的配置高度由调用方独立保留。 */
   public get distanceRatio(): number {
     return this.ratio;
   }

@@ -18,7 +18,7 @@ test('rewind & replay 只把 ack 之后的输入交给控制器', () => {
   const target: ReconcilerTarget = {
     rewindAndReplay(_state, pending) {
       calls.push({ ticks: pending.map((input) => input.tick) });
-      return { replayed: pending.length, residualDistance: 0, snapped: false };
+      return { replayed: pending.length, residualDistance: 0, corrected: false, snapped: false };
     },
   };
   const inputs: PlayerInputStep[] = Array.from({ length: 5 }, (_, index) => ({
@@ -38,7 +38,7 @@ test('重复与倒序 ack 幂等，不会再次改写物理状态', () => {
   const target: ReconcilerTarget = {
     rewindAndReplay() {
       calls += 1;
-      return { replayed: 0, residualDistance: 0, snapped: false };
+      return { replayed: 0, residualDistance: 0, corrected: false, snapped: false };
     },
   };
   const reconciler = new PlayerReconciler();

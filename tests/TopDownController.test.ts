@@ -21,6 +21,7 @@ import {
   WaterMovementEffectController,
   createPlayerMovementAttributes,
 } from '../shared/abilities/playerMovementEffects.mjs';
+import { SIMULATION_STEP_SECONDS } from '../shared/networkTuning.mjs';
 import { getRapier, PhysicsWorld } from '../shared/physics/index.mjs';
 
 class TestKeyboardMouseDevice extends BufferedInputDevice {
@@ -281,6 +282,136 @@ test('Space 进入固定物理步，短按边沿进入输入队列且空中方�
     Math.abs(controller.verticalPosition) < 0.03,
     `expected ground feet height, got ${controller.verticalPosition}`,
   );
+
+  controller.dispose();
+  physics.dispose();
+  input.dispose();
+});
+
+test('地形碰撞抬高到角色内部时，本地预测角色会立即上移到新支撑面', () => {
+  const scheme = createPlayerInputScheme({ storage: null });
+  const input = new InputSubsystem({
+    actions: scheme.actions,
+    config: scheme.config,
+    contexts: scheme.contexts,
+    devices: [],
+  });
+  const root = new Object3D();
+  const jump = new PlayerJumpComponent({
+    impulse: 7,
+    gravity: 22,
+    maximumFallSpeed: 20,
+    airControl: 0.85,
+  });
+  const physics = new PhysicsWorld(getRapier(), { timestep: SIMULATION_STEP_SECONDS });
+  const { canvas } = createCanvas();
+  const controller = new TopDownController(canvas, root, input, {
+    jumpAbility: jump,
+    physicsWorld: physics,
+    characterId: 'terrain-edit-player',
+    collisionRadius: 0.42,
+    collisionHeight: 0.84,
+  });
+
+  assert.equal(controller.ensureTerrainSupport(1), true);
+  assert.equal(controller.verticalPosition, 1);
+  assert.equal(root.position.y, 1);
+  assert.equal(controller.verticalVelocity, 0);
+  assert.equal(controller.isGrounded, true);
+  assert.ok(
+    Math.abs(physics.getCharacterTranslation('terrain-edit-player').y - 1) < 1e-6,
+  );
+  assert.equal(controller.ensureTerrainSupport(0.5), false, '下挖不能把角色瞬移向下');
+  assert.equal(controller.verticalPosition, 1);
+
+  controller.dispose();
+  physics.dispose();
+  input.dispose();
+});
+
+test('本地玩家和解只纠正逻辑误差，并保留固定步相位与可见连续性', () => {
+  const scheme = createPlayerInputScheme({ storage: null });
+  const input = new InputSubsystem({
+    actions: scheme.actions,
+    config: scheme.config,
+    contexts: scheme.contexts,
+    devices: [],
+  });
+  const root = new Object3D();
+  const jump = new PlayerJumpComponent({
+    impulse: 7,
+    gravity: 22,
+    maximumFallSpeed: 20,
+    airControl: 0.85,
+  });
+  const physics = new PhysicsWorld(getRapier(), { timestep: SIMULATION_STEP_SECONDS });
+  physics.setActorCollider('ground', {
+    shape: 'box', x: 0, y: 0, z: 0, yaw: 0,
+    halfWidth: 20, halfLength: 20, minimumY: -1, maximumY: 0,
+  });
+  physics.prepareQueries();
+  const { canvas } = createCanvas();
+  const controller = new TopDownController(canvas, root, input, {
+    enabled: false,
+    movement: { walkSpeed: 3.2, sprintMultiplier: 1.65 },
+    jumpAbility: jump,
+    physicsWorld: physics,
+    characterId: 'reconcile-test-player',
+    collisionRadius: 0.42,
+    collisionHeight: 0.84,
+  });
+
+  const halfStep = SIMULATION_STEP_SECONDS * 0.5;
+  controller.update(halfStep);
+  assert.equal(controller.drainInputSteps().length, 0);
+
+  // 模拟当前画面因固定步插值落后逻辑状态；它不能被算成网络纠正距离。
+  root.position.z -= 0.08;
+  const predicted = {
+    x: controller.position.x,
+    y: controller.verticalPosition,
+    z: controller.position.z,
+    vx: controller.horizontalVelocity.x,
+    vy: controller.verticalVelocity,
+    vz: controller.horizontalVelocity.z,
+    grounded: controller.isGrounded,
+  };
+  const interpolatedZ = root.position.z;
+  const tolerated = controller.rewindAndReplay({ ...predicted, x: predicted.x + 0.005 }, []);
+
+  assert.ok(Math.abs(tolerated.residualDistance - 0.005) < 1e-6);
+  assert.equal(tolerated.corrected, false);
+  assert.equal(tolerated.snapped, false);
+  assert.equal(controller.position.x, predicted.x, '6cm 容差内不能用毫米量化快照改写预测位置');
+  assert.equal(root.position.z, interpolatedZ, '可见插值位置不能参与逻辑误差计算');
+
+  controller.update(halfStep);
+  assert.equal(
+    controller.drainInputSteps().length,
+    1,
+    '普通和解必须保留此前累计的半个固定步',
+  );
+
+  const beforeCorrection = root.position.clone();
+  const current = {
+    x: controller.position.x,
+    y: controller.verticalPosition,
+    z: controller.position.z,
+    vx: controller.horizontalVelocity.x,
+    vy: controller.verticalVelocity,
+    vz: controller.horizontalVelocity.z,
+    grounded: controller.isGrounded,
+  };
+  const correctedX = current.x + 0.1;
+  const corrected = controller.rewindAndReplay({ ...current, x: correctedX }, []);
+  assert.ok(Math.abs(corrected.residualDistance - 0.1) < 1e-6);
+  assert.equal(corrected.corrected, true);
+  assert.equal(controller.position.x, correctedX);
+  assert.ok(root.position.distanceTo(beforeCorrection) < 1e-9, '普通纠正当帧不能让模型跳变');
+
+  controller.update(halfStep);
+  assert.ok(root.position.x > beforeCorrection.x, '可见位置应开始向纠正后的逻辑位置收敛');
+  assert.ok(root.position.x < correctedX, '普通纠正必须平滑收敛而不是瞬移');
 
   controller.dispose();
   physics.dispose();

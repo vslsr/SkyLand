@@ -2,6 +2,10 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Actor } from '../shared/actor/Actor.mjs';
 import { ActorComponent } from '../shared/actor/ActorComponent.mjs';
+import {
+  GAME_ABILITY_COMPONENT,
+  GameAbilityComponent,
+} from '../src/abilities/index.ts';
 import { AbilityLabSimulation } from '../src/abilities/lab/AbilityLabSimulation.ts';
 
 test('能力实验室覆盖消耗、冷却、标签阻断、周期效果与重置', () => {
@@ -66,6 +70,29 @@ test('能力实验室覆盖消耗、冷却、标签阻断、周期效果与重�
   lab.dispose();
   assert.equal(target.getComponent('game-ability'), undefined);
   assert.equal(target.getComponent('test-sentinel'), targetSentinel);
+  caster.dispose();
+  target.dispose();
+});
+
+test('能力实验室不会重复挂载或清理玩家已有的能力 Component', () => {
+  const caster = new Actor('player-with-abilities', 'player-slime');
+  const existing = caster.addComponent(new GameAbilityComponent({
+    attributes: [{ id: 'MoveSpeed', initialValue: 5, minimum: 0 }],
+    abilities: [{ slot: 'movement', ability: { id: 'Ability.Player.Movement' } }],
+  })) as GameAbilityComponent;
+  const target = new Actor('training-dummy-existing-caster', 'training-dummy');
+
+  const lab = new AbilityLabSimulation(caster, target);
+  assert.equal(caster.getComponent(GAME_ABILITY_COMPONENT), existing);
+  assert.equal(existing.hasAbility('movement'), true);
+  assert.equal(existing.abilitySystem.attributes.getCurrentValue('MoveSpeed'), 5);
+
+  lab.reset();
+  lab.dispose();
+
+  assert.equal(caster.getComponent(GAME_ABILITY_COMPONENT), existing);
+  assert.equal(existing.hasAbility('movement'), true);
+  assert.equal(target.getComponent(GAME_ABILITY_COMPONENT), undefined);
   caster.dispose();
   target.dispose();
 });

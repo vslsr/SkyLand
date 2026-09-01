@@ -1,6 +1,5 @@
 import { Actor } from '../../../shared/actor/Actor.mjs';
 import {
-  GAME_ABILITY_COMPONENT,
   GameAbilityComponent,
   type AbilityActivationFailure,
   type AbilitySystemEvent,
@@ -152,8 +151,8 @@ function attribute(snapshot: AbilitySystemSnapshot, id: string): number {
 
 /** 纯运行时测试夹具：不依赖 DOM 或 Three.js，可被场景、单测或调试命令共同驱动。 */
 export class AbilityLabSimulation {
-  private readonly casterActor: Actor;
-  private readonly targetActor: Actor;
+  private casterRuntimeActor?: Actor;
+  private targetRuntimeActor?: Actor;
   private caster?: GameAbilityComponent;
   private target?: GameAbilityComponent;
   private readonly eventDisposers: Array<() => void> = [];
@@ -163,8 +162,6 @@ export class AbilityLabSimulation {
 
   public constructor(casterActor: Actor, targetActor: Actor) {
     if (casterActor === targetActor) throw new Error('能力实验室的施法者与目标不能是同一个 Actor');
-    this.casterActor = casterActor;
-    this.targetActor = targetActor;
     this.rebuild();
     this.emit('实验室就绪：法力每秒恢复 5 点', 'info');
   }
@@ -317,8 +314,13 @@ export class AbilityLabSimulation {
       }],
     });
 
-    this.casterActor.addComponent(caster);
-    this.targetActor.addComponent(target);
+    // 实验室是本地测试夹具，不能把自己的临时属性、技能和效果
+    // 挂到真实玩家/Replica 上。玩家已拥有用于移动效果的 game-ability
+    // Component；再挂一个会中断整个场景帧循环。
+    this.casterRuntimeActor = new Actor('ability-lab-caster', 'ability-lab-runtime');
+    this.targetRuntimeActor = new Actor('ability-lab-target', 'ability-lab-runtime');
+    this.casterRuntimeActor.addComponent(caster);
+    this.targetRuntimeActor.addComponent(target);
     caster.abilitySystem.addLooseTag('State.CanCast');
     caster.abilitySystem.applyEffect(MANA_REGENERATION, { source: caster.abilitySystem });
     this.caster = caster;
@@ -331,12 +333,10 @@ export class AbilityLabSimulation {
 
   private clearRuntime(): void {
     for (const dispose of this.eventDisposers.splice(0)) dispose();
-    if (this.casterActor.getComponent(GAME_ABILITY_COMPONENT) === this.caster) {
-      this.casterActor.removeComponent(GAME_ABILITY_COMPONENT);
-    }
-    if (this.targetActor.getComponent(GAME_ABILITY_COMPONENT) === this.target) {
-      this.targetActor.removeComponent(GAME_ABILITY_COMPONENT);
-    }
+    this.casterRuntimeActor?.dispose();
+    this.targetRuntimeActor?.dispose();
+    this.casterRuntimeActor = undefined;
+    this.targetRuntimeActor = undefined;
     this.caster = undefined;
     this.target = undefined;
   }
