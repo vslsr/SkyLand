@@ -214,6 +214,16 @@
           "uniqueItems": true,
           "items": { "type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$" }
         },
+        "worldProps": {
+          "type": "object",
+          "description": "流式世界里每种物件由哪个原型承载；只在 renderer.world 存在时可用",
+          "additionalProperties": false,
+          "properties": {
+            "tree": { "type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$" },
+            "grass": { "type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$" },
+            "rock": { "type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$" }
+          }
+        },
         "bounds": {
           "type": "object",
           "additionalProperties": false,

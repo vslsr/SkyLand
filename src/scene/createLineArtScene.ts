@@ -45,9 +45,9 @@ export function createLineArtScene(
       environment,
       collision: collisionWorld,
       onChunkMounted: (key, chunkX, chunkZ, props, propCount) => {
-        actorSnapshotTarget?.mountGeneratedTreeChunk(key, chunkX, chunkZ, props, propCount);
+        actorSnapshotTarget?.mountGeneratedPropChunk(key, chunkX, chunkZ, props, propCount);
       },
-      onChunkUnmounted: (key) => actorSnapshotTarget?.unmountGeneratedTreeChunk(key),
+      onChunkUnmounted: (key) => actorSnapshotTarget?.unmountGeneratedPropChunk(key),
       templates: {
         content: renderer.content,
         environment,
@@ -60,7 +60,7 @@ export function createLineArtScene(
         },
       },
     });
-    actorSnapshotTarget?.setGeneratedTreeOverrideTarget(
+    actorSnapshotTarget?.setGeneratedPropOverrideTarget(
       (chunkX, chunkZ, propIndex, removed) => {
         streamer.setPropSkipped(chunkX, chunkZ, propIndex, removed);
       },

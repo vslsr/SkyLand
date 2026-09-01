@@ -68,6 +68,38 @@ test('ActorCatalog 加载并净化木筏原型', async () => {
   assert.equal(wood.components.actorResidency.dormantEligible, true);
   assert.equal(wood.components.replicationPolicy.mode, 'aoi');
   assert.equal(wood.components.render.model, 'line-art-wood-pile');
+
+  const tree = catalog.require('generated-tree');
+  // 原型只描述「它是什么」，承载哪一种物件由场景的 gameplay.worldProps 决定。
+  assert.equal(tree.components.generatedProp.kind, undefined);
+  assert.deepEqual(tree.components.generatedProp.drop, { archetypeId: 'wood-pile', quantity: 5 });
+  assert.equal(tree.components.interactable.action, 'harvest-prop');
+});
+
+test('ActorCatalog 拒绝缺失的掉落配置与不成对的采集交互', async () => {
+  const base = {
+    schemaVersion: 1,
+    id: 'generated-probe',
+    components: {
+      interactable: { action: 'harvest-prop', label: '探针', maximumDistance: 2 },
+      generatedProp: {
+        maximumHealth: 3,
+        harvestDamage: 1,
+        drop: { archetypeId: 'wood-pile', quantity: 5 },
+      },
+      replicationPolicy: { mode: 'aoi', radiusChunks: 2 },
+    },
+  };
+  await loadSingleActor(base);
+
+  const missingDrop = structuredClone(base);
+  delete missingDrop.components.generatedProp.drop;
+  await assert.rejects(loadSingleActor(missingDrop), /drop 必须是对象/);
+
+  // 生成物件与 harvest-prop 交互必须成对出现，少一半就没有入口或没有状态。
+  const wrongAction = structuredClone(base);
+  wrongAction.components.interactable.action = 'cargo-toggle';
+  await assert.rejects(loadSingleActor(wrongAction), /需要 harvest-prop interactable/);
 });
 
 test('ActorCatalog 拒绝缺少温度的可燃物和倒置的点燃阈值', async () => {

@@ -345,12 +345,93 @@ Actor 不需要重建任何树。格子按需创建、空了立刻回收，所�
 一个盒子带一个层掩码（`COLLISION_LAYER.MOVEMENT` / `CAMERA`），两种用途共用
 同一张网格。
 
-### 服务端的静态碰撞常驻策略
+### 服务端的 chunk 常驻策略
 
-房间 DS 不建几何体，但必须知道树在哪。`server/scene/ServerChunkColliders.mjs`
-只保留每名玩家所在 chunk 周围一圈的碰撞体，走出两圈之后卸载——最多
-玩家数 × 25 个 chunk，与世界面积无关。重算只在有人跨过 chunk 边界时发生，
-焦点没变的 tick 直接返回。
+房间 DS 上有两样东西要跟着玩家在大世界里滑动，它们装载的内容不同，但「什么时候
+装、什么时候卸」完全一样，所以那一份策略只有一个实现：
+`server/scene/ChunkResidency.mjs`。它维护常驻集合，装什么由 `onLoad` / `onUnload`
+决定。两条纪律和客户端 `ChunkStreamer` 一致：常驻集合的上界是
+玩家数 × (2 × keepRadius + 1)²，与世界面积无关；`keepRadius` 严格大于
+`residentRadius`，站在边界上来回走不会反复建了拆，而且没有人跨过边界的 tick
+直接返回，不做任何集合运算。
+
+| 使用者 | 装载内容 | residentRadius / keepRadius |
+| --- | --- | --- |
+| `server/scene/ServerChunkColliders.mjs` | chunk 静态碰撞体 | 1 / 2 |
+| `server/actors/ServerGeneratedPropActors.mjs` | 可交互的世界生成物件 Actor | 2 / 3 |
+
+房间 DS 不建几何体，但必须知道树在哪，否则玩家会被客户端预测挡住、又被服务端
+和解拉回去。碰撞体只服务玩家自己的推出解算，所以一圈就够。
+
+生成物件的半径更大，而且**不能小于原型的 `replicationPolicy.radiusChunks`**：AOI
+之内的物件必须有 Actor，否则被采掉的那个没有快照条目，客户端会把它画回来。这个
+下界在构造时从所有已登记原型里取最大值，两个半径不会各写一份之后悄悄失配。
+
+整个世界有约 2000 棵树和 900 块石头。全部常驻的话，每一个按 Component 查询的
+System 都要为它们付钱——`TemperatureSystem` 的热源收集是 `query(transform)`，会
+10 Hz 扫全世界。改成跟着玩家滑动之后，一名玩家在场时 ActorWorld 里带 Transform
+的 Actor 从 1913 个降到 162 个，而且不再随世界变大而增长。
+
+玩法状态用**偏离态**保存：卸载时只记下被采过或已采完的物件（血量、是否移除、
+revision），装载时按同一个 id 恢复并立刻挂上 `ReplicatedComponent`。完好的物件
+什么都不记，所以状态量跟着「玩家改动过多少个」走，而不是跟着「世界里有多少个」走。
+被移除这一位同时写进 `ServerChunkColliders` 的 skip 掩码，静态碰撞和几何体因此
+一起消失。
+
+### 世界生成物件的原型注册表
+
+一个物件是布景还是可交互 Actor，取决于场景有没有给它绑一个原型。绑定写在
+`gameplay.worldProps` 里，服务端与客户端各自据此建一张种类 → 原型的表；没有
+绑定的种类（当前是草）只有网格，不产生 Actor。
+
+```json
+"gameplay": {
+  "worldProps": { "tree": "generated-tree", "rock": "generated-rock" }
+}
+```
+
+**绑定归场景，定义归原型。** 原型只描述「它是什么」——多少血、掉什么、交互距离
+多远；承载哪一种物件是地图的事。所以同一种树在雪原和草原上可以是两个不同的
+玩法对象，而不用给原型加一堆按地图分支的字段。`worldProps` 只能出现在带
+`renderer.world` 的流式场景上。
+
+绑定的原型连同它掉落的堆叠原型会被自动带进场景的原型表，作者不用再在
+`runtimeActorArchetypes` 里重复列一遍——那份重复正是「绑了但忘了带进来」这类
+错误的来源。
+
+Actor id 是自描述的：`prop:<种类>:<chunkX>:<chunkZ>:<放置下标>`。种类是冗余的
+——后三项已经唯一确定一格——带上它是为了让「只拿到 id」的一侧不跑生成器就能挑出
+原型：生成物件的快照只发 `{ id, revision, propState }`，没有 `archetypeId`。这份
+冗余不会让客户端说了算：权威侧的 Actor 只可能由服务端从世界种子推导出来，交互
+入口再拿 id 里的种类和 Component 对一次，对不上就拒绝。
+
+掉什么、掉多少写在原型的 `generatedProp.drop` 里，不写在代码分支里；数量按生成
+时的缩放取整，所以大树掉的木材比小树多，两端算出的结果一致。
+
+`SceneCatalog` 在启动时校验这几条：
+
+| 约束 | 违反后的现象 |
+| --- | --- |
+| `worldProps` 只出现在流式场景上 | 固定摆放的场景里没有 chunk 物件可绑 |
+| 绑定的种类名必须已知 | 打错一个字，那一种物件静默地不生成 |
+| 绑定的原型必须有 `generatedProp` | 采集入口拿不到血量与掉落 |
+| 绑了 `tree` 就必须开 `renderer.content.trees` | 一片撞得到、采得到、但看不见的树 |
+| 掉落必须指向存在且可堆叠的原型 | 要等玩家采到那一下才炸在交互路径上 |
+
+`open-world` 目前绑了两种：
+
+| 物件 | 绑定的原型 | 生命 | 掉落 |
+| --- | --- | --- | --- |
+| `tree` | `generated-tree` | 3 | `wood-pile` × 5 |
+| `rock` | `generated-rock` | 4 | `stone-pile` × 3 |
+
+草没有原型认领，仍然是纯布景。两种采集走的是同一条 `harvest-prop` 代码路径，
+`ServerScene` 里没有任何一处提到树或石头。
+
+掉落物的绘制同样按渲染模型分派：`HighCountActorBatchSystem` 认 `PILE_RENDER_MODELS`
+里登记的堆叠模型，每种模型给出自己的模板分块（圆木是三根交错的圆柱，石堆是三块
+压扁的低多边形石头），后面的合批、实例化与轮廓线合并两种共用。同一个批次仍然固定
+两次绘制。
 
 ### 第三人称相机悬臂
 

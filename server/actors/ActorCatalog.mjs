@@ -5,6 +5,9 @@ import { fileURLToPath } from 'node:url';
 export const DEFAULT_ACTOR_DIRECTORY = fileURLToPath(new URL('../../config/actors/', import.meta.url));
 
 const ID_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+
+/** 走高数量合批绘制的堆叠模型。新增一种堆叠物就在这里登记。 */
+const PILE_RENDER_MODELS = new Set(['line-art-wood-pile', 'line-art-stone-pile']);
 const COLOR_PATTERN = /^#[0-9a-f]{6}$/i;
 
 function requireObject(value, path) {
@@ -112,7 +115,7 @@ function validatePlayerMovement(raw, filename) {
 function validateInteractable(raw, filename) {
   const path = `${filename}.components.interactable`;
   const definition = requireObject(raw, path);
-  if (!['cargo-toggle', 'mushroom-bite', 'pickup-stack', 'chop-tree'].includes(definition.action)) {
+  if (!['cargo-toggle', 'mushroom-bite', 'pickup-stack', 'harvest-prop'].includes(definition.action)) {
     throw new TypeError(`${path}.action 暂不支持：${definition.action}`);
   }
   return {
@@ -275,16 +278,23 @@ function validateReplicationPolicy(raw, filename) {
   return { mode: definition.mode, radiusChunks };
 }
 
-function validateGeneratedTree(raw, filename) {
-  const path = `${filename}.components.generatedTree`;
+function validateGeneratedProp(raw, filename) {
+  const path = `${filename}.components.generatedProp`;
   const definition = requireObject(raw, path);
   const maximumHealth = requireNumber(definition.maximumHealth, `${path}.maximumHealth`, 1, 1000);
-  const chopDamage = requireNumber(definition.chopDamage, `${path}.chopDamage`, 1, 1000);
-  const woodQuantity = requireNumber(definition.woodQuantity, `${path}.woodQuantity`, 1, 1000);
-  if (![maximumHealth, chopDamage, woodQuantity].every(Number.isInteger)) {
-    throw new TypeError(`${path} 的生命、伤害与木材数量必须是整数`);
+  const harvestDamage = requireNumber(definition.harvestDamage, `${path}.harvestDamage`, 1, 1000);
+  if (![maximumHealth, harvestDamage].every(Number.isInteger)) {
+    throw new TypeError(`${path} 的生命与伤害必须是整数`);
   }
-  return { maximumHealth, chopDamage, woodQuantity };
+  const dropPath = `${path}.drop`;
+  const drop = requireObject(definition.drop, dropPath);
+  const quantity = requireNumber(drop.quantity, `${dropPath}.quantity`, 1, 1000);
+  if (!Number.isInteger(quantity)) throw new TypeError(`${dropPath}.quantity 必须是整数`);
+  return {
+    maximumHealth,
+    harvestDamage,
+    drop: { archetypeId: requireId(drop.archetypeId, `${dropPath}.archetypeId`), quantity },
+  };
 }
 
 function validateRender(raw, filename) {
@@ -396,6 +406,16 @@ function validateRender(raw, filename) {
       height: requireNumber(render.height, `${path}.height`, Number.EPSILON, 3),
     };
   }
+  if (render.model === 'line-art-stone-pile') {
+    return {
+      model: render.model,
+      stoneColor: requireColor(render.stoneColor, `${path}.stoneColor`),
+      accentColor: requireColor(render.accentColor, `${path}.accentColor`),
+      inkColor: requireColor(render.inkColor, `${path}.inkColor`),
+      radius: requireNumber(render.radius, `${path}.radius`, Number.EPSILON, 3),
+      height: requireNumber(render.height, `${path}.height`, Number.EPSILON, 3),
+    };
+  }
   throw new TypeError(`${path}.model 不受支持：${render.model}`);
 }
 
@@ -419,7 +439,7 @@ function validateActorArchetype(raw, filename) {
     'dropMotion',
     'lifetime',
     'replicationPolicy',
-    'generatedTree',
+    'generatedProp',
     'render',
   ]);
   for (const componentName of Object.keys(components)) {
@@ -428,11 +448,11 @@ function validateActorArchetype(raw, filename) {
     }
   }
   const render = components.render ? validateRender(components.render, filename) : undefined;
-  const generatedTree = components.generatedTree
-    ? validateGeneratedTree(components.generatedTree, filename)
+  const generatedProp = components.generatedProp
+    ? validateGeneratedProp(components.generatedProp, filename)
     : undefined;
-  if (!render && !generatedTree) {
-    throw new TypeError(`${filename}.components 至少需要 render 或 generatedTree`);
+  if (!render && !generatedProp) {
+    throw new TypeError(`${filename}.components 至少需要 render 或 generatedProp`);
   }
   const playerMovement = components.playerMovement
     ? validatePlayerMovement(components.playerMovement, filename)
@@ -494,17 +514,18 @@ function validateActorArchetype(raw, filename) {
   if (itemStack && interactable?.action !== 'pickup-stack') {
     throw new TypeError(`${filename}.components.itemStack 需要 pickup-stack interactable`);
   }
-  if (render?.model === 'line-art-wood-pile' && !itemStack) {
-    throw new TypeError(`${filename}.components.render line-art-wood-pile 需要 itemStack`);
+  // 堆叠模型由 HighCountActorBatchSystem 合批绘制，没有 itemStack 就没有东西可画。
+  if (PILE_RENDER_MODELS.has(render?.model) && !itemStack) {
+    throw new TypeError(`${filename}.components.render ${render.model} 需要 itemStack`);
   }
-  if (generatedTree && interactable?.action !== 'chop-tree') {
-    throw new TypeError(`${filename}.components.generatedTree 需要 chop-tree interactable`);
+  if (generatedProp && interactable?.action !== 'harvest-prop') {
+    throw new TypeError(`${filename}.components.generatedProp 需要 harvest-prop interactable`);
   }
-  if (interactable?.action === 'chop-tree' && !generatedTree) {
-    throw new TypeError(`${filename}.components.interactable chop-tree 需要 generatedTree`);
+  if (interactable?.action === 'harvest-prop' && !generatedProp) {
+    throw new TypeError(`${filename}.components.interactable harvest-prop 需要 generatedProp`);
   }
-  if (generatedTree && !replicationPolicy) {
-    throw new TypeError(`${filename}.components.generatedTree 需要 replicationPolicy`);
+  if (generatedProp && !replicationPolicy) {
+    throw new TypeError(`${filename}.components.generatedProp 需要 replicationPolicy`);
   }
   return {
     schemaVersion: 1,
@@ -525,7 +546,7 @@ function validateActorArchetype(raw, filename) {
       ...(dropMotion ? { dropMotion } : {}),
       ...(lifetime ? { lifetime } : {}),
       ...(replicationPolicy ? { replicationPolicy } : {}),
-      ...(generatedTree ? { generatedTree } : {}),
+      ...(generatedProp ? { generatedProp } : {}),
       ...(render ? { render } : {}),
     },
   };

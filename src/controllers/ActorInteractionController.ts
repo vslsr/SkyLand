@@ -57,7 +57,7 @@ export class ActorInteractionController {
     const prompt = this.resolvePrompt(this.candidate, vesselId);
     this.port.setPrompt(prompt);
     if (this.interactionRequested && this.candidate) {
-      if (this.candidate.action === 'pickup-stack' || this.candidate.action === 'chop-tree') {
+      if (this.candidate.action === 'pickup-stack' || this.candidate.action === 'harvest-prop') {
         if (playerId) this.port.sendInteraction(this.candidate.actorId);
       } else if (this.candidate.action === 'mushroom-bite') {
         if (playerId && !this.candidate.holderPlayerId) {
@@ -95,7 +95,7 @@ export class ActorInteractionController {
         `拾取「${candidate.label}${quantity}」`,
       );
     }
-    if (candidate.action === 'chop-tree') {
+    if (candidate.action === 'harvest-prop') {
       return this.withInputLabel(
         this.port.getInputLabel(PlayerInputTags.WorldInteract),
         `砍伐「${candidate.label}」`,

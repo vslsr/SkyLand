@@ -1,0 +1,45 @@
+{
+  "$schema": "./actor.schema.json",
+  "schemaVersion": 1,
+  "id": "stone-pile",
+  "components": {
+    "interactable": {
+      "action": "pickup-stack",
+      "label": "石料",
+      "maximumDistance": 2.4
+    },
+    "itemStack": {
+      "itemType": "stone",
+      "displayName": "石料",
+      "defaultQuantity": 1,
+      "maximumQuantity": 999,
+      "compatibilityKey": "stone-standard"
+    },
+    "actorResidency": {
+      "sleepDelaySeconds": 1,
+      "dormantDelaySeconds": 3,
+      "dormantEligible": true
+    },
+    "dropMotion": {
+      "gravity": 9.8,
+      "drag": 6.5,
+      "settleSpeed": 0.08
+    },
+    "lifetime": { "lifetimeSeconds": 900 },
+    "replicationPolicy": { "mode": "aoi", "radiusChunks": 2 },
+    "temperature": {
+      "initialTemperature": 20,
+      "ambientTemperature": 20,
+      "heatCapacity": 24,
+      "coolingRate": 0.08
+    },
+    "render": {
+      "model": "line-art-stone-pile",
+      "stoneColor": "#B9B4A8",
+      "accentColor": "#8E8880",
+      "inkColor": "#4A453E",
+      "radius": 0.5,
+      "height": 0.32
+    }
+  }
+}

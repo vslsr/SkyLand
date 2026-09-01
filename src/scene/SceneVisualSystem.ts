@@ -49,7 +49,7 @@ export interface ActorSnapshotTarget {
 export interface ActorInteractionCandidate {
   actorId: string;
   label: string;
-  action: 'cargo-toggle' | 'mushroom-bite' | 'pickup-stack' | 'chop-tree';
+  action: 'cargo-toggle' | 'mushroom-bite' | 'pickup-stack' | 'harvest-prop';
   carrierActorId: string | null;
   holderPlayerId: string | null;
   quantity?: number;

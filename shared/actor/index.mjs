@@ -52,9 +52,9 @@ export {
   ItemStackComponent,
 } from './components/ItemStackComponent.mjs';
 export {
-  GENERATED_TREE_COMPONENT,
-  GeneratedTreeComponent,
-} from './components/GeneratedTreeComponent.mjs';
+  GENERATED_PROP_COMPONENT,
+  GeneratedPropComponent,
+} from './components/GeneratedPropComponent.mjs';
 export {
   LIFETIME_COMPONENT,
   LifetimeComponent,

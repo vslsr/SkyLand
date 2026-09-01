@@ -10,7 +10,7 @@ import {
 } from '../../shared/world/chunkGenerator.mjs';
 import { instantiateChunkGenerator } from '../../shared/world/chunkGeneratorWasm.mjs';
 import { DEFAULT_WORLD_SEED } from '../../shared/world/worldConfig.mjs';
-import { setPropSkipped } from '../../shared/world/generatedTree.mjs';
+import { setPropSkipped } from '../../shared/world/generatedProp.mjs';
 
 const WASM_PATH = fileURLToPath(new URL('../../shared/world/wasm/chunkgen.wasm', import.meta.url));
 

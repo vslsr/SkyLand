@@ -18,8 +18,8 @@ import {
   HazardComponent,
   HEAT_EMITTER_COMPONENT,
   HeatEmitterComponent,
-  GENERATED_TREE_COMPONENT,
-  GeneratedTreeComponent,
+  GENERATED_PROP_COMPONENT,
+  GeneratedPropComponent,
   INTERACTABLE_COMPONENT,
   InteractableComponent,
   ITEM_STACK_COMPONENT,
@@ -43,8 +43,11 @@ import {
   CollisionWorld,
 } from '../../shared/collision/index.mjs';
 import { PROP_FIELD, PROP_STRIDE } from '../../shared/world/chunkContent.mjs';
-import { formatGeneratedTreeId, parseGeneratedTreeId } from '../../shared/world/generatedTree.mjs';
-import { PROP_KIND } from '../../shared/world/worldConfig.mjs';
+import {
+  PROP_KIND_BY_NAME,
+  formatGeneratedPropId,
+  parseGeneratedPropId,
+} from '../../shared/world/generatedProp.mjs';
 import type { FillMaterialEnvironment } from '../materials/createFillMaterial';
 import { createActorVisualModel } from '../models/actors/createActorVisualModel';
 import type { SnapshotActor } from '../network/protocol';
@@ -99,13 +102,13 @@ export interface ClientActorSystemOptions {
   collision?: CollisionWorld;
 }
 
-type TreeStateSnapshot = {
+type PropStateSnapshot = {
   health: number;
   maximumHealth?: number;
   removed: boolean;
   revision: number;
 };
-type TreeOverrideTarget = (chunkX: number, chunkZ: number, propIndex: number, removed: boolean) => void;
+type PropOverrideTarget = (chunkX: number, chunkZ: number, propIndex: number, removed: boolean) => void;
 
 /** 接收服务端完整 Actor 快照并维护对应的客户端 Replica。 */
 export class ClientActorSystem implements SceneVisualSystem {
@@ -135,15 +138,29 @@ export class ClientActorSystem implements SceneVisualSystem {
   private hoverHelper?: THREE.BoxHelper;
   private simpleCollisionVisible = false;
   private temperatureVisible = false;
-  private readonly generatedTreeChunks = new Map<string, Set<string>>();
-  private readonly generatedTreeStates = new Map<string, TreeStateSnapshot>();
-  private generatedTreeOverrideTarget?: TreeOverrideTarget;
+  private readonly generatedPropChunks = new Map<string, Set<string>>();
+  private readonly generatedPropStates = new Map<string, PropStateSnapshot>();
+  private generatedPropOverrideTarget?: PropOverrideTarget;
+  /**
+   * 物件种类 → 承载它的原型。和服务端一样从场景的 gameplay.worldProps 建表，
+   * 两端因此对同一个 id 挑出同一个原型，不需要在快照里带 archetypeId。
+   */
+  private readonly generatedPropArchetypes = new Map<
+    number,
+    SceneDefinition['actorArchetypes'][number]
+  >();
 
   public constructor(options: ClientActorSystemOptions) {
     this.root.name = 'replicated-actor-world';
     this.archetypes = new Map(
       options.definition.actorArchetypes.map((definition) => [definition.id, definition]),
     );
+    for (const [name, archetypeId] of Object.entries(options.definition.gameplay.worldProps ?? {})) {
+      const kind = PROP_KIND_BY_NAME[name];
+      const archetype = this.archetypes.get(archetypeId);
+      if (kind === undefined || !archetype?.components.generatedProp) continue;
+      this.generatedPropArchetypes.set(kind, archetype);
+    }
     this.now = options.now ?? (() => Date.now());
     this.collision = options.collision ?? new CollisionWorld();
     this.highCountBatches = new HighCountActorBatchSystem(options.environment, this.archetypes);
@@ -175,12 +192,12 @@ export class ClientActorSystem implements SceneVisualSystem {
     const liveIds = new Set<string>();
     const applicableSnapshots: SnapshotActor[] = [];
 
-    // 树的偏离态可能先于对应 Chunk 到达。先缓存掩码；Chunk 挂载时再构造 Actor，
+    // 生成物件的偏离态可能先于对应 Chunk 到达。先缓存掩码；Chunk 挂载时再构造 Actor，
     // 避免在尚不可见的区域创建一个可以被交互命中的逻辑目标。
     for (const snapshot of snapshots) {
       liveIds.add(snapshot.id);
-      if (snapshot.treeState) {
-        this.rememberGeneratedTreeState(snapshot.id, snapshot.treeState, snapshot.revision);
+      if (snapshot.propState) {
+        this.rememberGeneratedPropState(snapshot.id, snapshot.propState, snapshot.revision);
         if (!this.world.getActor(snapshot.id)) continue;
       }
       applicableSnapshots.push(snapshot);
@@ -343,33 +360,33 @@ export class ClientActorSystem implements SceneVisualSystem {
     }
   }
 
-  public setGeneratedTreeOverrideTarget(target?: TreeOverrideTarget): void {
-    this.generatedTreeOverrideTarget = target;
+  public setGeneratedPropOverrideTarget(target?: PropOverrideTarget): void {
+    this.generatedPropOverrideTarget = target;
     if (!target) return;
-    for (const [actorId, state] of this.generatedTreeStates) {
-      const identity = parseGeneratedTreeId(actorId);
+    for (const [actorId, state] of this.generatedPropStates) {
+      const identity = parseGeneratedPropId(actorId);
       if (identity) target(identity.chunkX, identity.chunkZ, identity.propIndex, state.removed);
     }
   }
 
-  /** Chunk 装载时只构造逻辑 Actor；树的网格与碰撞仍由 Chunk 合批持有。 */
-  public mountGeneratedTreeChunk(
+  /** Chunk 装载时只构造逻辑 Actor；物件的网格与碰撞仍由 Chunk 合批持有。 */
+  public mountGeneratedPropChunk(
     key: string,
     chunkX: number,
     chunkZ: number,
     props: Int32Array,
     propCount: number,
   ): void {
-    const archetype = Array.from(this.archetypes.values()).find(
-      (candidate) => candidate.components.generatedTree,
-    );
-    if (!archetype?.components.generatedTree) return;
-    this.unmountGeneratedTreeChunk(key);
+    if (this.generatedPropArchetypes.size === 0) return;
+    this.unmountGeneratedPropChunk(key);
     const actorIds = new Set<string>();
     for (let propIndex = 0; propIndex < propCount; propIndex += 1) {
       const offset = propIndex * PROP_STRIDE;
-      if (props[offset + PROP_FIELD.KIND] !== PROP_KIND.TREE) continue;
-      const actorId = formatGeneratedTreeId(chunkX, chunkZ, propIndex);
+      const kind = props[offset + PROP_FIELD.KIND];
+      const archetype = this.generatedPropArchetypes.get(kind);
+      // 没有原型的种类是纯布景（草），只有网格没有逻辑 Actor。
+      if (!archetype?.components.generatedProp) continue;
+      const actorId = formatGeneratedPropId(kind, chunkX, chunkZ, propIndex);
       actorIds.add(actorId);
       if (this.world.getActor(actorId)) continue;
       const scale = props[offset + PROP_FIELD.SCALE_THOUSANDTHS] / 1000;
@@ -382,7 +399,8 @@ export class ClientActorSystem implements SceneVisualSystem {
         ],
         yaw: props[offset + PROP_FIELD.ROTATION_MRAD] / 1000,
       }));
-      actor.addComponent(new GeneratedTreeComponent(archetype.components.generatedTree, {
+      actor.addComponent(new GeneratedPropComponent(archetype.components.generatedProp, {
+        kind,
         chunkX,
         chunkZ,
         propIndex,
@@ -396,16 +414,16 @@ export class ClientActorSystem implements SceneVisualSystem {
       }
       actor.addComponent(new LocalDerivedActorComponent());
       this.world.addActor(actor);
-      const cachedState = this.generatedTreeStates.get(actorId);
-      if (cachedState) this.applyGeneratedTreeState(actor, cachedState);
+      const cachedState = this.generatedPropStates.get(actorId);
+      if (cachedState) this.applyGeneratedPropState(actor, cachedState);
     }
-    this.generatedTreeChunks.set(key, actorIds);
+    this.generatedPropChunks.set(key, actorIds);
   }
 
-  public unmountGeneratedTreeChunk(key: string): void {
-    const actorIds = this.generatedTreeChunks.get(key);
+  public unmountGeneratedPropChunk(key: string): void {
+    const actorIds = this.generatedPropChunks.get(key);
     if (!actorIds) return;
-    this.generatedTreeChunks.delete(key);
+    this.generatedPropChunks.delete(key);
     for (const actorId of actorIds) this.world.removeActor(actorId);
   }
 
@@ -478,7 +496,7 @@ export class ClientActorSystem implements SceneVisualSystem {
     this.refreshColliders();
     let nearest: { distance: number; candidate: ActorInteractionCandidate } | undefined;
     const visited = new Set<string>();
-    // 树干静态碰撞和普通 Actor 动态碰撞都带 actorId，因此交互查询与世界大小、
+    // 生成物件的静态碰撞和普通 Actor 的动态碰撞都带 actorId，因此交互查询与世界大小、
     // Actor 总数无关，只访问玩家附近几个空间格。
     this.collision.forEachNear(position.x, position.z, 12, COLLISION_LAYER.MOVEMENT, (instance) => {
       const actorId = (instance as { actorId?: string }).actorId;
@@ -735,10 +753,10 @@ export class ClientActorSystem implements SceneVisualSystem {
       residency.state = snapshot.residency.state;
       residency.revision = snapshot.residency.revision;
     }
-    if (snapshot.treeState) {
-      this.applyGeneratedTreeState(actor, {
-        ...snapshot.treeState,
-        revision: snapshot.treeState.revision ?? snapshot.revision,
+    if (snapshot.propState) {
+      this.applyGeneratedPropState(actor, {
+        ...snapshot.propState,
+        revision: snapshot.propState.revision ?? snapshot.revision,
       });
     }
     replication.revision = Math.max(replication.revision, snapshot.revision);
@@ -774,22 +792,22 @@ export class ClientActorSystem implements SceneVisualSystem {
     };
   }
 
-  private rememberGeneratedTreeState(
+  private rememberGeneratedPropState(
     actorId: string,
-    state: NonNullable<SnapshotActor['treeState']>,
+    state: NonNullable<SnapshotActor['propState']>,
     actorRevision: number,
   ): void {
-    const identity = parseGeneratedTreeId(actorId);
+    const identity = parseGeneratedPropId(actorId);
     if (!identity) return;
-    const previous = this.generatedTreeStates.get(actorId);
+    const previous = this.generatedPropStates.get(actorId);
     const revision = state.revision ?? actorRevision;
     if (previous && previous.revision > revision) return;
-    const copy: TreeStateSnapshot = {
+    const copy: PropStateSnapshot = {
       ...state,
       revision,
     };
-    this.generatedTreeStates.set(actorId, copy);
-    this.generatedTreeOverrideTarget?.(
+    this.generatedPropStates.set(actorId, copy);
+    this.generatedPropOverrideTarget?.(
       identity.chunkX,
       identity.chunkZ,
       identity.propIndex,
@@ -797,8 +815,8 @@ export class ClientActorSystem implements SceneVisualSystem {
     );
   }
 
-  private applyGeneratedTreeState(actor: Actor, state: TreeStateSnapshot): void {
-    const tree = actor.getComponent(GENERATED_TREE_COMPONENT) as GeneratedTreeComponent | undefined;
+  private applyGeneratedPropState(actor: Actor, state: PropStateSnapshot): void {
+    const tree = actor.getComponent(GENERATED_PROP_COMPONENT) as GeneratedPropComponent | undefined;
     const interactable = actor.getComponent(INTERACTABLE_COMPONENT) as InteractableComponent | undefined;
     if (!tree || !tree.applySnapshot(state)) return;
     if (interactable) {
@@ -807,9 +825,15 @@ export class ClientActorSystem implements SceneVisualSystem {
     }
   }
 
+  /**
+   * 生成物件的快照只带 id 与偏离态，原型从 id 里的种类查表得到。
+   * 这也是自描述 id 带上种类的理由：这条路径拿不到放置记录。
+   */
   private resolveSnapshotArchetypeId(snapshot: SnapshotActor): string {
     if (snapshot.archetypeId) return snapshot.archetypeId;
-    if (snapshot.treeState && parseGeneratedTreeId(snapshot.id)) return 'generated-tree';
+    const identity = snapshot.propState ? parseGeneratedPropId(snapshot.id) : undefined;
+    const archetype = identity ? this.generatedPropArchetypes.get(identity.kind) : undefined;
+    if (archetype) return archetype.id;
     throw new Error(`Actor ${snapshot.id} 的快照缺少 archetypeId`);
   }
 }

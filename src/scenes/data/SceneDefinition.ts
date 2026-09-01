@@ -125,6 +125,14 @@ export type ActorRenderDefinition =
       inkColor: string;
       radius: number;
       height: number;
+    }
+  | {
+      model: 'line-art-stone-pile';
+      stoneColor: string;
+      accentColor: string;
+      inkColor: string;
+      radius: number;
+      height: number;
     };
 
 export interface ActorArchetypeDefinition {
@@ -154,7 +162,7 @@ export interface ActorArchetypeDefinition {
       inputTimeoutMs: number;
     };
     interactable?: {
-      action: 'cargo-toggle' | 'mushroom-bite' | 'pickup-stack' | 'chop-tree';
+      action: 'cargo-toggle' | 'mushroom-bite' | 'pickup-stack' | 'harvest-prop';
       label: string;
       maximumDistance: number;
     };
@@ -214,10 +222,10 @@ export interface ActorArchetypeDefinition {
     };
     lifetime?: { lifetimeSeconds: number };
     replicationPolicy?: { mode: 'always' | 'aoi'; radiusChunks: number };
-    generatedTree?: {
+    generatedProp?: {
       maximumHealth: number;
-      chopDamage: number;
-      woodQuantity: number;
+      harvestDamage: number;
+      drop: { archetypeId: string; quantity: number };
     };
     render?: ActorRenderDefinition;
   };
@@ -287,6 +295,8 @@ export interface SceneDefinition extends SceneSummary {
   gameplay: {
     playerActor: { archetypeId: string };
     runtimeActorArchetypes?: string[];
+    /** 流式世界里每种物件由哪个原型承载；键是物件种类名。 */
+    worldProps?: Partial<Record<'tree' | 'grass' | 'rock', string>>;
     bounds: SceneBounds;
     spawn: { centerX: number; centerZ: number; radius: number; slots: number };
     water?: { seaLevel: number };

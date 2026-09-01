@@ -62,7 +62,17 @@ test('loads every selectable map from an independent scene JSON', async () => {
   assert.equal(catalog.require('open-meadow').renderer.content.trees, false);
   const openWorld = catalog.require('open-world');
   assert.deepEqual(openWorld.sceneComponents[0], grassland.sceneComponents[1]);
-  assert.deepEqual(openWorld.gameplay.runtimeActorArchetypes, ['generated-tree', 'wood-pile']);
+  // 绑定写在场景里，原型自己不再声明承载哪一种物件。
+  assert.deepEqual(openWorld.gameplay.worldProps, {
+    tree: 'generated-tree',
+    rock: 'generated-rock',
+  });
+  assert.deepEqual(openWorld.gameplay.runtimeActorArchetypes, []);
+  // 绑定的原型连同它的掉落一起被自动带进场景，作者不用再重复列一遍。
+  const openWorldArchetypeIds = openWorld.actorArchetypes.map((archetype) => archetype.id).sort();
+  for (const id of ['generated-tree', 'wood-pile', 'generated-rock', 'stone-pile']) {
+    assert.ok(openWorldArchetypeIds.includes(id), `${id} 应该被自动带进场景`);
+  }
   const thermalLab = catalog.require('thermal-lab');
   assert.deepEqual(
     thermalLab.actors.map((actor) => [actor.id, actor.archetypeId]),

@@ -24,7 +24,7 @@ import {
   generateChunkProps,
 } from './chunkContent.mjs';
 import { PROP_KIND } from './worldConfig.mjs';
-import { formatGeneratedTreeId, isPropSkipped } from './generatedTree.mjs';
+import { formatGeneratedPropId, isPropSkipped } from './generatedProp.mjs';
 
 /**
  * 每种物件的碰撞模板，单位缩放下的尺寸。放置记录里的 scale 会等比乘上去。
@@ -59,7 +59,7 @@ export const MAXIMUM_COLLIDERS_PER_PROP = Object.values(PROP_COLLIDER_TEMPLATES)
  * @param {Int32Array} props 放置记录缓冲区
  * @param {number} count 记录条数
  * @param {object[]} [target] 复用的输出数组
- * @param {{ skipMask?: import('./generatedTree.mjs').PropSkipMask, chunkX?: number, chunkZ?: number }} [options]
+ * @param {{ skipMask?: import('./generatedProp.mjs').PropSkipMask, chunkX?: number, chunkZ?: number }} [options]
  * @returns {object[]}
  */
 export function readChunkColliders(props, count, target = [], options = {}) {
@@ -74,13 +74,14 @@ export function readChunkColliders(props, count, target = [], options = {}) {
     const z = props[offset + PROP_FIELD.Z_MM] / 1000;
     const yaw = props[offset + PROP_FIELD.ROTATION_MRAD] / 1000;
     const scale = props[offset + PROP_FIELD.SCALE_THOUSANDTHS] / 1000;
-    // 同一个物件的几个盒子共用一份 transform：它们绑在同一棵树上，
+    // 同一个物件的几个盒子共用一份 transform：它们绑在同一个物件上，
     // 位置永远一致，也省下几个对象。
     const transform = { x, y: 0, z, yaw };
-    const actorId = kind === PROP_KIND.TREE
-      && Number.isInteger(options.chunkX)
-      && Number.isInteger(options.chunkZ)
-      ? formatGeneratedTreeId(options.chunkX, options.chunkZ, index)
+    // 每个有碰撞体的物件都带上自描述 id：交互查询靠它从碰撞世界反查 Actor，
+    // 成本随身边的密度走，而不是随世界里的物件总数走。哪些种类真的有 Actor
+    // 由原型注册表决定，这里不需要知道。
+    const actorId = Number.isInteger(options.chunkX) && Number.isInteger(options.chunkZ)
+      ? formatGeneratedPropId(kind, options.chunkX, options.chunkZ, index)
       : undefined;
     for (const template of templates) {
       target.push({
@@ -111,7 +112,7 @@ export function readChunkColliders(props, count, target = [], options = {}) {
  * @param {number} chunkX
  * @param {number} chunkZ
  * @param {Int32Array} [buffer] 复用的放置缓冲区
- * @param {import('./generatedTree.mjs').PropSkipMask} [skipMask]
+ * @param {import('./generatedProp.mjs').PropSkipMask} [skipMask]
  * @returns {object[]}
  */
 export function buildChunkColliders(worldSeed, chunkX, chunkZ, buffer, skipMask) {
