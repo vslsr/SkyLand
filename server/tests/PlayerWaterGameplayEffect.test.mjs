@@ -7,12 +7,14 @@ import {
 } from '../../shared/abilities/index.mjs';
 import { sampleBuoyancyBobOffset } from '../../shared/actor/buoyancyMotion.mjs';
 import {
+  encodeTerrainCell,
   terrainCellCodeAt,
   terrainCellSurface,
   sampleTerrain,
 } from '../../shared/world/terrainContent.mjs';
 import {
   TERRAIN_CELL_SIZE,
+  TERRAIN_SHAPE,
   TERRAIN_SURFACE,
 } from '../../shared/world/terrainConfig.mjs';
 import { DEFAULT_WORLD_SEED } from '../../shared/world/worldConfig.mjs';
@@ -33,7 +35,7 @@ function findCell(surface) {
   throw new Error(`没有找到测试地形表面：${surface}`);
 }
 
-function createDefinition(spawn) {
+function createDefinition(spawn, seaLevel = 0) {
   return {
     id: 'player-water-gas-test',
     renderer: { world: {} },
@@ -41,7 +43,7 @@ function createDefinition(spawn) {
       bounds: { minimumX: -128, maximumX: 128, minimumZ: -128, maximumZ: 128 },
       spawn: { centerX: spawn.x, centerZ: spawn.z, radius: 0, slots: 1 },
       playerActor: { archetypeId: 'player-slime' },
-      water: { seaLevel: 0 },
+      water: { seaLevel },
     },
     actorArchetypes: [{
       id: 'player-slime',
@@ -119,4 +121,40 @@ test('玩家进水时 GAS 减速，权威 Y 即使没有输入也按大振幅浮
   assert.equal(abilities.attributes.getCurrentValue(MOVE_SPEED_ATTRIBUTE), 3.2);
   assert.equal(abilities.hasTag(IN_WATER_STATE_TAG), false);
   assert.equal(abilities.createSnapshot().effects.length, 0);
+});
+
+test('服务端允许玩家跳过岸沿并在落地后继续向岸内移动', () => {
+  const now = 1_000_000;
+  const scene = new ServerScene(createDefinition({ x: 0.1, z: 1 }, -0.4), {
+    worldSeed: DEFAULT_WORLD_SEED,
+    now: () => now,
+  });
+  const water = encodeTerrainCell(-1, TERRAIN_SURFACE.WATER, TERRAIN_SHAPE.FLAT);
+  const land = encodeTerrainCell(0, TERRAIN_SURFACE.GROUND, TERRAIN_SHAPE.FLAT);
+  scene.terrainPatches.setCellCode(-1, 0, water);
+  scene.terrainPatches.setCellCode(0, 0, land);
+  // 本用例只验证地形岸沿，排除程序化树石碰撞的随机干扰。
+  scene.collision.resolveCircle = (position) => position;
+  scene.addPlayer({ id: 'shore-jumper', name: '越岸玩家', slot: 0 });
+
+  const player = scene.players.get('shore-jumper');
+  const waterPosition = { x: -0.5, z: 1 };
+  const shorePosition = { x: 0.1, z: 1 };
+  const inlandPosition = { x: 0.5, z: 1 };
+  const waterY = scene.playerSupportHeightAt(player, waterPosition.x, waterPosition.z, now / 1000);
+  player.setPosition(waterPosition.x, waterPosition.z, waterY);
+  player.jump.applyAuthoritativeState(0, true);
+
+  const walking = scene.resolvePlayerMovement(player, { ...shorePosition, y: waterY });
+  assert.equal(walking.x, waterPosition.x, '未起跳时岸沿仍应阻挡玩家');
+
+  player.jump.setPressed(false);
+  player.jump.setPressed(true);
+  const jumpedOntoShore = scene.resolvePlayerMovement(player, { ...shorePosition, y: 0 });
+  assert.equal(jumpedOntoShore.x, shorePosition.x, '权威解算应允许脚底高过岸面的玩家越岸');
+
+  player.setPosition(jumpedOntoShore.x, jumpedOntoShore.z, 0);
+  player.jump.applyAuthoritativeState(0, true);
+  const movedInland = scene.resolvePlayerMovement(player, { ...inlandPosition, y: 0 });
+  assert.equal(movedInland.x, inlandPosition.x, '落地后应脱离岸沿，而不是只能沿岸滑动');
 });

@@ -14,11 +14,15 @@
  * Actor 上限。这个类本身不做任何全世界的遍历或预分配。
  */
 
-import { resolveCircleAgainstSimpleCollisions } from '../actor/simpleCollision.mjs';
+import {
+  resolveCircleAgainstSimpleCollisions,
+  supportHeightForSimpleCollision,
+} from '../actor/simpleCollision.mjs';
 import { CollisionGrid } from './CollisionGrid.mjs';
 import { COLLISION_LAYER, COLLISION_LAYER_SOLID } from './collisionLayers.mjs';
 import {
   simpleCollisionWorldBounds,
+  sweepCircleAgainstSimpleCollision,
   sweepSphereAgainstSimpleCollision,
 } from './collisionBox.mjs';
 
@@ -173,6 +177,81 @@ export class CollisionWorld {
       candidates,
       options.verticalProfile,
     );
+  }
+
+  /**
+   * 圆形角色脚底的向下支撑查询。宽相仍走同一张局部网格，窄相只接受脚印覆盖且
+   * 顶面落在 [minimumY, maximumY] 扫掠区间内的物件，并返回其中最高的顶面。
+   * @param {{ x: number, z: number }} point
+   * @param {number} radius
+   * @param {number} minimumY
+   * @param {number} maximumY
+   * @param {{ accept?: (instance: object) => boolean, layers?: number }} [options]
+   * @returns {number | undefined}
+   */
+  findSupportHeight(point, radius, minimumY, maximumY, options = {}) {
+    const safeRadius = Math.max(0, finiteNumber(radius));
+    const accept = options.accept;
+    let highest;
+    this.grid.forEachInCircle(
+      finiteNumber(point.x),
+      finiteNumber(point.z),
+      safeRadius,
+      options.layers ?? COLLISION_LAYER.MOVEMENT,
+      (instance) => {
+        if (accept && !accept(instance)) return;
+        const supportY = supportHeightForSimpleCollision(
+          point,
+          safeRadius,
+          instance,
+          minimumY,
+          maximumY,
+        );
+        if (supportY === undefined || (highest !== undefined && supportY <= highest)) return;
+        highest = supportY;
+      },
+    );
+    return highest;
+  }
+
+  /**
+   * 竖直圆柱角色的水平连续碰撞查询。返回最早命中与世界空间法线；候选只来自
+   * 扫掠 AABB 覆盖到的局部格子，因此成本与本次位移和局部密度有关。
+   * @param {{ x: number, z: number }} start
+   * @param {{ x: number, z: number }} end
+   * @param {number} radius
+   * @param {{ minimumY: number, maximumY: number, maximumStepHeight?: number }} verticalProfile
+   * @param {{ accept?: (instance: object) => boolean, layers?: number }} [options]
+   * @returns {{ t: number, normalX: number, normalZ: number } | undefined}
+   */
+  sweepCircle(start, end, radius, verticalProfile, options = {}) {
+    const safeRadius = Math.max(0, finiteNumber(radius));
+    const minimumX = Math.min(finiteNumber(start.x), finiteNumber(end.x)) - safeRadius;
+    const maximumX = Math.max(finiteNumber(start.x), finiteNumber(end.x)) + safeRadius;
+    const minimumZ = Math.min(finiteNumber(start.z), finiteNumber(end.z)) - safeRadius;
+    const maximumZ = Math.max(finiteNumber(start.z), finiteNumber(end.z)) + safeRadius;
+    const accept = options.accept;
+    let earliest;
+    this.grid.forEachInAabb(
+      minimumX,
+      minimumZ,
+      maximumX,
+      maximumZ,
+      options.layers ?? COLLISION_LAYER.MOVEMENT,
+      (instance) => {
+        if (accept && !accept(instance)) return;
+        const hit = sweepCircleAgainstSimpleCollision(
+          start,
+          end,
+          safeRadius,
+          verticalProfile,
+          instance,
+        );
+        if (!hit || (earliest && hit.t >= earliest.t)) return;
+        earliest = hit;
+      },
+    );
+    return earliest;
   }
 
   /**

@@ -217,6 +217,9 @@ export function createPlayerSlimeModel(
       halfLength: radius,
       minimumY: 0,
       maximumY: radius * 2,
+      supportShape: 'cylinder',
+      supportHalfWidth: radius,
+      supportHalfLength: radius,
     },
   };
 }

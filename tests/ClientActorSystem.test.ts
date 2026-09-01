@@ -1228,7 +1228,7 @@ test('混合史莱姆的软核心产生黏地拖后，内部圆柱碰撞令接�
   visual.dispose();
 });
 
-test('混合史莱姆起跳时向心点上移并收起贴地软边，落地后恢复穹顶', () => {
+test('混合史莱姆用移动与跳跃速度合成三维水滴轴，并让质量核心反向塌陷', () => {
   const render = pbfSlimeArchetype.components.render;
   assert.ok(render?.model === 'line-art-pbf-slime');
   const visual = createPlayerActorVisual('jump-visual-player', render, 3.2);
@@ -1240,6 +1240,48 @@ test('混合史莱姆起跳时向心点上移并收起贴地软边，落地后�
     }
     return minimum;
   };
+  const projectionExtent = (axisX: number, axisY: number, axisZ: number): number => {
+    const axisLength = Math.hypot(axisX, axisY, axisZ);
+    let minimum = Number.POSITIVE_INFINITY;
+    let maximum = Number.NEGATIVE_INFINITY;
+    for (let offset = 0; offset < simulation.positions.length; offset += 3) {
+      const projection = (
+        simulation.positions[offset] * axisX
+        + simulation.positions[offset + 1] * axisY
+        + simulation.positions[offset + 2] * axisZ
+      ) / axisLength;
+      minimum = Math.min(minimum, projection);
+      maximum = Math.max(maximum, projection);
+    }
+    return maximum - minimum;
+  };
+  const axisBandRadius = (
+    axisX: number,
+    axisY: number,
+    minimumAlignment: number,
+    maximumAlignment: number,
+  ): number => {
+    const directions = visual.component!.rig.surfaceDirections;
+    let sum = 0;
+    let count = 0;
+    for (let offset = 0; offset < simulation.positions.length; offset += 3) {
+      const alignment = directions[offset] * axisX + directions[offset + 1] * axisY;
+      if (alignment < minimumAlignment || alignment > maximumAlignment) continue;
+      const localX = simulation.positions[offset] - simulation.center[0];
+      const localY = simulation.positions[offset + 1] - simulation.center[1];
+      const localZ = simulation.positions[offset + 2] - simulation.center[2];
+      const parallel = localX * axisX + localY * axisY;
+      sum += Math.sqrt(Math.max(
+        0,
+        localX * localX + localY * localY + localZ * localZ - parallel * parallel,
+      ));
+      count += 1;
+    }
+    return sum / Math.max(1, count);
+  };
+  const jumpAxisLength = Math.hypot(3.2, 7);
+  const jumpAxisX = 3.2 / jumpAxisLength;
+  const jumpAxisY = 7 / jumpAxisLength;
 
   for (let frame = 0; frame < 120; frame += 1) {
     visual.update(1 / 60, frame / 60, 0, 0, {
@@ -1249,46 +1291,78 @@ test('混合史莱姆起跳时向心点上移并收起贴地软边，落地后�
       grounded: true,
     });
   }
-  const groundedCenterY = simulation.forceCenter[1];
+  const groundedCenterY = simulation.center[1];
+  const groundedForceCenterY = simulation.forceCenter[1];
   const groundedLowestY = minimumSurfaceY();
-  let groundedPlanarRadius = 0;
-  for (let offset = 0; offset < simulation.positions.length; offset += 3) {
-    groundedPlanarRadius += Math.hypot(
-      simulation.positions[offset],
-      simulation.positions[offset + 2],
-    );
-  }
+  const groundedJumpAxisExtent = projectionExtent(jumpAxisX, jumpAxisY, 0);
 
   for (let frame = 120; frame < 180; frame += 1) {
     visual.update(1 / 60, frame / 60, 0, 0, {
-      velocityX: 0,
+      velocityX: 3.2,
       velocityZ: 0,
       verticalVelocity: 7,
       grounded: false,
     });
   }
   const airborneLowestY = minimumSurfaceY();
-  let airbornePlanarRadius = 0;
-  for (let offset = 0; offset < simulation.positions.length; offset += 3) {
-    airbornePlanarRadius += Math.hypot(
-      simulation.positions[offset],
-      simulation.positions[offset + 2],
-    );
-  }
+  const airborneJumpAxisExtent = projectionExtent(jumpAxisX, jumpAxisY, 0);
+  const forceBiasX = simulation.forceCenter[0] - simulation.center[0];
+  const forceBiasY = simulation.forceCenter[1] - simulation.center[1];
+  const forceBiasLength = Math.hypot(forceBiasX, forceBiasY);
+  const movingHeadRadius = axisBandRadius(jumpAxisX, jumpAxisY, 0.65, 0.9);
+  const trailingTailRadius = axisBandRadius(jumpAxisX, jumpAxisY, -0.9, -0.65);
   assert.ok(
-    simulation.forceCenter[1] > groundedCenterY + render.radius * 0.08,
-    '竖直冲量必须把胡克弹簧向心点向上偏移',
+    simulation.center[1] < groundedCenterY - render.radius * 0.12,
+    '起跳时质量核心必须相对 Actor 根向下滞后，形成向下塌陷',
   );
   assert.ok(
-    airborneLowestY > groundedLowestY + render.radius * 0.04,
-    '空中底圈应脱离局部地面，不再保持贴地钉扎',
+    airborneLowestY < groundedLowestY - render.radius * 0.1,
+    '离地后应释放局部地面钉扎，让底部向下拖出软尾',
   );
   assert.ok(
-    airbornePlanarRadius < groundedPlanarRadius * 0.94,
-    '空中向心力应把软边向内收紧',
+    airborneJumpAxisExtent > groundedJumpAxisExtent * 1.06,
+    '蒙皮必须沿水平移动与竖直冲量的合成轴拉长',
+  );
+  assert.ok(forceBiasX > render.radius * 0.03 && forceBiasY > render.radius * 0.08);
+  assert.ok(
+    (forceBiasX * jumpAxisX + forceBiasY * jumpAxisY) / forceBiasLength > 0.98,
+    '向心力偏移必须与三维合成速度同向，不能只使用水平或竖直分量',
+  );
+  assert.ok(
+    movingHeadRadius > trailingTailRadius * 1.3,
+    '水滴圆头必须沿移动+跳跃合成方向，反方向只能是收窄的拖尾',
   );
 
-  for (let frame = 180; frame < 480; frame += 1) {
+  for (let frame = 180; frame < 240; frame += 1) {
+    visual.update(1 / 60, frame / 60, 0, 0, {
+      velocityX: 3.2,
+      velocityZ: 0,
+      verticalVelocity: -7,
+      grounded: false,
+    });
+  }
+  const fallAxisY = -jumpAxisY;
+  const fallForceBiasX = simulation.forceCenter[0] - simulation.center[0];
+  const fallForceBiasY = simulation.forceCenter[1] - simulation.center[1];
+  const fallForceBiasLength = Math.hypot(fallForceBiasX, fallForceBiasY);
+  const fallingHeadRadius = axisBandRadius(jumpAxisX, fallAxisY, 0.65, 0.9);
+  const fallingTailRadius = axisBandRadius(jumpAxisX, fallAxisY, -0.9, -0.65);
+  assert.ok(
+    simulation.center[1] > groundedCenterY + render.radius * 0.12,
+    '下落时质量核心应反向向上滞后',
+  );
+  assert.ok(
+    (
+      fallForceBiasX * jumpAxisX + fallForceBiasY * fallAxisY
+    ) / fallForceBiasLength > 0.98,
+    '下落阶段的水滴轴应随移动+下落矢量平滑翻转',
+  );
+  assert.ok(
+    fallingHeadRadius > fallingTailRadius * 1.3,
+    '进入下落后水滴圆头也必须转到新的运动方向，尖尾留在反方向',
+  );
+
+  for (let frame = 240; frame < 540; frame += 1) {
     visual.update(1 / 60, frame / 60, 0, 0, {
       velocityX: 0,
       velocityZ: 0,
@@ -1296,9 +1370,128 @@ test('混合史莱姆起跳时向心点上移并收起贴地软边，落地后�
       grounded: true,
     });
   }
-  assert.ok(Math.abs(simulation.forceCenter[1] - groundedCenterY) < render.radius * 0.002);
+  assert.ok(Math.abs(simulation.center[1] - groundedCenterY) < render.radius * 0.002);
+  assert.ok(Math.abs(simulation.forceCenter[1] - groundedForceCenterY) < render.radius * 0.002);
   assert.ok(Math.abs(minimumSurfaceY() - groundedLowestY) < render.radius * 0.004);
   assert.equal(simulation.isActive, false, '落地恢复后应重新休眠，不能持续抖动');
+  visual.dispose();
+});
+
+test('混合史莱姆起跳首帧移除平底，并让水滴圆头向上、尖尾向下', () => {
+  const render = pbfSlimeArchetype.components.render;
+  assert.ok(render?.model === 'line-art-pbf-slime');
+  const visual = createPlayerActorVisual('jump-silhouette-player', render, 3.2);
+  const component = visual.component!;
+  const simulation = component.simulation;
+  const directions = component.rig.surfaceDirections;
+  const verticalExtent = (): number => {
+    let minimum = Number.POSITIVE_INFINITY;
+    let maximum = Number.NEGATIVE_INFINITY;
+    for (let offset = 1; offset < simulation.positions.length; offset += 3) {
+      minimum = Math.min(minimum, simulation.positions[offset]);
+      maximum = Math.max(maximum, simulation.positions[offset]);
+    }
+    return maximum - minimum;
+  };
+  const bandPlanarRadius = (minimumDirectionY: number, maximumDirectionY: number): number => {
+    let sum = 0;
+    let count = 0;
+    for (let offset = 0; offset < simulation.positions.length; offset += 3) {
+      const directionY = directions[offset + 1];
+      if (directionY < minimumDirectionY || directionY > maximumDirectionY) continue;
+      sum += Math.hypot(
+        simulation.positions[offset] - simulation.center[0],
+        simulation.positions[offset + 2] - simulation.center[2],
+      );
+      count += 1;
+    }
+    return sum / Math.max(1, count);
+  };
+  const bandAverageY = (minimumDirectionY: number, maximumDirectionY: number): number => {
+    let sum = 0;
+    let count = 0;
+    for (let offset = 0; offset < simulation.positions.length; offset += 3) {
+      const directionY = directions[offset + 1];
+      if (directionY < minimumDirectionY || directionY > maximumDirectionY) continue;
+      sum += simulation.positions[offset + 1];
+      count += 1;
+    }
+    return sum / Math.max(1, count);
+  };
+
+  for (let frame = 0; frame < 120; frame += 1) {
+    visual.update(1 / 60, frame / 60, 0, 0, {
+      velocityX: 0,
+      velocityZ: 0,
+      verticalVelocity: 0,
+      grounded: true,
+    });
+  }
+  const groundedExtent = verticalExtent();
+  const groundedTaperRatio = bandPlanarRadius(-0.9, -0.65)
+    / bandPlanarRadius(0.65, 0.9);
+  let maximumExtentRatio = 1;
+  let minimumTailToHeadRatio = groundedTaperRatio;
+  let firstFrameTailToHeadRatio = groundedTaperRatio;
+  let sixthFrameTailToHeadRatio = groundedTaperRatio;
+  let firstFrameBottomCurveDepth = 0;
+  let sixthFrameBottomCurveDepth = 0;
+  let maximumRememberedJumpSpeed = 0;
+  let verticalVelocity = 7;
+  for (let frame = 120; frame < 156; frame += 1) {
+    visual.update(1 / 60, frame / 60, 0, 0, {
+      velocityX: 0,
+      velocityZ: 0,
+      verticalVelocity,
+      grounded: false,
+    });
+    verticalVelocity -= 22 / 60;
+    maximumExtentRatio = Math.max(maximumExtentRatio, verticalExtent() / groundedExtent);
+    const tailToHeadRatio = bandPlanarRadius(-0.9, -0.65)
+      / bandPlanarRadius(0.65, 0.9);
+    const bottomCurveDepth = bandAverageY(-0.55, -0.25) - bandAverageY(-1, -0.95);
+    minimumTailToHeadRatio = Math.min(minimumTailToHeadRatio, tailToHeadRatio);
+    if (frame === 120) {
+      firstFrameTailToHeadRatio = tailToHeadRatio;
+      firstFrameBottomCurveDepth = bottomCurveDepth;
+    }
+    if (frame === 125) {
+      sixthFrameTailToHeadRatio = tailToHeadRatio;
+      sixthFrameBottomCurveDepth = bottomCurveDepth;
+    }
+    maximumRememberedJumpSpeed = Math.max(
+      maximumRememberedJumpSpeed,
+      simulation.stats().shapeVerticalVelocity,
+    );
+  }
+
+  assert.ok(maximumRememberedJumpSpeed > 6.5, '起跳冲量必须立即进入黏性形变状态');
+  assert.ok(
+    maximumExtentRatio > 1.2,
+    `真实上升阶段的纵向轮廓至少应增加 20%，当前为 ${maximumExtentRatio.toFixed(3)}`,
+  );
+  assert.ok(
+    firstFrameTailToHeadRatio < groundedTaperRatio * 0.96,
+    '起跳首帧必须已经开始形成上宽下尖，不能等到最高点才变化',
+  );
+  assert.ok(
+    sixthFrameTailToHeadRatio < groundedTaperRatio * 0.78,
+    `起跳第六帧必须形成圆头向上、尖尾向下，当前比例 ${(
+      sixthFrameTailToHeadRatio / groundedTaperRatio
+    ).toFixed(3)}`,
+  );
+  assert.ok(
+    minimumTailToHeadRatio < groundedTaperRatio * 0.65,
+    '完整上升阶段的下方尖尾必须明显窄于上方水滴头',
+  );
+  assert.ok(
+    firstFrameBottomCurveDepth > render.radius * 0.025,
+    '史莱姆底面必须在起跳首帧脱离平面，底点应低于周围下半球',
+  );
+  assert.ok(
+    sixthFrameBottomCurveDepth > render.radius * 0.14,
+    '起跳后史莱姆下方必须保持连续弧形尖尾，不能出现平底层',
+  );
   visual.dispose();
 });
 

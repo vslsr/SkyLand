@@ -89,12 +89,14 @@ export class TerrainWorld {
     radius: number,
     maximumStepHeight: number,
     buoyancyDraft?: number,
+    minimumY?: number,
   ): { x: number; y: number; z: number } {
     return resolveTerrainMovement(this.worldSeed, from, to, {
       radius,
       maximumStepHeight,
       waterLevel: this.seaLevel,
       buoyancyDraft,
+      minimumY,
       cellCodeAt: this.cellCodeAt,
     });
   }

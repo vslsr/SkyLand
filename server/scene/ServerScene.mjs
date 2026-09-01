@@ -606,18 +606,15 @@ export class ServerScene {
       player.z,
       this.now() / 1000,
     );
-    const terrainStepHeight = player.jump.traversableStepHeight(
-      player.movement.maximumStepHeight,
-      supportY,
-      targetY,
-    );
+    const moverMinimumY = player.jump.isAirborne ? targetY : supportY;
     for (let iteration = 0; iteration < 4; iteration += 1) {
       const terrainPosition = this.terrainEnabled
         ? resolveTerrainMovement(this.worldSeed, player, candidate, {
             radius: player.collisionRadius,
-            maximumStepHeight: terrainStepHeight,
+            maximumStepHeight: player.movement.maximumStepHeight,
             waterLevel: this.actorWorld.context.seaLevel,
             buoyancyDraft: buoyancy?.draft,
+            minimumY: moverMinimumY,
             cellCodeAt: this.terrainCellCodeAt,
           })
         : { ...candidate, y: player.y };

@@ -185,17 +185,15 @@ export class SceneRenderer implements GrassInteractionTarget {
     const moverMinimumY = motion?.airborne && Number.isFinite(motion.minimumY)
       ? motion.minimumY
       : supportY;
-    const terrainStepHeight = motion?.airborne
-      ? Math.max(maximumStepHeight, moverMinimumY - supportY)
-      : maximumStepHeight;
     let candidate = position;
     for (let iteration = 0; iteration < 4; iteration += 1) {
       const terrainPosition = this.terrainWorld?.resolveMovement(
         from,
         candidate,
         radius,
-        terrainStepHeight,
+        maximumStepHeight,
         buoyancyDraft,
+        moverMinimumY,
       ) ?? { ...candidate, y: 0 };
       const actorY = motion?.airborne ? moverMinimumY : terrainPosition.y;
       const objectPosition = this.collisionWorld?.resolveCircle(terrainPosition, radius, {

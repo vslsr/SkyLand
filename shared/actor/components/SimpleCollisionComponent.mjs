@@ -15,5 +15,8 @@ export class SimpleCollisionComponent extends ActorComponent {
     this.halfLength = collision.halfLength;
     this.minimumY = collision.minimumY;
     this.maximumY = collision.maximumY;
+    this.supportShape = collision.supportShape;
+    this.supportHalfWidth = collision.supportHalfWidth;
+    this.supportHalfLength = collision.supportHalfLength;
   }
 }

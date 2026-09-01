@@ -8,6 +8,9 @@ export interface ActorSimpleCollision {
   readonly halfLength: number;
   readonly minimumY: number;
   readonly maximumY: number;
+  readonly supportShape: 'box' | 'cylinder';
+  readonly supportHalfWidth: number;
+  readonly supportHalfLength: number;
 }
 
 export interface ActorVisualModel {

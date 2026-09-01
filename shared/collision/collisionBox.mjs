@@ -31,19 +31,26 @@ export function simpleCollisionWorldBounds(instance, margin = 0) {
   const centerZ = finiteNumber(collision.centerZ);
   const halfWidth = finiteNumber(collision.halfWidth);
   const halfLength = finiteNumber(collision.halfLength);
+  const supportHalfWidth = finiteNumber(collision.supportHalfWidth, halfWidth);
+  const supportHalfLength = finiteNumber(collision.supportHalfLength, halfLength);
   const worldX = finiteNumber(transform.x) + cosYaw * centerX + sinYaw * centerZ;
   const worldZ = finiteNumber(transform.z) - sinYaw * centerX + cosYaw * centerZ;
-  if (collision.shape === 'cylinder') {
-    const radius = Math.min(halfWidth, halfLength) + margin;
-    return {
-      minimumX: worldX - radius,
-      maximumX: worldX + radius,
-      minimumZ: worldZ - radius,
-      maximumZ: worldZ + radius,
-    };
-  }
-  const extentX = Math.abs(cosYaw) * halfWidth + Math.abs(sinYaw) * halfLength + margin;
-  const extentZ = Math.abs(sinYaw) * halfWidth + Math.abs(cosYaw) * halfLength + margin;
+  const collisionRadius = Math.min(halfWidth, halfLength);
+  const collisionExtentX = collision.shape === 'cylinder'
+    ? collisionRadius
+    : Math.abs(cosYaw) * halfWidth + Math.abs(sinYaw) * halfLength;
+  const collisionExtentZ = collision.shape === 'cylinder'
+    ? collisionRadius
+    : Math.abs(sinYaw) * halfWidth + Math.abs(cosYaw) * halfLength;
+  const supportRadius = Math.min(supportHalfWidth, supportHalfLength);
+  const supportExtentX = collision.supportShape === 'cylinder'
+    ? supportRadius
+    : Math.abs(cosYaw) * supportHalfWidth + Math.abs(sinYaw) * supportHalfLength;
+  const supportExtentZ = collision.supportShape === 'cylinder'
+    ? supportRadius
+    : Math.abs(sinYaw) * supportHalfWidth + Math.abs(cosYaw) * supportHalfLength;
+  const extentX = Math.max(collisionExtentX, supportExtentX) + margin;
+  const extentZ = Math.max(collisionExtentZ, supportExtentZ) + margin;
   return {
     minimumX: worldX - extentX,
     maximumX: worldX + extentX,
@@ -158,4 +165,163 @@ export function sweepSphereAgainstSimpleCollision(start, end, radius, instance) 
     if (enter > exit) return 1;
   }
   return enter <= exit ? enter : 1;
+}
+
+/**
+ * 在固定脚底高度上扫掠一个竖直圆柱，返回最早的水平命中与世界空间法线。
+ *
+ * 角色体与盒子的水平闵可夫斯基和仍采用保守的“外扩有向盒”；圆柱障碍则用
+ * 真实圆对圆二次方程。宽相只负责给候选，本函数决定实际命中。
+ *
+ * @param {{ x: number, z: number }} start
+ * @param {{ x: number, z: number }} end
+ * @param {number} radius
+ * @param {{ minimumY: number, maximumY: number, maximumStepHeight?: number }} verticalProfile
+ * @param {{ collision: object, transform: object }} instance
+ * @returns {{ t: number, normalX: number, normalZ: number } | undefined}
+ */
+export function sweepCircleAgainstSimpleCollision(
+  start,
+  end,
+  radius,
+  verticalProfile,
+  instance,
+) {
+  const { collision, transform } = instance;
+  const transformY = finiteNumber(transform.y);
+  const obstacleMinimumY = transformY + finiteNumber(collision.minimumY);
+  const obstacleMaximumY = transformY + finiteNumber(collision.maximumY);
+  const moverMinimumY = finiteNumber(verticalProfile?.minimumY);
+  const moverMaximumY = Math.max(
+    moverMinimumY,
+    finiteNumber(verticalProfile?.maximumY, moverMinimumY),
+  );
+  const maximumStepHeight = Math.max(0, finiteNumber(verticalProfile?.maximumStepHeight));
+  if (obstacleMaximumY <= moverMinimumY + maximumStepHeight + EPSILON) return undefined;
+  if (
+    obstacleMinimumY >= moverMaximumY - EPSILON
+    || obstacleMaximumY <= moverMinimumY + EPSILON
+  ) {
+    return undefined;
+  }
+
+  const safeRadius = Math.max(0, finiteNumber(radius));
+  const yaw = finiteNumber(transform.yaw);
+  const sinYaw = Math.sin(yaw);
+  const cosYaw = Math.cos(yaw);
+  const transformX = finiteNumber(transform.x);
+  const transformZ = finiteNumber(transform.z);
+  const centerX = finiteNumber(collision.centerX);
+  const centerZ = finiteNumber(collision.centerZ);
+
+  const startDeltaX = finiteNumber(start.x) - transformX;
+  const startDeltaZ = finiteNumber(start.z) - transformZ;
+  const endDeltaX = finiteNumber(end.x) - transformX;
+  const endDeltaZ = finiteNumber(end.z) - transformZ;
+  const startLocalX = cosYaw * startDeltaX - sinYaw * startDeltaZ - centerX;
+  const startLocalZ = sinYaw * startDeltaX + cosYaw * startDeltaZ - centerZ;
+  const endLocalX = cosYaw * endDeltaX - sinYaw * endDeltaZ - centerX;
+  const endLocalZ = sinYaw * endDeltaX + cosYaw * endDeltaZ - centerZ;
+  const directionX = endLocalX - startLocalX;
+  const directionZ = endLocalZ - startLocalZ;
+  if (directionX * directionX + directionZ * directionZ < EPSILON) return undefined;
+
+  let hitT;
+  let localNormalX = 0;
+  let localNormalZ = 0;
+  if (collision.shape === 'cylinder') {
+    const expandedRadius = Math.min(
+      finiteNumber(collision.halfWidth),
+      finiteNumber(collision.halfLength),
+    ) + safeRadius;
+    const a = directionX * directionX + directionZ * directionZ;
+    const b = 2 * (startLocalX * directionX + startLocalZ * directionZ);
+    const c = startLocalX * startLocalX + startLocalZ * startLocalZ
+      - expandedRadius * expandedRadius;
+    if (c <= EPSILON) {
+      // 已经贴在边界上且正离开时不能重新把角色锁住。
+      if (b >= 0) return undefined;
+      hitT = 0;
+    } else {
+      const discriminant = b * b - 4 * a * c;
+      if (discriminant < 0) return undefined;
+      hitT = (-b - Math.sqrt(discriminant)) / (2 * a);
+      if (hitT < -EPSILON || hitT > 1 + EPSILON) return undefined;
+      hitT = Math.max(0, Math.min(1, hitT));
+    }
+    const hitX = startLocalX + directionX * hitT;
+    const hitZ = startLocalZ + directionZ * hitT;
+    const length = Math.hypot(hitX, hitZ);
+    if (length > EPSILON) {
+      localNormalX = hitX / length;
+      localNormalZ = hitZ / length;
+    } else {
+      const directionLength = Math.hypot(directionX, directionZ) || 1;
+      localNormalX = -directionX / directionLength;
+      localNormalZ = -directionZ / directionLength;
+    }
+  } else {
+    const halfWidth = finiteNumber(collision.halfWidth) + safeRadius;
+    const halfLength = finiteNumber(collision.halfLength) + safeRadius;
+    let enter = 0;
+    let exit = 1;
+    const startInside = Math.abs(startLocalX) < halfWidth - EPSILON
+      && Math.abs(startLocalZ) < halfLength - EPSILON;
+    const axes = [
+      {
+        origin: startLocalX,
+        direction: directionX,
+        minimum: -halfWidth,
+        maximum: halfWidth,
+        nearNormalX: directionX > 0 ? -1 : 1,
+        nearNormalZ: 0,
+      },
+      {
+        origin: startLocalZ,
+        direction: directionZ,
+        minimum: -halfLength,
+        maximum: halfLength,
+        nearNormalX: 0,
+        nearNormalZ: directionZ > 0 ? -1 : 1,
+      },
+    ];
+    for (const axis of axes) {
+      if (Math.abs(axis.direction) < EPSILON) {
+        if (axis.origin < axis.minimum || axis.origin > axis.maximum) return undefined;
+        continue;
+      }
+      let near = (axis.minimum - axis.origin) / axis.direction;
+      let far = (axis.maximum - axis.origin) / axis.direction;
+      if (near > far) [near, far] = [far, near];
+      if (near > enter) {
+        enter = near;
+        localNormalX = axis.nearNormalX;
+        localNormalZ = axis.nearNormalZ;
+      }
+      exit = Math.min(exit, far);
+      if (enter > exit) return undefined;
+    }
+    if (exit < -EPSILON || enter > 1 + EPSILON) return undefined;
+    if (startInside) {
+      const left = startLocalX + halfWidth;
+      const right = halfWidth - startLocalX;
+      const back = startLocalZ + halfLength;
+      const front = halfLength - startLocalZ;
+      const nearest = Math.min(left, right, back, front);
+      if (nearest === left) [localNormalX, localNormalZ] = [-1, 0];
+      else if (nearest === right) [localNormalX, localNormalZ] = [1, 0];
+      else if (nearest === back) [localNormalX, localNormalZ] = [0, -1];
+      else [localNormalX, localNormalZ] = [0, 1];
+      if (directionX * localNormalX + directionZ * localNormalZ >= 0) return undefined;
+      hitT = 0;
+    } else {
+      hitT = Math.max(0, enter);
+    }
+  }
+
+  return {
+    t: hitT,
+    normalX: cosYaw * localNormalX + sinYaw * localNormalZ,
+    normalZ: -sinYaw * localNormalX + cosYaw * localNormalZ,
+  };
 }

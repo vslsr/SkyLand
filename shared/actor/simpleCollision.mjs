@@ -4,7 +4,7 @@
  */
 
 /** @typedef {'box' | 'cylinder'} SimpleCollisionShape */
-/** @typedef {{ shape: SimpleCollisionShape, centerX: number, centerZ: number, halfWidth: number, halfLength: number, minimumY: number, maximumY: number }} SimpleCollisionDefinition */
+/** @typedef {{ shape: SimpleCollisionShape, centerX: number, centerZ: number, halfWidth: number, halfLength: number, minimumY: number, maximumY: number, supportShape: SimpleCollisionShape, supportHalfWidth: number, supportHalfLength: number }} SimpleCollisionDefinition */
 /** @typedef {{ x: number, z: number }} CollisionPoint */
 /** @typedef {{ x: number, y?: number, z: number, yaw: number }} CollisionTransform */
 /** @typedef {{ collision: SimpleCollisionDefinition, transform: CollisionTransform }} SimpleCollisionInstance */
@@ -103,6 +103,11 @@ export function createSimpleCollisionFromRender(render, dropMotion) {
       halfLength: radius * 0.4,
       minimumY: 0,
       maximumY: height,
+      // 常规角色控制器把「侧面阻挡」和「顶部支撑」分开。菌盖不挡水平移动，
+      // 但向下扫掠必须能落在整个圆形菌盖上，而不是只认细根的面积。
+      supportShape: 'cylinder',
+      supportHalfWidth: radius,
+      supportHalfLength: radius,
     });
   }
   if (model === 'line-art-training-dummy' || model === 'line-art-focus-obelisk') {
@@ -158,15 +163,124 @@ export function createSimpleCollisionFromRender(render, dropMotion) {
 export function createSimpleCollisionDefinition(definition) {
   const minimumY = finiteNumber(definition.minimumY);
   const maximumY = finiteNumber(definition.maximumY, minimumY + 1);
+  const halfWidth = positiveNumber(definition.halfWidth, 0.01);
+  const halfLength = positiveNumber(definition.halfLength, 0.01);
   return {
     shape: definition.shape === 'cylinder' ? 'cylinder' : 'box',
     centerX: finiteNumber(definition.centerX),
     centerZ: finiteNumber(definition.centerZ),
-    halfWidth: positiveNumber(definition.halfWidth, 0.01),
-    halfLength: positiveNumber(definition.halfLength, 0.01),
+    halfWidth,
+    halfLength,
     minimumY: Math.min(minimumY, maximumY),
     maximumY: Math.max(minimumY, maximumY),
+    supportShape: definition.supportShape === 'cylinder'
+      ? 'cylinder'
+      : definition.supportShape === 'box'
+        ? 'box'
+        : definition.shape === 'cylinder' ? 'cylinder' : 'box',
+    supportHalfWidth: positiveNumber(definition.supportHalfWidth, halfWidth),
+    supportHalfLength: positiveNumber(definition.supportHalfLength, halfLength),
   };
+}
+
+/**
+ * 常规角色控制器的向下支撑窄相：圆形脚印必须覆盖物件顶面，并且顶面必须落在
+ * 本帧脚底从 maximumY 到 minimumY 的向下扫掠区间内。返回世界空间顶面高度。
+ * @param {CollisionPoint} point
+ * @param {number} radius
+ * @param {SimpleCollisionInstance} instance
+ * @param {number} minimumY
+ * @param {number} maximumY
+ * @returns {number | undefined}
+ */
+export function supportHeightForSimpleCollision(
+  point,
+  radius,
+  instance,
+  minimumY,
+  maximumY,
+) {
+  const lowerY = Math.min(finiteNumber(minimumY), finiteNumber(maximumY));
+  const upperY = Math.max(finiteNumber(minimumY), finiteNumber(maximumY));
+  const collision = instance.collision;
+  const transform = instance.transform;
+  const supportY = finiteNumber(transform.y) + finiteNumber(collision.maximumY);
+  if (supportY < lowerY - COLLISION_EPSILON || supportY > upperY + COLLISION_EPSILON) {
+    return undefined;
+  }
+
+  const yaw = finiteNumber(transform.yaw);
+  const sinYaw = Math.sin(yaw);
+  const cosYaw = Math.cos(yaw);
+  const deltaX = finiteNumber(point.x) - finiteNumber(transform.x);
+  const deltaZ = finiteNumber(point.z) - finiteNumber(transform.z);
+  const localX = cosYaw * deltaX - sinYaw * deltaZ - finiteNumber(collision.centerX);
+  const localZ = sinYaw * deltaX + cosYaw * deltaZ - finiteNumber(collision.centerZ);
+  const supportHalfWidth = positiveNumber(
+    collision.supportHalfWidth,
+    positiveNumber(collision.halfWidth, 0.01),
+  );
+  const supportHalfLength = positiveNumber(
+    collision.supportHalfLength,
+    positiveNumber(collision.halfLength, 0.01),
+  );
+  const safeRadius = Math.max(0, finiteNumber(radius));
+  const supportShape = collision.supportShape ?? collision.shape;
+
+  if (supportShape === 'cylinder') {
+    const separation = Math.min(supportHalfWidth, supportHalfLength) + safeRadius;
+    return localX * localX + localZ * localZ <= separation * separation + COLLISION_EPSILON
+      ? supportY
+      : undefined;
+  }
+
+  const closestX = Math.max(-supportHalfWidth, Math.min(supportHalfWidth, localX));
+  const closestZ = Math.max(-supportHalfLength, Math.min(supportHalfLength, localZ));
+  const distanceX = localX - closestX;
+  const distanceZ = localZ - closestZ;
+  return distanceX * distanceX + distanceZ * distanceZ
+    <= safeRadius * safeRadius + COLLISION_EPSILON
+    ? supportY
+    : undefined;
+}
+
+/**
+ * 圆形角色脚印是否覆盖碰撞体的水平截面。竖直扫掠用主碰撞形状，向下支撑
+ * 查询可选择更宽的 supportShape（例如蘑菇菌盖）。
+ * @param {CollisionPoint} point
+ * @param {number} radius
+ * @param {SimpleCollisionInstance} instance
+ * @param {boolean} [support]
+ * @returns {boolean}
+ */
+export function circleOverlapsSimpleCollisionFootprint(point, radius, instance, support = false) {
+  const collision = instance.collision;
+  const transform = instance.transform;
+  const yaw = finiteNumber(transform.yaw);
+  const sinYaw = Math.sin(yaw);
+  const cosYaw = Math.cos(yaw);
+  const deltaX = finiteNumber(point.x) - finiteNumber(transform.x);
+  const deltaZ = finiteNumber(point.z) - finiteNumber(transform.z);
+  const localX = cosYaw * deltaX - sinYaw * deltaZ - finiteNumber(collision.centerX);
+  const localZ = sinYaw * deltaX + cosYaw * deltaZ - finiteNumber(collision.centerZ);
+  const halfWidth = support
+    ? positiveNumber(collision.supportHalfWidth, positiveNumber(collision.halfWidth, 0.01))
+    : positiveNumber(collision.halfWidth, 0.01);
+  const halfLength = support
+    ? positiveNumber(collision.supportHalfLength, positiveNumber(collision.halfLength, 0.01))
+    : positiveNumber(collision.halfLength, 0.01);
+  const shape = support ? (collision.supportShape ?? collision.shape) : collision.shape;
+  const safeRadius = Math.max(0, finiteNumber(radius));
+  if (shape === 'cylinder') {
+    const separation = Math.min(halfWidth, halfLength) + safeRadius;
+    return localX * localX + localZ * localZ <= separation * separation + COLLISION_EPSILON;
+  }
+  const closestX = Math.max(-halfWidth, Math.min(halfWidth, localX));
+  const closestZ = Math.max(-halfLength, Math.min(halfLength, localZ));
+  const distanceX = localX - closestX;
+  const distanceZ = localZ - closestZ;
+  return distanceX * distanceX + distanceZ * distanceZ
+    <= safeRadius * safeRadius + COLLISION_EPSILON;
 }
 
 /**

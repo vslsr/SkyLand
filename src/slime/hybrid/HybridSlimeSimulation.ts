@@ -20,6 +20,9 @@ export interface HybridSlimeSimulationStats {
   readonly active: boolean;
   readonly maximumSkinError: number;
   readonly kineticEnergy: number;
+  readonly airborneAmount: number;
+  readonly shapeVerticalVelocity: number;
+  readonly takeoffPulse: number;
   readonly surfaceDragActive: boolean;
   readonly surfaceDragExtensionRatio: number;
   readonly surfaceDragForceScale: number;
@@ -46,10 +49,23 @@ const MAX_TEARDROP_FRONT_STRETCH = 0.14;
 const MAX_TEARDROP_REAR_CONTRACTION = 0.04;
 const MAX_TEARDROP_TIP_NARROWING = 0.18;
 const AIRBORNE_FOLLOW_RATE = 14;
-const AIRBORNE_PLANAR_CONTRACTION = 0.12;
-const AIRBORNE_RIM_LIFT_RATIO = 0.11;
-const AIRBORNE_VERTICAL_STRETCH = 0.18;
-const MAX_VERTICAL_FORCE_CENTER_RATIO = 0.09;
+/** 跳跃形变比物理速度多保留一拍，模拟黏性质量追不上 Actor 根的惯性。 */
+const AIRBORNE_VERTICAL_SHAPE_FOLLOW_RATE = 5.5;
+const GROUNDED_VERTICAL_SHAPE_FOLLOW_RATE = 16;
+const TAKEOFF_PULSE_DECAY_PER_SECOND = 2.2;
+const TAKEOFF_DIRECT_SKIN_FOLLOW_RATE = 24;
+const TAKEOFF_INITIAL_AIRBORNE_AMOUNT = 0.72;
+const AIRBORNE_PLANAR_CONTRACTION = 0.18;
+const AIRBORNE_REST_VERTICAL_RADIUS_RATIO = 0.58;
+const MAX_VERTICAL_BODY_LAG_RADIUS_RATIO = 0.22;
+const MAX_AIRBORNE_FORCE_BIAS_RADIUS_RATIO = 0.18;
+const MAX_AIRBORNE_TAIL_STRETCH = 0.72;
+const MAX_AIRBORNE_HEAD_STRETCH = 0.18;
+const MAX_AIRBORNE_TAIL_NARROWING = 0.76;
+const MAX_AIRBORNE_HEAD_BULGE = 0.26;
+const MAX_TAKEOFF_SAG_RADIUS_RATIO = 0.14;
+const MAX_AIRBORNE_FLOOR_RELEASE_RATIO = 1.1;
+const REFERENCE_JUMP_SPEED = 7;
 
 function clamp(value: number, minimum: number, maximum: number): number {
   return Math.max(minimum, Math.min(maximum, value));
@@ -88,20 +104,29 @@ export class HybridSlimeSimulation {
   private readonly floorY: number;
   private readonly centerY: number;
   private readonly maximumBodyLag: number;
+  private readonly maximumVerticalBodyLag: number;
   private targetCoreX = 0;
+  private targetCoreY = 0;
   private targetCoreZ = 0;
   private coreX = 0;
+  private coreY = 0;
   private coreZ = 0;
   private coreVelocityX = 0;
+  private coreVelocityY = 0;
   private coreVelocityZ = 0;
   private targetForceCenterX = 0;
+  private targetForceCenterY = 0;
   private targetForceCenterZ = 0;
+  private driveVelocityX = 0;
+  private driveVelocityZ = 0;
   private driveDirectionX = 0;
   private driveDirectionZ = 1;
   private driveSpeed = 0;
   private targetAirborneAmount = 0;
   private airborneAmount = 0;
   private verticalVelocity = 0;
+  private shapeVerticalVelocity = 0;
+  private takeoffPulse = 0;
   private deformationDirectionX = 0;
   private deformationDirectionZ = 1;
   private collisionCompression = 0;
@@ -137,6 +162,8 @@ export class HybridSlimeSimulation {
     this.centerY = options.radius * HYBRID_SLIME_CENTER_HEIGHT_RATIO;
     this.floorY = hybridSlimeFloorY(options.radius);
     this.maximumBodyLag = options.radius * MAX_BODY_LAG_RADIUS_RATIO;
+    this.maximumVerticalBodyLag = options.radius * MAX_VERTICAL_BODY_LAG_RADIUS_RATIO;
+    this.targetForceCenterY = this.centerY;
     this.center = new Float32Array([0, this.centerY, 0]);
     this.forceCenter = new Float32Array([0, this.centerY, 0]);
     this.rebuildAnchors(0);
@@ -239,6 +266,8 @@ export class HybridSlimeSimulation {
   public setDriveVelocity(velocityX: number, velocityZ: number): void {
     const safeX = Number.isFinite(velocityX) ? velocityX : 0;
     const safeZ = Number.isFinite(velocityZ) ? velocityZ : 0;
+    this.driveVelocityX = safeX;
+    this.driveVelocityZ = safeZ;
     const [targetX, targetZ] = clampPlanarMagnitude(
       -safeX * BODY_LAG_SECONDS,
       -safeZ * BODY_LAG_SECONDS,
@@ -266,16 +295,37 @@ export class HybridSlimeSimulation {
   }
 
   /**
-   * 空中不再把蒙皮边缘钉在局部地面：向心点随竖直冲量偏移，底圈向内上收。
-   * 该状态仍只是客户端表现，不回写 Actor Transform 或网络权威数据。
+   * 竖直速度驱动质量核心的反向惯性：起跳时核心先向下滞后，下落时反向。
+   * 蒙皮同时用水平速度与竖直速度的三维合成轴形成水滴，且只影响客户端表现。
    */
   public setAirborneMotion(verticalVelocity: number, grounded: boolean): void {
     const nextAirborne = grounded ? 0 : 1;
     const nextVelocity = Number.isFinite(verticalVelocity) ? verticalVelocity : 0;
+    const justTookOff = nextAirborne > 0 && this.targetAirborneAmount <= 0;
+    const nextTargetCoreY = nextAirborne > 0
+      ? clamp(
+        -nextVelocity * BODY_LAG_SECONDS,
+        -this.maximumVerticalBodyLag,
+        this.maximumVerticalBodyLag,
+      )
+      : 0;
     const changed = nextAirborne !== this.targetAirborneAmount
-      || Math.abs(nextVelocity - this.verticalVelocity) > 0.02;
+      || Math.abs(nextVelocity - this.verticalVelocity) > 0.02
+      || Math.abs(nextTargetCoreY - this.targetCoreY) > this.options.radius * 1e-5;
     this.targetAirborneAmount = nextAirborne;
     this.verticalVelocity = nextVelocity;
+    // 起跳冲量不能等弹簧低通后才进入外壳，否则约 0.3 秒的上升阶段会被完全吃掉。
+    if (justTookOff) {
+      this.shapeVerticalVelocity = Math.max(0, nextVelocity);
+      this.takeoffPulse = 1;
+      // 参考实现按下跳跃时直接向 squash 弹簧注入速度；这里同样不能从 0 慢慢淡入，
+      // 否则第一个明显轮廓会拖到最高点以后。
+      this.airborneAmount = Math.max(
+        this.airborneAmount,
+        TAKEOFF_INITIAL_AIRBORNE_AMOUNT,
+      );
+    }
+    this.targetCoreY = nextTargetCoreY;
     if (changed) {
       this.isActive = true;
       this.stableSeconds = 0;
@@ -348,6 +398,7 @@ export class HybridSlimeSimulation {
   public sleep(): void {
     this.velocities.fill(0);
     this.coreVelocityX = 0;
+    this.coreVelocityY = 0;
     this.coreVelocityZ = 0;
     this.stableSeconds = 0;
     this.isActive = false;
@@ -359,6 +410,9 @@ export class HybridSlimeSimulation {
       active: this.isActive,
       maximumSkinError: this.maximumSkinError,
       kineticEnergy: this.kineticEnergy,
+      airborneAmount: this.airborneAmount,
+      shapeVerticalVelocity: this.shapeVerticalVelocity,
+      takeoffPulse: this.takeoffPulse,
       surfaceDragActive: this.surfaceDragActive,
       surfaceDragExtensionRatio: this.surfaceDragExtensionRatio,
       surfaceDragForceScale: this.surfaceDragForceScale,
@@ -370,22 +424,48 @@ export class HybridSlimeSimulation {
     this.airborneAmount += (
       this.targetAirborneAmount - this.airborneAmount
     ) * airborneFollow;
+    const verticalShapeFollowRate = this.targetAirborneAmount > 0
+      ? AIRBORNE_VERTICAL_SHAPE_FOLLOW_RATE
+      : GROUNDED_VERTICAL_SHAPE_FOLLOW_RATE;
+    const verticalShapeFollow = 1 - Math.exp(-verticalShapeFollowRate * deltaSeconds);
+    this.shapeVerticalVelocity += (
+      this.verticalVelocity - this.shapeVerticalVelocity
+    ) * verticalShapeFollow;
+    const takeoffPulseDecay = this.targetAirborneAmount > 0
+      ? TAKEOFF_PULSE_DECAY_PER_SECOND
+      : TAKEOFF_PULSE_DECAY_PER_SECOND * 2.5;
+    this.takeoffPulse = Math.max(0, this.takeoffPulse - takeoffPulseDecay * deltaSeconds);
     const coreDamping = 2 * Math.sqrt(this.options.coreStiffness) * 0.96;
     this.coreVelocityX += (
       this.targetCoreX - this.coreX
+    ) * this.options.coreStiffness * deltaSeconds;
+    this.coreVelocityY += (
+      this.targetCoreY - this.coreY
     ) * this.options.coreStiffness * deltaSeconds;
     this.coreVelocityZ += (
       this.targetCoreZ - this.coreZ
     ) * this.options.coreStiffness * deltaSeconds;
     const coreDampingMultiplier = Math.exp(-coreDamping * deltaSeconds);
     this.coreVelocityX *= coreDampingMultiplier;
+    this.coreVelocityY *= coreDampingMultiplier;
     this.coreVelocityZ *= coreDampingMultiplier;
     this.coreX += this.coreVelocityX * deltaSeconds;
+    this.coreY += this.coreVelocityY * deltaSeconds;
     this.coreZ += this.coreVelocityZ * deltaSeconds;
     this.center[0] = this.coreX;
+    this.center[1] = this.centerY + this.coreY;
     this.center[2] = this.coreZ;
 
     this.rebuildAnchors(deltaSeconds);
+    if (this.takeoffPulse > 0) {
+      // 起跳脉冲只短暂加速蒙皮追赶，不修改权威根节点，也不长期提高弹簧刚度。
+      const directFollow = 1 - Math.exp(
+        -TAKEOFF_DIRECT_SKIN_FOLLOW_RATE * this.takeoffPulse * deltaSeconds,
+      );
+      for (let offset = 0; offset < this.positions.length; offset += 1) {
+        this.positions[offset] += (this.anchors[offset] - this.positions[offset]) * directFollow;
+      }
+    }
     const dampingMultiplier = Math.exp(-this.options.skinDamping * deltaSeconds);
     const positions = this.positions;
     const velocities = this.velocities;
@@ -447,7 +527,7 @@ export class HybridSlimeSimulation {
       positions[offset + 1] += velocities[offset + 1] * deltaSeconds;
       positions[offset + 2] += velocities[offset + 2] * deltaSeconds;
 
-      const groundWeight = clamp(
+      const groundWeight = (1 - this.airborneAmount) * clamp(
         1 - (anchors[offset + 1] - this.floorY) / (this.options.radius * 0.2),
         0,
         1,
@@ -457,8 +537,12 @@ export class HybridSlimeSimulation {
         velocities[offset] *= groundDamping;
         velocities[offset + 2] *= groundDamping;
       }
-      if (positions[offset + 1] < this.floorY) {
-        positions[offset + 1] = this.floorY;
+      // 地面约束随离地权重释放，允许底部在起跳时相对 Actor 根向下拖后，
+      // 但仍以固定半径上限约束，成本和形变量都不会随世界尺度增长。
+      const minimumSurfaceY = this.floorY
+        - this.options.radius * MAX_AIRBORNE_FLOOR_RELEASE_RATIO * this.airborneAmount;
+      if (positions[offset + 1] < minimumSurfaceY) {
+        positions[offset + 1] = minimumSurfaceY;
         if (velocities[offset + 1] < 0) velocities[offset + 1] = 0;
       }
       energy += (
@@ -582,37 +666,61 @@ export class HybridSlimeSimulation {
     );
     const volumeScale = 1 / Math.sqrt(parallelScale);
     const movementStrength = clamp(this.driveSpeed / FULL_INWARD_FORCE_SPEED, 0, 1);
+    const groundedMovementStrength = movementStrength * (1 - this.airborneAmount);
     const movementInwardRatio = movementStrength * MAX_MOVEMENT_INWARD_RATIO;
     const airborneInwardRatio = this.airborneAmount * AIRBORNE_PLANAR_CONTRACTION;
-    const movementForceBias = (
-      this.options.radius * MAX_MOVEMENT_FORCE_BIAS_RADIUS_RATIO * movementStrength
+    const compositeSpeed = Math.hypot(
+      this.driveVelocityX,
+      this.shapeVerticalVelocity,
+      this.driveVelocityZ,
     );
-    this.targetForceCenterX = this.coreX + this.driveDirectionX * movementForceBias;
-    this.targetForceCenterZ = this.coreZ + this.driveDirectionZ * movementForceBias;
+    const inverseCompositeSpeed = compositeSpeed > 1e-5 ? 1 / compositeSpeed : 0;
+    // 水滴头朝运动方向，尖尾朝反方向；向心力使用 motionAxis，蒙皮使用 tailAxis。
+    const motionAxisX = this.driveVelocityX * inverseCompositeSpeed;
+    const motionAxisY = this.shapeVerticalVelocity * inverseCompositeSpeed;
+    const motionAxisZ = this.driveVelocityZ * inverseCompositeSpeed;
+    const tailAxisX = -motionAxisX;
+    const tailAxisY = -motionAxisY;
+    const tailAxisZ = -motionAxisZ;
+    const airborneMotionStrength = this.airborneAmount * Math.max(
+      clamp(compositeSpeed / REFERENCE_JUMP_SPEED, 0, 1),
+      this.takeoffPulse * 0.95,
+    );
+    const groundedForceBias = (
+      this.options.radius
+      * MAX_MOVEMENT_FORCE_BIAS_RADIUS_RATIO
+      * groundedMovementStrength
+    );
+    const airborneForceBias = (
+      this.options.radius
+      * MAX_AIRBORNE_FORCE_BIAS_RADIUS_RATIO
+      * airborneMotionStrength
+    );
+    this.targetForceCenterX = this.coreX
+      + this.driveDirectionX * groundedForceBias
+      + motionAxisX * airborneForceBias;
+    this.targetForceCenterY = this.centerY + this.coreY
+      + motionAxisY * airborneForceBias;
+    this.targetForceCenterZ = this.coreZ
+      + this.driveDirectionZ * groundedForceBias
+      + motionAxisZ * airborneForceBias;
     if (deltaSeconds > 0) {
       const followRatio = 1 - Math.exp(-FORCE_CENTER_FOLLOW_RATE * deltaSeconds);
       this.forceCenter[0] += (this.targetForceCenterX - this.forceCenter[0]) * followRatio;
+      this.forceCenter[1] += (this.targetForceCenterY - this.forceCenter[1]) * followRatio;
       this.forceCenter[2] += (this.targetForceCenterZ - this.forceCenter[2]) * followRatio;
     }
-    const verticalForceBias = clamp(
-      this.verticalVelocity / 7,
-      -1,
-      1,
-    ) * this.options.radius * MAX_VERTICAL_FORCE_CENTER_RATIO * this.airborneAmount;
-    this.forceCenter[1] = this.centerY
-      + this.options.radius * 0.055 * this.airborneAmount
-      + verticalForceBias;
-    this.center[1] = this.forceCenter[1];
     // 移动时把蒙皮的胡克目标径向拉向核心；底部只收一半以保留黏地软边，
     // 中上层收得更多，并用很小的高度补偿避免视觉体积突然消失。
     const movementVerticalScale = 1 + movementInwardRatio * 0.3;
     this.coreYaw = Math.atan2(deformationX, deformationZ);
     const airbornePlanarScale = 1 - airborneInwardRatio * 0.65;
     this.coreScale[0] = volumeScale * airbornePlanarScale;
-    this.coreScale[1] = volumeScale * (1 + this.airborneAmount * AIRBORNE_VERTICAL_STRETCH);
+    this.coreScale[1] = volumeScale * (1 + this.airborneAmount * 0.04);
     this.coreScale[2] = parallelScale * airbornePlanarScale;
     const smoothedForceBiasX = this.forceCenter[0] - this.coreX;
     const smoothedForceBiasZ = this.forceCenter[2] - this.coreZ;
+    const ascentRatio = clamp(this.shapeVerticalVelocity / REFERENCE_JUMP_SPEED, 0, 1);
 
     for (let offset = 0; offset < directions.length; offset += 3) {
       const directionX = directions[offset];
@@ -654,11 +762,15 @@ export class HybridSlimeSimulation {
       const drivePerpendicularZ = shapedZ - this.driveDirectionZ * driveParallel;
       const teardropParallelScale = (
         1
-        + movementStrength * MAX_TEARDROP_FRONT_STRETCH * frontWeight
-        - movementStrength * MAX_TEARDROP_REAR_CONTRACTION * rearWeight
+        + groundedMovementStrength * MAX_TEARDROP_FRONT_STRETCH * frontWeight
+        - groundedMovementStrength * MAX_TEARDROP_REAR_CONTRACTION * rearWeight
       );
       const teardropPerpendicularScale = (
-        1 - movementStrength * MAX_TEARDROP_TIP_NARROWING * frontWeight * frontWeight
+        1
+        - groundedMovementStrength
+          * MAX_TEARDROP_TIP_NARROWING
+          * frontWeight
+          * frontWeight
       );
       shapedX = (
         this.driveDirectionX * driveParallel * teardropParallelScale
@@ -672,45 +784,119 @@ export class HybridSlimeSimulation {
       // 并保留质量中心的黏性滞后，所以软边贴地而可见核心仍准确标示吸引点。
       const adhesionFactor = 0.35 + (1 - height) * 1.0;
       const forceBiasWeight = 0.2 + height * 0.8;
-      this.anchors[offset] = (
+      const groundedAdhesion = 1 - this.airborneAmount;
+      const baseAnchorX = (
         this.forceCenter[0]
         + shapedX
-        + this.coreX * (adhesionFactor - 1)
-        - smoothedForceBiasX * (1 - forceBiasWeight)
+        + this.coreX * (adhesionFactor - 1) * groundedAdhesion
+        - smoothedForceBiasX * (1 - forceBiasWeight) * groundedAdhesion
       );
-      const airborneRimLift = (
-        this.options.radius
-        * AIRBORNE_RIM_LIFT_RATIO
-        * this.airborneAmount
-        * Math.pow(1 - height, 1.6)
-      );
-      this.anchors[offset + 1] = hybridSlimeRestY(
+      const groundedAnchorY = hybridSlimeRestY(
         this.options.radius,
         directionY,
-        volumeScale
-          * movementVerticalScale
-          * (1 + this.airborneAmount * AIRBORNE_VERTICAL_STRETCH),
-      ) + airborneRimLift;
-      this.anchors[offset + 2] = (
+        volumeScale * movementVerticalScale,
+      );
+      // 地面穹顶只用于 grounded。离地后混合到完整闭合椭球，让下半球各纬度拥有
+      // 不同 Y，彻底移除史莱姆自身的平底，而不是把整层底点一起上下移动。
+      const airborneAnchorY = this.centerY
+        + directionY
+          * this.options.radius
+          * AIRBORNE_REST_VERTICAL_RADIUS_RATIO
+          * volumeScale;
+      const baseAnchorY = groundedAnchorY
+        + (airborneAnchorY - groundedAnchorY) * this.airborneAmount;
+      const baseAnchorZ = (
         this.forceCenter[2]
         + shapedZ
-        + this.coreZ * (adhesionFactor - 1)
-        - smoothedForceBiasZ * (1 - forceBiasWeight)
+        + this.coreZ * (adhesionFactor - 1) * groundedAdhesion
+        - smoothedForceBiasZ * (1 - forceBiasWeight) * groundedAdhesion
       );
+
+      // 空中水滴头沿三维合成运动方向；反向 tailAxis 拉长并收尖。
+      const localX = baseAnchorX - this.coreX;
+      const localY = baseAnchorY - this.centerY;
+      const localZ = baseAnchorZ - this.coreZ;
+      // 权重必须来自未压扁的球面方向。若使用贴地穹顶的 localY，绝大多数上半球
+      // 会被误判成“赤道”，结果只有纵向拉高而没有肉眼可见的水滴尖端。
+      const tailAlignment = compositeSpeed > 1e-5
+        ? clamp(
+          directionX * tailAxisX
+            + directionY * tailAxisY
+            + directionZ * tailAxisZ,
+          -1,
+          1,
+        )
+        : 0;
+      const tailWeight = Math.max(0, tailAlignment);
+      const headWeight = Math.max(0, -tailAlignment);
+      const tailParallel = (
+        localX * tailAxisX
+        + localY * tailAxisY
+        + localZ * tailAxisZ
+      );
+      const tailPerpendicularX = localX - tailAxisX * tailParallel;
+      const tailPerpendicularY = localY - tailAxisY * tailParallel;
+      const tailPerpendicularZ = localZ - tailAxisZ * tailParallel;
+      const airborneParallelScale = (
+        1
+        + airborneMotionStrength
+          * MAX_AIRBORNE_TAIL_STRETCH
+          * tailWeight
+        + airborneMotionStrength
+          * MAX_AIRBORNE_HEAD_STRETCH
+          * headWeight
+      );
+      const airbornePerpendicularScale = (
+        1
+        - airborneMotionStrength
+          * MAX_AIRBORNE_TAIL_NARROWING
+          * tailWeight
+          * tailWeight
+        + airborneMotionStrength
+          * MAX_AIRBORNE_HEAD_BULGE
+          * headWeight
+          * headWeight
+      );
+      const takeoffSag = (
+        this.options.radius
+        * MAX_TAKEOFF_SAG_RADIUS_RATIO
+        * this.airborneAmount
+        * ascentRatio
+        * (0.35 + Math.pow(1 - height, 1.4) * 0.65)
+      );
+      this.anchors[offset] = this.coreX
+        + tailAxisX * tailParallel * airborneParallelScale
+        + tailPerpendicularX * airbornePerpendicularScale;
+      this.anchors[offset + 1] = this.centerY + this.coreY
+        + tailAxisY * tailParallel * airborneParallelScale
+        + tailPerpendicularY * airbornePerpendicularScale
+        - takeoffSag;
+      this.anchors[offset + 2] = this.coreZ
+        + tailAxisZ * tailParallel * airborneParallelScale
+        + tailPerpendicularZ * airbornePerpendicularScale;
     }
   }
 
   private evaluateSleep(deltaSeconds: number): void {
     const coreError = Math.hypot(
       this.targetCoreX - this.coreX,
+      this.targetCoreY - this.coreY,
       this.targetCoreZ - this.coreZ,
     );
-    const coreSpeed = Math.hypot(this.coreVelocityX, this.coreVelocityZ);
+    const coreSpeed = Math.hypot(
+      this.coreVelocityX,
+      this.coreVelocityY,
+      this.coreVelocityZ,
+    );
     const forceCenterError = Math.hypot(
       this.targetForceCenterX - this.forceCenter[0],
+      this.targetForceCenterY - this.forceCenter[1],
       this.targetForceCenterZ - this.forceCenter[2],
     );
     const airborneError = Math.abs(this.targetAirborneAmount - this.airborneAmount);
+    const verticalShapeError = Math.abs(
+      this.verticalVelocity - this.shapeVerticalVelocity,
+    );
     const stable = (
       this.collisionActiveSeconds <= 0
       && !this.surfaceDragActive
@@ -720,6 +906,7 @@ export class HybridSlimeSimulation {
       && coreSpeed < this.options.radius * 0.004
       && forceCenterError < this.options.radius * 0.001
       && airborneError < 0.001
+      && verticalShapeError < 0.002
     );
     this.stableSeconds = stable ? this.stableSeconds + deltaSeconds : 0;
     if (this.stableSeconds < 0.08) return;
@@ -729,11 +916,13 @@ export class HybridSlimeSimulation {
       this.deformationDirectionZ = this.driveDirectionZ;
     }
     this.forceCenter[0] = this.targetForceCenterX;
+    this.forceCenter[1] = this.targetForceCenterY;
     this.forceCenter[2] = this.targetForceCenterZ;
     this.rebuildAnchors(0);
     this.positions.set(this.anchors);
     this.maximumSkinError = 0;
     this.kineticEnergy = 0;
+    if (this.targetAirborneAmount <= 0) this.shapeVerticalVelocity = 0;
     this.sleep();
   }
 }

@@ -42,6 +42,7 @@ function footprintStepAllowed(
   maximumStepHeight,
   waterLevel,
   buoyancyDraft,
+  moverMinimumY,
 ) {
   const maximumSlope = TERRAIN_HEIGHT_STEP / TERRAIN_CELL_SIZE;
   const continuousRise = horizontalDistance * maximumSlope;
@@ -49,12 +50,20 @@ function footprintStepAllowed(
     const before = previous[index];
     const after = next[index];
     // 下落不受 maximumStepHeight 限制；只有向上跨越才需要判断角色能迈多高。
-    const heightRise = terrainMovementHeight(after, waterLevel, buoyancyDraft)
-      - terrainMovementHeight(before, waterLevel, buoyancyDraft);
+    const beforeHeight = terrainMovementHeight(before, waterLevel, buoyancyDraft);
+    const afterHeight = terrainMovementHeight(after, waterLevel, buoyancyDraft);
+    const heightRise = afterHeight - beforeHeight;
     const includesRamp = before.shape !== TERRAIN_SHAPE.FLAT
       || after.shape !== TERRAIN_SHAPE.FLAT;
     const allowedRise = maximumStepHeight + (includesRamp ? continuousRise : 0);
-    if (heightRise > allowedRise + HEIGHT_EPSILON) return false;
+    if (heightRise <= allowedRise + HEIGHT_EPSILON) continue;
+
+    // 角色跳上台面后，碰撞圆的后缘可能仍跨在低处水格里。此时后缘继续向岸内
+    // 移动会再次采到“水→陆”的高度差，但角色脚底其实已经在岸面之上，不应被
+    // 二次挡住。绝对脚底高度只作为局部台阶判定的补充；脚还在水面下时仍会阻挡。
+    const clearsFromMoverHeight = Number.isFinite(moverMinimumY)
+      && afterHeight <= moverMinimumY + allowedRise + HEIGHT_EPSILON;
+    if (!clearsFromMoverHeight) return false;
   }
   return true;
 }
@@ -67,6 +76,7 @@ function traceTerrain(
   maximumStepHeight,
   waterLevel,
   buoyancyDraft,
+  moverMinimumY,
   cellCodeAt,
 ) {
   const deltaX = to.x - from.x;
@@ -89,6 +99,7 @@ function traceTerrain(
       maximumStepHeight,
       waterLevel,
       buoyancyDraft,
+      moverMinimumY,
     )) {
       return undefined;
     }
@@ -124,6 +135,8 @@ export function resolveTerrainMovement(
   const buoyancyDraft = Number.isFinite(rawBuoyancyDraft)
     ? Math.max(0, rawBuoyancyDraft)
     : undefined;
+  const rawMinimumY = Number(options.minimumY);
+  const minimumY = Number.isFinite(rawMinimumY) ? rawMinimumY : undefined;
   const cellCodeAt = typeof options.cellCodeAt === 'function'
     ? options.cellCodeAt
     : undefined;
@@ -135,6 +148,7 @@ export function resolveTerrainMovement(
     maximumStepHeight,
     waterLevel,
     buoyancyDraft,
+    minimumY,
     cellCodeAt,
   );
   if (direct) return direct;
@@ -147,6 +161,7 @@ export function resolveTerrainMovement(
     maximumStepHeight,
     waterLevel,
     buoyancyDraft,
+    minimumY,
     cellCodeAt,
   );
   if (alongX) {
@@ -158,6 +173,7 @@ export function resolveTerrainMovement(
       maximumStepHeight,
       waterLevel,
       buoyancyDraft,
+      minimumY,
       cellCodeAt,
     );
     return alongZ ?? alongX;
@@ -171,6 +187,7 @@ export function resolveTerrainMovement(
     maximumStepHeight,
     waterLevel,
     buoyancyDraft,
+    minimumY,
     cellCodeAt,
   );
   if (alongZ) return alongZ;
