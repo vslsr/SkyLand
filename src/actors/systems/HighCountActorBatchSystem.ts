@@ -12,12 +12,37 @@ import {
   type TransformComponent,
 } from '../../../shared/actor/index.mjs';
 import { createFillMaterial, type FillMaterialEnvironment } from '../../materials/createFillMaterial';
+import {
+  STONE_PILE_PIECES,
+  createStonePieceGeometry,
+} from '../../models/actors/createStonePileModel';
 import type { ActorArchetypeDefinition } from '../../scenes/data/SceneDefinition';
 
-type WoodPileRender = Extract<
-  ActorArchetypeDefinition['components']['render'],
-  { model: 'line-art-wood-pile' }
->;
+type ActorRender = ActorArchetypeDefinition['components']['render'];
+type WoodPileRender = Extract<ActorRender, { model: 'line-art-wood-pile' }>;
+type StonePileRender = Extract<ActorRender, { model: 'line-art-stone-pile' }>;
+type PileRender = WoodPileRender | StonePileRender;
+
+/** 走合批绘制的堆叠模型。新增一种堆叠物就在这里登记，并补一个 pieces 构造。 */
+const PILE_RENDER_MODELS = new Set<PileRender['model']>([
+  'line-art-wood-pile',
+  'line-art-stone-pile',
+]);
+
+/**
+ * 模板里的一块。位置与朝向写死在矩阵里，颜色随顶点走，
+ * 所以整堆合批之后仍然只用一种材质。
+ */
+interface PilePiece {
+  readonly geometry: THREE.BufferGeometry;
+  readonly matrix: THREE.Matrix4;
+  readonly tint: THREE.Color;
+  readonly edgeThreshold: number;
+}
+
+function isPileRender(render: ActorRender | undefined): render is PileRender {
+  return render !== undefined && PILE_RENDER_MODELS.has(render.model as PileRender['model']);
+}
 
 interface BatchEntry {
   readonly root: THREE.Group;
@@ -37,8 +62,62 @@ function nextCapacity(required: number): number {
   return capacity;
 }
 
+/** 三根交错的圆木，与 createWoodPileModel 的摆法一致。 */
+function createWoodPilePieces(definition: WoodPileRender, burning: boolean): PilePiece[] {
+  const wood = new THREE.Color(burning ? '#d66b38' : definition.woodColor);
+  const cut = new THREE.Color(burning ? '#f2a04f' : definition.cutColor);
+  const pieces: PilePiece[] = [];
+  for (let index = 0; index < 3; index += 1) {
+    const matrix = new THREE.Matrix4().compose(
+      new THREE.Vector3((index - 1) * definition.radius * 0.22, definition.height * (0.35 + index * 0.18), 0),
+      new THREE.Quaternion().setFromEuler(
+        new THREE.Euler(0, index === 2 ? Math.PI / 2 : (index - 0.5) * 0.42, Math.PI / 2),
+      ),
+      new THREE.Vector3(1, 1, 1),
+    );
+    pieces.push({
+      geometry: new THREE.CylinderGeometry(
+        definition.radius * 0.15,
+        definition.radius * 0.15,
+        definition.radius * 1.45,
+        8,
+      ),
+      matrix,
+      tint: index === 2 ? cut : wood,
+      edgeThreshold: 6,
+    });
+  }
+  return pieces;
+}
+
+/** 三块压扁的低多边形石头，与 createStonePileModel 的摆法一致。 */
+function createStonePilePieces(definition: StonePileRender, burning: boolean): PilePiece[] {
+  const stone = new THREE.Color(burning ? '#c98a6a' : definition.stoneColor);
+  const accent = new THREE.Color(burning ? '#a86a52' : definition.accentColor);
+  return STONE_PILE_PIECES.map((piece) => ({
+    geometry: createStonePieceGeometry(definition.radius * piece.scale),
+    matrix: new THREE.Matrix4().compose(
+      new THREE.Vector3(
+        definition.radius * piece.offsetX,
+        definition.height * piece.offsetY,
+        definition.radius * piece.offsetZ,
+      ),
+      new THREE.Quaternion().setFromEuler(new THREE.Euler(0, piece.yaw, 0)),
+      new THREE.Vector3(1, 1, 1),
+    ),
+    tint: piece.accent ? accent : stone,
+    edgeThreshold: 0.6,
+  }));
+}
+
+function createPilePieces(definition: PileRender, burning: boolean): PilePiece[] {
+  return definition.model === 'line-art-wood-pile'
+    ? createWoodPilePieces(definition, burning)
+    : createStonePilePieces(definition, burning);
+}
+
 function createPileTemplate(
-  definition: WoodPileRender,
+  definition: PileRender,
   environment: FillMaterialEnvironment,
   burning: boolean,
 ): Omit<BatchEntry, 'root' | 'fill' | 'capacity' | 'outline' | 'signature'> {
@@ -46,35 +125,20 @@ function createPileTemplate(
   const normals: number[] = [];
   const tints: number[] = [];
   const outlinePositions: number[] = [];
-  const wood = new THREE.Color(burning ? '#d66b38' : definition.woodColor);
-  const cut = new THREE.Color(burning ? '#f2a04f' : definition.cutColor);
 
-  for (let index = 0; index < 3; index += 1) {
-    const source = new THREE.CylinderGeometry(
-      definition.radius * 0.15,
-      definition.radius * 0.15,
-      definition.radius * 1.45,
-      8,
-    );
-    const matrix = new THREE.Matrix4();
-    const rotation = new THREE.Euler(0, index === 2 ? Math.PI / 2 : (index - 0.5) * 0.42, Math.PI / 2);
-    matrix.compose(
-      new THREE.Vector3((index - 1) * definition.radius * 0.22, definition.height * (0.35 + index * 0.18), 0),
-      new THREE.Quaternion().setFromEuler(rotation),
-      new THREE.Vector3(1, 1, 1),
-    );
+  for (const piece of createPilePieces(definition, burning)) {
+    const { geometry: source, matrix, tint } = piece;
     const triangles = source.toNonIndexed();
     triangles.applyMatrix4(matrix);
     triangles.computeVertexNormals();
     const position = triangles.getAttribute('position');
     const normal = triangles.getAttribute('normal');
-    const tint = index === 2 ? cut : wood;
     for (let vertex = 0; vertex < position.count; vertex += 1) {
       positions.push(position.getX(vertex), position.getY(vertex), position.getZ(vertex));
       normals.push(normal.getX(vertex), normal.getY(vertex), normal.getZ(vertex));
       tints.push(tint.r, tint.g, tint.b);
     }
-    const edges = new THREE.EdgesGeometry(source, 6);
+    const edges = new THREE.EdgesGeometry(source, piece.edgeThreshold);
     edges.applyMatrix4(matrix);
     const edgePosition = edges.getAttribute('position');
     for (let vertex = 0; vertex < edgePosition.count; vertex += 1) {
@@ -124,7 +188,7 @@ export class HighCountActorBatchSystem {
     const groups = new Map<string, Actor[]>();
     for (const actor of world.query(TRANSFORM_COMPONENT, ITEM_STACK_COMPONENT) as Actor[]) {
       const archetype = this.archetypes.get(actor.archetypeId);
-      if (archetype?.components.render?.model !== 'line-art-wood-pile') continue;
+      if (!isPileRender(archetype?.components.render)) continue;
       const residency = actor.getComponent(ACTOR_RESIDENCY_COMPONENT) as ActorResidencyComponent | undefined;
       const combustible = actor.getComponent(COMBUSTIBLE_COMPONENT) as CombustibleComponent | undefined;
       const key = `${actor.archetypeId}:${residency?.state ?? 'active'}:${combustible?.burning ? 'burning' : 'normal'}`;
@@ -140,7 +204,7 @@ export class HighCountActorBatchSystem {
     for (const [key, actors] of groups) {
       const [archetypeId, , burnState] = key.split(':');
       const archetype = this.archetypes.get(archetypeId)!;
-      const definition = archetype.components.render as WoodPileRender;
+      const definition = archetype.components.render as PileRender;
       const batch = this.requireBatch(key, definition, burnState === 'burning', actors.length);
       batch.root.visible = true;
       this.updateBatch(batch, actors);
@@ -160,7 +224,7 @@ export class HighCountActorBatchSystem {
 
   private requireBatch(
     key: string,
-    definition: WoodPileRender,
+    definition: PileRender,
     burning: boolean,
     count: number,
   ): BatchEntry {

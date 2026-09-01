@@ -1,0 +1,19 @@
+{
+  "$schema": "./actor.schema.json",
+  "schemaVersion": 1,
+  "id": "generated-rock",
+  "components": {
+    "interactable": {
+      "action": "harvest-prop",
+      "label": "岩石",
+      "maximumDistance": 2.2
+    },
+    "generatedProp": {
+      "kind": "rock",
+      "maximumHealth": 4,
+      "harvestDamage": 1,
+      "drop": { "archetypeId": "stone-pile", "quantity": 3 }
+    },
+    "replicationPolicy": { "mode": "aoi", "radiusChunks": 2 }
+  }
+}

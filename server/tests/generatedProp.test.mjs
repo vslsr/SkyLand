@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   GENERATED_PROP_COMPONENT,
+  INVENTORY_COMPONENT,
   ITEM_STACK_COMPONENT,
   REPLICATED_COMPONENT,
   TRANSFORM_COMPONENT,
@@ -31,8 +32,14 @@ async function createOpenWorldScene() {
   });
 }
 
+function residentProps(scene, kind) {
+  const actors = scene.actorWorld.query(GENERATED_PROP_COMPONENT, TRANSFORM_COMPONENT);
+  if (kind === undefined) return actors;
+  return actors.filter((actor) => actor.requireComponent(GENERATED_PROP_COMPONENT).kind === kind);
+}
+
 function residentTrees(scene) {
-  return scene.actorWorld.query(GENERATED_PROP_COMPONENT, TRANSFORM_COMPONENT);
+  return residentProps(scene, PROP_KIND.TREE);
 }
 
 /** 把玩家挪到某个坐标，并按服务端的入口补上那一片的常驻内容。 */
@@ -42,8 +49,8 @@ function movePlayerTo(scene, playerId, x, z) {
   scene.generatedProps.ensureAround(x, z);
 }
 
-function nearestTreeTo(scene, x, z) {
-  return residentTrees(scene).reduce((nearest, candidate) => {
+function nearestPropTo(scene, x, z, kind) {
+  return residentProps(scene, kind).reduce((nearest, candidate) => {
     const transform = candidate.requireComponent(TRANSFORM_COMPONENT);
     if (!nearest) return candidate;
     const nearestTransform = nearest.requireComponent(TRANSFORM_COMPONENT);
@@ -52,6 +59,20 @@ function nearestTreeTo(scene, x, z) {
       ? candidate
       : nearest;
   }, undefined);
+}
+
+function nearestTreeTo(scene, x, z) {
+  return nearestPropTo(scene, x, z, PROP_KIND.TREE);
+}
+
+/** 反复交互直到物件被采完，返回下一个可用的序号。 */
+function harvestUntilRemoved(scene, playerId, actorId, prop, startSequence = 1) {
+  let sequence = startSequence;
+  while (!prop.removed) {
+    assert.equal(scene.interactWithActor(playerId, { actorId, sequence }), true);
+    sequence += 1;
+  }
+  return sequence;
 }
 
 test('生成物件 id 带种类、可在负 chunk 往返，并拒绝越界与未知种类', () => {
@@ -85,14 +106,15 @@ test('deriveGeneratedProp 报告放置记录里真实的种类', () => {
   assert.ok(kinds.size > 1, '同一个 chunk 里应该有不止一种物件');
 });
 
-test('空房间不建任何树，玩家到场才装载他周围的那一片', async () => {
+test('空房间不建任何物件，玩家到场才装载他周围的那一片', async () => {
   const scene = await createOpenWorldScene();
-  assert.equal(residentTrees(scene).length, 0);
+  assert.equal(residentProps(scene).length, 0);
   assert.equal(scene.generatedProps.residentChunkCount, 0);
 
   scene.addPlayer({ id: 'woodcutter', name: '樵夫', slot: 0 });
-  const resident = residentTrees(scene);
-  assert.ok(resident.length > 0, '玩家出生点周围应该有树');
+  const resident = residentProps(scene);
+  assert.ok(residentTrees(scene).length > 0, '玩家出生点周围应该有树');
+  assert.ok(residentProps(scene, PROP_KIND.ROCK).length > 0, '也应该有石头');
 
   // 常驻半径至少要覆盖复制半径，否则 AOI 里的树没有 Actor 可复制偏离态。
   const archetype = scene.generatedProps.archetypeForKind(PROP_KIND.TREE);
@@ -101,14 +123,14 @@ test('空房间不建任何树，玩家到场才装载他周围的那一片', as
   );
   assert.ok(scene.generatedProps.keepRadius > scene.generatedProps.residentRadius);
 
-  // 常驻集合是玩家周围的一圈，不是全世界。
+  // 常驻集合是玩家周围的一圈，不是全世界；两种物件走同一套半径。
   const player = scene.players.get('woodcutter');
   const reach = (scene.generatedProps.residentRadius + 1) * CHUNK_SIZE;
   for (const actor of resident) {
     const transform = actor.requireComponent(TRANSFORM_COMPONENT);
     assert.ok(
       Math.abs(transform.x - player.x) <= reach && Math.abs(transform.z - player.z) <= reach,
-      `树 ${actor.id} 落在常驻范围之外`,
+      `物件 ${actor.id} 落在常驻范围之外`,
     );
   }
   assert.equal(resident.length, scene.generatedProps.residentActorCount);
@@ -225,4 +247,79 @@ test('倒下的树重新装载后仍然是倒下的，不会原地长回来', as
   assert.deepEqual(snapshot.propState, { health: 0, removed: true });
   // 已经倒下的树不能再砍出第二份木材。
   assert.equal(scene.interactWithActor('woodcutter', { actorId: treeId, sequence }), false);
+});
+
+
+test('石头走的是同一条采集链路，掉的是石料而不是木材', async () => {
+  const scene = await createOpenWorldScene();
+  scene.addPlayer({ id: 'miner', name: '矿工', slot: 0 });
+  const player = scene.players.get('miner');
+
+  // 树和石头都常驻，说明注册表两种原型都认领到了。
+  assert.ok(residentProps(scene, PROP_KIND.TREE).length > 0);
+  assert.ok(residentProps(scene, PROP_KIND.ROCK).length > 0);
+
+  const rockActor = nearestPropTo(scene, player.x, player.z, PROP_KIND.ROCK);
+  assert.ok(rockActor);
+  assert.equal(rockActor.archetypeId, 'generated-rock');
+  assert.equal(rockActor.id.startsWith('prop:rock:'), true);
+
+  const transform = rockActor.requireComponent(TRANSFORM_COMPONENT);
+  const rock = rockActor.requireComponent(GENERATED_PROP_COMPONENT);
+  movePlayerTo(scene, 'miner', transform.x + 0.5, transform.z);
+
+  // 石头比树硬：血量取自 generated-rock.actor.json，不是代码里的常数。
+  assert.equal(rock.maximumHealth, 4);
+  const sequence = harvestUntilRemoved(scene, 'miner', rockActor.id, rock);
+
+  const stone = scene.actorWorld.query(ITEM_STACK_COMPONENT).find((actor) => (
+    actor.requireComponent(ITEM_STACK_COMPONENT).itemType === 'stone'
+  ));
+  assert.ok(stone, '应该掉出石料');
+  assert.equal(stone.archetypeId, 'stone-pile');
+  assert.equal(stone.requireComponent(ITEM_STACK_COMPONENT).quantity, rock.dropQuantity);
+  // 采石头不应该顺带掉木材。
+  assert.equal(
+    scene.actorWorld.query(ITEM_STACK_COMPONENT).some((actor) => (
+      actor.requireComponent(ITEM_STACK_COMPONENT).itemType === 'wood'
+    )),
+    false,
+  );
+
+  // 静态碰撞跟着一起消失，玩家能走到原来的位置上。
+  const mask = scene.chunkColliders.getSkipMask(rock.chunkX, rock.chunkZ);
+  assert.equal(mask.low !== 0 || mask.high !== 0, true);
+  assert.equal(scene.interactWithActor('miner', { actorId: rockActor.id, sequence }), false);
+});
+
+test('同一个玩家采树和采石得到两种不同的物品', async () => {
+  const scene = await createOpenWorldScene();
+  scene.addPlayer({ id: 'miner', name: '矿工', slot: 0 });
+  const player = scene.players.get('miner');
+  const inventory = player.requireComponent(INVENTORY_COMPONENT);
+
+  let sequence = 1;
+  for (const kind of [PROP_KIND.TREE, PROP_KIND.ROCK]) {
+    const actor = nearestPropTo(scene, player.x, player.z, kind);
+    const transform = actor.requireComponent(TRANSFORM_COMPONENT);
+    const prop = actor.requireComponent(GENERATED_PROP_COMPONENT);
+    movePlayerTo(scene, 'miner', transform.x + 0.5, transform.z);
+    sequence = harvestUntilRemoved(scene, 'miner', actor.id, prop, sequence);
+
+    const drop = scene.actorWorld.query(ITEM_STACK_COMPONENT).find((candidate) => (
+      candidate.requireComponent(ITEM_STACK_COMPONENT).quantity > 0
+      && candidate.archetypeId === prop.dropArchetypeId
+    ));
+    assert.ok(drop, `${prop.dropArchetypeId} 应该掉出来`);
+    const dropTransform = drop.requireComponent(TRANSFORM_COMPONENT);
+    movePlayerTo(scene, 'miner', dropTransform.x, dropTransform.z);
+    assert.equal(scene.interactWithActor('miner', { actorId: drop.id, sequence }), true);
+    sequence += 1;
+  }
+
+  assert.deepEqual(
+    inventory.snapshot().map((entry) => entry.itemType),
+    ['stone', 'wood'],
+    '两种物品分别入账，没有被当成同一种堆叠',
+  );
 });

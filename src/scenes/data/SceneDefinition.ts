@@ -125,6 +125,14 @@ export type ActorRenderDefinition =
       inkColor: string;
       radius: number;
       height: number;
+    }
+  | {
+      model: 'line-art-stone-pile';
+      stoneColor: string;
+      accentColor: string;
+      inkColor: string;
+      radius: number;
+      height: number;
     };
 
 export interface ActorArchetypeDefinition {

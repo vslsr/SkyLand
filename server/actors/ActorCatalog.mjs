@@ -6,6 +6,9 @@ import { PROP_KIND_BY_NAME } from '../../shared/world/generatedProp.mjs';
 export const DEFAULT_ACTOR_DIRECTORY = fileURLToPath(new URL('../../config/actors/', import.meta.url));
 
 const ID_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+
+/** 走高数量合批绘制的堆叠模型。新增一种堆叠物就在这里登记。 */
+const PILE_RENDER_MODELS = new Set(['line-art-wood-pile', 'line-art-stone-pile']);
 const COLOR_PATTERN = /^#[0-9a-f]{6}$/i;
 
 function requireObject(value, path) {
@@ -412,6 +415,16 @@ function validateRender(raw, filename) {
       height: requireNumber(render.height, `${path}.height`, Number.EPSILON, 3),
     };
   }
+  if (render.model === 'line-art-stone-pile') {
+    return {
+      model: render.model,
+      stoneColor: requireColor(render.stoneColor, `${path}.stoneColor`),
+      accentColor: requireColor(render.accentColor, `${path}.accentColor`),
+      inkColor: requireColor(render.inkColor, `${path}.inkColor`),
+      radius: requireNumber(render.radius, `${path}.radius`, Number.EPSILON, 3),
+      height: requireNumber(render.height, `${path}.height`, Number.EPSILON, 3),
+    };
+  }
   throw new TypeError(`${path}.model 不受支持：${render.model}`);
 }
 
@@ -510,8 +523,9 @@ function validateActorArchetype(raw, filename) {
   if (itemStack && interactable?.action !== 'pickup-stack') {
     throw new TypeError(`${filename}.components.itemStack 需要 pickup-stack interactable`);
   }
-  if (render?.model === 'line-art-wood-pile' && !itemStack) {
-    throw new TypeError(`${filename}.components.render line-art-wood-pile 需要 itemStack`);
+  // 堆叠模型由 HighCountActorBatchSystem 合批绘制，没有 itemStack 就没有东西可画。
+  if (PILE_RENDER_MODELS.has(render?.model) && !itemStack) {
+    throw new TypeError(`${filename}.components.render ${render.model} 需要 itemStack`);
   }
   if (generatedProp && interactable?.action !== 'harvest-prop') {
     throw new TypeError(`${filename}.components.generatedProp 需要 harvest-prop interactable`);

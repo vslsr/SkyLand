@@ -214,6 +214,41 @@ const woodPileArchetype: SceneDefinition['actorArchetypes'][number] = {
   },
 };
 
+const stonePileArchetype: SceneDefinition['actorArchetypes'][number] = {
+  schemaVersion: 1,
+  id: 'stone-pile',
+  components: {
+    interactable: { action: 'pickup-stack', label: '石料', maximumDistance: 2.4 },
+    itemStack: {
+      itemType: 'stone', displayName: '石料',
+      defaultQuantity: 1, maximumQuantity: 999, compatibilityKey: 'stone-standard',
+    },
+    actorResidency: { sleepDelaySeconds: 1, dormantDelaySeconds: 3, dormantEligible: true },
+    dropMotion: { gravity: 9.8, drag: 6.5, settleSpeed: 0.08 },
+    lifetime: { lifetimeSeconds: 900 },
+    replicationPolicy: { mode: 'aoi', radiusChunks: 2 },
+    render: {
+      model: 'line-art-stone-pile', stoneColor: '#b9b4a8', accentColor: '#8e8880',
+      inkColor: '#4a453e', radius: 0.5, height: 0.32,
+    },
+  },
+};
+
+const generatedRockArchetype: SceneDefinition['actorArchetypes'][number] = {
+  schemaVersion: 1,
+  id: 'generated-rock',
+  components: {
+    interactable: { action: 'harvest-prop', label: '岩石', maximumDistance: 2.2 },
+    generatedProp: {
+      kind: 'rock',
+      maximumHealth: 4,
+      harvestDamage: 1,
+      drop: { archetypeId: 'stone-pile', quantity: 3 },
+    },
+    replicationPolicy: { mode: 'aoi', radiusChunks: 2 },
+  },
+};
+
 const generatedPropArchetype: SceneDefinition['actorArchetypes'][number] = {
   schemaVersion: 1,
   id: 'generated-tree',
@@ -252,6 +287,8 @@ const definition = {
     dryHayArchetype,
     woodPileArchetype,
     generatedPropArchetype,
+    stonePileArchetype,
+    generatedRockArchetype,
   ],
   renderer: {
     type: 'line-art',
@@ -649,6 +686,54 @@ test('高数量物品 Actor 保留交互与碰撞身份，但用批次绘制而�
   assert.equal(fills.length, 1);
   assert.equal(fills[0].count, 1);
   assert.equal(outlines.length, 1);
+  system.dispose();
+});
+
+test('木堆与石堆各自成批：合批系统按渲染模型分派模板，不是只认木堆', () => {
+  const system = new ClientActorSystem({
+    definition,
+    environment: { fogColor: '#ffffff', fogNear: 20, fogFar: 60 },
+    now: () => 1_000,
+  });
+  const wood: SnapshotActor = {
+    id: 'drop-wood',
+    archetypeId: 'wood-pile',
+    revision: 2,
+    transform: { x: 1, y: 0, z: 2, yaw: 0.2 },
+    interactable: { action: 'pickup-stack', label: '木材', enabled: true, revision: 0 },
+    itemStack: { itemType: 'wood', displayName: '木材', quantity: 12, maximumQuantity: 999, revision: 1 },
+    residency: { state: 'sleeping', revision: 1 },
+  };
+  const stone: SnapshotActor = {
+    id: 'drop-stone',
+    archetypeId: 'stone-pile',
+    revision: 2,
+    transform: { x: 4, y: 0, z: 2, yaw: -0.4 },
+    interactable: { action: 'pickup-stack', label: '石料', enabled: true, revision: 0 },
+    itemStack: { itemType: 'stone', displayName: '石料', quantity: 3, maximumQuantity: 999, revision: 1 },
+    residency: { state: 'sleeping', revision: 1 },
+  };
+  system.syncSnapshots([wood, stone], 1_000, 1_000);
+  system.update(0, 0);
+
+  const batchRoot = system.root.getObjectByName('high-count-actor-batches')!;
+  const fills: THREE.InstancedMesh[] = [];
+  batchRoot.traverse((object) => {
+    if ((object as THREE.InstancedMesh).isInstancedMesh) fills.push(object as THREE.InstancedMesh);
+  });
+  // 两种原型 → 两个批次，各一个实例；石堆没有走成木堆的模板。
+  assert.equal(fills.length, 2);
+  assert.deepEqual(fills.map((fill) => fill.count), [1, 1]);
+  const vertexCounts = fills.map((fill) => fill.geometry.getAttribute('position').count);
+  assert.notEqual(
+    vertexCounts[0],
+    vertexCounts[1],
+    '圆木与石块的模板顶点数应该不同，相同说明分派没生效',
+  );
+
+  // 两种堆都保留各自的交互身份。
+  assert.equal(system.findNearbyInteractableActor({ x: 1, z: 2 })?.actorId, 'drop-wood');
+  assert.equal(system.findNearbyInteractableActor({ x: 4, z: 2 })?.actorId, 'drop-stone');
   system.dispose();
 });
 

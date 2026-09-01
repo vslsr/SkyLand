@@ -95,7 +95,12 @@ export function createSimpleCollisionFromRender(render) {
       maximumY: positiveNumber(render.height, 0.1),
     });
   }
-  if (model === 'line-art-campfire' || model === 'line-art-dry-hay' || model === 'line-art-wood-pile') {
+  if (
+    model === 'line-art-campfire'
+    || model === 'line-art-dry-hay'
+    || model === 'line-art-wood-pile'
+    || model === 'line-art-stone-pile'
+  ) {
     const radius = positiveNumber(render.radius, 0.5);
     return createSimpleCollisionDefinition({
       halfWidth: radius,
