@@ -3,6 +3,7 @@ import { fileURLToPath } from 'node:url';
 import { join } from 'node:path';
 import { ActorCatalog } from '../actors/ActorCatalog.mjs';
 import { CHUNK_SIZE, WORLD_PLAY_AREA } from '../../shared/world/worldConfig.mjs';
+import { PROP_KIND_BY_NAME } from '../../shared/world/generatedProp.mjs';
 
 export const DEFAULT_SCENE_DIRECTORY = fileURLToPath(new URL('../../config/scenes/', import.meta.url));
 
@@ -214,6 +215,43 @@ function validateSceneComponents(rawComponents, filename) {
   });
 }
 
+/** 只有 tree 与 grass 有渲染开关；岩石永远出现，所以没有对应项。 */
+const PROP_KIND_CONTENT_KEY = { tree: 'trees', grass: 'grass' };
+
+/**
+ * 流式世界里每种物件由哪个原型承载。
+ *
+ * 绑定关系放在场景而不是原型里：同一棵树在不同地图上可以是不同的玩法对象
+ * （雪原的树掉的东西和草原不一样），而原型只描述「它是什么」。
+ */
+function validateWorldProps(gameplay, filename, actorCatalog, world, content) {
+  const path = `${filename}.gameplay.worldProps`;
+  if (gameplay.worldProps === undefined) return {};
+  if (!world) throw new TypeError(`${path} 只能用在带 renderer.world 的流式场景上`);
+  const definition = requireObject(gameplay.worldProps, path);
+  const bindings = {};
+  for (const [kind, rawArchetypeId] of Object.entries(definition)) {
+    if (PROP_KIND_BY_NAME[kind] === undefined) {
+      throw new TypeError(
+        `${path} 的 ${kind} 不是已知物件种类：${Object.keys(PROP_KIND_BY_NAME).join(' / ')}`,
+      );
+    }
+    const contentKey = PROP_KIND_CONTENT_KEY[kind];
+    // 内容关掉了还绑玩法，会得到一片撞得到、采得到、但看不见的东西。
+    if (contentKey && !content[contentKey]) {
+      throw new TypeError(`${path}.${kind} 需要开启 renderer.content.${contentKey}`);
+    }
+    const archetypeId = requireString(rawArchetypeId, `${path}.${kind}`, 48);
+    if (!SCENE_ID_PATTERN.test(archetypeId)) throw new TypeError(`${path}.${kind} 格式无效`);
+    const archetype = actorCatalog.require(archetypeId);
+    if (!archetype.components.generatedProp) {
+      throw new TypeError(`${path}.${kind} 的 ${archetypeId} 缺少 generatedProp`);
+    }
+    bindings[kind] = archetypeId;
+  }
+  return bindings;
+}
+
 function validateSceneDefinition(raw, filename, actorCatalog) {
   const scene = requireObject(raw, filename);
   if (scene.schemaVersion !== 1) throw new TypeError(`${filename}.schemaVersion 必须是 1`);
@@ -323,6 +361,7 @@ function validateSceneDefinition(raw, filename, actorCatalog) {
   if (new Set(runtimeActorArchetypeIds).size !== runtimeActorArchetypeIds.length) {
     throw new TypeError(`${filename}.gameplay.runtimeActorArchetypes 不能重复`);
   }
+  const worldProps = validateWorldProps(gameplay, filename, actorCatalog, world, content);
   const bounds = requireObject(gameplay.bounds, `${filename}.gameplay.bounds`);
   const spawn = requireObject(gameplay.spawn, `${filename}.gameplay.spawn`);
   const minimumX = requireNumber(bounds.minimumX, `${filename}.gameplay.bounds.minimumX`);
@@ -386,27 +425,33 @@ function validateSceneDefinition(raw, filename, actorCatalog) {
       actorComposition.actorArchetypes.push(archetype);
     }
   }
-  // 生成物件的原型注册表必须无歧义：一种物件只能由一个原型承载，否则两端各自
-  // 挑到哪个原型就取决于声明顺序。掉落也必须指向这张地图上真的存在的堆叠原型，
-  // 否则要等玩家采到那一下才会炸在交互路径上。
-  const generatedPropKinds = new Set();
-  for (const archetype of actorComposition.actorArchetypes) {
-    const generatedProp = archetype.components.generatedProp;
-    if (!generatedProp) continue;
-    if (generatedPropKinds.has(generatedProp.kind)) {
+  // worldProps 绑定的原型，连同它掉落的堆叠原型，一并进入场景的原型表。
+  // 作者不用再把这些 id 在 runtimeActorArchetypes 里重复写一遍——那份重复正是
+  // 「绑了但忘了带进来」这类错误的来源。
+  const includeArchetype = (archetype) => {
+    if (!actorComposition.actorArchetypes.some((definition) => definition.id === archetype.id)) {
+      actorComposition.actorArchetypes.push(archetype);
+    }
+  };
+  for (const [kind, archetypeId] of Object.entries(worldProps)) {
+    const archetype = actorCatalog.require(archetypeId);
+    includeArchetype(archetype);
+    const dropArchetypeId = archetype.components.generatedProp.drop.archetypeId;
+    // 掉落必须真的存在且可堆叠，否则要等玩家采到那一下才会炸在交互路径上。
+    let dropArchetype;
+    try {
+      dropArchetype = actorCatalog.require(dropArchetypeId);
+    } catch {
       throw new TypeError(
-        `${filename} 的物件种类 ${generatedProp.kind} 被多个原型声明，注册表有歧义`,
+        `${filename}.gameplay.worldProps.${kind} 的 ${archetypeId} 掉落引用了不存在的原型：${dropArchetypeId}`,
       );
     }
-    generatedPropKinds.add(generatedProp.kind);
-    const dropArchetype = actorComposition.actorArchetypes.find(
-      (definition) => definition.id === generatedProp.drop.archetypeId,
-    );
-    if (!dropArchetype?.components.itemStack) {
+    if (!dropArchetype.components.itemStack) {
       throw new TypeError(
-        `${filename} 的 ${archetype.id} 掉落引用了不存在或不可堆叠的原型：${generatedProp.drop.archetypeId}`,
+        `${filename}.gameplay.worldProps.${kind} 的掉落原型 ${dropArchetypeId} 没有 itemStack`,
       );
     }
+    includeArchetype(dropArchetype);
   }
   for (const component of sceneComponents) {
     if (component.type !== 'ability-lab') continue;
@@ -456,6 +501,7 @@ function validateSceneDefinition(raw, filename, actorCatalog) {
     gameplay: {
       playerActor: { archetypeId: playerActorArchetype.id },
       runtimeActorArchetypes: runtimeActorArchetypeIds.slice(),
+      worldProps: { ...worldProps },
       bounds: { minimumX, maximumX, minimumZ, maximumZ },
       spawn: {
         centerX,

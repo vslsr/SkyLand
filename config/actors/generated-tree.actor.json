@@ -9,7 +9,6 @@
       "maximumDistance": 2.6
     },
     "generatedProp": {
-      "kind": "tree",
       "maximumHealth": 3,
       "harvestDamage": 1,
       "drop": { "archetypeId": "wood-pile", "quantity": 5 }

@@ -35,8 +35,9 @@ const DEFAULT_RESIDENT_RADIUS = 2;
  * 的物件必须有 Actor，否则被采掉的那个没有快照条目，客户端会把它画回来。构造时
  * 直接从原型里取所有种类的最大值，避免两个半径各写一份之后悄悄失配。
  *
- * 哪一种物件由哪个原型承载，来自原型自己声明的 `generatedProp.kind`：这里只
- * 建一张 kind → archetype 的表，没有登记的种类就是纯布景，不产生 Actor。
+ * 哪一种物件由哪个原型承载，来自场景的 `gameplay.worldProps`：同一棵树在不同
+ * 地图上可以是不同的玩法对象，而原型只描述「它是什么」。这里把那份绑定解析成
+ * 一张 kind → archetype 的表，没有绑定的种类就是纯布景，不产生 Actor。
  *
  * 卸载时把偏离默认生成结果的物件（采过一半或已采完）记进 deviations，重新装载
  * 时恢复。没被动过的物件不占任何状态内存，所以状态量跟着「玩家改动过多少个」
@@ -47,6 +48,7 @@ export class ServerGeneratedPropActors {
    * @param {{
    *   world: import('../../shared/actor/ActorWorld.mjs').ActorWorld,
    *   archetypes?: ReadonlyArray<{ id: string, components: object }>,
+   *   worldProps?: Record<string, string>,
    *   worldSeed?: number,
    *   enabled?: boolean,
    *   residentRadius?: number,
@@ -58,14 +60,14 @@ export class ServerGeneratedPropActors {
     this.worldSeed = toWorldSeed(options.worldSeed);
     /** @type {Map<number, { id: string, components: object }>} 物件种类 → 承载它的原型。 */
     this.archetypesByKind = new Map();
+    const archetypesById = new Map((options.archetypes ?? []).map((each) => [each.id, each]));
     let replicationRadius = 0;
-    for (const archetype of options.archetypes ?? []) {
-      const definition = archetype.components.generatedProp;
-      if (!definition) continue;
-      const kind = PROP_KIND_BY_NAME[definition.kind];
-      if (kind === undefined) continue;
-      // 同一种类只能有一个原型，重复的在 SceneCatalog 就被拒了；这里取先声明的。
-      if (this.archetypesByKind.has(kind)) continue;
+    for (const [name, archetypeId] of Object.entries(options.worldProps ?? {})) {
+      const kind = PROP_KIND_BY_NAME[name];
+      const archetype = archetypesById.get(archetypeId);
+      // 绑定的合法性在 SceneCatalog 就校验过了；这里只是不让一个坏配置炸在
+      // 每一次 chunk 装载上。
+      if (kind === undefined || !archetype?.components.generatedProp) continue;
       this.archetypesByKind.set(kind, archetype);
       replicationRadius = Math.max(
         replicationRadius,

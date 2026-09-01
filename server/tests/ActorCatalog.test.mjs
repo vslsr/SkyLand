@@ -70,19 +70,19 @@ test('ActorCatalog 加载并净化木筏原型', async () => {
   assert.equal(wood.components.render.model, 'line-art-wood-pile');
 
   const tree = catalog.require('generated-tree');
-  assert.equal(tree.components.generatedProp.kind, 'tree');
+  // 原型只描述「它是什么」，承载哪一种物件由场景的 gameplay.worldProps 决定。
+  assert.equal(tree.components.generatedProp.kind, undefined);
   assert.deepEqual(tree.components.generatedProp.drop, { archetypeId: 'wood-pile', quantity: 5 });
   assert.equal(tree.components.interactable.action, 'harvest-prop');
 });
 
-test('ActorCatalog 拒绝未知物件种类与缺失的掉落配置', async () => {
+test('ActorCatalog 拒绝缺失的掉落配置与不成对的采集交互', async () => {
   const base = {
     schemaVersion: 1,
     id: 'generated-probe',
     components: {
       interactable: { action: 'harvest-prop', label: '探针', maximumDistance: 2 },
       generatedProp: {
-        kind: 'tree',
         maximumHealth: 3,
         harvestDamage: 1,
         drop: { archetypeId: 'wood-pile', quantity: 5 },
@@ -91,10 +91,6 @@ test('ActorCatalog 拒绝未知物件种类与缺失的掉落配置', async () =
     },
   };
   await loadSingleActor(base);
-
-  const unknownKind = structuredClone(base);
-  unknownKind.components.generatedProp.kind = 'dragon';
-  await assert.rejects(loadSingleActor(unknownKind), /kind 必须是已知物件种类/);
 
   const missingDrop = structuredClone(base);
   delete missingDrop.components.generatedProp.drop;

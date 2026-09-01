@@ -206,11 +206,10 @@
         },
         "generatedProp": {
           "type": "object",
-          "description": "把原型绑到世界生成算法的一种物件；位置与外观仍由世界种子派生",
+          "description": "可采集的世界生成物件；承载哪一种物件由场景的 gameplay.worldProps 决定",
           "additionalProperties": false,
-          "required": ["kind", "maximumHealth", "harvestDamage", "drop"],
+          "required": ["maximumHealth", "harvestDamage", "drop"],
           "properties": {
-            "kind": { "enum": ["tree", "grass", "rock"] },
             "maximumHealth": { "type": "integer", "minimum": 1, "maximum": 1000 },
             "harvestDamage": { "type": "integer", "minimum": 1, "maximum": 1000 },
             "drop": {

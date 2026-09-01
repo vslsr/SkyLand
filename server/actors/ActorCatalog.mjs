@@ -1,7 +1,6 @@
 import { readdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { PROP_KIND_BY_NAME } from '../../shared/world/generatedProp.mjs';
 
 export const DEFAULT_ACTOR_DIRECTORY = fileURLToPath(new URL('../../config/actors/', import.meta.url));
 
@@ -282,13 +281,6 @@ function validateReplicationPolicy(raw, filename) {
 function validateGeneratedProp(raw, filename) {
   const path = `${filename}.components.generatedProp`;
   const definition = requireObject(raw, path);
-  // kind 把原型绑到世界生成算法的一种物件上。名字而不是数值，因为数值是放置
-  // 记录的内部编码，不该出现在配置里。
-  if (PROP_KIND_BY_NAME[definition.kind] === undefined) {
-    throw new TypeError(
-      `${path}.kind 必须是已知物件种类：${Object.keys(PROP_KIND_BY_NAME).join(' / ')}`,
-    );
-  }
   const maximumHealth = requireNumber(definition.maximumHealth, `${path}.maximumHealth`, 1, 1000);
   const harvestDamage = requireNumber(definition.harvestDamage, `${path}.harvestDamage`, 1, 1000);
   if (![maximumHealth, harvestDamage].every(Number.isInteger)) {
@@ -299,7 +291,6 @@ function validateGeneratedProp(raw, filename) {
   const quantity = requireNumber(drop.quantity, `${dropPath}.quantity`, 1, 1000);
   if (!Number.isInteger(quantity)) throw new TypeError(`${dropPath}.quantity 必须是整数`);
   return {
-    kind: definition.kind,
     maximumHealth,
     harvestDamage,
     drop: { archetypeId: requireId(drop.archetypeId, `${dropPath}.archetypeId`), quantity },

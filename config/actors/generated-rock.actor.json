@@ -9,7 +9,6 @@
       "maximumDistance": 2.2
     },
     "generatedProp": {
-      "kind": "rock",
       "maximumHealth": 4,
       "harvestDamage": 1,
       "drop": { "archetypeId": "stone-pile", "quantity": 3 }

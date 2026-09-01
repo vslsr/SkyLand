@@ -112,10 +112,11 @@ export class ServerScene {
       enabled: Boolean(definition.renderer?.world),
     });
     // 生成物件和静态碰撞一样跟着玩家滑动，房间启动时一个都不建。
-    // 哪些种类真的产生 Actor，由原型自己声明的 generatedProp.kind 决定。
+    // 哪些种类真的产生 Actor，由场景的 gameplay.worldProps 绑定决定。
     this.generatedProps = new ServerGeneratedPropActors({
       world: this.actorWorld,
       archetypes: definition.actorArchetypes,
+      worldProps: definition.gameplay?.worldProps,
       worldSeed: this.worldSeed,
       enabled: Boolean(definition.renderer?.world),
     });

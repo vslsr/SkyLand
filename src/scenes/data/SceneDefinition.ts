@@ -223,7 +223,6 @@ export interface ActorArchetypeDefinition {
     lifetime?: { lifetimeSeconds: number };
     replicationPolicy?: { mode: 'always' | 'aoi'; radiusChunks: number };
     generatedProp?: {
-      kind: 'tree' | 'grass' | 'rock';
       maximumHealth: number;
       harvestDamage: number;
       drop: { archetypeId: string; quantity: number };
@@ -296,6 +295,8 @@ export interface SceneDefinition extends SceneSummary {
   gameplay: {
     playerActor: { archetypeId: string };
     runtimeActorArchetypes?: string[];
+    /** 流式世界里每种物件由哪个原型承载；键是物件种类名。 */
+    worldProps?: Partial<Record<'tree' | 'grass' | 'rock', string>>;
     bounds: SceneBounds;
     spawn: { centerX: number; centerZ: number; radius: number; slots: number };
     water?: { seaLevel: number };

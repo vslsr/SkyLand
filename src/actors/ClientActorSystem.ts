@@ -142,8 +142,8 @@ export class ClientActorSystem implements SceneVisualSystem {
   private readonly generatedPropStates = new Map<string, PropStateSnapshot>();
   private generatedPropOverrideTarget?: PropOverrideTarget;
   /**
-   * 物件种类 → 承载它的原型。和服务端一样从原型自己声明的 generatedProp.kind
-   * 建表，两端因此对同一个 id 挑出同一个原型，不需要在快照里带 archetypeId。
+   * 物件种类 → 承载它的原型。和服务端一样从场景的 gameplay.worldProps 建表，
+   * 两端因此对同一个 id 挑出同一个原型，不需要在快照里带 archetypeId。
    */
   private readonly generatedPropArchetypes = new Map<
     number,
@@ -155,9 +155,10 @@ export class ClientActorSystem implements SceneVisualSystem {
     this.archetypes = new Map(
       options.definition.actorArchetypes.map((definition) => [definition.id, definition]),
     );
-    for (const archetype of options.definition.actorArchetypes) {
-      const kind = PROP_KIND_BY_NAME[archetype.components.generatedProp?.kind ?? ''];
-      if (kind === undefined || this.generatedPropArchetypes.has(kind)) continue;
+    for (const [name, archetypeId] of Object.entries(options.definition.gameplay.worldProps ?? {})) {
+      const kind = PROP_KIND_BY_NAME[name];
+      const archetype = this.archetypes.get(archetypeId);
+      if (kind === undefined || !archetype?.components.generatedProp) continue;
       this.generatedPropArchetypes.set(kind, archetype);
     }
     this.now = options.now ?? (() => Date.now());
