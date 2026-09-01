@@ -51,19 +51,20 @@ test('流式世界里的树和石头会挡住玩家，跨 chunk 行走全程不�
   });
   scene.addPlayer({ id: 'walker', name: '巡林员', slot: 0 });
 
-  let sequence = 0;
+  let inputTick = 0;
   let blockedAtLeastOnce = false;
   // 斜着走出两个 chunk，途中必然会撞上若干棵树。
   for (let step = 0; step < 400; step += 1) {
     clock.advance(0.05);
     scene.update();
     const before = { ...scene.players.get('walker') };
-    sequence += 1;
-    scene.applyInput('walker', {
-      sequence,
-      deltaSeconds: 0.05,
+    const inputs = Array.from({ length: 3 }, () => ({
+      tick: ++inputTick,
       move: { x: 0.8, z: 0.6 },
       yaw: 0,
+    }));
+    scene.applyInput('walker', {
+      inputs,
     });
     const player = scene.players.get('walker');
     const position = { x: player.x, z: player.z };
@@ -103,3 +104,4 @@ test('出生点会被推到碰撞体之外', async () => {
     );
   }
 });
+import './initRapier.mjs';

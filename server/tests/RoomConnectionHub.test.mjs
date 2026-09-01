@@ -19,7 +19,16 @@ class MockRoomManager extends EventEmitter {
   }
 
   leaveRoom(...args) { this.calls.push(['leaveRoom', ...args]); }
+  getRoom(roomId) { return { id: roomId, sceneId: 'grass-test' }; }
   sendInput(...args) { this.calls.push(['sendInput', ...args]); }
+  startPlayerTransformLog(...args) {
+    this.calls.push(['startPlayerTransformLog', ...args]);
+    return true;
+  }
+  stopPlayerTransformLog(...args) {
+    this.calls.push(['stopPlayerTransformLog', ...args]);
+    return true;
+  }
   setWeather(...args) { this.calls.push(['setWeather', ...args]); }
   claimActorControl(...args) { this.calls.push(['claimActorControl', ...args]); }
   releaseActorControl(...args) { this.calls.push(['releaseActorControl', ...args]); }
@@ -98,6 +107,71 @@ test('RoomConnectionHub 将未知消息作为可靠错误回复', () => {
   session.receive({ type: 'unknown' });
   assert.deepEqual(sent.at(-1), {
     message: { type: 'error', message: '未知消息类型：unknown' },
+    channel: 'control',
+  });
+
+  session.close();
+  hub.close();
+});
+
+test('RoomConnectionHub 关联玩家录制会话并在 DS 停止后返回双端文件', async () => {
+  const roomManager = new MockRoomManager();
+  const sent = [];
+  const calls = [];
+  const transformLogStore = {
+    begin(metadata) { calls.push(['begin', metadata]); return true; },
+    appendClient(sessionId, events) { calls.push(['client', sessionId, events]); return true; },
+    appendServer(sessionId, event) { calls.push(['server', sessionId, event]); return true; },
+    discard() {},
+    async finish(sessionId, reason) {
+      calls.push(['finish', sessionId, reason]);
+      return { clientFile: 'logs/client.log', serverFile: 'logs/server.log' };
+    },
+  };
+  const hub = new RoomConnectionHub(roomManager, { transformLogStore });
+  const session = hub.openSession((message, channel) => sent.push({ message, channel }));
+  session.receive({ type: 'room:join', roomId: 'room-1', name: 'Player' });
+
+  session.receive({ type: 'debug:transform-log:start' });
+  const started = sent.at(-1).message.transformLog;
+  assert.equal(started.status, 'started');
+  assert.ok(started.sessionId);
+  assert.equal(roomManager.calls.at(-1)[0], 'startPlayerTransformLog');
+
+  const clientEvent = { event: 'client.input_packet_sent', data: { tick: 1 } };
+  session.receive({
+    type: 'debug:transform-log:events',
+    sessionId: started.sessionId,
+    events: [clientEvent],
+  });
+  roomManager.emit(
+    'transform-log:event',
+    'room-1',
+    'player-1',
+    started.sessionId,
+    { event: 'server.input_step_applied', data: { tick: 1 } },
+  );
+  session.receive({
+    type: 'debug:transform-log:stop',
+    sessionId: started.sessionId,
+    events: [],
+  });
+  roomManager.emit('transform-log:stopped', 'room-1', 'player-1', started.sessionId);
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.ok(calls.some(([kind]) => kind === 'client'));
+  assert.ok(calls.some(([kind]) => kind === 'server'));
+  assert.ok(calls.some(([kind, , reason]) => kind === 'finish' && reason === 'manual-stop'));
+  assert.deepEqual(sent.at(-1), {
+    message: {
+      type: 'debug:transform-log:status',
+      transformLog: {
+        status: 'saved',
+        sessionId: started.sessionId,
+        clientFile: 'logs/client.log',
+        serverFile: 'logs/server.log',
+      },
+    },
     channel: 'control',
   });
 

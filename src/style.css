@@ -524,6 +524,11 @@ body.has-interaction-target .crosshair {
   border-color: #8b4058;
 }
 
+.debug-menu__status {
+  min-height: 2.6em;
+  overflow-wrap: anywhere;
+}
+
 .debug-menu__weather-grid {
   display: flex;
   flex-wrap: wrap;

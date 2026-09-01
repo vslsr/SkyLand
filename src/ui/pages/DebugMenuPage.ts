@@ -5,14 +5,21 @@ import {
   WEATHER_TYPES,
   type WeatherType,
 } from '../../weather/index';
+import type { PlayerTransformLogState } from '../../debug/PlayerTransformLogRecorder';
 
 export class DebugMenuPage extends ModalWindow {
+  private readonly transformLogButton: HTMLButtonElement;
+  private readonly transformLogStatus: HTMLParagraphElement;
   private readonly collisionButton: HTMLButtonElement;
   private readonly temperatureButton: HTMLButtonElement;
   private readonly weatherButtons = new Map<WeatherType, HTMLButtonElement>();
   private collisionToggleHandler?: (visible: boolean) => void;
   private temperatureToggleHandler?: (visible: boolean) => void;
   private weatherSelectHandler?: (weather: WeatherType) => void;
+  private transformLogToggleHandler?: (recording: boolean) => void;
+  private transformLogState: PlayerTransformLogState = 'inactive';
+  private transformLogAvailable = false;
+  private transformLogMessage?: string;
   private collisionVisible = false;
   private temperatureVisible = false;
 
@@ -24,6 +31,34 @@ export class DebugMenuPage extends ModalWindow {
       description: '检查运行时 Actor 状态，并向房间服务端请求切换权威天气。',
       size: 'compact',
     });
+
+    const transformLogSection = document.createElement('section');
+    transformLogSection.className = 'debug-menu__section';
+    const transformLogHeading = document.createElement('h3');
+    transformLogHeading.textContent = 'PLAYER TRANSFORM SYNC';
+    const transformLogDescription = document.createElement('p');
+    transformLogDescription.textContent = '同时记录本地预测/和解与房间服务端权威移动，停止后在 logs 目录生成 client、server 两段日志。';
+    this.transformLogButton = document.createElement('button');
+    this.transformLogButton.className = 'paper-button debug-menu__toggle';
+    this.transformLogButton.type = 'button';
+    this.transformLogButton.addEventListener('click', () => {
+      if (this.transformLogState === 'inactive') {
+        this.setTransformLogState('starting');
+        this.transformLogToggleHandler?.(true);
+      } else if (this.transformLogState === 'recording') {
+        this.setTransformLogState('stopping');
+        this.transformLogToggleHandler?.(false);
+      }
+    });
+    this.transformLogStatus = document.createElement('p');
+    this.transformLogStatus.className = 'debug-menu__status';
+    this.transformLogStatus.setAttribute('role', 'status');
+    transformLogSection.append(
+      transformLogHeading,
+      transformLogDescription,
+      this.transformLogButton,
+      this.transformLogStatus,
+    );
 
     const collisionSection = document.createElement('section');
     collisionSection.className = 'debug-menu__section';
@@ -77,7 +112,14 @@ export class DebugMenuPage extends ModalWindow {
     }
     weatherSection.append(weatherHeading, weatherDescription, weatherGrid);
 
-    this.bodyElement.append(collisionSection, temperatureSection, weatherSection);
+    this.bodyElement.append(
+      transformLogSection,
+      collisionSection,
+      temperatureSection,
+      weatherSection,
+    );
+    this.setTransformLogState('inactive');
+    this.setTransformLogAvailable(false);
     this.setCollisionVisible(false);
     this.setTemperatureVisible(false);
     this.setWeather(DEFAULT_WEATHER);
@@ -93,6 +135,37 @@ export class DebugMenuPage extends ModalWindow {
 
   public onWeatherSelect(handler: (weather: WeatherType) => void): void {
     this.weatherSelectHandler = handler;
+  }
+
+  public onTransformLogToggle(handler: (recording: boolean) => void): void {
+    this.transformLogToggleHandler = handler;
+  }
+
+  public setTransformLogAvailable(available: boolean): void {
+    this.transformLogAvailable = available;
+    if (this.transformLogState === 'inactive' && this.transformLogMessage === undefined) {
+      this.transformLogStatus.textContent = available
+        ? '可以开始记录；关闭 F8 菜单后正常复现移动问题。'
+        : '进入房间并生成玩家角色后可以开始记录。';
+    }
+    this.updateTransformLogButton();
+  }
+
+  public setTransformLogState(state: PlayerTransformLogState, message?: string): void {
+    this.transformLogState = state;
+    this.transformLogMessage = message;
+    this.transformLogStatus.textContent = message ?? (
+      state === 'recording'
+        ? '正在记录当前玩家的 Transform 同步链路。'
+        : state === 'starting'
+          ? '正在等待服务端开启录制…'
+          : state === 'stopping'
+            ? '正在关闭录制并写入日志…'
+            : this.transformLogAvailable
+              ? '可以开始记录；关闭 F8 菜单后正常复现移动问题。'
+              : '进入房间并生成玩家角色后可以开始记录。'
+    );
+    this.updateTransformLogButton();
   }
 
   public setCollisionVisible(visible: boolean): void {
@@ -118,6 +191,23 @@ export class DebugMenuPage extends ModalWindow {
   }
 
   public onOpen(): void {
-    this.collisionButton.focus();
+    (this.transformLogAvailable ? this.transformLogButton : this.collisionButton).focus();
+  }
+
+  private updateTransformLogButton(): void {
+    const recording = this.transformLogState === 'recording';
+    this.transformLogButton.setAttribute('aria-pressed', String(recording));
+    this.transformLogButton.disabled = (
+      this.transformLogState === 'starting'
+      || this.transformLogState === 'stopping'
+      || (!this.transformLogAvailable && this.transformLogState === 'inactive')
+    );
+    this.transformLogButton.textContent = this.transformLogState === 'starting'
+      ? '正在开启…'
+      : this.transformLogState === 'stopping'
+        ? '正在保存…'
+        : recording
+          ? '停止并保存 Transform 日志'
+          : '开始记录玩家 Transform';
   }
 }

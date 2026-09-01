@@ -61,3 +61,4 @@ test('史莱姆近距离叼住蘑菇，拉过断裂长度后权威释放并恢�
   assert.equal(mushroom.elasticTether.releaseRevision, 2);
   assert.equal(mushroom.interactable.enabled, true);
 });
+import './initRapier.mjs';

@@ -1,4 +1,5 @@
 import { CameraBoom, type CameraProbe } from '../camera/CameraBoom';
+import { CameraFollow } from '../camera/CameraFollow';
 import type { CameraFrame } from '../camera/CameraTransform';
 import type { CameraAxes } from '../camera/cameraMath';
 import { createCameraViewMatrix } from '../camera/cameraMath';
@@ -18,10 +19,38 @@ import {
   lerpAngle,
   normalizeAngle,
 } from '../../shared/playerMovement.mjs';
-import type { PlayerInputFrame } from '../network/protocol';
+import type { PlayerInputFrame, PlayerInputStep } from '../network/protocol';
 import type { SceneBounds } from '../scenes/data/SceneDefinition';
 import type * as THREE from 'three';
-import type { PlayerJumpComponent } from '../../shared/actor/index.mjs';
+import {
+  type PlayerJumpComponent,
+} from '../../shared/actor/index.mjs';
+import type { PhysicsWorld } from '../../shared/physics/PhysicsWorld.mjs';
+import {
+  copyCharacterState,
+  createCharacterState,
+} from '../../shared/physics/characterState.mjs';
+import {
+  createCharacterSimulationParams,
+  stepCharacter,
+} from '../../shared/physics/stepCharacter.mjs';
+import { SimulationClock } from '../../shared/physics/simulationClock.mjs';
+import {
+  RECONCILE_RATE,
+  RECONCILE_SNAP_DISTANCE,
+  SIMULATION_STEP_SECONDS,
+} from '../../shared/networkTuning.mjs';
+
+export interface AuthoritativeCharacterState {
+  x: number;
+  y: number;
+  z: number;
+  vx: number;
+  vy: number;
+  vz: number;
+  grounded: boolean;
+  jumpPressed?: boolean;
+}
 
 export interface PlayerCollisionMotion {
   minimumY: number;
@@ -31,15 +60,30 @@ export interface PlayerCollisionMotion {
 export interface TopDownControllerOptions {
   enabled?: boolean;
   cameraOffset?: Vec3;
+  /** TopDown 镜头追随玩家的收敛速度；越大越紧，默认保留轻微粘滞感。 */
+  cameraFollowSharpness?: number;
   fieldOfViewDegrees?: number;
   bounds?: SceneBounds;
   collisionRadius?: number;
-  movement?: { walkSpeed: number; sprintMultiplier: number };
+  collisionHeight?: number;
+  movement?: {
+    walkSpeed: number;
+    sprintMultiplier: number;
+    maximumStepHeight?: number;
+    acceleration?: number;
+    deceleration?: number;
+    airAcceleration?: number;
+    airDrag?: number;
+  };
   jumpAbility?: PlayerJumpComponent;
+  physicsWorld?: PhysicsWorld;
+  characterId?: string;
   /** 在本帧读取 GAS 移动属性前同步环境 GameplayEffect。 */
   updateMovementState?: () => void;
   /** 返回 GAS Movement.Speed 的 CurrentValue。 */
   resolveWalkSpeed?: () => number;
+  /** 水面支撑高度；不在水中返回 undefined。 */
+  resolveBuoyancyHeight?: () => number | undefined;
   resolveCollision?: (
     position: { x: number; z: number },
     radius: number,
@@ -68,20 +112,33 @@ export class TopDownController {
   private readonly inputDisposers: Array<() => void> = [];
   private readonly cameraOffset: Vec3;
   private readonly fieldOfViewRadians: number;
-  private readonly pointer = { x: 0, y: 0, available: false };
+  private readonly pointer = { x: 0, y: 0, available: false, dirty: false };
   private readonly movementInput = { x: 0, y: 0 };
   private readonly bounds: SceneBounds;
   private readonly collisionRadius: number;
   private readonly movement: { walkSpeed: number; sprintMultiplier: number };
   private readonly jumpAbility?: PlayerJumpComponent;
+  private readonly physicsWorld?: PhysicsWorld;
+  private readonly characterId?: string;
+  private readonly characterState?: ReturnType<typeof createCharacterState>;
+  private readonly characterParams?: ReturnType<typeof createCharacterSimulationParams>;
+  private readonly simulationClock = new SimulationClock();
+  private readonly generatedInputSteps: PlayerInputStep[] = [];
+  private nextInputTick = 1;
+  private previousSimulationPosition = { x: 0, y: 0, z: 0 };
+  private renderOffsetX = 0;
+  private renderOffsetY = 0;
+  private renderOffsetZ = 0;
   private readonly updateMovementState?: TopDownControllerOptions['updateMovementState'];
   private readonly resolveWalkSpeed?: TopDownControllerOptions['resolveWalkSpeed'];
+  private readonly resolveBuoyancyHeight?: TopDownControllerOptions['resolveBuoyancyHeight'];
   private readonly resolveCollision?: TopDownControllerOptions['resolveCollision'];
   private readonly sampleGroundHeight?: TopDownControllerOptions['sampleGroundHeight'];
   private readonly raycastGround?: TopDownControllerOptions['raycastGround'];
   private readonly cameraCollisionEnabled: boolean;
   private readonly cameraProbe?: CameraProbe;
   private readonly cameraBoom = new CameraBoom();
+  private readonly cameraFollow: CameraFollow;
   private cameraDistanceRatio = 1;
   private enabled: boolean;
   private facingYaw = Math.PI;
@@ -113,20 +170,53 @@ export class TopDownController {
       sprintMultiplier: PLAYER_SPRINT_MULTIPLIER,
     };
     this.jumpAbility = options.jumpAbility;
+    this.physicsWorld = options.physicsWorld;
+    this.characterId = options.characterId;
+    if (options.jumpAbility && this.physicsWorld && this.characterId) {
+      this.characterState = createCharacterState({
+        x: this.player.position.x,
+        y: this.player.position.y,
+        z: this.player.position.z,
+        grounded: true,
+      });
+      this.characterParams = createCharacterSimulationParams(
+        this.characterId,
+        this.movement,
+        options.jumpAbility,
+        { bounds: this.bounds },
+      );
+      this.physicsWorld.createCharacter(this.characterId, {
+        x: this.player.position.x,
+        y: this.player.position.y,
+        z: this.player.position.z,
+        radius: this.collisionRadius,
+        halfHeight: (options.collisionHeight ?? this.collisionRadius * 2) * 0.5,
+      });
+      this.physicsWorld.prepareQueries();
+      this.previousSimulationPosition = {
+        x: this.characterState.x,
+        y: this.characterState.y,
+        z: this.characterState.z,
+      };
+    }
     this.updateMovementState = options.updateMovementState;
     this.resolveWalkSpeed = options.resolveWalkSpeed;
+    this.resolveBuoyancyHeight = options.resolveBuoyancyHeight;
     this.resolveCollision = options.resolveCollision;
     this.sampleGroundHeight = options.sampleGroundHeight;
     this.raycastGround = options.raycastGround;
     this.cameraCollisionEnabled = options.cameraCollisionEnabled ?? false;
     this.cameraProbe = options.cameraProbe;
+    this.cameraFollow = new CameraFollow(this.cameraPivot, {
+      sharpness: options.cameraFollowSharpness,
+    });
     this.fieldOfViewRadians = ((options.fieldOfViewDegrees ?? 50) * Math.PI) / 180;
     this.bindInput(input);
     this.bindPointerEvents();
   }
 
   public get frame(): CameraFrame {
-    const target = this.cameraPivot;
+    const target = this.cameraFollow.position;
     // 悬臂只改长度不改方向，所以三条相机轴与无遮挡时完全一致：
     // 鼠标射线投影、朝向解算都不需要为镜头收缩单独处理。
     const ratio = this.cameraDistanceRatio;
@@ -147,7 +237,9 @@ export class TopDownController {
   }
 
   public get movementSpeed(): number {
-    return this.currentSpeed;
+    return this.characterState
+      ? Math.hypot(this.characterState.vx, this.characterState.vz)
+      : this.currentSpeed;
   }
 
   /** 悬臂支点：角色所在位置抬高到胸口。 */
@@ -165,19 +257,45 @@ export class TopDownController {
   }
 
   public get position(): { x: number; z: number } {
-    return { x: this.player.position.x, z: this.player.position.z };
+    return this.characterState
+      ? { x: this.characterState.x, z: this.characterState.z }
+      : { x: this.player.position.x, z: this.player.position.z };
   }
 
   public get verticalPosition(): number {
-    return this.player.position.y;
+    return this.characterState?.y ?? this.player.position.y;
   }
 
   public get verticalVelocity(): number {
-    return this.jumpAbility?.verticalVelocity ?? 0;
+    return this.characterState?.vy ?? this.jumpAbility?.verticalVelocity ?? 0;
+  }
+
+  public get horizontalVelocity(): { x: number; z: number } {
+    return {
+      x: this.characterState?.vx ?? 0,
+      z: this.characterState?.vz ?? 0,
+    };
+  }
+
+  public applyAuthoritativeMotion(
+    velocityX: number,
+    verticalVelocity: number,
+    velocityZ: number,
+    grounded: boolean,
+  ): void {
+    if (this.characterState) {
+      this.characterState.vx = velocityX;
+      this.characterState.vy = grounded ? 0 : verticalVelocity;
+      this.characterState.vz = velocityZ;
+      this.characterState.grounded = grounded;
+      this.jumpAbility?.applyAuthoritativeState(verticalVelocity, grounded);
+    } else {
+      this.jumpAbility?.applyAuthoritativeState(verticalVelocity, grounded);
+    }
   }
 
   public get isGrounded(): boolean {
-    return this.jumpAbility?.grounded ?? true;
+    return this.characterState?.grounded ?? this.jumpAbility?.grounded ?? true;
   }
 
   /**
@@ -202,6 +320,72 @@ export class TopDownController {
     };
   }
 
+  /** 取走本渲染帧实际执行过的 60Hz 输入步。 */
+  public drainInputSteps(): PlayerInputStep[] {
+    return this.generatedInputSteps.splice(0);
+  }
+
+  /**
+   * 逻辑状态立即回到服务端确认点，再重放所有尚未确认的本地输入。
+   * 可见位置只保留一个衰减偏移，永远不会反过来污染物理状态。
+   */
+  public rewindAndReplay(
+    authoritative: AuthoritativeCharacterState,
+    pendingInputs: readonly PlayerInputStep[],
+  ): { replayed: number; residualDistance: number; snapped: boolean } {
+    if (!this.characterState || !this.characterParams || !this.physicsWorld || !this.characterId) {
+      this.setPosition(authoritative.x, authoritative.z);
+      this.setVerticalPosition(authoritative.y);
+      this.applyAuthoritativeMotion(
+        authoritative.vx,
+        authoritative.vy,
+        authoritative.vz,
+        authoritative.grounded,
+      );
+      return { replayed: 0, residualDistance: 0, snapped: true };
+    }
+
+    const rendered = {
+      x: this.player.position.x,
+      y: this.player.position.y,
+      z: this.player.position.z,
+    };
+    copyCharacterState(this.characterState, authoritative);
+    this.physicsWorld.setCharacterTranslation(this.characterId, this.characterState);
+    this.physicsWorld.prepareQueries();
+    const ordered = [...pendingInputs].sort((left, right) => left.tick - right.tick);
+    for (const input of ordered) {
+      stepCharacter(
+        this.characterState,
+        input,
+        SIMULATION_STEP_SECONDS,
+        this.physicsWorld,
+        this.characterParams,
+      );
+    }
+    this.previousSimulationPosition = {
+      x: this.characterState.x,
+      y: this.characterState.y,
+      z: this.characterState.z,
+    };
+    this.simulationClock.reset();
+    const errorX = rendered.x - this.characterState.x;
+    const errorY = rendered.y - this.characterState.y;
+    const errorZ = rendered.z - this.characterState.z;
+    const residualDistance = Math.hypot(errorX, errorY, errorZ);
+    const snapped = residualDistance > RECONCILE_SNAP_DISTANCE;
+    this.renderOffsetX = snapped ? 0 : errorX;
+    this.renderOffsetY = snapped ? 0 : errorY;
+    this.renderOffsetZ = snapped ? 0 : errorZ;
+    if (snapped) this.resetCamera();
+    this.jumpAbility?.applyAuthoritativeState(
+      this.characterState.vy,
+      this.characterState.grounded,
+    );
+    this.refreshRenderPosition(1);
+    return { replayed: ordered.length, residualDistance, snapped };
+  }
+
   /** 输入包成功发出后清除短按锁存；仍按住 Space 时 jump 会继续保持 true。 */
   public acknowledgeInputFrame(): void {
     this.jumpRequestPending = false;
@@ -223,10 +407,11 @@ export class TopDownController {
     }
   }
 
-  /** 传送或重新出生：悬臂不该把上一处的收缩量带过来。 */
+  /** 传送或重新出生：悬臂与平滑支点都不该把上一处状态带过来。 */
   public resetCamera(): void {
     this.cameraBoom.reset();
     this.cameraDistanceRatio = 1;
+    this.cameraFollow.reset(this.cameraPivot);
   }
 
   public setPosition(x: number, z: number): void {
@@ -235,6 +420,15 @@ export class TopDownController {
       x: clampToRange(x, this.bounds.minimumX, this.bounds.maximumX),
       z: clampToRange(z, this.bounds.minimumZ, this.bounds.maximumZ),
     };
+    if (this.characterState && this.physicsWorld && this.characterId) {
+      this.characterState.x = bounded.x;
+      this.characterState.z = bounded.z;
+      this.physicsWorld.setCharacterTranslation(this.characterId, this.characterState);
+      this.previousSimulationPosition.x = bounded.x;
+      this.previousSimulationPosition.z = bounded.z;
+      this.refreshRenderPosition(1);
+      return;
+    }
     const resolved: { x: number; y?: number; z: number } =
       this.resolveCollision?.(bounded, this.collisionRadius, previous, {
         minimumY: this.player.position.y,
@@ -254,11 +448,19 @@ export class TopDownController {
   }
 
   public setVerticalPosition(y: number): void {
-    if (Number.isFinite(y)) this.player.position.y = y;
+    if (!Number.isFinite(y)) return;
+    if (this.characterState && this.physicsWorld && this.characterId) {
+      this.characterState.y = y;
+      this.physicsWorld.setCharacterTranslation(this.characterId, this.characterState);
+      this.previousSimulationPosition.y = y;
+      this.refreshRenderPosition(1);
+      return;
+    }
+    this.player.position.y = y;
   }
 
   public translateVertical(deltaY: number): void {
-    if (Number.isFinite(deltaY)) this.player.position.y += deltaY;
+    if (Number.isFinite(deltaY)) this.setVerticalPosition(this.verticalPosition + deltaY);
   }
 
   /** 表面拖拽命中玩家自身时暂停左键朝向，避免同一次手势同时旋转 Actor。 */
@@ -268,15 +470,22 @@ export class TopDownController {
   }
 
   public translate(deltaX: number, deltaZ: number): void {
-    this.setPosition(this.player.position.x + deltaX, this.player.position.z + deltaZ);
+    this.setPosition(this.position.x + deltaX, this.position.z + deltaZ);
   }
 
   public update(deltaSeconds: number): void {
+    this.decayRenderOffset(deltaSeconds);
     // 镜头必须先解算：即使输入被 UI 接管，角色仍可能被服务端和解拉着走，
     // 这时镜头照样要躲开挡在中间的树。
     this.updateCameraBoom(deltaSeconds);
-    this.updateVerticalMotion(deltaSeconds);
-    if (!this.enabled) return;
+    if (!this.enabled) {
+      if (this.characterState) {
+        this.updateCharacterMotion(deltaSeconds, 0, 0, false);
+      } else {
+        this.updateVerticalMotion(deltaSeconds);
+      }
+      return;
+    }
     this.updateMovementState?.();
     const resolvedWalkSpeed = this.resolveWalkSpeed?.() ?? this.movement.walkSpeed;
     const walkSpeed = Number.isFinite(resolvedWalkSpeed)
@@ -301,7 +510,13 @@ export class TopDownController {
       const normalizedY = localY / inputLength;
       this.moveX = rightX * normalizedX + forwardX * normalizedY;
       this.moveZ = rightZ * normalizedX + forwardZ * normalizedY;
-      // 本地预测：和房间进程跑同一份 applyPlayerMovement，输入一致则结果一致。
+    }
+
+    if (this.characterState) {
+      this.updateCharacterMotion(deltaSeconds, this.moveX, this.moveZ, this.sprinting, walkSpeed);
+      this.currentSpeed = Math.hypot(this.characterState.vx, this.characterState.vz);
+    } else if (inputLength > 0) {
+      // 兼容没有角色碰撞查询的轻量测试/旧固定场景。
       const next = applyPlayerMovement(
         this.position,
         { x: this.moveX, z: this.moveZ, sprint: this.sprinting },
@@ -321,14 +536,17 @@ export class TopDownController {
     }
 
     if (this.mouseFacingActive) {
-      const groundPoint = this.projectPointerToGameplayPlane();
-      if (groundPoint) {
-        const deltaX = groundPoint.x - this.player.position.x;
-        const deltaY = groundPoint.y - this.player.position.z;
-        if (Math.hypot(deltaX, deltaY) > 0.08) {
-          const targetYaw = Math.atan2(deltaX, deltaY);
-          this.facingYaw = lerpAngle(this.facingYaw, targetYaw, Math.min(1, deltaSeconds * 14));
+      if (this.pointer.dirty) {
+        const groundPoint = this.projectPointerToGameplayPlane();
+        if (groundPoint) {
+          const deltaX = groundPoint.x - this.player.position.x;
+          const deltaY = groundPoint.y - this.player.position.z;
+          if (Math.hypot(deltaX, deltaY) > 0.08) {
+            const targetYaw = Math.atan2(deltaX, deltaY);
+            this.facingYaw = lerpAngle(this.facingYaw, targetYaw, Math.min(1, deltaSeconds * 14));
+          }
         }
+        this.pointer.dirty = false;
       }
     } else if (inputLength > 0) {
       const targetYaw = Math.atan2(this.moveX, this.moveZ);
@@ -336,7 +554,72 @@ export class TopDownController {
     }
     this.facingYaw = normalizeAngle(this.facingYaw);
     this.player.rotation.y = this.facingYaw;
-    this.resolveLanding();
+    if (!this.characterState) this.resolveLanding();
+  }
+
+  private updateCharacterMotion(
+    deltaSeconds: number,
+    moveX: number,
+    moveZ: number,
+    sprint: boolean,
+    walkSpeed?: number,
+  ): void {
+    if (!this.characterState || !this.characterParams || !this.physicsWorld) return;
+    this.characterParams.walkSpeed = walkSpeed ?? this.movement.walkSpeed;
+    this.characterParams.buoyancyHeight = this.resolveBuoyancyHeight?.();
+    const jump = this.jumpHeld || this.jumpRequestPending;
+    this.simulationClock.advance(deltaSeconds, (stepSeconds: number) => {
+      this.previousSimulationPosition = {
+        x: this.characterState!.x,
+        y: this.characterState!.y,
+        z: this.characterState!.z,
+      };
+      const input: PlayerInputStep = {
+        tick: this.nextInputTick,
+        move: { x: moveX, z: moveZ },
+        sprint,
+        jump,
+        yaw: normalizeAngle(this.facingYaw),
+      };
+      this.nextInputTick += 1;
+      stepCharacter(
+        this.characterState!,
+        input,
+        stepSeconds,
+        this.physicsWorld!,
+        this.characterParams!,
+      );
+      this.generatedInputSteps.push(input);
+      this.jumpRequestPending = false;
+    });
+    this.jumpAbility?.applyAuthoritativeState(
+      this.characterState.vy,
+      this.characterState.grounded,
+    );
+    this.refreshRenderPosition(this.simulationClock.alpha);
+  }
+
+  private decayRenderOffset(deltaSeconds: number): void {
+    const amount = Math.exp(-RECONCILE_RATE * Math.max(0, deltaSeconds));
+    this.renderOffsetX *= amount;
+    this.renderOffsetY *= amount;
+    this.renderOffsetZ *= amount;
+  }
+
+  private refreshRenderPosition(alpha: number): void {
+    if (!this.characterState) return;
+    const mix = Math.max(0, Math.min(1, alpha));
+    this.player.position.set(
+      this.previousSimulationPosition.x
+        + (this.characterState.x - this.previousSimulationPosition.x) * mix
+        + this.renderOffsetX,
+      this.previousSimulationPosition.y
+        + (this.characterState.y - this.previousSimulationPosition.y) * mix
+        + this.renderOffsetY,
+      this.previousSimulationPosition.z
+        + (this.characterState.z - this.previousSimulationPosition.z) * mix
+        + this.renderOffsetZ,
+    );
   }
 
   private updateVerticalMotion(deltaSeconds: number): void {
@@ -361,8 +644,9 @@ export class TopDownController {
    * CAMERA 层，所以只会命中附近格子里的那几个盒子，成本与世界大小无关。
    */
   private updateCameraBoom(deltaSeconds: number): void {
+    const smoothedPivot = this.cameraFollow.update(this.cameraPivot, deltaSeconds);
     this.cameraDistanceRatio = this.cameraBoom.solve(
-      this.cameraPivot,
+      smoothedPivot,
       this.cameraOffset,
       deltaSeconds,
       this.cameraCollisionEnabled ? this.cameraProbe : undefined,
@@ -371,6 +655,9 @@ export class TopDownController {
 
   public dispose(): void {
     for (const dispose of this.inputDisposers.splice(0)) dispose();
+    if (this.physicsWorld && this.characterId) {
+      this.physicsWorld.removeCharacter(this.characterId);
+    }
     this.canvas.removeEventListener('pointerdown', this.handlePointerMove);
     this.canvas.removeEventListener('pointermove', this.handlePointerMove);
     this.canvas.removeEventListener('pointerenter', this.handlePointerMove);
@@ -409,10 +696,12 @@ export class TopDownController {
     this.pointer.x = event.clientX;
     this.pointer.y = event.clientY;
     this.pointer.available = true;
+    this.pointer.dirty = true;
   };
 
   private readonly handlePointerLeave = (): void => {
     this.pointer.available = false;
+    this.pointer.dirty = false;
   };
 
   private bindInput(input: InputSubsystem): void {

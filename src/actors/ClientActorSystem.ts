@@ -43,6 +43,8 @@ import {
   COLLISION_LAYER_SOLID,
   CollisionWorld,
 } from '../../shared/collision/index.mjs';
+import type { PhysicsWorld } from '../../shared/physics/PhysicsWorld.mjs';
+import { simpleCollisionInstanceToPhysicsDefinitions } from '../../shared/physics/simpleCollisionToPhysics.mjs';
 import { PROP_FIELD, PROP_STRIDE } from '../../shared/world/chunkContent.mjs';
 import {
   PROP_KIND_BY_NAME,
@@ -108,6 +110,7 @@ export interface ClientActorSystemOptions {
    * 单独使用这个 System 的测试因此不需要额外搭场景。
    */
   collision?: CollisionWorld;
+  physics?: PhysicsWorld;
 }
 
 type PropStateSnapshot = {
@@ -135,6 +138,7 @@ export class ClientActorSystem implements SceneVisualSystem {
   private readonly actorWorldPoint = new THREE.Vector3();
   private readonly closestRayPoint = new THREE.Vector3();
   private readonly collision: CollisionWorld;
+  private readonly physics?: PhysicsWorld;
   private readonly highCountBatches: HighCountActorBatchSystem;
   private readonly fruit: GeneratedPropFruitSystem;
   /** actorId → 登记进碰撞世界的实例，逐帧复用，避免每帧产生一批临时对象。 */
@@ -185,6 +189,7 @@ export class ClientActorSystem implements SceneVisualSystem {
     this.worldSeed = toWorldSeed(options.worldSeed);
     this.now = options.now ?? (() => Date.now());
     this.collision = options.collision ?? new CollisionWorld();
+    this.physics = options.physics;
     this.highCountBatches = new HighCountActorBatchSystem(options.environment, this.archetypes);
     this.fruit = new GeneratedPropFruitSystem(options.environment, this.archetypes);
     // 客户端不运行 AttachmentSystem：最终世界坐标来自快照插值，不能被
@@ -316,11 +321,14 @@ export class ClientActorSystem implements SceneVisualSystem {
         this.colliderInstances.set(actor.id, instance);
       }
       this.collision.setDynamic(actor.id, instance);
+      const definitions = simpleCollisionInstanceToPhysicsDefinitions(instance);
+      if (definitions.length > 0) this.physics?.setActorCollider(actor.id, definitions);
     }
     for (const actorId of Array.from(this.colliderInstances.keys())) {
       if (live.has(actorId)) continue;
       this.colliderInstances.delete(actorId);
       this.collision.removeDynamic(actorId);
+      this.physics?.removeActorCollider(actorId);
     }
   }
 
@@ -343,7 +351,10 @@ export class ClientActorSystem implements SceneVisualSystem {
   public dispose(): void {
     this.disposeHoverHelper();
     this.snapshots.clear();
-    for (const actorId of this.colliderInstances.keys()) this.collision.removeDynamic(actorId);
+    for (const actorId of this.colliderInstances.keys()) {
+      this.collision.removeDynamic(actorId);
+      this.physics?.removeActorCollider(actorId);
+    }
     this.colliderInstances.clear();
     this.highCountBatches.dispose();
     this.fruit.dispose();

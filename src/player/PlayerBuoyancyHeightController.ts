@@ -20,6 +20,10 @@ export class PlayerBuoyancyHeightController {
     this.sampleBaseHeight(x, z) + this.currentOffset
   );
 
+  public get offset(): number {
+    return this.currentOffset;
+  }
+
   public setAuthoritativeHeight(x: number, z: number, y: number): void {
     if (!Number.isFinite(y)) return;
     const offset = y - this.sampleBaseHeight(x, z);

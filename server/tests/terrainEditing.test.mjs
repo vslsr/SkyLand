@@ -148,3 +148,4 @@ test('非流式场景没有可编辑地形，编辑入口直接是空操作', as
   );
   assert.deepEqual(scene.readTerrainPatches(), []);
 });
+import './initRapier.mjs';

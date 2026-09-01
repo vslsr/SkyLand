@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { ClientActorSystem } from '../actors/ClientActorSystem';
 import { CollisionWorld } from '../../shared/collision/index.mjs';
+import { getRapier, PhysicsWorld } from '../../shared/physics/index.mjs';
 import { GrassFieldSystem, type GrassInteractionTarget } from '../grass';
 import { createGroundModel } from '../models/ground';
 import { createTreeField } from '../models/tree';
@@ -27,6 +28,7 @@ export function createLineArtScene(
   // 一个场景一张碰撞网格：流式 chunk 往里放静态物件，Actor 往里放动态盒子，
   // 玩家推出和相机悬臂都只查它，不需要各自再维护一份碰撞体列表。
   const collisionWorld = new CollisionWorld();
+  const physicsWorld = new PhysicsWorld(getRapier());
   const terrainWorld = renderer.world
     ? new TerrainWorld(
         toWorldSeed(worldSeed ?? DEFAULT_WORLD_SEED),
@@ -46,6 +48,7 @@ export function createLineArtScene(
       definition,
       environment,
       collision: collisionWorld,
+      physics: physicsWorld,
       worldSeed,
     });
   }
@@ -75,6 +78,7 @@ export function createLineArtScene(
       seaLevel: definition.gameplay.water?.seaLevel,
       terrainPatches: terrainWorld?.patches,
       collision: collisionWorld,
+      physics: physicsWorld,
       onChunkMounted: (key, chunkX, chunkZ, props, propCount) => {
         actorSnapshotTarget?.mountGeneratedPropChunk(key, chunkX, chunkZ, props, propCount);
       },
@@ -100,6 +104,21 @@ export function createLineArtScene(
     visualSystems.push(streamer);
     grassInteraction = streamer.grassInteraction;
   } else {
+    if (renderer.content.ground) {
+      const bounds = definition.gameplay.bounds;
+      physicsWorld.setActorCollider('__fixed-ground', {
+        shape: 'box',
+        halfWidth: (bounds.maximumX - bounds.minimumX) * 0.5,
+        halfLength: (bounds.maximumZ - bounds.minimumZ) * 0.5,
+        minimumY: -0.2,
+        maximumY: 0,
+        x: (bounds.minimumX + bounds.maximumX) * 0.5,
+        y: 0,
+        z: (bounds.minimumZ + bounds.maximumZ) * 0.5,
+        yaw: 0,
+      });
+      physicsWorld.step();
+    }
     if (renderer.content.ground) scene.add(createGroundModel(renderer.palette.ground, environment));
     if (renderer.content.trees) {
       scene.add(createTreeField(
@@ -142,5 +161,6 @@ export function createLineArtScene(
     actorSnapshotTarget,
     collisionWorld,
     terrainWorld,
+    physicsWorld,
   };
 }

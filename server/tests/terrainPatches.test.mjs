@@ -13,7 +13,6 @@ import {
   TERRAIN_SHAPE,
   TERRAIN_SURFACE,
 } from '../../shared/world/terrainConfig.mjs';
-import { resolveTerrainMovement } from '../../shared/world/terrainMovement.mjs';
 import {
   TerrainEditor,
   TERRAIN_RAMP_DIRECTION,
@@ -62,7 +61,7 @@ test('边界 patch 只通知当前 chunk 与读取该边界的相邻 chunk', () 
   );
 });
 
-test('共享采样与移动解算可以读取同一份稀疏地形覆盖', () => {
+test('共享地形采样可以读取同一份稀疏地形覆盖', () => {
   const patches = new TerrainPatchStore(DEFAULT_WORLD_SEED);
   const override = encodeTerrainCell(2, TERRAIN_SURFACE.GROUND, TERRAIN_SHAPE.FLAT);
   patches.setCellCode(0, 0, override);
@@ -71,14 +70,6 @@ test('共享采样与移动解算可以读取同一份稀疏地形覆盖', () =>
 
   assert.equal(
     sampleTerrain(DEFAULT_WORLD_SEED, center.x, center.z, {}, cellCodeAt).groundY,
-    2,
-  );
-  assert.equal(
-    resolveTerrainMovement(DEFAULT_WORLD_SEED, center, center, {
-      radius: 0,
-      maximumStepHeight: 0,
-      cellCodeAt,
-    }).y,
     2,
   );
 });

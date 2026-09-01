@@ -71,7 +71,9 @@ export function createSimpleCollisionFromRender(render, dropMotion) {
       halfWidth: positiveNumber(render.width, 1) * 0.5,
       halfLength: positiveNumber(render.length, 1) * 0.5,
       minimumY: -0.24,
-      maximumY: 2.3,
+      // 甲板可见顶面在根节点上方约 0.47m；旧值 2.3m 把桅杆也包进一个
+      // 巨型盒，角色控制器只会撞上一堵隐形墙而无法站上木筏。
+      maximumY: 0.47,
     });
   }
   if (model === 'line-art-cargo-crate') {
@@ -98,13 +100,13 @@ export function createSimpleCollisionFromRender(render, dropMotion) {
     const radius = positiveNumber(render.radius, 0.5);
     const height = positiveNumber(render.height, 0.9);
     return createSimpleCollisionDefinition({
-      // 只让细小根部参与推出，宽菌盖可以悬在史莱姆头顶而不形成隐形墙。
+      // 根部保持细小；Rapier 适配层会把下面的 supportShape 生成为独立薄菌盖，
+      // 因此菌盖顶面可站立，而不再用一根宽盒从地面制造隐形墙。
       halfWidth: radius * 0.4,
       halfLength: radius * 0.4,
       minimumY: 0,
       maximumY: height,
-      // 常规角色控制器把「侧面阻挡」和「顶部支撑」分开。菌盖不挡水平移动，
-      // 但向下扫掠必须能落在整个圆形菌盖上，而不是只认细根的面积。
+      // 支撑 authoring 会成为第二枚薄圆柱 collider，而不是旧查询的特殊分支。
       supportShape: 'cylinder',
       supportHalfWidth: radius,
       supportHalfLength: radius,

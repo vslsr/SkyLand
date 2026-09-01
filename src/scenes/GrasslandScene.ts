@@ -1,6 +1,7 @@
 import { FlyController } from '../camera/FlyController';
 import { GameInteractionLayer } from '../interaction/GameInteractionLayer';
 import { isDevelopmentRuntime } from '../debug/developmentRuntime';
+import { PlayerTransformLogRecorder } from '../debug/PlayerTransformLogRecorder';
 import {
   createPlayerInputScheme,
   GamepadInputDevice,
@@ -62,6 +63,7 @@ export class GrasslandScene extends Scene {
   private readonly lobbyPage = new RoomLobbyPage();
   private readonly gameMenuPage = new GameMenuPage();
   private readonly debugMenuPage?: DebugMenuPage;
+  private readonly playerTransformLog?: PlayerTransformLogRecorder;
   private disposeDebugMenuShortcut?: () => void;
   private readonly snapshots = new SnapshotBuffer();
   private readonly remotePlayers: RemotePlayerGroup;
@@ -96,7 +98,40 @@ export class GrasslandScene extends Scene {
     });
     if (this.developmentRuntime) {
       this.debugMenuPage = new DebugMenuPage();
+      this.playerTransformLog = new PlayerTransformLogRecorder({
+        start: () => this.roomClient.startPlayerTransformLog(),
+        append: (sessionId, events) => (
+          this.roomClient.appendPlayerTransformLog(sessionId, events)
+        ),
+        stop: (sessionId, events) => (
+          this.roomClient.stopPlayerTransformLog(sessionId, events)
+        ),
+      }, {
+        onStateChange: (state, message) => {
+          this.debugMenuPage?.setTransformLogState(state, message);
+        },
+      });
       this.debugMenuPage.onRequestClose(() => this.commonUI.pop(this.debugMenuPage));
+      this.debugMenuPage.onTransformLogToggle((recording) => {
+        if (!recording) {
+          this.playerTransformLog?.stop();
+          return;
+        }
+        const joinedRoom = this.joinedRoom;
+        const player = this.player;
+        if (!joinedRoom || !player) {
+          this.debugMenuPage?.setTransformLogState('inactive', '请先进入房间并生成玩家角色。');
+          return;
+        }
+        this.playerTransformLog?.begin({
+          roomId: joinedRoom.room.id,
+          roomName: joinedRoom.room.name,
+          sceneId: joinedRoom.scene.id,
+          playerId: joinedRoom.player.id,
+          playerName: joinedRoom.player.name,
+          initialState: player.captureTransformDebugState(),
+        });
+      });
       this.debugMenuPage.onCollisionToggle((visible) => {
         this.renderer.setSimpleCollisionVisible(visible);
       });
@@ -185,9 +220,15 @@ export class GrasslandScene extends Scene {
       this.terrainEdits.setOperation(operation);
     });
     this.roomClient.onSnapshot((snapshot) => this.handleSnapshot(snapshot));
+    this.roomClient.onPlayerTransformLogStatus((status) => {
+      this.playerTransformLog?.handleStatus(status);
+    });
     // 地形覆盖只从服务端来：客户端不做本地预测，避免脚下的世界两端不一致。
     this.roomClient.onTerrainPatch((cells) => this.renderer.applyTerrainPatches(cells));
-    this.roomClient.onDisconnect(() => this.handleDisconnect());
+    this.roomClient.onDisconnect(() => {
+      this.playerTransformLog?.handleDisconnect();
+      this.handleDisconnect();
+    });
     this.renderer.addWorldObject(this.remotePlayers.root);
   }
 
@@ -344,6 +385,7 @@ export class GrasslandScene extends Scene {
       player: this.player,
     });
     this.hud.setRoom(joined.room);
+    this.debugMenuPage?.setTransformLogAvailable(Boolean(this.player));
     this.commonUI.clear();
   }
 
@@ -362,6 +404,7 @@ export class GrasslandScene extends Scene {
     page.setCollisionVisible(this.renderer.isSimpleCollisionVisible);
     page.setTemperatureVisible(this.renderer.isTemperatureVisible);
     page.setWeather(this.renderer.weather);
+    page.setTransformLogAvailable(Boolean(this.joinedRoom && this.player));
     this.commonUI.push(page);
   }
 
@@ -377,6 +420,7 @@ export class GrasslandScene extends Scene {
 
   private exitCurrentRoom(): void {
     if (!this.joinedRoom) return;
+    this.playerTransformLog?.stop();
     this.roomClient.leaveRoom();
     this.joinedRoom = undefined;
     this.terrainEditorPanel.setAvailable(false);
@@ -404,14 +448,63 @@ export class GrasslandScene extends Scene {
 
     // 自己的那条不走插值：直接交给和解，把预测拉回服务器的结论。
     const own = snapshot.players.find((player) => player.id === this.joinedRoom?.player.id);
-    if (own) this.player?.applyAuthoritativeState(
-      own.sequence,
+    const player = this.player;
+    if (!own || !player) {
+      this.playerTransformLog?.record('client.snapshot_missing_local_player', {
+        snapshotTick: snapshot.tick,
+        serverTime: snapshot.serverTime,
+        snapshotPlayerIds: snapshot.players.map((entry) => entry.id),
+      });
+      return;
+    }
+    const before = player.captureTransformDebugState();
+    const authority = {
+      id: own.id,
+      x: own.x,
+      y: own.y,
+      z: own.z,
+      yaw: own.yaw,
+      speed: own.speed,
+      ackTick: own.ackTick ?? own.sequence,
+      velocityX: own.velocityX,
+      verticalVelocity: own.verticalVelocity,
+      velocityZ: own.velocityZ,
+      grounded: own.grounded,
+    };
+    this.playerTransformLog?.record('client.snapshot_received', {
+      snapshotTick: snapshot.tick,
+      serverTime: snapshot.serverTime,
+      receivedAt: Date.now(),
+      authority,
+      clientBefore: before,
+      authorityDeltaBefore: {
+        x: before.logic.x - own.x,
+        y: own.y === undefined ? undefined : before.logic.y - own.y,
+        z: before.logic.z - own.z,
+      },
+    });
+    const reconciliation = player.applyAuthoritativeState(
+      own.ackTick ?? own.sequence,
       own.x,
       own.z,
       own.y,
       own.verticalVelocity,
+      own.velocityX,
+      own.velocityZ,
       own.grounded,
     );
+    const after = player.captureTransformDebugState();
+    this.playerTransformLog?.record('client.reconciliation_completed', {
+      snapshotTick: snapshot.tick,
+      serverTime: snapshot.serverTime,
+      reconciliation,
+      clientAfter: after,
+      authorityDeltaAfter: {
+        x: after.logic.x - own.x,
+        y: own.y === undefined ? undefined : after.logic.y - own.y,
+        z: after.logic.z - own.z,
+      },
+    });
   }
 
   private handleDisconnect(): void {
@@ -452,6 +545,7 @@ export class GrasslandScene extends Scene {
   }
 
   private destroyPlayer(): void {
+    this.debugMenuPage?.setTransformLogAvailable(false);
     this.sceneComponents.clear();
     this.snapshots.clear();
     this.vesselControls.reset();
@@ -475,12 +569,17 @@ export class GrasslandScene extends Scene {
     this.timeSinceInputSent += deltaSeconds;
     if (this.timeSinceInputSent < INPUT_SEND_INTERVAL_SECONDS) return;
 
-    const elapsed = this.timeSinceInputSent;
     this.timeSinceInputSent = 0;
-    const sequence = this.roomClient.sendPlayerInput(this.player.controller.inputFrame, elapsed);
-    if (sequence !== undefined) {
-      this.player.recordPrediction(sequence);
-      this.player.controller.acknowledgeInputFrame();
-    }
+    const inputs = this.player.unacknowledgedInputSteps;
+    const lastInput = inputs.at(-1);
+    const sentTick = this.roomClient.sendPlayerInput(inputs);
+    this.playerTransformLog?.record('client.input_packet_sent', {
+      sent: sentTick !== undefined,
+      inputCount: inputs.length,
+      firstTick: inputs[0]?.tick,
+      lastTick: lastInput?.tick,
+      lastInput,
+      transform: this.player.captureTransformDebugState(),
+    });
   }
 }

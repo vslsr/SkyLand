@@ -25,5 +25,9 @@ export class PlayerMovementComponent extends ActorComponent {
       4,
     );
     this.maximumStepHeight = finiteInRange(definition.maximumStepHeight, 0, 0, 2);
+    this.acceleration = finiteInRange(definition.acceleration, 28, 0.1, 100);
+    this.deceleration = finiteInRange(definition.deceleration, 24, 0.1, 100);
+    this.airAcceleration = finiteInRange(definition.airAcceleration, 8, 0, 100);
+    this.airDrag = finiteInRange(definition.airDrag, 0.6, 0, 20);
   }
 }

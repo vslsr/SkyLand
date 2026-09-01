@@ -17,11 +17,20 @@ export const TICKS_PER_SNAPSHOT = Math.max(1, Math.round(SERVER_TICK_RATE / SNAP
 /** 客户端上行输入的最小间隔（秒），与渲染帧率解耦。 */
 export const INPUT_SEND_INTERVAL_SECONDS = 0.05;
 
-/** 单条输入允许推进的最大模拟时间（秒）。 */
-export const MAXIMUM_INPUT_DELTA_SECONDS = 0.1;
+/** 玩家预测与权威模拟唯一允许使用的固定步长。 */
+export const SIMULATION_STEP_SECONDS = 1 / 60;
+
+/** 单个渲染帧最多补跑的固定步数，避免切回后台标签时阻塞主线程。 */
+export const MAXIMUM_SIMULATION_CATCH_UP_STEPS = 5;
+
+/** 单个输入包最多接受的固定步数（100ms）。 */
+export const MAXIMUM_INPUT_STEPS_PER_PACKET = 6;
 
 /** 每名玩家的模拟时间预算上限（秒），用来吸收网络抖动的突发。 */
 export const INPUT_TIME_BUDGET_SECONDS = 0.25;
+
+/** 客户端未确认输入队列上限；超过时只保留最新步并等待权威快照兜底。 */
+export const MAXIMUM_PENDING_INPUT_STEPS = 120;
 
 /** 单个连接每秒允许的输入消息数，以及可以透支的突发条数。 */
 export const MAXIMUM_INPUT_MESSAGES_PER_SECOND = 40;

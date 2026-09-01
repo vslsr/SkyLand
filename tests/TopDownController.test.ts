@@ -21,6 +21,7 @@ import {
   WaterMovementEffectController,
   createPlayerMovementAttributes,
 } from '../shared/abilities/playerMovementEffects.mjs';
+import { getRapier, PhysicsWorld } from '../shared/physics/index.mjs';
 
 class TestKeyboardMouseDevice extends BufferedInputDevice {
   public constructor(private readonly now: () => number) {
@@ -212,7 +213,7 @@ test('TopDown 本地预测读取 GAS Movement.Speed，涉水 Effect 使位移降
   input.dispose();
 });
 
-test('Space 触发本地跳跃预测，短按被锁存且空中方向输入继续移动', () => {
+test('Space 进入固定物理步，短按边沿进入输入队列且空中方向输入继续移动', () => {
   let now = 0;
   const device = new TestKeyboardMouseDevice(() => now);
   const scheme = createPlayerInputScheme({ storage: null });
@@ -231,9 +232,19 @@ test('Space 触发本地跳跃预测，短按被锁存且空中方向输入继�
     airControl: 0.85,
   });
   const { canvas } = createCanvas();
+  const physics = new PhysicsWorld(getRapier(), { timestep: 1 / 60 });
+  physics.setActorCollider('ground', {
+    shape: 'box', x: 0, y: 0, z: 0, yaw: 0,
+    halfWidth: 20, halfLength: 20, minimumY: -1, maximumY: 0,
+  });
+  physics.prepareQueries();
   const controller = new TopDownController(canvas, root, input, {
     movement: { walkSpeed: 3.2, sprintMultiplier: 1.65 },
     jumpAbility: jump,
+    physicsWorld: physics,
+    characterId: 'jump-test-player',
+    collisionRadius: 0.42,
+    collisionHeight: 0.84,
     sampleGroundHeight: () => 0,
   });
 
@@ -243,16 +254,21 @@ test('Space 触发本地跳跃预测，短按被锁存且空中方向输入继�
   input.update(now);
   controller.update(0.05);
   assert.equal(controller.isGrounded, false);
-  assert.ok(controller.verticalPosition > 0);
-  assert.ok(Math.hypot(controller.position.x, controller.position.z) > 0);
+  assert.ok(controller.verticalPosition > 0, `expected airborne y, got ${controller.verticalPosition}`);
+  assert.ok(
+    Math.hypot(controller.position.x, controller.position.z) > 0,
+    `expected horizontal input, got ${JSON.stringify(controller.position)}`,
+  );
   assert.equal(controller.inputFrame.jump, true);
+  assert.ok(
+    controller.drainInputSteps().some((step) => step.jump === true),
+    'fixed input queue lost the jump edge',
+  );
 
   device.emit('Keyboard.Space', false);
   now = 32;
   input.update(now);
-  assert.equal(controller.inputFrame.jump, true, '短按必须保留到下一份网络输入发出');
-  controller.acknowledgeInputFrame();
-  assert.equal(controller.inputFrame.jump, false);
+  assert.equal(controller.inputFrame.jump, false, '按下沿已经进入固定步队列后即可释放锁存');
 
   device.emit('Keyboard.KeyW', false);
   for (let frame = 0; frame < 30 && !controller.isGrounded; frame += 1) {
@@ -261,9 +277,13 @@ test('Space 触发本地跳跃预测，短按被锁存且空中方向输入继�
     controller.update(0.05);
   }
   assert.equal(controller.isGrounded, true);
-  assert.equal(controller.verticalPosition, 0);
+  assert.ok(
+    Math.abs(controller.verticalPosition) < 0.03,
+    `expected ground feet height, got ${controller.verticalPosition}`,
+  );
 
   controller.dispose();
+  physics.dispose();
   input.dispose();
 });
 

@@ -19,6 +19,7 @@ import {
   setPropSkipped as updatePropSkipMask,
 } from '../../shared/world/generatedProp.mjs';
 import { ChunkResidency } from './ChunkResidency.mjs';
+import { simpleCollisionGroupToPhysicsDefinitions } from '../../shared/physics/simpleCollisionToPhysics.mjs';
 
 const DEFAULT_RESIDENT_RADIUS = 1;
 const DEFAULT_KEEP_RADIUS = 2;
@@ -35,6 +36,7 @@ export class ServerChunkColliders {
    */
   constructor(options) {
     this.world = options.world;
+    this.physics = options.physics;
     this.worldSeed = toWorldSeed(options.worldSeed);
     /** 只保存偏离默认生成结果的 chunk；数量与被砍过的树成正比。 */
     this.skipMasks = new Map();
@@ -45,7 +47,10 @@ export class ServerChunkColliders {
       residentRadius: options.residentRadius ?? DEFAULT_RESIDENT_RADIUS,
       keepRadius: options.keepRadius ?? DEFAULT_KEEP_RADIUS,
       onLoad: (chunkX, chunkZ, key) => this.rebuild(chunkX, chunkZ, key),
-      onUnload: (key) => this.world.removeStaticGroup(key),
+      onUnload: (key) => {
+        this.world.removeStaticGroup(key);
+        this.physics?.removeStaticColliderGroup(`props:${key}`);
+      },
     });
   }
 
@@ -107,15 +112,17 @@ export class ServerChunkColliders {
   }
 
   rebuild(chunkX, chunkZ, key = toChunkKey(chunkX, chunkZ)) {
-    this.world.setStaticGroup(
-      key,
-      buildChunkColliders(
-        this.worldSeed,
-        chunkX,
-        chunkZ,
-        this.propBuffer,
-        this.skipMasks.get(key),
-      ),
+    const colliders = buildChunkColliders(
+      this.worldSeed,
+      chunkX,
+      chunkZ,
+      this.propBuffer,
+      this.skipMasks.get(key),
+    );
+    this.world.setStaticGroup(key, colliders);
+    this.physics?.setStaticColliderGroup(
+      `props:${key}`,
+      simpleCollisionGroupToPhysicsDefinitions(colliders),
     );
   }
 }

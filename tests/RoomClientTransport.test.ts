@@ -100,9 +100,18 @@ test('RoomClient 按消息用途选择 control 与 realtime 通道', async () =>
   }));
   assert.equal((await joining).player.id, 'player-1');
 
-  assert.equal(client.sendPlayerInput({ move: { x: 1, z: 0 }, sprint: false, yaw: 0 }, 0.05), 1);
+  assert.equal(client.sendPlayerInput([
+    { tick: 1, move: { x: 1, z: 0 }, sprint: false, jump: false, yaw: 0 },
+    { tick: 2, move: { x: 1, z: 0 }, sprint: false, jump: false, yaw: 0 },
+  ]), 2);
   assert.equal(transport.sent.at(-1)?.channel, 'realtime');
-  assert.equal(decodeSent(transport.sent.at(-1)!.payload).type, 'player:input');
+  assert.deepEqual(decodeSent(transport.sent.at(-1)!.payload), {
+    type: 'player:input',
+    inputs: [
+      { tick: 1, move: { x: 1, z: 0 }, sprint: false, jump: false, yaw: 0 },
+      { tick: 2, move: { x: 1, z: 0 }, sprint: false, jump: false, yaw: 0 },
+    ],
+  });
 
   assert.equal(client.sendVesselInput('raft-1', { throttle: 1, steering: 0.25 }), 1);
   assert.equal(transport.sent.at(-1)?.channel, 'realtime');
@@ -122,6 +131,30 @@ test('RoomClient 按消息用途选择 control 与 realtime 通道', async () =>
     type: 'weather:set',
     weather: 'blizzard',
   });
+
+  const transformLogStatuses: string[] = [];
+  client.onPlayerTransformLogStatus((status) => transformLogStatuses.push(status.status));
+  assert.equal(client.startPlayerTransformLog(), true);
+  assert.equal(decodeSent(transport.sent.at(-1)!.payload).type, 'debug:transform-log:start');
+  transport.receive(JSON.stringify({
+    type: 'debug:transform-log:status',
+    transformLog: { status: 'started', sessionId: 'session-1' },
+  }));
+  assert.deepEqual(transformLogStatuses, ['started']);
+  const transformEvent = {
+    event: 'client.input_packet_sent',
+    clientTime: 1,
+    clientTimeIso: '1970-01-01T00:00:00.001Z',
+    monotonicMs: 1,
+    data: { lastTick: 2 },
+  };
+  assert.equal(client.appendPlayerTransformLog('session-1', [transformEvent]), true);
+  assert.equal(
+    decodeSent(transport.sent.at(-1)!.payload).type,
+    'debug:transform-log:events',
+  );
+  assert.equal(client.stopPlayerTransformLog('session-1', []), true);
+  assert.equal(decodeSent(transport.sent.at(-1)!.payload).type, 'debug:transform-log:stop');
 });
 
 test('JSON codec 同时接受文本与二进制传输载荷', () => {

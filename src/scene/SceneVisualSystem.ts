@@ -6,6 +6,7 @@ import type { SnapshotActor } from '../network/protocol';
 import type { ActorFloatState, ActorEventType } from '../network/protocol';
 import type { WeatherType } from '../weather/index';
 import type { TerrainWorld } from '../world/TerrainWorld';
+import type { PhysicsWorld } from '../../shared/physics/PhysicsWorld.mjs';
 
 /**
  * 每帧传给场景系统的上下文。
@@ -81,10 +82,11 @@ export interface SceneComposition {
   grassInteraction?: GrassInteractionTarget;
   actorSnapshotTarget?: ActorSnapshotTarget;
   /**
-   * 这个场景的碰撞世界：流式 chunk 的静态物件与 Actor 的碰撞盒都登记在这里。
-   * 玩家推出与第三人称相机悬臂共用它，随场景一起创建与丢弃。
+   * 旧 CollisionWorld 只保留给非玩家 Actor 推出、交互宽相与兼容调试。
+   * 玩家和相机均使用下面的 Rapier PhysicsWorld。
    */
   collisionWorld?: CollisionWorld;
-  /** 规则地形保持为纯函数查询，不向碰撞网格注册 256 个格子。 */
+  /** 规则地形的内容采样（草、水、编辑等）；玩家碰撞由 trimesh 负责。 */
   terrainWorld?: TerrainWorld;
+  physicsWorld?: PhysicsWorld;
 }

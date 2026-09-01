@@ -12,6 +12,8 @@ function toState(player: SnapshotPlayer): InterpolatedPlayerState {
     yaw: player.yaw,
     speed: player.speed,
     verticalVelocity: player.verticalVelocity,
+    velocityX: player.velocityX,
+    velocityZ: player.velocityZ,
     grounded: player.grounded,
   };
 }
@@ -30,6 +32,12 @@ function blend(from: SnapshotPlayer, to: SnapshotPlayer, amount: number): Interp
     verticalVelocity: Number.isFinite(from.verticalVelocity) && Number.isFinite(to.verticalVelocity)
       ? from.verticalVelocity! + (to.verticalVelocity! - from.verticalVelocity!) * amount
       : to.verticalVelocity ?? from.verticalVelocity,
+    velocityX: Number.isFinite(from.velocityX) && Number.isFinite(to.velocityX)
+      ? from.velocityX! + (to.velocityX! - from.velocityX!) * amount
+      : to.velocityX ?? from.velocityX,
+    velocityZ: Number.isFinite(from.velocityZ) && Number.isFinite(to.velocityZ)
+      ? from.velocityZ! + (to.velocityZ! - from.velocityZ!) * amount
+      : to.velocityZ ?? from.velocityZ,
     grounded: amount < 0.5 ? from.grounded : to.grounded,
   };
 }

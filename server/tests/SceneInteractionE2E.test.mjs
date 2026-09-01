@@ -241,16 +241,17 @@ test('真实 WebSocket 贯通史莱姆叼取、移动拉伸和自动脱离', asy
     return mushroom?.elasticTether.holderPlayerId === null
       && mushroom.elasticTether.releaseRevision >= 1;
   });
-  let sequence = 0;
+  let inputTick = 0;
   const movement = setInterval(() => {
-    sequence += 1;
-    socket.send(JSON.stringify({
-      type: 'player:input',
-      sequence,
-      deltaSeconds: 0.05,
+    const inputs = Array.from({ length: 3 }, () => ({
+      tick: ++inputTick,
       move: { x: 0, z: 1 },
       sprint: true,
       yaw: 0,
+    }));
+    socket.send(JSON.stringify({
+      type: 'player:input',
+      inputs,
     }));
   }, 50);
   const released = await releasedState.finally(() => clearInterval(movement));
@@ -331,21 +332,22 @@ test('真实 WebSocket 贯通流式树砍伐、偏离态快照和圆木掉落', 
 
   const directionX = (target.x - player.x) / Math.max(target.distance, 0.001);
   const directionZ = (target.z - player.z) / Math.max(target.distance, 0.001);
-  let movementSequence = 0;
+  let movementTick = 0;
   const nearbyState = waitForJson(socket, (message) => {
     if (message.type !== 'room:snapshot') return false;
     const current = message.snapshot.players.find((candidate) => candidate.id === joined.player.id);
     return current && Math.hypot(current.x - target.x, current.z - target.z) <= 2.4;
   }, 10_000);
   const movement = setInterval(() => {
-    movementSequence += 1;
-    socket.send(JSON.stringify({
-      type: 'player:input',
-      sequence: movementSequence,
-      deltaSeconds: 0.05,
+    const inputs = Array.from({ length: 3 }, () => ({
+      tick: ++movementTick,
       move: { x: directionX, z: directionZ },
       sprint: true,
       yaw: 0,
+    }));
+    socket.send(JSON.stringify({
+      type: 'player:input',
+      inputs,
     }));
   }, 40);
   await nearbyState.finally(() => clearInterval(movement));

@@ -326,6 +326,18 @@ function validateSlimeSurfaceDrag(raw, filename) {
       Number.EPSILON,
       2,
     ),
+    ...(definition.acceleration !== undefined ? {
+      acceleration: requireNumber(definition.acceleration, `${path}.acceleration`, Number.EPSILON, 100),
+    } : {}),
+    ...(definition.deceleration !== undefined ? {
+      deceleration: requireNumber(definition.deceleration, `${path}.deceleration`, Number.EPSILON, 100),
+    } : {}),
+    ...(definition.airAcceleration !== undefined ? {
+      airAcceleration: requireNumber(definition.airAcceleration, `${path}.airAcceleration`, 0, 100),
+    } : {}),
+    ...(definition.airDrag !== undefined ? {
+      airDrag: requireNumber(definition.airDrag, `${path}.airDrag`, 0, 20),
+    } : {}),
   };
 }
 

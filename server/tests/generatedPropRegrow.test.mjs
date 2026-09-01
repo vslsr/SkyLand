@@ -228,3 +228,4 @@ test('快照只发这一种形态用得上的字段', async () => {
   assert.equal(typeof rockSnapshot.propState.health, 'number');
   assert.equal(rockSnapshot.propState.readyAt, undefined);
 });
+import './initRapier.mjs';

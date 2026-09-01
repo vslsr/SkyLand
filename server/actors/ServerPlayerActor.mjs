@@ -9,7 +9,14 @@ import {
   TRANSFORM_COMPONENT,
   TransformComponent,
 } from '../../shared/actor/index.mjs';
-import { INPUT_TIME_BUDGET_SECONDS } from '../../shared/networkTuning.mjs';
+import {
+  createCharacterSimulationParams,
+  createCharacterState,
+} from '../../shared/physics/index.mjs';
+import {
+  INPUT_TIME_BUDGET_SECONDS,
+  SIMULATION_STEP_SECONDS,
+} from '../../shared/networkTuning.mjs';
 import {
   GAME_ABILITY_COMPONENT,
   GameAbilityComponent,
@@ -47,11 +54,19 @@ export class ServerPlayerActor extends Actor {
     const render = archetype.components.render;
     this.collisionRadius = render.collisionRadius ?? render.radius;
     this.collisionHeight = render.collisionHeight ?? render.radius * 2;
+    this.characterState = createCharacterState({
+      x: spawn.x,
+      y: spawn.y ?? 0,
+      z: spawn.z,
+      grounded: true,
+    });
+    this.characterParams = createCharacterSimulationParams(player.id, movement, this.jump);
     this.speed = 0;
+    this.ackTick = 0;
     this.sequence = 0;
     this.actorInteractionSequence = 0;
     this.terrainEditSequence = 0;
-    this.timeBudget = INPUT_TIME_BUDGET_SECONDS;
+    this.stepBudget = Math.floor(INPUT_TIME_BUDGET_SECONDS / SIMULATION_STEP_SECONDS);
     this.lastInputAt = now;
     // ServerScene.players 过去保存普通对象；保留可枚举坐标，兼容监控/测试里
     // 通过对象展开记录一帧位置的用法，同时实际数据仍由 Transform Component 持有。
@@ -114,6 +129,9 @@ export class ServerPlayerActor extends Actor {
 
   setPosition(x, z, y = this.y) {
     this.transform.setWorldTransform([x, y, z], this.yaw);
+    this.characterState.x = x;
+    this.characterState.y = y;
+    this.characterState.z = z;
   }
 
   dispose() {

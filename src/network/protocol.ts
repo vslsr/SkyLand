@@ -10,8 +10,13 @@ export interface SnapshotPlayer {
   z: number;
   yaw: number;
   speed: number;
+  /** 服务端已经逐步执行到的客户端输入 tick。 */
+  ackTick: number;
+  /** @deprecated 过渡期快照别名；新代码只读取 ackTick。 */
   sequence: number;
   verticalVelocity?: number;
+  velocityX?: number;
+  velocityZ?: number;
   grounded?: boolean;
   inventory?: Array<{ itemType: string; quantity: number }>;
   inventoryRevision?: number;
@@ -126,6 +131,11 @@ export interface PlayerInputFrame {
   yaw: number;
 }
 
+/** 客户端实际执行过的一次 60Hz 预测步；服务端按 tick 原样重放。 */
+export interface PlayerInputStep extends PlayerInputFrame {
+  tick: number;
+}
+
 /** 插值之后可以直接用于渲染的远端玩家状态。 */
 export interface InterpolatedPlayerState {
   id: string;
@@ -136,5 +146,7 @@ export interface InterpolatedPlayerState {
   yaw: number;
   speed: number;
   verticalVelocity?: number;
+  velocityX?: number;
+  velocityZ?: number;
   grounded?: boolean;
 }

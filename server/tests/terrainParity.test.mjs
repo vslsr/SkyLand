@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import './initRapier.mjs';
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { readWasmTerrainCellCode } from '../../shared/world/chunkGeneratorWasm.mjs';
@@ -8,13 +9,17 @@ import {
   terrainCellHeightLevel,
   terrainCellShape,
   terrainCellSurface,
+  sampleTerrain,
 } from '../../shared/world/terrainContent.mjs';
 import {
   TERRAIN_GRID,
+  TERRAIN_CELL_SIZE,
   TERRAIN_SHAPE,
   TERRAIN_SURFACE,
 } from '../../shared/world/terrainConfig.mjs';
 import { DEFAULT_WORLD_SEED } from '../../shared/world/worldConfig.mjs';
+import { buildTerrainCollisionMesh } from '../../shared/world/terrainCollisionMesh.mjs';
+import { getRapier, PhysicsWorld } from '../../shared/physics/index.mjs';
 
 const WASM_PATH = fileURLToPath(new URL('../../shared/world/wasm/chunkgen.wasm', import.meta.url));
 
@@ -115,4 +120,32 @@ test('缺少 terrain_cell_code_at 导出时给出可诊断的错误', async () =
     () => readWasmTerrainCellCode({ exports: {} }, DEFAULT_WORLD_SEED, 0, 0),
     /terrain_cell_code_at 导出/,
   );
+});
+
+test('sampleTerrain 地面高度与 Rapier trimesh 向下射线一致', () => {
+  const chunkX = 2;
+  const chunkZ = -1;
+  const physics = new PhysicsWorld(getRapier());
+  physics.setChunkCollider(
+    `${chunkX}:${chunkZ}`,
+    buildTerrainCollisionMesh(
+      chunkX,
+      chunkZ,
+      (cellX, cellZ) => terrainCellCodeAt(DEFAULT_WORLD_SEED, cellX, cellZ),
+    ),
+  );
+  physics.prepareQueries();
+  for (let index = 0; index < 64; index += 1) {
+    const localCellX = index % TERRAIN_GRID;
+    const localCellZ = Math.floor(index / TERRAIN_GRID) * 2;
+    const x = (chunkX * TERRAIN_GRID + localCellX + 0.31) * TERRAIN_CELL_SIZE;
+    const z = (chunkZ * TERRAIN_GRID + localCellZ + 0.67) * TERRAIN_CELL_SIZE;
+    const expected = sampleTerrain(DEFAULT_WORLD_SEED, x, z).groundY;
+    const originY = expected + 5;
+    const hit = physics.castRay({ x, y: originY, z }, { x: 0, y: -1, z: 0 }, 10);
+    assert.ok(hit, `missing trimesh at ${x}, ${z}`);
+    const actual = originY - hit.timeOfImpact;
+    assert.ok(Math.abs(actual - expected) < 1e-4, `${x},${z}: ${actual} != ${expected}`);
+  }
+  physics.dispose();
 });

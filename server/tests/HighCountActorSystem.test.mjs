@@ -147,3 +147,4 @@ test('AOI 快照只向附近玩家复制物品堆，燃烧堆不会进入 dorman
   assert.equal(pile.requireComponent(ACTOR_RESIDENCY_COMPONENT).state, 'active');
   assert.equal(scene.actorWorld.context.highCountActors.dormantCount, 0);
 });
+import './initRapier.mjs';

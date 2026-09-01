@@ -1,9 +1,12 @@
 import { ServerScene } from '../scene/ServerScene.mjs';
+import { initServerRapier } from '../physics/rapierRuntime.mjs';
 import { SERVER_TICK_RATE, TICKS_PER_SNAPSHOT } from '../../shared/networkTuning.mjs';
 
 let room;
 let scene;
 let ticker;
+let initializing;
+const transformRecordings = new Map();
 
 function send(message) {
   if (process.connected) process.send?.(message);
@@ -21,30 +24,87 @@ function sendSummary() {
   });
 }
 
-function initialize(message) {
+async function initialize(message) {
   if (scene) return;
-  room = message.room;
-  // 世界种子决定这一局的树和石头长在哪；房间 DS 靠它算出与客户端一致的
-  // 静态碰撞，静态内容因此依然一个字节都不用同步。
-  scene = new ServerScene(message.scene, { worldSeed: message.worldSeed });
-  ticker = setInterval(() => {
-    scene.update();
-    if (scene.tick % TICKS_PER_SNAPSHOT === 0) {
-      if (scene.players.size === 0) {
-        // 保留无连接房间的观测快照，便于监控和子进程集成测试。
-        send({ type: 'room:snapshot', snapshot: scene.createSnapshot() });
-      } else {
-        for (const playerId of scene.players.keys()) {
-          send({
-            type: 'room:snapshot',
-            playerId,
-            snapshot: scene.createSnapshot(playerId),
-          });
+  if (initializing) return initializing;
+  initializing = (async () => {
+    const rapier = await initServerRapier();
+    if (scene) return;
+    room = message.room;
+    // 世界种子决定这一局的树和石头长在哪；房间 DS 靠它算出与客户端一致的
+    // 静态碰撞，静态内容因此依然一个字节都不用同步。
+    scene = new ServerScene(message.scene, {
+      worldSeed: message.worldSeed,
+      rapier,
+      playerTransformDebug: {
+        isEnabled: isPlayerTransformDebugEnabled,
+        record: recordPlayerTransformDebug,
+      },
+    });
+    ticker = setInterval(() => {
+      scene.update();
+      if (scene.tick % TICKS_PER_SNAPSHOT === 0) {
+        if (scene.players.size === 0) {
+          // 保留无连接房间的观测快照，便于监控和子进程集成测试。
+          send({ type: 'room:snapshot', snapshot: scene.createSnapshot() });
+        } else {
+          for (const playerId of scene.players.keys()) {
+            const snapshot = scene.createSnapshot(playerId);
+            if (isPlayerTransformDebugEnabled(playerId)) {
+              const player = snapshot.players.find((candidate) => candidate.id === playerId);
+              scene.emitPlayerTransformDebug(playerId, 'server.snapshot_emitted', {
+                snapshotTick: snapshot.tick,
+                serverTime: snapshot.serverTime,
+                authority: player ? {
+                  id: player.id,
+                  x: player.x,
+                  y: player.y,
+                  z: player.z,
+                  yaw: player.yaw,
+                  speed: player.speed,
+                  ackTick: player.ackTick,
+                  velocityX: player.velocityX,
+                  verticalVelocity: player.verticalVelocity,
+                  velocityZ: player.velocityZ,
+                  grounded: player.grounded,
+                } : undefined,
+              });
+            }
+            send({
+              type: 'room:snapshot',
+              playerId,
+              snapshot,
+            });
+          }
         }
       }
-    }
-  }, 1000 / SERVER_TICK_RATE);
-  send({ type: 'room:ready', pid: process.pid, sceneId: scene.id });
+    }, 1000 / SERVER_TICK_RATE);
+    send({ type: 'room:ready', pid: process.pid, sceneId: scene.id });
+  })();
+  try {
+    await initializing;
+  } finally {
+    initializing = undefined;
+  }
+}
+
+function isPlayerTransformDebugEnabled(playerId) {
+  for (const recording of transformRecordings.values()) {
+    if (recording.playerId === playerId) return true;
+  }
+  return false;
+}
+
+function recordPlayerTransformDebug(event) {
+  for (const [sessionId, recording] of transformRecordings) {
+    if (recording.playerId !== event.playerId) continue;
+    send({
+      type: 'debug:transform-log:event',
+      sessionId,
+      playerId: recording.playerId,
+      event,
+    });
+  }
 }
 
 process.on('message', (message) => {
@@ -52,7 +112,9 @@ process.on('message', (message) => {
 
   switch (message.type) {
     case 'room:initialize':
-      initialize(message);
+      void initialize(message).catch((error) => {
+        send({ type: 'room:error', message: error instanceof Error ? error.message : String(error) });
+      });
       break;
     case 'player:join': {
       if (!scene) break;
@@ -73,6 +135,29 @@ process.on('message', (message) => {
     case 'player:input':
       if (!scene) break;
       scene.applyInput(message.playerId, message.input ?? {});
+      break;
+    case 'debug:transform-log:start':
+      if (!scene || !scene.players.has(message.playerId)) break;
+      transformRecordings.set(message.sessionId, { playerId: message.playerId });
+      scene.emitPlayerTransformDebug(message.playerId, 'server.recording_started', {
+        roomId: room?.id,
+        sceneId: scene.id,
+      });
+      break;
+    case 'debug:transform-log:stop':
+      if (!scene) break;
+      if (transformRecordings.get(message.sessionId)?.playerId === message.playerId) {
+        scene.emitPlayerTransformDebug(message.playerId, 'server.recording_stopped', {
+          roomId: room?.id,
+          sceneId: scene.id,
+        });
+        transformRecordings.delete(message.sessionId);
+      }
+      send({
+        type: 'debug:transform-log:stopped',
+        sessionId: message.sessionId,
+        playerId: message.playerId,
+      });
       break;
     case 'weather:set':
       if (!scene) break;
@@ -113,6 +198,7 @@ process.on('message', (message) => {
 
 function shutdown() {
   if (ticker) clearInterval(ticker);
+  transformRecordings.clear();
   process.exit(0);
 }
 

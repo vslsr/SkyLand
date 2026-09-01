@@ -1,5 +1,6 @@
 import './style.css';
 import './ui/scrollbars.css';
+import { initRapier } from '../shared/physics/RapierRuntime.mjs';
 import { GrasslandScene } from './scenes/GrasslandScene';
 import { SceneManager } from './scenes/SceneManager';
 
@@ -30,6 +31,7 @@ function showStartupError(error: unknown): void {
 }
 
 try {
+  await initRapier(() => import('@dimforge/rapier3d'));
   const sceneManager = new SceneManager();
   const grasslandScene = new GrasslandScene({
     canvas: requireElement<HTMLCanvasElement>('scene'),

@@ -8,6 +8,7 @@ class FakeElement extends EventTarget {
   public id = '';
   public textContent = '';
   public type = '';
+  public disabled = false;
   public readonly dataset: Record<string, string> = {};
   public readonly children: FakeElement[] = [];
   public focused = false;
@@ -55,6 +56,24 @@ test('F8 调试菜单温度按钮切换文案、无障碍状态并派发回调',
 
   try {
     const page = new DebugMenuPage();
+    const transformLogButton = fakeDocument.elements.find((element) => (
+      element.tagName === 'button' && element.textContent === '开始记录玩家 Transform'
+    ));
+    assert.ok(transformLogButton);
+    assert.equal(transformLogButton.disabled, true);
+    page.setTransformLogAvailable(true);
+    assert.equal(transformLogButton.disabled, false);
+    const transformLogStates: boolean[] = [];
+    page.onTransformLogToggle((recording) => transformLogStates.push(recording));
+    transformLogButton.dispatchEvent(new Event('click'));
+    assert.deepEqual(transformLogStates, [true]);
+    assert.equal(transformLogButton.textContent, '正在开启…');
+    assert.equal(transformLogButton.disabled, true);
+    page.setTransformLogState('recording');
+    transformLogButton.dispatchEvent(new Event('click'));
+    assert.deepEqual(transformLogStates, [true, false]);
+    assert.equal(transformLogButton.textContent, '正在保存…');
+
     const temperatureButton = fakeDocument.elements.find((element) => (
       element.tagName === 'button' && element.textContent === '显示 Actor 温度'
     ));

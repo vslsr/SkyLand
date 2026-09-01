@@ -105,18 +105,21 @@ test('玩家进水时 GAS 减速，权威 Y 即使没有输入也按大振幅浮
 
   const beforeX = player.x;
   scene.applyInput(player.id, {
-    sequence: 1,
-    deltaSeconds: 0.05,
-    move: { x: 1, z: 0 },
+    inputs: Array.from({ length: 3 }, (_, index) => ({
+      tick: index + 1,
+      move: { x: 1, z: 0 },
+      sprint: false,
+      jump: false,
+      yaw: 0,
+    })),
   });
-  assert.ok(Math.abs(player.x - beforeX - 1.6 * 0.05) < 1e-6);
+  assert.ok(player.x > beforeX);
+  assert.ok(player.speed <= 1.6 + 1e-6);
   assert.equal(abilities.createSnapshot().effects.length, 1, '水中连续输入不能重复堆叠效果');
 
   player.setPosition(ground.x, ground.z);
   scene.applyInput(player.id, {
-    sequence: 2,
-    deltaSeconds: 0,
-    move: { x: 0, z: 0 },
+    inputs: [{ tick: 4, move: { x: 0, z: 0 }, sprint: false, jump: false, yaw: 0 }],
   });
   assert.equal(abilities.attributes.getCurrentValue(MOVE_SPEED_ATTRIBUTE), 3.2);
   assert.equal(abilities.hasTag(IN_WATER_STATE_TAG), false);
@@ -124,7 +127,7 @@ test('玩家进水时 GAS 减速，权威 Y 即使没有输入也按大振幅浮
 });
 
 test('服务端允许玩家跳过岸沿并在落地后继续向岸内移动', () => {
-  const now = 1_000_000;
+  let now = 1_000_000;
   const scene = new ServerScene(createDefinition({ x: 0.1, z: 1 }, -0.4), {
     worldSeed: DEFAULT_WORLD_SEED,
     now: () => now,
@@ -144,17 +147,46 @@ test('服务端允许玩家跳过岸沿并在落地后继续向岸内移动', ()
   const waterY = scene.playerSupportHeightAt(player, waterPosition.x, waterPosition.z, now / 1000);
   player.setPosition(waterPosition.x, waterPosition.z, waterY);
   player.jump.applyAuthoritativeState(0, true);
+  player.characterState.grounded = true;
 
-  const walking = scene.resolvePlayerMovement(player, { ...shorePosition, y: waterY });
-  assert.equal(walking.x, waterPosition.x, '未起跳时岸沿仍应阻挡玩家');
+  let tick = 1;
+  const advancePacket = (jump = false) => {
+    now += 50;
+    scene.update();
+    const inputs = Array.from({ length: 3 }, (_, index) => ({
+      tick: tick + index,
+      move: { x: 1, z: 0 },
+      sprint: false,
+      jump,
+      yaw: Math.PI / 2,
+    }));
+    tick += 3;
+    scene.applyInput(player.id, { inputs });
+  };
 
-  player.jump.setPressed(false);
-  player.jump.setPressed(true);
-  const jumpedOntoShore = scene.resolvePlayerMovement(player, { ...shorePosition, y: 0 });
-  assert.equal(jumpedOntoShore.x, shorePosition.x, '权威解算应允许脚底高过岸面的玩家越岸');
+  for (let packet = 0; packet < 4; packet += 1) advancePacket(false);
+  assert.ok(player.x < shorePosition.x, '未起跳时岸沿仍应阻挡玩家');
 
-  player.setPosition(jumpedOntoShore.x, jumpedOntoShore.z, 0);
-  player.jump.applyAuthoritativeState(0, true);
-  const movedInland = scene.resolvePlayerMovement(player, { ...inlandPosition, y: 0 });
-  assert.equal(movedInland.x, inlandPosition.x, '落地后应脱离岸沿，而不是只能沿岸滑动');
+  advancePacket(true);
+  assert.equal(player.characterState.grounded, false, '水面支撑仍必须允许起跳');
+  assert.ok(player.characterState.vy > 0, '起跳后必须保留向上速度');
+  for (let packet = 0; packet < 24 && player.x < inlandPosition.x; packet += 1) {
+    advancePacket(false);
+  }
+  assert.ok(
+    player.x >= inlandPosition.x,
+    `起跳后应越过岸沿，实际 ${JSON.stringify({
+      x: player.x,
+      y: player.y,
+      vx: player.characterState.vx,
+      vy: player.characterState.vy,
+      grounded: player.characterState.grounded,
+      ackTick: player.ackTick,
+    })}`,
+  );
+  for (let packet = 0; packet < 20 && !player.characterState.grounded; packet += 1) {
+    advancePacket(false);
+  }
+  assert.equal(player.characterState.grounded, true);
 });
+import './initRapier.mjs';

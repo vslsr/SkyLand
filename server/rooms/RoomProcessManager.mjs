@@ -152,6 +152,20 @@ export class RoomProcessManager extends EventEmitter {
     record.child.send({ type: 'player:input', playerId, input });
   }
 
+  startPlayerTransformLog(roomId, playerId, sessionId) {
+    const record = this.rooms.get(roomId);
+    if (!record || !record.players.has(playerId) || !record.child.connected) return false;
+    record.child.send({ type: 'debug:transform-log:start', playerId, sessionId });
+    return true;
+  }
+
+  stopPlayerTransformLog(roomId, playerId, sessionId) {
+    const record = this.rooms.get(roomId);
+    if (!record?.child?.connected) return false;
+    record.child.send({ type: 'debug:transform-log:stop', playerId, sessionId });
+    return true;
+  }
+
   setWeather(roomId, playerId, weather) {
     const record = this.rooms.get(roomId);
     if (!record || !record.players.has(playerId)) return;
@@ -188,6 +202,25 @@ export class RoomProcessManager extends EventEmitter {
 
   handleWorkerMessage(record, message) {
     if (!message || typeof message !== 'object') return;
+    if (message.type === 'debug:transform-log:event') {
+      this.emit(
+        'transform-log:event',
+        record.id,
+        message.playerId,
+        message.sessionId,
+        message.event,
+      );
+      return;
+    }
+    if (message.type === 'debug:transform-log:stopped') {
+      this.emit(
+        'transform-log:stopped',
+        record.id,
+        message.playerId,
+        message.sessionId,
+      );
+      return;
+    }
     if (message.type === 'room:terrain') {
       this.emit('terrain', record.id, message.cells, message.playerId);
       return;

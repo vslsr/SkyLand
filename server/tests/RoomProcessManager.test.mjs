@@ -20,6 +20,22 @@ function waitForSnapshot(manager, roomId, predicate, timeoutMs = 2_000) {
   });
 }
 
+function waitForTransformLogEvent(manager, sessionId, predicate, timeoutMs = 2_000) {
+  return new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      manager.off('transform-log:event', handleEvent);
+      reject(new Error('等待玩家 Transform 诊断事件超时'));
+    }, timeoutMs);
+    const handleEvent = (roomId, playerId, receivedSessionId, event) => {
+      if (receivedSessionId !== sessionId || !predicate(event)) return;
+      clearTimeout(timeout);
+      manager.off('transform-log:event', handleEvent);
+      resolve({ roomId, playerId, event });
+    };
+    manager.on('transform-log:event', handleEvent);
+  });
+}
+
 test('each room starts and stops an independent Node.js process', async () => {
   const sceneCatalog = await SceneCatalog.load();
   const manager = new RoomProcessManager({ capacity: 4, sceneCatalog });
@@ -101,6 +117,48 @@ test('房间 IPC 把天气请求交给 DS 并从快照同步结果', async () =>
     (candidate) => candidate.weather === 'storm',
   );
   assert.equal(snapshot.weather, 'storm');
+
+  const exited = once(record.child, 'exit');
+  manager.removeRoom(room.id);
+  await exited;
+});
+
+test('房间 IPC 转发玩家 Transform 录制的权威步进事件与停止确认', async () => {
+  const sceneCatalog = await SceneCatalog.load();
+  const manager = new RoomProcessManager({ sceneCatalog });
+  const room = await manager.createRoom('Transform 日志测试房', 'open-meadow');
+  const record = manager.rooms.get(room.id);
+  const joined = manager.joinRoom(room.id, '记录者');
+  const sessionId = '11111111-2222-4333-8444-555555555555';
+
+  const startedEvent = waitForTransformLogEvent(
+    manager,
+    sessionId,
+    (event) => event.event === 'server.recording_started',
+  );
+  assert.equal(manager.startPlayerTransformLog(room.id, joined.player.id, sessionId), true);
+  assert.equal((await startedEvent).playerId, joined.player.id);
+
+  const stepEvent = waitForTransformLogEvent(
+    manager,
+    sessionId,
+    (event) => event.event === 'server.input_step_applied',
+  );
+  manager.sendInput(room.id, joined.player.id, {
+    type: 'player:input',
+    inputs: [{
+      tick: 1,
+      move: { x: 1, z: 0 },
+      sprint: false,
+      jump: false,
+      yaw: 0,
+    }],
+  });
+  assert.equal((await stepEvent).event.data.after.ackTick, 1);
+
+  const stopped = once(manager, 'transform-log:stopped');
+  assert.equal(manager.stopPlayerTransformLog(room.id, joined.player.id, sessionId), true);
+  assert.deepEqual((await stopped).slice(0, 3), [room.id, joined.player.id, sessionId]);
 
   const exited = once(record.child, 'exit');
   manager.removeRoom(room.id);

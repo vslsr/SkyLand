@@ -21,6 +21,7 @@ import type { SnapshotActor } from '../network/protocol';
 import type { SceneBeforeRenderListener } from '../scene/components';
 import type { SceneDefinition } from '../scenes/data/SceneDefinition';
 import type { TerrainWorld } from '../world/TerrainWorld';
+import type { PhysicsWorld } from '../../shared/physics/PhysicsWorld.mjs';
 import { DEFAULT_WEATHER, type WeatherType } from '../weather/index';
 
 const EMPTY_SCENE_COLOR = 0xfdfbf6;
@@ -53,6 +54,8 @@ export class SceneRenderer implements GrassInteractionTarget {
   private weatherTarget?: WeatherVisualTarget;
   private collisionWorld?: CollisionWorld;
   private terrainWorld?: TerrainWorld;
+  private physicsWorld?: PhysicsWorld;
+  private physicsDebug?: THREE.LineSegments;
   private terrainHighlight?: THREE.LineSegments;
   private fixedWaterWorld = false;
   private currentWeather: WeatherType = DEFAULT_WEATHER;
@@ -119,6 +122,7 @@ export class SceneRenderer implements GrassInteractionTarget {
     context?: SceneUpdateContext,
   ): void {
     for (const system of this.visualSystems) system.update(deltaSeconds, elapsedSeconds, context);
+    this.updatePhysicsDebug();
   }
 
   public syncActors(snapshots: readonly SnapshotActor[], serverTime: number): void {
@@ -162,66 +166,16 @@ export class SceneRenderer implements GrassInteractionTarget {
     return this.actorSnapshotTarget?.getVesselHudState(playerId);
   }
 
-  /**
-   * 圆形移动体的水平推出。候选由场景碰撞网格给出，Actor 与流式 chunk 的
-   * 静态物件都在里面，成本只跟身边的碰撞体密度有关。
-   */
-  public resolveSimpleCollision(
-    position: { x: number; z: number },
-    radius: number,
-    maximumStepHeight = 0,
-    moverHeight = radius * 2,
-    from: { x: number; z: number } = position,
-    buoyancyDraft?: number,
-    motion?: { minimumY: number; airborne: boolean },
-  ): { x: number; y?: number; z: number } {
-    // Actor 的盒子每帧刷新一次，先让 Actor System 兑现待登记的变更。
-    this.actorSnapshotTarget?.refreshColliders();
-    const supportY = this.terrainWorld?.sampleMovementHeight(
-      from.x,
-      from.z,
-      buoyancyDraft,
-    ) ?? 0;
-    const moverMinimumY = motion?.airborne && Number.isFinite(motion.minimumY)
-      ? motion.minimumY
-      : supportY;
-    let candidate = position;
-    for (let iteration = 0; iteration < 4; iteration += 1) {
-      const terrainPosition = this.terrainWorld?.resolveMovement(
-        from,
-        candidate,
-        radius,
-        maximumStepHeight,
-        buoyancyDraft,
-        moverMinimumY,
-      ) ?? { ...candidate, y: 0 };
-      const actorY = motion?.airborne ? moverMinimumY : terrainPosition.y;
-      const objectPosition = this.collisionWorld?.resolveCircle(terrainPosition, radius, {
-        verticalProfile: {
-          minimumY: actorY,
-          maximumY: actorY + Math.max(0, moverHeight),
-          maximumStepHeight: motion?.airborne ? 0 : maximumStepHeight,
-        },
-      }) ?? terrainPosition;
-      if (Math.hypot(
-        objectPosition.x - terrainPosition.x,
-        objectPosition.z - terrainPosition.z,
-      ) <= 1e-7) return { x: terrainPosition.x, y: actorY, z: terrainPosition.z };
-      candidate = objectPosition;
-    }
-    return {
-      x: from.x,
-      y: motion?.airborne ? moverMinimumY : supportY,
-      z: from.z,
-    };
-  }
-
   public sampleGroundHeight(x: number, z: number): number {
     return this.terrainWorld?.sampleGroundHeight(x, z) ?? 0;
   }
 
   public samplePlayerHeight(x: number, z: number, buoyancyDraft?: number): number {
     return this.terrainWorld?.sampleMovementHeight(x, z, buoyancyDraft) ?? 0;
+  }
+
+  public getPhysicsWorld(): PhysicsWorld | undefined {
+    return this.physicsWorld;
   }
 
   public isWaterAt(x: number, z: number): boolean {
@@ -291,15 +245,13 @@ export class SceneRenderer implements GrassInteractionTarget {
     end: readonly [number, number, number],
     radius: number,
   ): number {
-    return Math.min(
-      this.collisionWorld?.sweepSphere(start, end, radius) ?? 1,
-      this.terrainWorld?.sweepCamera(start, end, radius) ?? 1,
-    );
+    return this.physicsWorld?.castCameraSphere(start, end, radius) ?? 1;
   }
 
   public setSimpleCollisionVisible(visible: boolean): void {
     this.simpleCollisionVisible = visible;
     this.actorSnapshotTarget?.setSimpleCollisionVisible(visible);
+    if (this.physicsDebug) this.physicsDebug.visible = visible;
   }
 
   public get isSimpleCollisionVisible(): boolean {
@@ -351,6 +303,7 @@ export class SceneRenderer implements GrassInteractionTarget {
     // 碰撞世界随场景走：上一张地图的 chunk 与 Actor 碰撞体一起被丢掉，
     // 不会有残留的盒子挡住新地图里的路。
     this.collisionWorld?.clear();
+    this.physicsWorld?.dispose();
     this.scene = composition.scene;
     this.visualSystems = composition.visualSystems;
     this.weatherTarget = composition.weatherTarget;
@@ -358,10 +311,41 @@ export class SceneRenderer implements GrassInteractionTarget {
     this.actorSnapshotTarget = composition.actorSnapshotTarget;
     this.collisionWorld = composition.collisionWorld;
     this.terrainWorld = composition.terrainWorld;
+    this.physicsWorld = composition.physicsWorld;
+    if (this.physicsDebug) this.physicsDebug.visible = Boolean(this.physicsWorld)
+      && this.simpleCollisionVisible;
     this.actorSnapshotTarget?.setSimpleCollisionVisible(this.simpleCollisionVisible);
     this.actorSnapshotTarget?.setTemperatureVisible(this.temperatureVisible);
     this.weatherTarget?.setWeather(this.currentWeather);
     this.scene.add(this.dynamicWorld);
+  }
+
+  private updatePhysicsDebug(): void {
+    if (!this.simpleCollisionVisible || !this.physicsWorld) return;
+    const buffers = this.physicsWorld.debugRender();
+    if (!this.physicsDebug) {
+      this.physicsDebug = new THREE.LineSegments(
+        new THREE.BufferGeometry(),
+        new THREE.LineBasicMaterial({ vertexColors: true, depthTest: false }),
+      );
+      this.physicsDebug.name = 'rapier-physics-debug';
+      this.physicsDebug.renderOrder = 998;
+      this.physicsDebug.frustumCulled = false;
+      this.dynamicWorld.add(this.physicsDebug);
+    }
+    const colors = new Float32Array((buffers.colors.length / 4) * 3);
+    for (let source = 0, target = 0; source < buffers.colors.length; source += 4) {
+      colors[target++] = buffers.colors[source];
+      colors[target++] = buffers.colors[source + 1];
+      colors[target++] = buffers.colors[source + 2];
+    }
+    this.physicsDebug.geometry.setAttribute(
+      'position',
+      new THREE.BufferAttribute(buffers.vertices, 3),
+    );
+    this.physicsDebug.geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+    this.physicsDebug.geometry.computeBoundingSphere();
+    this.physicsDebug.visible = true;
   }
 
   private resizeToDisplaySize(): void {

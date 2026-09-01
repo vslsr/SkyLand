@@ -1,4 +1,5 @@
 import type { CameraFrame } from '../camera/CameraTransform';
+import { CameraFrameTransition } from '../camera/CameraFrameTransition';
 
 export interface SceneCameraController {
   readonly frame: CameraFrame;
@@ -8,19 +9,30 @@ export interface SceneCameraController {
 
 type ControlMode = 'fly' | 'topdown';
 
+export interface SceneControlRouterOptions {
+  cameraTransitionDurationSeconds?: number;
+}
+
 export class SceneControlRouter {
   private readonly fallbackController: SceneCameraController;
+  private readonly cameraTransition: CameraFrameTransition;
   private playerController?: SceneCameraController;
   private inputEnabled = false;
   private modeChangeHandler?: (mode: ControlMode) => void;
 
-  public constructor(fallbackController: SceneCameraController) {
+  public constructor(
+    fallbackController: SceneCameraController,
+    options: SceneControlRouterOptions = {},
+  ) {
     this.fallbackController = fallbackController;
+    this.cameraTransition = new CameraFrameTransition({
+      durationSeconds: options.cameraTransitionDurationSeconds,
+    });
     this.fallbackController.setInputEnabled(false);
   }
 
   public get frame(): CameraFrame {
-    return this.activeController.frame;
+    return this.cameraTransition.resolve(this.activeController.frame);
   }
 
   public get mode(): ControlMode {
@@ -28,9 +40,12 @@ export class SceneControlRouter {
   }
 
   public setPlayerController(controller: SceneCameraController | undefined): void {
+    if (controller === this.playerController) return;
+    const transitionSource = this.frame;
     const previousMode = this.mode;
     this.playerController?.setInputEnabled(false);
     this.playerController = controller;
+    this.cameraTransition.begin(transitionSource);
     this.syncEnabledController();
     if (this.mode !== previousMode) this.modeChangeHandler?.(this.mode);
   }
@@ -42,6 +57,7 @@ export class SceneControlRouter {
 
   public update(deltaSeconds: number, elapsedSeconds: number): void {
     this.activeController.update(deltaSeconds, elapsedSeconds);
+    this.cameraTransition.update(deltaSeconds);
   }
 
   public onModeChange(handler: (mode: ControlMode) => void): void {

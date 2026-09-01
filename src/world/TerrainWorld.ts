@@ -1,8 +1,5 @@
 import { sampleTerrain } from '../../shared/world/terrainContent.mjs';
-import {
-  resolveTerrainMovement,
-  terrainMovementHeight,
-} from '../../shared/world/terrainMovement.mjs';
+import { terrainMovementHeight } from '../../shared/world/terrainMovement.mjs';
 import { TERRAIN_SURFACE } from '../../shared/world/terrainConfig.mjs';
 import { TerrainEditor } from '../../shared/world/terrainEditing.mjs';
 import { TerrainPatchStore } from '../../shared/world/terrainPatches.mjs';
@@ -83,24 +80,6 @@ export class TerrainWorld {
     );
   }
 
-  public resolveMovement(
-    from: { x: number; z: number },
-    to: { x: number; z: number },
-    radius: number,
-    maximumStepHeight: number,
-    buoyancyDraft?: number,
-    minimumY?: number,
-  ): { x: number; y: number; z: number } {
-    return resolveTerrainMovement(this.worldSeed, from, to, {
-      radius,
-      maximumStepHeight,
-      waterLevel: this.seaLevel,
-      buoyancyDraft,
-      minimumY,
-      cellCodeAt: this.cellCodeAt,
-    });
-  }
-
   /** 鼠标射线与地表/水面的有界步进相交；成本不随世界大小增长。 */
   public raycast(
     origin: readonly [number, number, number],
@@ -144,26 +123,6 @@ export class TerrainWorld {
       previousAbove = above;
     }
     return undefined;
-  }
-
-  /** 将规则地形作为相机悬臂的隐式高度场参与遮挡。 */
-  public sweepCamera(
-    start: readonly [number, number, number],
-    end: readonly [number, number, number],
-    radius: number,
-  ): number {
-    const minimumAmount = 0.04;
-    const steps = 64;
-    for (let step = 1; step <= steps; step += 1) {
-      const amount = minimumAmount + (1 - minimumAmount) * (step / steps);
-      const x = start[0] + (end[0] - start[0]) * amount;
-      const y = start[1] + (end[1] - start[1]) * amount;
-      const z = start[2] + (end[2] - start[2]) * amount;
-      if (y - radius <= this.surfaceHeight(x, z)) {
-        return Math.max(minimumAmount, amount - 1 / steps);
-      }
-    }
-    return 1;
   }
 
   private surfaceHeight(x: number, z: number): number {

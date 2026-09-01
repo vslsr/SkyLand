@@ -17,7 +17,6 @@ import {
   TERRAIN_SHAPE,
   TERRAIN_SURFACE,
 } from '../../shared/world/terrainConfig.mjs';
-import { resolveTerrainMovement } from '../../shared/world/terrainMovement.mjs';
 import { DEFAULT_WORLD_SEED } from '../../shared/world/worldConfig.mjs';
 
 const CORNER_SHAPES = [
@@ -205,100 +204,4 @@ test('单高角与单低角都补齐四个方向，角点高度和表面采样�
     assert.ok(namedCorner.normalY < 1);
     assert.ok(oppositeCorner.normalY < 1);
   }
-});
-
-test('共享移动允许斜坡和水域通行，河床与浮力共同决定支撑高度', () => {
-  const ramp = findCell((code) => terrainCellShape(code) === TERRAIN_SHAPE.RAMP_EAST);
-  const originX = ramp.x * TERRAIN_CELL_SIZE;
-  const originZ = ramp.z * TERRAIN_CELL_SIZE;
-  const low = { x: originX + 0.1, z: originZ + 1 };
-  const high = { x: originX + 1.9, z: originZ + 1 };
-  const climbed = resolveTerrainMovement(DEFAULT_WORLD_SEED, low, high, {
-    radius: 0,
-    maximumStepHeight: 0.2,
-  });
-  assert.equal(climbed.x, high.x);
-  assert.ok(climbed.y > sampleTerrain(DEFAULT_WORLD_SEED, low.x, low.z).groundY + 0.8);
-
-  const shore = findCell((code, x, z) => (
-    terrainCellSurface(code) === TERRAIN_SURFACE.GROUND
-    && terrainCellHeightLevel(code) === 0
-    && terrainCellSurface(terrainCellCodeAt(DEFAULT_WORLD_SEED, x + 1, z))
-      === TERRAIN_SURFACE.WATER
-  ));
-  const start = { x: shore.x * TERRAIN_CELL_SIZE + 1, z: shore.z * TERRAIN_CELL_SIZE + 1 };
-  const water = { x: start.x + TERRAIN_CELL_SIZE, z: start.z };
-  const enteredWater = resolveTerrainMovement(DEFAULT_WORLD_SEED, start, water, {
-    radius: 0,
-    maximumStepHeight: 0.2,
-  });
-  assert.deepEqual({ x: enteredWater.x, z: enteredWater.z }, water);
-  assert.equal(
-    enteredWater.y,
-    sampleTerrain(DEFAULT_WORLD_SEED, water.x, water.z).groundY,
-    '没有浮力时角色沿河床高度移动',
-  );
-
-  const blockedByRiverbed = resolveTerrainMovement(DEFAULT_WORLD_SEED, water, start, {
-    radius: 0,
-    maximumStepHeight: 0.2,
-  });
-  assert.notDeepEqual(
-    { x: blockedByRiverbed.x, z: blockedByRiverbed.z },
-    start,
-    '河床到高岸的落差仍应按可跨越高度阻挡',
-  );
-
-  const floatingOptions = {
-    radius: 0,
-    maximumStepHeight: 0.2,
-    waterLevel: 0,
-    buoyancyDraft: 0.18,
-  };
-  const floated = resolveTerrainMovement(DEFAULT_WORLD_SEED, start, water, floatingOptions);
-  assert.deepEqual({ x: floated.x, z: floated.z }, water);
-  assert.equal(floated.y, -0.18);
-  const leftWater = resolveTerrainMovement(DEFAULT_WORLD_SEED, water, start, floatingOptions);
-  assert.deepEqual(
-    { x: leftWater.x, z: leftWater.z },
-    start,
-    '浮力把脚下支撑抬到岸边可跨越范围后应能离水',
-  );
-});
-
-test('角色可以跳下地块边界，向上越级仍受 maximumStepHeight 限制', () => {
-  const cliff = findGroundCliff();
-  const movement = { radius: 0.25, maximumStepHeight: 0.2 };
-  const dropped = resolveTerrainMovement(DEFAULT_WORLD_SEED, cliff.high, cliff.low, movement);
-  assert.deepEqual(
-    { x: dropped.x, z: dropped.z },
-    cliff.low,
-    '向下越过断崖不应被台阶高度挡住',
-  );
-  assert.equal(
-    dropped.y,
-    sampleTerrain(DEFAULT_WORLD_SEED, cliff.low.x, cliff.low.z).groundY,
-  );
-
-  const blockedClimb = resolveTerrainMovement(
-    DEFAULT_WORLD_SEED,
-    cliff.low,
-    cliff.high,
-    movement,
-  );
-  assert.notDeepEqual(
-    { x: blockedClimb.x, z: blockedClimb.z },
-    cliff.high,
-    '超过角色可跨越高度的上台阶必须阻挡',
-  );
-
-  const capableClimb = resolveTerrainMovement(DEFAULT_WORLD_SEED, cliff.low, cliff.high, {
-    radius: movement.radius,
-    maximumStepHeight: TERRAIN_CELL_SIZE,
-  });
-  assert.deepEqual(
-    { x: capableClimb.x, z: capableClimb.z },
-    cliff.high,
-    '可跨越高度足够时应允许向上通过同一边界',
-  );
 });

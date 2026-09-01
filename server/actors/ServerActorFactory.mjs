@@ -129,6 +129,7 @@ export function createServerActorWorld(sceneDefinition, options = {}) {
     players: options.players,
     // 场景共用的空间划分。System 拿它做邻近查询，而不是每次遍历全部 Actor。
     collision: options.collision,
+    physics: options.physics,
     groundHeightAt: options.groundHeightAt,
     createActor: createServerActor,
   });

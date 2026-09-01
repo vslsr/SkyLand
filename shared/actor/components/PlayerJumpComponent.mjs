@@ -83,6 +83,25 @@ export class PlayerJumpComponent extends ActorComponent {
     return safePositionY;
   }
 
+  /** 走出超过 stepHeight 的支撑边缘时进入自由落体，并保留水平速度。 */
+  leaveGround() {
+    if (!this.grounded) return false;
+    this.grounded = false;
+    this.verticalVelocity = Math.min(0, this.verticalVelocity);
+    return true;
+  }
+
+  /** 竖直向下扫掠命中支撑面。 */
+  land() {
+    this.verticalVelocity = 0;
+    this.grounded = true;
+  }
+
+  /** 竖直向上扫掠命中天花板，只清除向上的速度。 */
+  hitCeiling() {
+    if (this.verticalVelocity > 0) this.verticalVelocity = 0;
+  }
+
   /** 空中可跨越高度等于脚底相对起跳支撑面的净空，仍保留原有小台阶能力。 */
   traversableStepHeight(baseStepHeight, supportY, positionY) {
     const base = Math.max(0, Number(baseStepHeight) || 0);

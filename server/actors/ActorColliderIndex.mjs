@@ -3,6 +3,7 @@ import {
   TRANSFORM_COMPONENT,
 } from '../../shared/actor/index.mjs';
 import { COLLISION_LAYER_SOLID } from '../../shared/collision/index.mjs';
+import { simpleCollisionInstanceToPhysicsDefinitions } from '../../shared/physics/simpleCollisionToPhysics.mjs';
 
 /**
  * 把 ActorWorld 里的碰撞盒同步进场景的空间划分。
@@ -24,7 +25,8 @@ export class ActorColliderIndex {
 
   update(world) {
     const collision = world.context?.collision;
-    if (!collision) return;
+    const physics = world.context?.physics;
+    if (!collision && !physics) return;
     this.live.clear();
     for (const actor of world.query(TRANSFORM_COMPONENT, SIMPLE_COLLISION_COMPONENT)) {
       this.live.add(actor.id);
@@ -50,7 +52,9 @@ export class ActorColliderIndex {
         || transform.z !== instance.publishedZ
         || transform.yaw !== instance.publishedYaw
       ) {
-        collision.setDynamic(actor.id, instance);
+        collision?.setDynamic(actor.id, instance);
+        const definitions = simpleCollisionInstanceToPhysicsDefinitions(instance);
+        if (definitions.length > 0) physics?.setActorCollider(actor.id, definitions);
         instance.publishedX = transform.x;
         instance.publishedY = transform.y;
         instance.publishedZ = transform.z;
@@ -60,7 +64,8 @@ export class ActorColliderIndex {
     for (const actorId of Array.from(this.instances.keys())) {
       if (this.live.has(actorId)) continue;
       this.instances.delete(actorId);
-      collision.removeDynamic(actorId);
+      collision?.removeDynamic(actorId);
+      physics?.removeActorCollider(actorId);
     }
   }
 }

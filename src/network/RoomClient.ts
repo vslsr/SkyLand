@@ -4,11 +4,13 @@ import type {
   ActorGameplayEvent,
   ClientMessage,
   JoinedRoom,
+  PlayerTransformLogClientEvent,
+  PlayerTransformLogStatus,
   RoomSummary,
   VesselInputFrame,
 } from './messages';
 import type { TerrainEditOperation } from './messages';
-import type { PlayerInputFrame, RoomSnapshot } from './protocol';
+import type { PlayerInputStep, RoomSnapshot } from './protocol';
 import type { WeatherType } from '../weather/index';
 import { HttpRoomDirectory, type RoomDirectory } from './RoomDirectory';
 import {
@@ -20,14 +22,17 @@ import {
 export type {
   ActorGameplayEvent,
   JoinedRoom,
+  PlayerTransformLogClientEvent,
+  PlayerTransformLogStatus,
   RoomSummary,
   VesselInputFrame,
 } from './messages';
-export type { PlayerInputFrame, RoomSnapshot } from './protocol';
+export type { PlayerInputFrame, PlayerInputStep, RoomSnapshot } from './protocol';
 
 type RoomUpdateListener = (room: RoomSummary) => void;
 type SnapshotListener = (snapshot: RoomSnapshot) => void;
 type DisconnectListener = () => void;
+type PlayerTransformLogListener = (status: PlayerTransformLogStatus) => void;
 
 /** 服务端确认过的一格地形覆盖。code 的打包格式见 terrainConfig.mjs。 */
 export interface TerrainPatchCell {
@@ -61,8 +66,8 @@ export class RoomClient {
   private readonly roomListeners = new Set<RoomUpdateListener>();
   private readonly snapshotListeners = new Set<SnapshotListener>();
   private readonly disconnectListeners = new Set<DisconnectListener>();
+  private readonly playerTransformLogListeners = new Set<PlayerTransformLogListener>();
   private readonly terrainListeners = new Set<TerrainPatchListener>();
-  private inputSequence = 0;
   private readonly actorInputSequences = new Map<string, number>();
   private readonly actorEventSequences = new Map<string, number>();
   private actorInteractionSequence = 0;
@@ -144,25 +149,45 @@ export class RoomClient {
     this.send({ type: 'weather:set', weather }, 'control');
   }
 
-  /**
-   * 上报一帧输入。deltaSeconds 是这条输入覆盖的真实时间，
-   * 服务端会用自己的时钟核对，客户端谎报也换不来额外的位移。
-   * 返回本条输入的序号，调用方据此记录预测位置。
-   */
-  public sendPlayerInput(input: PlayerInputFrame, deltaSeconds: number): number | undefined {
-    const sequence = this.inputSequence + 1;
-    const sent = this.send({
-      type: 'player:input',
-      sequence,
-      deltaSeconds,
-      move: input.move,
+  /** 上报仍未被服务端确认的固定模拟步；丢包时下一包会自然重带旧步。 */
+  public sendPlayerInput(inputs: readonly PlayerInputStep[]): number | undefined {
+    if (inputs.length === 0) return undefined;
+    const payload = inputs.map((input) => ({
+      tick: input.tick,
+      move: { x: input.move.x, z: input.move.z },
       sprint: input.sprint,
       jump: input.jump,
       yaw: input.yaw,
-    }, 'realtime');
-    if (!sent) return undefined;
-    this.inputSequence = sequence;
-    return sequence;
+    }));
+    if (!this.send({ type: 'player:input', inputs: payload }, 'realtime')) return undefined;
+    return payload.at(-1)?.tick;
+  }
+
+  public startPlayerTransformLog(): boolean {
+    return this.send({ type: 'debug:transform-log:start' }, 'control');
+  }
+
+  public appendPlayerTransformLog(
+    sessionId: string,
+    events: readonly PlayerTransformLogClientEvent[],
+  ): boolean {
+    if (events.length === 0) return true;
+    return this.send({
+      type: 'debug:transform-log:events',
+      sessionId,
+      events: [...events],
+    }, 'control');
+  }
+
+  public stopPlayerTransformLog(
+    sessionId: string,
+    events: readonly PlayerTransformLogClientEvent[],
+  ): boolean {
+    return this.send({
+      type: 'debug:transform-log:stop',
+      sessionId,
+      events: [...events],
+    }, 'control');
   }
 
   public requestActorControl(actorId: string): void {
@@ -247,6 +272,11 @@ export class RoomClient {
     return () => this.disconnectListeners.delete(listener);
   }
 
+  public onPlayerTransformLogStatus(listener: PlayerTransformLogListener): () => void {
+    this.playerTransformLogListeners.add(listener);
+    return () => this.playerTransformLogListeners.delete(listener);
+  }
+
   private async ensureTransport(): Promise<void> {
     if (this.transport.state === 'connected') return;
     await this.transport.connect({ endpoint: this.resolveEndpoint() });
@@ -260,6 +290,8 @@ export class RoomClient {
       for (const listener of this.snapshotListeners) listener(message.snapshot);
     } else if (message?.type === 'room:terrain' && Array.isArray(message.cells)) {
       for (const listener of this.terrainListeners) listener(message.cells as TerrainPatchCell[]);
+    } else if (message?.type === 'debug:transform-log:status' && message.transformLog) {
+      for (const listener of this.playerTransformLogListeners) listener(message.transformLog);
     } else if (message?.type === 'room:closed') {
       this.transport.close();
     }
@@ -279,7 +311,6 @@ export class RoomClient {
   }
 
   private resetSequences(): void {
-    this.inputSequence = 0;
     this.actorInputSequences.clear();
     this.actorEventSequences.clear();
     this.actorInteractionSequence = 0;

@@ -179,6 +179,10 @@ export interface ActorArchetypeDefinition {
       walkSpeed: number;
       sprintMultiplier: number;
       maximumStepHeight: number;
+      acceleration?: number;
+      deceleration?: number;
+      airAcceleration?: number;
+      airDrag?: number;
     };
     playerJump?: {
       impulse: number;

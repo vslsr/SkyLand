@@ -320,11 +320,12 @@ test('玩家移动由房间 DS 按 Actor 模型生成的简易碰撞权威推出
   player.z = transform.z + sinYaw * (clearance + 0.05);
 
   scene.applyInput('walker', {
-    sequence: 1,
-    deltaSeconds: 0.1,
-    move: { x: cosYaw, z: -sinYaw },
-    sprint: false,
-    yaw: 0,
+    inputs: Array.from({ length: 6 }, (_, index) => ({
+      tick: index + 1,
+      move: { x: cosYaw, z: -sinYaw },
+      sprint: false,
+      yaw: 0,
+    })),
   });
 
   const deltaX = player.x - transform.x;
@@ -362,11 +363,12 @@ test('混合软体测试场景按连接生成新的可操控史莱姆 Actor', as
   player.x = transform.x;
   player.z = transform.z + clearance + 0.05;
   scene.applyInput('pbf-player', {
-    sequence: 1,
-    deltaSeconds: 0.1,
-    move: { x: 0, z: -1 },
-    sprint: false,
-    yaw: Math.PI,
+    inputs: Array.from({ length: 6 }, (_, index) => ({
+      tick: index + 1,
+      move: { x: 0, z: -1 },
+      sprint: false,
+      yaw: Math.PI,
+    })),
   });
   assert.ok(player.z >= transform.z + clearance - 1e-6, '内部圆柱应被测试障碍权威推出');
 });
@@ -384,11 +386,20 @@ test('玩家 Actor 的 maximumStepHeight 允许跨过低矮场景 Actor', async 
   player.setPosition(transform.x, startZ);
 
   scene.applyInput('step-walker', {
-    sequence: 1,
-    deltaSeconds: 0.1,
-    move: { x: 0, z: -1 },
-    sprint: false,
-    yaw: Math.PI,
+    inputs: Array.from({ length: 6 }, (_, index) => ({
+      tick: index + 1,
+      move: { x: 0, z: -1 },
+      sprint: false,
+      yaw: Math.PI,
+    })),
+  });
+  scene.applyInput('step-walker', {
+    inputs: Array.from({ length: 6 }, (_, index) => ({
+      tick: index + 7,
+      move: { x: 0, z: -1 },
+      sprint: false,
+      yaw: Math.PI,
+    })),
   });
 
   assert.equal(player.archetypeId, 'player-slime');
@@ -400,3 +411,4 @@ test('玩家 Actor 的 maximumStepHeight 允许跨过低矮场景 Actor', async 
     false,
   );
 });
+import './initRapier.mjs';

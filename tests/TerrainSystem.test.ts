@@ -341,15 +341,13 @@ test('两类角坡的四个方向都沿特殊角点对角线切分顶面', () =>
   }
 });
 
-test('TerrainWorld 射线命中真实高度，并保持斜坡与浮力水域移动', () => {
+test('TerrainWorld 射线、斜坡采样与浮力高度保持一致', () => {
   const world = new TerrainWorld(SEED, -0.4);
   const ramp = findCell(TERRAIN_SURFACE.GROUND, TERRAIN_SHAPE.RAMP_EAST);
   const centerZ = (ramp.z + 0.5) * TERRAIN_CELL_SIZE;
   const from = { x: (ramp.x + 0.1) * TERRAIN_CELL_SIZE, z: centerZ };
   const to = { x: (ramp.x + 0.9) * TERRAIN_CELL_SIZE, z: centerZ };
-  const moved = world.resolveMovement(from, to, 0, 0.05);
-  assert.equal(moved.x, to.x);
-  assert.ok(moved.y > world.sampleGroundHeight(from.x, from.z));
+  assert.ok(world.sampleGroundHeight(to.x, to.z) > world.sampleGroundHeight(from.x, from.z));
 
   const hit = world.raycast([to.x, 10, to.z], [0, -1, 0], 20);
   assert.ok(hit);
@@ -365,66 +363,6 @@ test('TerrainWorld 射线命中真实高度，并保持斜坡与浮力水域移�
   assert.ok(
     Math.abs(world.sampleMovementHeight(waterCenter.x, waterCenter.z, 0.18) + 0.58) < 1e-9,
   );
-  const floating = world.resolveMovement(waterCenter, waterCenter, 0, 0.05, 0.18);
-  assert.equal(floating.x, waterCenter.x);
-  assert.equal(floating.z, waterCenter.z);
-  assert.ok(Math.abs(floating.y + 0.58) < 1e-9);
-});
-
-test('角色跳上岸后即使碰撞圆后缘仍跨水格，也能继续向岸内移动', () => {
-  const world = new TerrainWorld(SEED, -0.4);
-  const water = encodeTerrainCell(-1, TERRAIN_SURFACE.WATER, TERRAIN_SHAPE.FLAT);
-  const land = encodeTerrainCell(0, TERRAIN_SURFACE.GROUND, TERRAIN_SHAPE.FLAT);
-  world.setCellCode(-1, 0, water);
-  world.setCellCode(0, 0, land);
-
-  const radius = 0.42;
-  const stepHeight = 0.2;
-  const draft = 0.18;
-  const waterPosition = { x: -0.5, z: 1 };
-  const shorePosition = { x: 0.1, z: 1 };
-  const inlandPosition = { x: 0.5, z: 1 };
-  const waterY = world.sampleMovementHeight(waterPosition.x, waterPosition.z, draft);
-
-  const walking = world.resolveMovement(
-    waterPosition,
-    shorePosition,
-    radius,
-    stepHeight,
-    draft,
-    waterY,
-  );
-  assert.equal(walking.x, waterPosition.x, '脚仍在水面时不能直接穿过岸沿');
-
-  const belowShore = world.resolveMovement(
-    waterPosition,
-    shorePosition,
-    radius,
-    stepHeight,
-    draft,
-    -stepHeight - 0.01,
-  );
-  assert.equal(belowShore.x, waterPosition.x, '脚底净空不足时仍不能提前穿入岸面');
-
-  const jumpedOntoShore = world.resolveMovement(
-    waterPosition,
-    shorePosition,
-    radius,
-    stepHeight,
-    draft,
-    0,
-  );
-  assert.equal(jumpedOntoShore.x, shorePosition.x, '脚底越过岸面后应能进入岸格');
-
-  const movedInland = world.resolveMovement(
-    shorePosition,
-    inlandPosition,
-    radius,
-    stepHeight,
-    draft,
-    0,
-  );
-  assert.equal(movedInland.x, inlandPosition.x, '落地后不能被碰撞圆后缘再次锁在岸边');
 });
 
 test('TerrainWorld 的稀疏编辑会同时驱动采样与 chunk 水面几何，并可恢复默认值', () => {

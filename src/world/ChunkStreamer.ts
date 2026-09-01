@@ -10,6 +10,9 @@ import {
   toWorldSeed,
 } from '../../shared/world/worldConfig.mjs';
 import type { CollisionWorld } from '../../shared/collision/index.mjs';
+import type { PhysicsWorld } from '../../shared/physics/PhysicsWorld.mjs';
+import { buildTerrainCollisionMesh } from '../../shared/world/terrainCollisionMesh.mjs';
+import { simpleCollisionGroupToPhysicsDefinitions } from '../../shared/physics/simpleCollisionToPhysics.mjs';
 import { readChunkColliders } from '../../shared/world/chunkColliders.mjs';
 import {
   isPropSkipped,
@@ -53,6 +56,7 @@ export interface ChunkStreamerOptions {
    * 所以参与碰撞的物件数量跟着 keepRadius 走，不跟世界面积走。
    */
   collision?: CollisionWorld;
+  physics?: PhysicsWorld;
   onChunkMounted?: (
     key: string,
     chunkX: number,
@@ -95,6 +99,7 @@ export class ChunkStreamer implements SceneVisualSystem {
   private readonly templates: ChunkTemplateOptions;
   private readonly grass?: StreamingGrassSystem;
   private readonly collision?: CollisionWorld;
+  private readonly physics?: PhysicsWorld;
   private readonly onChunkMounted?: ChunkStreamerOptions['onChunkMounted'];
   private readonly onChunkUnmounted?: ChunkStreamerOptions['onChunkUnmounted'];
   /** 只保存被动过的 chunk，默认世界仍不占状态内存。 */
@@ -112,6 +117,7 @@ export class ChunkStreamer implements SceneVisualSystem {
     this.root.name = 'chunk-streamer';
     this.world = options.world;
     this.collision = options.collision;
+    this.physics = options.physics;
     this.onChunkMounted = options.onChunkMounted;
     this.onChunkUnmounted = options.onChunkUnmounted;
     this.templates = options.templates;
@@ -130,7 +136,7 @@ export class ChunkStreamer implements SceneVisualSystem {
       affectedChunks: readonly { key: string }[];
     }) => {
       for (const chunk of change.affectedChunks) {
-        this.views.get(chunk.key)?.rebuildTerrain();
+        if (this.views.has(chunk.key)) this.rebuild(chunk.key);
       }
     });
     this.fillMaterial = createChunkFillMaterial(options.environment);
@@ -315,13 +321,19 @@ export class ChunkStreamer implements SceneVisualSystem {
       );
       this.grass?.mountChunk(chunk.key, data);
       // 碰撞体由同一批放置记录派生，和几何体同生共死，不会出现「看得见但撞不到」。
-      this.collision?.setStaticGroup(
-        chunk.key,
-        readChunkColliders(data.props, data.propCount, [], {
+      const chunkColliders = readChunkColliders(data.props, data.propCount, [], {
           skipMask,
           chunkX: chunk.chunkX,
           chunkZ: chunk.chunkZ,
-        }),
+        });
+      this.collision?.setStaticGroup(chunk.key, chunkColliders);
+      this.physics?.setStaticColliderGroup(
+        `props:${chunk.key}`,
+        simpleCollisionGroupToPhysicsDefinitions(chunkColliders),
+      );
+      this.physics?.setChunkCollider(
+        chunk.key,
+        buildTerrainCollisionMesh(chunk.chunkX, chunk.chunkZ, this.cellCodeAt),
       );
       this.views.set(chunk.key, view);
       this.root.add(view.root);
@@ -347,6 +359,8 @@ export class ChunkStreamer implements SceneVisualSystem {
     this.onChunkUnmounted?.(key);
     this.grass?.unmountChunk(key);
     this.collision?.removeStaticGroup(key);
+    this.physics?.removeStaticColliderGroup(`props:${key}`);
+    this.physics?.removeChunkCollider(key);
     view.dispose();
   }
 

@@ -8,10 +8,10 @@ import {
 import {
   TERRAIN_CELL_SIZE,
   TERRAIN_GRID,
-  TERRAIN_SHAPE,
   TERRAIN_SURFACE,
 } from '../../../shared/world/terrainConfig.mjs';
 import { terrainCellHasWater } from '../../../shared/world/terrainWater.mjs';
+import { terrainTopTriangles } from '../../../shared/world/terrainCollisionMesh.mjs';
 import type { OceanVisualDefinition } from '../../scenes/data/SceneDefinition';
 import { sampleOceanFaceTint } from '../ocean/oceanFaceting';
 import { STREAMED_WATER_SHORE_WIDTH } from './terrainWaterStyle';
@@ -208,14 +208,6 @@ function appendShoreSplash(
   directions.push(directionX, directionZ);
 }
 
-/** 单高/低角的特殊角点在 NW 或 SE 时，顶面必须沿 NW-SE 切分。 */
-function usesNorthWestSouthEastDiagonal(shape: number): boolean {
-  return shape === TERRAIN_SHAPE.CORNER_HIGH_NORTH_WEST
-    || shape === TERRAIN_SHAPE.CORNER_HIGH_SOUTH_EAST
-    || shape === TERRAIN_SHAPE.CORNER_LOW_NORTH_WEST
-    || shape === TERRAIN_SHAPE.CORNER_LOW_SOUTH_EAST;
-}
-
 /**
  * 由全局格坐标直接建立一个 chunk 的台地、斜坡、断崖和局部水面。
  * 顶点全部写成世界坐标，chunk 接缝不会因父节点浮点变换产生裂缝。
@@ -277,45 +269,19 @@ export function createTerrainChunkGeometry(
       const [southWest, southEast, northEast, northWest] = corners;
       const topTint = terrainCellSurface(code) === TERRAIN_SURFACE.WATER ? groundFloor : groundTop;
 
-      if (usesNorthWestSouthEastDiagonal(terrainCellShape(code))) {
-        appendTriangle(
-          groundPositions,
-          groundNormals,
-          groundTints,
-          southWest,
-          northWest,
-          southEast,
-          topTint,
-        );
-        appendTriangle(
-          groundPositions,
-          groundNormals,
-          groundTints,
-          northWest,
-          northEast,
-          southEast,
-          topTint,
-        );
-      } else {
-        appendTriangle(
-          groundPositions,
-          groundNormals,
-          groundTints,
-          southWest,
-          northEast,
-          southEast,
-          topTint,
-        );
-        appendTriangle(
-          groundPositions,
-          groundNormals,
-          groundTints,
-          southWest,
-          northWest,
-          northEast,
-          topTint,
-        );
-      }
+      const topTriangles = terrainTopTriangles(terrainCellShape(code), corners) as Corner[];
+      appendTriangle(
+        groundPositions,
+        groundNormals,
+        groundTints,
+        topTriangles[0], topTriangles[1], topTriangles[2], topTint,
+      );
+      appendTriangle(
+        groundPositions,
+        groundNormals,
+        groundTints,
+        topTriangles[3], topTriangles[4], topTriangles[5], topTint,
+      );
       // 南边与西边拥有共享格线；相邻格/相邻 chunk 不会再叠画一遍加深透明度。
       appendLine(groundLines, southWest, southEast, 0.012);
       appendLine(groundLines, northWest, southWest, 0.012);

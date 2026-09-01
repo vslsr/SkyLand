@@ -1,4 +1,4 @@
-import type { PlayerInputFrame, RoomSnapshot } from './protocol';
+import type { PlayerInputStep, RoomSnapshot } from './protocol';
 import type { SceneDefinition } from '../scenes/data/SceneDefinition';
 import type { WeatherType } from '../weather/index';
 
@@ -31,6 +31,22 @@ export interface VesselInputFrame {
   steering: number;
 }
 
+export interface PlayerTransformLogClientEvent {
+  event: string;
+  clientTime: number;
+  clientTimeIso: string;
+  monotonicMs: number;
+  data: Record<string, unknown>;
+}
+
+export interface PlayerTransformLogStatus {
+  status: 'started' | 'saved' | 'error';
+  sessionId?: string;
+  clientFile?: string;
+  serverFile?: string;
+  message?: string;
+}
+
 export type ActorGameplayEvent =
   | { type: 'cargo:add'; cargoId: string; mass: number; localX: number; localZ: number }
   | { type: 'cargo:remove'; cargoId: string }
@@ -42,12 +58,18 @@ export type ClientMessage =
   | { type: 'weather:set'; weather: WeatherType }
   | {
       type: 'player:input';
-      sequence: number;
-      deltaSeconds: number;
-      move: PlayerInputFrame['move'];
-      sprint: boolean;
-      jump?: boolean;
-      yaw: number;
+      inputs: PlayerInputStep[];
+    }
+  | { type: 'debug:transform-log:start' }
+  | {
+      type: 'debug:transform-log:events';
+      sessionId: string;
+      events: PlayerTransformLogClientEvent[];
+    }
+  | {
+      type: 'debug:transform-log:stop';
+      sessionId: string;
+      events: PlayerTransformLogClientEvent[];
     }
   | { type: 'actor:claim'; actorId: string }
   | { type: 'actor:release'; actorId: string }
@@ -84,4 +106,5 @@ export interface ServerMessage {
   message?: string;
   /** room:terrain 携带的地形覆盖格；只有服务端确认过的编辑会出现在这里。 */
   cells?: Array<{ cellX: number; cellZ: number; code: number }>;
+  transformLog?: PlayerTransformLogStatus;
 }

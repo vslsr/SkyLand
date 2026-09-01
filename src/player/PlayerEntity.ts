@@ -15,7 +15,6 @@ import {
 import { SlimeSurfaceDragController } from '../controllers/SlimeSurfaceDragController';
 import {
   TopDownController,
-  type PlayerCollisionMotion,
 } from '../controllers/TopDownController';
 import type { GrassInteractionTarget } from '../grass';
 import type { InputSubsystem } from '../input/index';
@@ -36,20 +35,36 @@ import {
   createPlayerMovementAttributes,
 } from '../../shared/abilities/playerMovementEffects.mjs';
 import { PlayerBuoyancyHeightController } from './PlayerBuoyancyHeightController';
+import type { PhysicsWorld } from '../../shared/physics/PhysicsWorld.mjs';
+import type { PlayerInputStep } from '../network/protocol';
+import { MAXIMUM_PENDING_INPUT_STEPS } from '../../shared/networkTuning.mjs';
+
+export interface PlayerTransformDebugState {
+  logic: { x: number; y: number; z: number };
+  render: { x: number; y: number; z: number; yaw: number };
+  velocity: { x: number; y: number; z: number };
+  grounded: boolean;
+  pendingInputCount: number;
+  firstPendingTick?: number;
+  lastPendingTick?: number;
+}
+
+export interface PlayerAuthoritativeApplyResult {
+  applied: boolean;
+  reason: 'reconciled' | 'stale-ack' | 'incomplete-authority';
+  ackTick: number;
+  pendingBefore: number;
+  pendingAfter: number;
+  replayed?: number;
+  residualDistance?: number;
+  snapped?: boolean;
+}
 
 interface PlayerWorldInteraction extends GrassInteractionTarget {
-  resolveSimpleCollision?(
-    position: { x: number; z: number },
-    radius: number,
-    maximumStepHeight: number,
-    moverHeight: number,
-    from?: { x: number; z: number },
-    buoyancyDraft?: number,
-    motion?: PlayerCollisionMotion,
-  ): { x: number; y?: number; z: number };
   sampleGroundHeight?(x: number, z: number): number;
   samplePlayerHeight?(x: number, z: number, buoyancyDraft?: number): number;
   isWaterAt?(x: number, z: number): boolean;
+  getPhysicsWorld?(): PhysicsWorld | undefined;
   raycastGround?(
     origin: readonly [number, number, number],
     direction: readonly [number, number, number],
@@ -74,6 +89,7 @@ export class PlayerEntity extends Actor {
   private readonly jumpAbility: PlayerJumpComponent;
   private readonly buoyancyHeight?: PlayerBuoyancyHeightController;
   private readonly isWaterAt?: (x: number, z: number) => boolean;
+  private readonly pendingInputSteps: PlayerInputStep[] = [];
 
   public constructor(
     playerId: string,
@@ -138,8 +154,11 @@ export class PlayerEntity extends Actor {
       enabled: false,
       bounds,
       collisionRadius: this.visual.collisionRadius,
+      collisionHeight: this.visual.collisionHeight,
       movement,
       jumpAbility: this.jumpAbility,
+      physicsWorld: grassInteraction.getPhysicsWorld?.(),
+      characterId: playerId,
       updateMovementState: () => this.waterMovementEffect.sync(
         this.jumpAbility.grounded
           && (grassInteraction.isWaterAt?.(
@@ -148,19 +167,17 @@ export class PlayerEntity extends Actor {
           ) ?? false),
       ),
       resolveWalkSpeed: () => this.waterMovementEffect.moveSpeed,
-      resolveCollision: (position, radius, from, motion) => (
-        grassInteraction.resolveSimpleCollision?.(
-          position,
-          radius,
-          movement.maximumStepHeight,
-          this.visual.collisionHeight,
-          from,
-          buoyancy?.draft,
-          motion,
-        ) ?? position
+      resolveBuoyancyHeight: () => (
+        this.isWaterAt?.(this.controller?.position.x ?? spawn.x, this.controller?.position.z ?? spawn.z)
+          ? samplePlayerHeight?.(
+              this.controller?.position.x ?? spawn.x,
+              this.controller?.position.z ?? spawn.z,
+            )
+          : undefined
       ),
       sampleGroundHeight: samplePlayerHeight,
       raycastGround,
+      cameraCollisionEnabled: Boolean(grassInteraction.getPhysicsWorld?.()),
       cameraProbe,
     });
     this.slimeSurfaceDragController = slimeSurfaceDrag
@@ -183,63 +200,122 @@ export class PlayerEntity extends Actor {
     return this.model.root;
   }
 
-  /** 每发出一条输入就记下当时的预测位置，供之后和服务器对账。 */
-  public recordPrediction(sequence: number): void {
-    const { x, z } = this.controller.position;
-    this.reconciler.recordPrediction(sequence, x, z, this.controller.verticalPosition);
+  /** 尚未被服务端确认的输入；上行包会重复携带它们来抵抗丢包。 */
+  public get unacknowledgedInputSteps(): readonly PlayerInputStep[] {
+    return this.pendingInputSteps;
+  }
+
+  public captureTransformDebugState(): PlayerTransformDebugState {
+    const horizontalVelocity = this.controller.horizontalVelocity;
+    return {
+      logic: {
+        x: this.controller.position.x,
+        y: this.controller.verticalPosition,
+        z: this.controller.position.z,
+      },
+      render: {
+        x: this.model.root.position.x,
+        y: this.model.root.position.y,
+        z: this.model.root.position.z,
+        yaw: this.model.root.rotation.y,
+      },
+      velocity: {
+        x: horizontalVelocity.x,
+        y: this.controller.verticalVelocity,
+        z: horizontalVelocity.z,
+      },
+      grounded: this.controller.isGrounded,
+      pendingInputCount: this.pendingInputSteps.length,
+      firstPendingTick: this.pendingInputSteps[0]?.tick,
+      lastPendingTick: this.pendingInputSteps.at(-1)?.tick,
+    };
   }
 
   /** 快照里属于自己的那条权威状态。 */
   public applyAuthoritativeState(
-    sequence: number,
+    ackTick: number,
     x: number,
     z: number,
     y?: number,
     verticalVelocity?: number,
+    velocityX?: number,
+    velocityZ?: number,
     grounded?: boolean,
-  ): void {
+  ): PlayerAuthoritativeApplyResult {
+    const pendingBefore = this.pendingInputSteps.length;
     if (y !== undefined && grounded !== false) {
       this.buoyancyHeight?.setAuthoritativeHeight(x, z, y);
     }
-    const accepted = this.reconciler.acceptAuthoritative(
-      sequence,
-      x,
-      z,
-      this.controller,
-      y,
-    );
     if (
-      accepted
-      && grounded !== undefined
-      && verticalVelocity !== undefined
-      && (
-        grounded !== this.jumpAbility.grounded
-        || (!grounded && Math.abs(verticalVelocity - this.jumpAbility.verticalVelocity) > 2)
-      )
+      y === undefined
+      || grounded === undefined
+      || verticalVelocity === undefined
+      || velocityX === undefined
+      || velocityZ === undefined
     ) {
-      this.jumpAbility.applyAuthoritativeState(verticalVelocity, grounded);
+      return {
+        applied: false,
+        reason: 'incomplete-authority',
+        ackTick,
+        pendingBefore,
+        pendingAfter: this.pendingInputSteps.length,
+      };
     }
+    const firstPending = this.pendingInputSteps.findIndex((input) => input.tick > ackTick);
+    this.pendingInputSteps.splice(
+      0,
+      firstPending < 0 ? this.pendingInputSteps.length : firstPending,
+    );
+    const applied = this.reconciler.acceptAuthoritative(
+      ackTick,
+      {
+        x,
+        y,
+        z,
+        vx: velocityX,
+        vy: verticalVelocity,
+        vz: velocityZ,
+        grounded,
+      },
+      this.pendingInputSteps,
+      this.controller,
+    );
+    const result = applied ? this.reconciler.latestResult : undefined;
+    return {
+      applied,
+      reason: applied ? 'reconciled' : 'stale-ack',
+      ackTick,
+      pendingBefore,
+      pendingAfter: this.pendingInputSteps.length,
+      ...(result ?? {}),
+    };
   }
 
   public update(deltaSeconds: number, elapsedSeconds: number): void {
+    this.pendingInputSteps.push(...this.controller.drainInputSteps());
+    if (this.pendingInputSteps.length > MAXIMUM_PENDING_INPUT_STEPS) {
+      this.pendingInputSteps.splice(
+        0,
+        this.pendingInputSteps.length - MAXIMUM_PENDING_INPUT_STEPS,
+      );
+    }
     this.gameAbility.update(deltaSeconds);
-    this.reconciler.update(deltaSeconds, this.controller);
     this.buoyancyHeight?.update(
       deltaSeconds,
       this.isWaterAt?.(this.model.root.position.x, this.model.root.position.z) ?? false,
       this.controller.isGrounded,
     );
     this.slimeSurfaceDragController?.update();
-    const input = this.controller.inputFrame;
     const movementSpeed = this.controller.movementSpeed;
+    const horizontalVelocity = this.controller.horizontalVelocity;
     this.visual.update(
       deltaSeconds,
       elapsedSeconds,
       movementSpeed,
       this.model.root.rotation.y,
       {
-        velocityX: input.move.x * movementSpeed,
-        velocityZ: input.move.z * movementSpeed,
+        velocityX: horizontalVelocity.x,
+        velocityZ: horizontalVelocity.z,
         verticalVelocity: this.controller.verticalVelocity,
         grounded: this.controller.isGrounded,
         collisionDisplacement: this.controller.consumeCollisionDisplacement(),
@@ -253,6 +329,7 @@ export class PlayerEntity extends Actor {
     this.slimeSurfaceDragController?.dispose();
     this.controller.dispose();
     this.reconciler.reset();
+    this.pendingInputSteps.length = 0;
     super.dispose();
     this.model.root.parent?.remove(this.model.root);
     this.visual.dispose();
