@@ -66,6 +66,7 @@ export class TopDownController {
   private moveX = 0;
   private moveZ = 0;
   private sprinting = false;
+  private mouseFacingActive = false;
 
   public constructor(
     canvas: HTMLCanvasElement,
@@ -148,6 +149,7 @@ export class TopDownController {
       this.moveX = 0;
       this.moveZ = 0;
       this.sprinting = false;
+      this.mouseFacingActive = false;
     }
   }
 
@@ -210,13 +212,15 @@ export class TopDownController {
       this.currentSpeed += (0 - this.currentSpeed) * Math.min(1, deltaSeconds * 10);
     }
 
-    const groundPoint = this.projectPointerToGameplayPlane();
-    if (groundPoint) {
-      const deltaX = groundPoint.x - this.player.position.x;
-      const deltaY = groundPoint.y - this.player.position.z;
-      if (Math.hypot(deltaX, deltaY) > 0.08) {
-        const targetYaw = Math.atan2(deltaX, deltaY);
-        this.facingYaw = lerpAngle(this.facingYaw, targetYaw, Math.min(1, deltaSeconds * 14));
+    if (this.mouseFacingActive) {
+      const groundPoint = this.projectPointerToGameplayPlane();
+      if (groundPoint) {
+        const deltaX = groundPoint.x - this.player.position.x;
+        const deltaY = groundPoint.y - this.player.position.z;
+        if (Math.hypot(deltaX, deltaY) > 0.08) {
+          const targetYaw = Math.atan2(deltaX, deltaY);
+          this.facingYaw = lerpAngle(this.facingYaw, targetYaw, Math.min(1, deltaSeconds * 14));
+        }
       }
     } else if (inputLength > 0) {
       const targetYaw = Math.atan2(this.moveX, this.moveZ);
@@ -243,6 +247,7 @@ export class TopDownController {
 
   public dispose(): void {
     for (const dispose of this.inputDisposers.splice(0)) dispose();
+    this.canvas.removeEventListener('pointerdown', this.handlePointerMove);
     this.canvas.removeEventListener('pointermove', this.handlePointerMove);
     this.canvas.removeEventListener('pointerenter', this.handlePointerMove);
     this.canvas.removeEventListener('pointerleave', this.handlePointerLeave);
@@ -288,10 +293,13 @@ export class TopDownController {
     this.inputDisposers.push(
       input.bind(PlayerInputTags.Move, (event) => this.handleMoveInput(event)),
       input.bind(PlayerInputTags.Sprint, (event) => this.handleSprintInput(event)),
+      input.bind(PlayerInputTags.Primary, (event) => this.handlePrimaryInput(event)),
     );
   }
 
   private bindPointerEvents(): void {
+    // 点击本身仍由 Input.Player.Primary 决定；这里只同步点击瞬间的光标坐标。
+    this.canvas.addEventListener('pointerdown', this.handlePointerMove);
     this.canvas.addEventListener('pointermove', this.handlePointerMove);
     this.canvas.addEventListener('pointerenter', this.handlePointerMove);
     this.canvas.addEventListener('pointerleave', this.handlePointerLeave);
@@ -313,5 +321,18 @@ export class TopDownController {
       && event.phase !== 'completed'
       && event.phase !== 'canceled'
       && event.value === true;
+  }
+
+  private handlePrimaryInput(event: InputActionEvent): void {
+    if (event.phase === 'completed' || event.phase === 'canceled') {
+      this.mouseFacingActive = false;
+      return;
+    }
+    if (
+      event.deviceKind === 'keyboardMouse'
+      && event.sourceControl?.startsWith('Mouse.')
+    ) {
+      this.mouseFacingActive = this.enabled && event.value === true;
+    }
   }
 }
