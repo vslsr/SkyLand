@@ -1,0 +1,17 @@
+{
+  "$schema": "./actor.schema.json",
+  "schemaVersion": 1,
+  "id": "fruit-tree",
+  "components": {
+    "interactable": {
+      "action": "harvest-prop",
+      "label": "果树",
+      "maximumDistance": 2.6
+    },
+    "generatedProp": {
+      "regrow": { "seconds": 120 },
+      "drop": { "archetypeId": "fruit-pile", "quantity": 3 }
+    },
+    "replicationPolicy": { "mode": "aoi", "radiusChunks": 2 }
+  }
+}

@@ -7,6 +7,8 @@ import {
   COMBUSTIBLE_COMPONENT,
   type CombustibleComponent,
   GENERATED_PROP_COMPONENT,
+  INTERACTABLE_COMPONENT,
+  type InteractableComponent,
   type GeneratedPropComponent,
   ITEM_STACK_COMPONENT,
   type ItemStackComponent,
@@ -735,6 +737,105 @@ test('木堆与石堆各自成批：合批系统按渲染模型分派模板，�
   // 两种堆都保留各自的交互身份。
   assert.equal(system.findNearbyInteractableActor({ x: 1, z: 2 })?.actorId, 'drop-wood');
   assert.equal(system.findNearbyInteractableActor({ x: 4, z: 2 })?.actorId, 'drop-stone');
+  system.dispose();
+});
+
+const fruitPileArchetype: SceneDefinition['actorArchetypes'][number] = {
+  schemaVersion: 1,
+  id: 'fruit-pile',
+  components: {
+    interactable: { action: 'pickup-stack', label: '果实', maximumDistance: 2.4 },
+    itemStack: {
+      itemType: 'fruit', displayName: '果实',
+      defaultQuantity: 1, maximumQuantity: 999, compatibilityKey: 'fruit-standard',
+    },
+    actorResidency: { sleepDelaySeconds: 1, dormantDelaySeconds: 3, dormantEligible: true },
+    dropMotion: { gravity: 9.8, drag: 4.5, settleSpeed: 0.08 },
+    lifetime: { lifetimeSeconds: 300 },
+    replicationPolicy: { mode: 'aoi', radiusChunks: 2 },
+    render: {
+      model: 'line-art-fruit-pile', fruitColor: '#d4694f', accentColor: '#e8a24c',
+      inkColor: '#5c2f26', radius: 0.42, height: 0.3,
+    },
+  },
+};
+
+const fruitTreeArchetype: SceneDefinition['actorArchetypes'][number] = {
+  schemaVersion: 1,
+  id: 'fruit-tree',
+  components: {
+    interactable: { action: 'harvest-prop', label: '果树', maximumDistance: 2.6 },
+    generatedProp: {
+      regrow: { seconds: 120 },
+      drop: { archetypeId: 'fruit-pile', quantity: 3 },
+    },
+    replicationPolicy: { mode: 'aoi', radiusChunks: 2 },
+  },
+};
+
+/** 和主场景同一套世界生成，只把 tree 换绑到可再生的果树上。 */
+const orchardDefinition = {
+  ...definition,
+  actorArchetypes: [...definition.actorArchetypes, fruitTreeArchetype, fruitPileArchetype],
+  gameplay: { ...definition.gameplay, worldProps: { tree: 'fruit-tree' } },
+} satisfies SceneDefinition;
+
+test('果子按服务端时钟自己熟：冷却中不画也不能交互，到期后无需新快照就恢复', () => {
+  let now = 1_000_000;
+  const system = new ClientActorSystem({
+    definition: orchardDefinition,
+    environment: { fogColor: '#ffffff', fogNear: 20, fogFar: 60 },
+    now: () => now,
+  });
+
+  const props = new Int32Array(PROP_BUFFER_LENGTH);
+  const propCount = generateChunkProps(DEFAULT_WORLD_SEED, -1, 0, props);
+  let propIndex = -1;
+  for (let index = 0; index < propCount; index += 1) {
+    if (props[index * PROP_STRIDE + PROP_FIELD.KIND] === PROP_KIND.TREE) {
+      propIndex = index;
+      break;
+    }
+  }
+  assert.ok(propIndex >= 0);
+
+  // 客户端与服务端时钟差 5 分钟：冷却必须按服务端时间算，否则整个偏掉。
+  const serverTime = now - 300_000;
+  system.syncSnapshots([], serverTime, now);
+  system.mountGeneratedPropChunk('-1:0', -1, 0, props, propCount);
+  system.update(0, 0);
+
+  const fruitRoot = system.root.getObjectByName('generated-prop-fruit')!;
+  assert.ok(fruitRoot, '有果树的地图才挂这一层');
+  const fill = fruitRoot.children.find(
+    (child) => (child as THREE.InstancedMesh).isInstancedMesh,
+  ) as THREE.InstancedMesh;
+  const ripeCount = fill.count;
+  assert.ok(ripeCount > 0, '默认是熟的，应该画出果子');
+
+  const actorId = formatGeneratedPropId(PROP_KIND.TREE, -1, 0, propIndex);
+  const actor = system.getActor(actorId)!;
+  const interactable = actor.requireComponent(INTERACTABLE_COMPONENT) as InteractableComponent;
+  assert.equal(interactable.enabled, true);
+
+  // 摘掉一棵：只发 readyAt，不发第二条「长回来」的快照。
+  const readyAt = (serverTime + 120_000) / 1000;
+  system.syncSnapshots([{
+    id: actorId,
+    revision: 4,
+    propState: { removed: false, readyAt },
+  }], serverTime + 1, now);
+  // 快照缓冲有 120ms 插值延迟，要等这一帧真的被采样到。
+  now += 200;
+  system.update(0, 0);
+  assert.equal(fill.count, ripeCount - 5, '这一棵的五颗果子应该消失');
+  assert.equal(interactable.enabled, false, '冷却中不该还提示可采');
+
+  // 时间过去，没有任何新快照，果子自己回来。
+  now += 121_000;
+  system.update(0, 0);
+  assert.equal(fill.count, ripeCount, '到期后无需新快照就恢复');
+  assert.equal(interactable.enabled, true);
   system.dispose();
 });
 

@@ -11,6 +11,7 @@ import { createTrainingDummyModel } from './createTrainingDummyModel';
 import { createPlayerSlimeModel } from '../playerSlime';
 import { createCampfireModel } from './createCampfireModel';
 import { createDryHayModel } from './createDryHayModel';
+import { createFruitPileModel } from './createFruitPileModel';
 import { createStonePileModel } from './createStonePileModel';
 import { createWoodPileModel } from './createWoodPileModel';
 
@@ -50,6 +51,9 @@ export function createActorVisualModel(
   }
   if (definition.model === 'line-art-stone-pile') {
     return createStonePileModel(environment, definition);
+  }
+  if (definition.model === 'line-art-fruit-pile') {
+    return createFruitPileModel(environment, definition);
   }
   return createReefModel(environment, definition);
 }

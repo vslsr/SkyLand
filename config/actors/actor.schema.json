@@ -208,10 +208,29 @@
           "type": "object",
           "description": "可采集的世界生成物件；承载哪一种物件由场景的 gameplay.worldProps 决定",
           "additionalProperties": false,
-          "required": ["maximumHealth", "harvestDamage", "drop"],
+          "required": ["drop"],
+          "oneOf": [
+            {
+              "required": ["maximumHealth", "harvestDamage"],
+              "not": { "required": ["regrow"] }
+            },
+            {
+              "required": ["regrow"],
+              "not": { "anyOf": [{ "required": ["maximumHealth"] }, { "required": ["harvestDamage"] }] }
+            }
+          ],
           "properties": {
             "maximumHealth": { "type": "integer", "minimum": 1, "maximum": 1000 },
             "harvestDamage": { "type": "integer", "minimum": 1, "maximum": 1000 },
+            "regrow": {
+              "type": "object",
+              "description": "出现这一块表示采集即冷却：没有血量，采一次之后过这么多秒自己长回来",
+              "additionalProperties": false,
+              "required": ["seconds"],
+              "properties": {
+                "seconds": { "type": "number", "minimum": 1, "maximum": 86400 }
+              }
+            },
             "drop": {
               "type": "object",
               "additionalProperties": false,
@@ -368,6 +387,19 @@
                 "model": { "const": "line-art-wood-pile" },
                 "woodColor": { "$ref": "#/$defs/color" },
                 "cutColor": { "$ref": "#/$defs/color" },
+                "inkColor": { "$ref": "#/$defs/color" },
+                "radius": { "type": "number", "exclusiveMinimum": 0, "maximum": 3 },
+                "height": { "type": "number", "exclusiveMinimum": 0, "maximum": 3 }
+              }
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["model", "fruitColor", "accentColor", "inkColor", "radius", "height"],
+              "properties": {
+                "model": { "const": "line-art-fruit-pile" },
+                "fruitColor": { "$ref": "#/$defs/color" },
+                "accentColor": { "$ref": "#/$defs/color" },
                 "inkColor": { "$ref": "#/$defs/color" },
                 "radius": { "type": "number", "exclusiveMinimum": 0, "maximum": 3 },
                 "height": { "type": "number", "exclusiveMinimum": 0, "maximum": 3 }

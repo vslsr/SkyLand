@@ -13,6 +13,10 @@ import {
 } from '../../../shared/actor/index.mjs';
 import { createFillMaterial, type FillMaterialEnvironment } from '../../materials/createFillMaterial';
 import {
+  FRUIT_PILE_PIECES,
+  createFruitGeometry,
+} from '../../models/actors/createFruitPileModel';
+import {
   STONE_PILE_PIECES,
   createStonePieceGeometry,
 } from '../../models/actors/createStonePileModel';
@@ -21,12 +25,14 @@ import type { ActorArchetypeDefinition } from '../../scenes/data/SceneDefinition
 type ActorRender = ActorArchetypeDefinition['components']['render'];
 type WoodPileRender = Extract<ActorRender, { model: 'line-art-wood-pile' }>;
 type StonePileRender = Extract<ActorRender, { model: 'line-art-stone-pile' }>;
-type PileRender = WoodPileRender | StonePileRender;
+type FruitPileRender = Extract<ActorRender, { model: 'line-art-fruit-pile' }>;
+type PileRender = WoodPileRender | StonePileRender | FruitPileRender;
 
 /** 走合批绘制的堆叠模型。新增一种堆叠物就在这里登记，并补一个 pieces 构造。 */
 const PILE_RENDER_MODELS = new Set<PileRender['model']>([
   'line-art-wood-pile',
   'line-art-stone-pile',
+  'line-art-fruit-pile',
 ]);
 
 /**
@@ -110,10 +116,26 @@ function createStonePilePieces(definition: StonePileRender, burning: boolean): P
   }));
 }
 
+/** 四颗果子，与 createFruitPileModel 的摆法一致。 */
+function createFruitPilePieces(definition: FruitPileRender, burning: boolean): PilePiece[] {
+  const fruit = new THREE.Color(burning ? '#8a4a2c' : definition.fruitColor);
+  const accent = new THREE.Color(burning ? '#6d3a24' : definition.accentColor);
+  return FRUIT_PILE_PIECES.map((piece) => ({
+    geometry: createFruitGeometry(definition.radius * piece.scale),
+    matrix: new THREE.Matrix4().setPosition(
+      definition.radius * piece.offsetX,
+      definition.height * piece.offsetY,
+      definition.radius * piece.offsetZ,
+    ),
+    tint: piece.accent ? accent : fruit,
+    edgeThreshold: 24,
+  }));
+}
+
 function createPilePieces(definition: PileRender, burning: boolean): PilePiece[] {
-  return definition.model === 'line-art-wood-pile'
-    ? createWoodPilePieces(definition, burning)
-    : createStonePilePieces(definition, burning);
+  if (definition.model === 'line-art-wood-pile') return createWoodPilePieces(definition, burning);
+  if (definition.model === 'line-art-stone-pile') return createStonePilePieces(definition, burning);
+  return createFruitPilePieces(definition, burning);
 }
 
 function createPileTemplate(

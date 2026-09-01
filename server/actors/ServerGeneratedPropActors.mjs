@@ -39,9 +39,12 @@ const DEFAULT_RESIDENT_RADIUS = 2;
  * 地图上可以是不同的玩法对象，而原型只描述「它是什么」。这里把那份绑定解析成
  * 一张 kind → archetype 的表，没有绑定的种类就是纯布景，不产生 Actor。
  *
- * 卸载时把偏离默认生成结果的物件（采过一半或已采完）记进 deviations，重新装载
- * 时恢复。没被动过的物件不占任何状态内存，所以状态量跟着「玩家改动过多少个」
- * 走，而不是跟着世界里有多少个走。
+ * 卸载时把偏离默认生成结果的物件（采过一半、已采完、或者还在冷却）记进
+ * deviations，重新装载时恢复。没被动过的物件不占任何状态内存，所以状态量跟着
+ * 「玩家改动过多少个」走，而不是跟着世界里有多少个走。
+ *
+ * 可再生物件的冷却用绝对服务端时间记，卸载期间不需要任何逐 tick 计时：装回来
+ * 时比一次 readyAt 就知道长回来没有，长回来的直接丢掉记录，回到「没被动过」。
  */
 export class ServerGeneratedPropActors {
   /**
@@ -53,11 +56,14 @@ export class ServerGeneratedPropActors {
    *   enabled?: boolean,
    *   residentRadius?: number,
    *   keepRadius?: number,
+   *   now?: () => number,
    * }} options
    */
   constructor(options) {
     this.world = options.world;
     this.worldSeed = toWorldSeed(options.worldSeed);
+    /** 绝对服务端秒数，冷却结算用的就是它。 */
+    this.now = options.now ?? (() => Date.now() / 1000);
     /** @type {Map<number, { id: string, components: object }>} 物件种类 → 承载它的原型。 */
     this.archetypesByKind = new Map();
     const archetypesById = new Map((options.archetypes ?? []).map((each) => [each.id, each]));
@@ -80,7 +86,7 @@ export class ServerGeneratedPropActors {
     );
     /** @type {Map<string, string[]>} chunk key → 该 chunk 装载出来的 Actor id。 */
     this.actorIdsByChunk = new Map();
-    /** @type {Map<string, { health: number, removed: boolean, revision: number }>} */
+    /** @type {Map<string, { health: number, removed: boolean, readyAt: number, revision: number }>} */
     this.deviations = new Map();
     /** 放置记录缓冲区复用，避免每装载一个 chunk 都新建一次。 */
     this.propBuffer = new Int32Array(PROP_BUFFER_LENGTH);
@@ -145,6 +151,7 @@ export class ServerGeneratedPropActors {
   /** @param {number} chunkX @param {number} chunkZ @param {string} key */
   mountChunk(chunkX, chunkZ, key) {
     const propCount = generateChunkProps(this.worldSeed, chunkX, chunkZ, this.propBuffer);
+    const elapsedSeconds = this.now();
     const actorIds = [];
     for (let propIndex = 0; propIndex < propCount; propIndex += 1) {
       const offset = propIndex * PROP_STRIDE;
@@ -155,7 +162,8 @@ export class ServerGeneratedPropActors {
       const id = formatGeneratedPropId(kind, chunkX, chunkZ, propIndex);
       // 同一个 chunk 不会装两次，这里只防御 ensureAround 与 sync 的竞争。
       if (this.world.getActor(id)) continue;
-      const deviation = this.deviations.get(id);
+      // 卸载期间长回来的，装载这一刻就把记录丢掉，回到「没被动过」。
+      const deviation = this.takeLiveDeviation(id, elapsedSeconds);
       const actor = createServerActor({
         id,
         archetypeId: archetype.id,
@@ -214,15 +222,33 @@ export class ServerGeneratedPropActors {
   captureDeviation(actor) {
     const prop = actor.getComponent(GENERATED_PROP_COMPONENT);
     if (!prop) return;
-    if (!prop.removed && prop.health >= prop.maximumHealth) {
+    if (prop.isPristine(this.now())) {
       this.deviations.delete(actor.id);
       return;
     }
     this.deviations.set(actor.id, {
       health: prop.health,
       removed: prop.removed,
+      readyAt: prop.readyAt,
       revision: prop.revision,
     });
+  }
+
+  /**
+   * 取出仍然有效的偏离态。冷却已经过去的记录在这里被丢掉——这就是「长回来」
+   * 的全部实现：没有定时器，没有逐 tick 扫描，只有装载时的一次比较。
+   * @param {string} actorId
+   * @param {number} elapsedSeconds
+   */
+  takeLiveDeviation(actorId, elapsedSeconds) {
+    const deviation = this.deviations.get(actorId);
+    if (!deviation) return undefined;
+    const regrown = !deviation.removed
+      && deviation.readyAt > 0
+      && elapsedSeconds >= deviation.readyAt;
+    if (!regrown) return deviation;
+    this.deviations.delete(actorId);
+    return undefined;
   }
 
   /**

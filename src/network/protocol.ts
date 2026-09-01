@@ -93,9 +93,12 @@ export interface SnapshotActor {
     revision: number;
   };
   propState?: {
-    health: number;
+    /** 掉血形态才有；可再生物件没有血量。 */
+    health?: number;
     maximumHealth?: number;
     removed: boolean;
+    /** 可再生物件下一次可采的绝对服务端秒数；两端各自判断有没有长回来。 */
+    readyAt?: number;
     revision?: number;
   };
 }
