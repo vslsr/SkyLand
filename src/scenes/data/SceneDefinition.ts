@@ -180,6 +180,12 @@ export interface ActorArchetypeDefinition {
       sprintMultiplier: number;
       maximumStepHeight: number;
     };
+    playerJump?: {
+      impulse: number;
+      gravity: number;
+      maximumFallSpeed: number;
+      airControl: number;
+    };
     /** 仅客户端使用：鼠标拖拽混合史莱姆蒙皮时的局部软体参数。 */
     slimeSurfaceDrag?: {
       maximumDistance: number;
@@ -193,6 +199,8 @@ export interface ActorArchetypeDefinition {
       maximumTrimRadians: number;
       minimumDraft: number;
       maximumDraft: number;
+      bobAmplitude?: number;
+      bobFrequency?: number;
       parts: ActorBuoyancyPartDefinition[];
     };
     vesselMotor?: {

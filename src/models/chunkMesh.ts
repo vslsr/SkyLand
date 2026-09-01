@@ -15,6 +15,16 @@ export function createChunkFillMaterial(
   return createFillMaterial(0xffffff, environment, { vertexTint: true });
 }
 
+/** 台地顶面单独绕过距离雾，避免雾天把玩家脚下的纸面洗成灰白色。 */
+export function createChunkGroundFillMaterial(
+  environment: FillMaterialEnvironment,
+): THREE.ShaderMaterial {
+  return createFillMaterial(0xffffff, environment, {
+    vertexTint: true,
+    fog: false,
+  });
+}
+
 /**
  * 合批后的填充几何体。
  *

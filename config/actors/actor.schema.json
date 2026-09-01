@@ -27,6 +27,17 @@
             "maximumStepHeight": { "type": "number", "minimum": 0, "maximum": 2 }
           }
         },
+        "playerJump": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["impulse", "gravity", "maximumFallSpeed", "airControl"],
+          "properties": {
+            "impulse": { "type": "number", "exclusiveMinimum": 0, "maximum": 30 },
+            "gravity": { "type": "number", "exclusiveMinimum": 0, "maximum": 60 },
+            "maximumFallSpeed": { "type": "number", "exclusiveMinimum": 0, "maximum": 60 },
+            "airControl": { "type": "number", "minimum": 0, "maximum": 1 }
+          }
+        },
         "slimeSurfaceDrag": {
           "type": "object",
           "description": "仅客户端使用的混合史莱姆鼠标表面拖拽参数",
@@ -49,6 +60,8 @@
             "maximumTrimRadians": { "type": "number", "minimum": 0, "maximum": 0.25 },
             "minimumDraft": { "type": "number", "minimum": 0 },
             "maximumDraft": { "type": "number", "minimum": 0 },
+            "bobAmplitude": { "type": "number", "minimum": 0, "maximum": 0.75 },
+            "bobFrequency": { "type": "number", "minimum": 0, "maximum": 2 },
             "parts": {
               "type": "array",
               "minItems": 1,

@@ -45,6 +45,11 @@ const FORCE_CENTER_FOLLOW_RATE = 8.5;
 const MAX_TEARDROP_FRONT_STRETCH = 0.14;
 const MAX_TEARDROP_REAR_CONTRACTION = 0.04;
 const MAX_TEARDROP_TIP_NARROWING = 0.18;
+const AIRBORNE_FOLLOW_RATE = 14;
+const AIRBORNE_PLANAR_CONTRACTION = 0.12;
+const AIRBORNE_RIM_LIFT_RATIO = 0.11;
+const AIRBORNE_VERTICAL_STRETCH = 0.18;
+const MAX_VERTICAL_FORCE_CENTER_RATIO = 0.09;
 
 function clamp(value: number, minimum: number, maximum: number): number {
   return Math.max(minimum, Math.min(maximum, value));
@@ -94,6 +99,9 @@ export class HybridSlimeSimulation {
   private driveDirectionX = 0;
   private driveDirectionZ = 1;
   private driveSpeed = 0;
+  private targetAirborneAmount = 0;
+  private airborneAmount = 0;
+  private verticalVelocity = 0;
   private deformationDirectionX = 0;
   private deformationDirectionZ = 1;
   private collisionCompression = 0;
@@ -258,6 +266,23 @@ export class HybridSlimeSimulation {
   }
 
   /**
+   * 空中不再把蒙皮边缘钉在局部地面：向心点随竖直冲量偏移，底圈向内上收。
+   * 该状态仍只是客户端表现，不回写 Actor Transform 或网络权威数据。
+   */
+  public setAirborneMotion(verticalVelocity: number, grounded: boolean): void {
+    const nextAirborne = grounded ? 0 : 1;
+    const nextVelocity = Number.isFinite(verticalVelocity) ? verticalVelocity : 0;
+    const changed = nextAirborne !== this.targetAirborneAmount
+      || Math.abs(nextVelocity - this.verticalVelocity) > 0.02;
+    this.targetAirborneAmount = nextAirborne;
+    this.verticalVelocity = nextVelocity;
+    if (changed) {
+      this.isActive = true;
+      this.stableSeconds = 0;
+    }
+  }
+
+  /**
    * collisionDisplacement 指向角色本帧试图进入的障碍方向。只压入该侧蒙皮，
    * 而不是给整团顶点同一个速度，从而产生局部环境接触凹陷。
    */
@@ -341,6 +366,10 @@ export class HybridSlimeSimulation {
   }
 
   private step(deltaSeconds: number): void {
+    const airborneFollow = 1 - Math.exp(-AIRBORNE_FOLLOW_RATE * deltaSeconds);
+    this.airborneAmount += (
+      this.targetAirborneAmount - this.airborneAmount
+    ) * airborneFollow;
     const coreDamping = 2 * Math.sqrt(this.options.coreStiffness) * 0.96;
     this.coreVelocityX += (
       this.targetCoreX - this.coreX
@@ -554,6 +583,7 @@ export class HybridSlimeSimulation {
     const volumeScale = 1 / Math.sqrt(parallelScale);
     const movementStrength = clamp(this.driveSpeed / FULL_INWARD_FORCE_SPEED, 0, 1);
     const movementInwardRatio = movementStrength * MAX_MOVEMENT_INWARD_RATIO;
+    const airborneInwardRatio = this.airborneAmount * AIRBORNE_PLANAR_CONTRACTION;
     const movementForceBias = (
       this.options.radius * MAX_MOVEMENT_FORCE_BIAS_RADIUS_RATIO * movementStrength
     );
@@ -564,14 +594,23 @@ export class HybridSlimeSimulation {
       this.forceCenter[0] += (this.targetForceCenterX - this.forceCenter[0]) * followRatio;
       this.forceCenter[2] += (this.targetForceCenterZ - this.forceCenter[2]) * followRatio;
     }
-    this.forceCenter[1] = this.centerY;
+    const verticalForceBias = clamp(
+      this.verticalVelocity / 7,
+      -1,
+      1,
+    ) * this.options.radius * MAX_VERTICAL_FORCE_CENTER_RATIO * this.airborneAmount;
+    this.forceCenter[1] = this.centerY
+      + this.options.radius * 0.055 * this.airborneAmount
+      + verticalForceBias;
+    this.center[1] = this.forceCenter[1];
     // 移动时把蒙皮的胡克目标径向拉向核心；底部只收一半以保留黏地软边，
     // 中上层收得更多，并用很小的高度补偿避免视觉体积突然消失。
     const movementVerticalScale = 1 + movementInwardRatio * 0.3;
     this.coreYaw = Math.atan2(deformationX, deformationZ);
-    this.coreScale[0] = volumeScale;
-    this.coreScale[1] = volumeScale;
-    this.coreScale[2] = parallelScale;
+    const airbornePlanarScale = 1 - airborneInwardRatio * 0.65;
+    this.coreScale[0] = volumeScale * airbornePlanarScale;
+    this.coreScale[1] = volumeScale * (1 + this.airborneAmount * AIRBORNE_VERTICAL_STRETCH);
+    this.coreScale[2] = parallelScale * airbornePlanarScale;
     const smoothedForceBiasX = this.forceCenter[0] - this.coreX;
     const smoothedForceBiasZ = this.forceCenter[2] - this.coreZ;
 
@@ -580,7 +619,11 @@ export class HybridSlimeSimulation {
       const directionY = directions[offset + 1];
       const directionZ = directions[offset + 2];
       const height = clamp(directionY, 0, 1);
-      const inwardScale = 1 - movementInwardRatio * (0.5 + height * 0.5);
+      const inwardScale = (
+        1
+        - movementInwardRatio * (0.5 + height * 0.5)
+        - airborneInwardRatio * (1.05 - height * 0.35)
+      );
       const baseX = (
         directionX * this.options.radius * HYBRID_SLIME_PLANAR_RADIUS_RATIO * inwardScale
       );
@@ -635,11 +678,19 @@ export class HybridSlimeSimulation {
         + this.coreX * (adhesionFactor - 1)
         - smoothedForceBiasX * (1 - forceBiasWeight)
       );
+      const airborneRimLift = (
+        this.options.radius
+        * AIRBORNE_RIM_LIFT_RATIO
+        * this.airborneAmount
+        * Math.pow(1 - height, 1.6)
+      );
       this.anchors[offset + 1] = hybridSlimeRestY(
         this.options.radius,
         directionY,
-        volumeScale * movementVerticalScale,
-      );
+        volumeScale
+          * movementVerticalScale
+          * (1 + this.airborneAmount * AIRBORNE_VERTICAL_STRETCH),
+      ) + airborneRimLift;
       this.anchors[offset + 2] = (
         this.forceCenter[2]
         + shapedZ
@@ -659,6 +710,7 @@ export class HybridSlimeSimulation {
       this.targetForceCenterX - this.forceCenter[0],
       this.targetForceCenterZ - this.forceCenter[2],
     );
+    const airborneError = Math.abs(this.targetAirborneAmount - this.airborneAmount);
     const stable = (
       this.collisionActiveSeconds <= 0
       && !this.surfaceDragActive
@@ -667,6 +719,7 @@ export class HybridSlimeSimulation {
       && coreError < this.options.radius * 0.001
       && coreSpeed < this.options.radius * 0.004
       && forceCenterError < this.options.radius * 0.001
+      && airborneError < 0.001
     );
     this.stableSeconds = stable ? this.stableSeconds + deltaSeconds : 0;
     if (this.stableSeconds < 0.08) return;

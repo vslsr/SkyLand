@@ -83,10 +83,11 @@ abilities.activate('primary');
 输入绑定、网络意图、快照复制和视觉反馈仍由各自适配层负责，Component 不直接监听 DOM
 按键，也不把客户端动画当成权威状态。
 
-当前“能力系统实验室”是客户端本地测试夹具。用于多人正式玩法时，应让房间 DS 持有
-Component，客户端只发送能力槽位和目标意图；DS 校验后把属性、标签、效果和冷却摘要放入
-快照。当前 Node 房间进程直接运行 `.mjs`，接入生产权威链路前还需要把这套 TypeScript
-编译为服务端可导入的 shared 包，不能直接把实验室模拟当作联机权威实现。
+`npm run build:abilities` 会把同一份 TypeScript GAS 核心编译成
+`shared/abilities/runtime.mjs`，供 Node 房间进程使用。正式玩家已用它持有
+`Movement.Speed` 属性：进入水域添加无限时长 `Effect.Movement.WaterSlow`，离水移除；
+DS 权威移动和客户端预测都读取 CurrentValue。能力实验室仍是客户端本地测试夹具；后续
+需要玩家主动释放的联机能力，仍应走槽位意图、DS 校验和快照确认的完整链路。
 
 ## 数值与时间规则
 

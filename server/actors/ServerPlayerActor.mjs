@@ -2,12 +2,20 @@ import {
   Actor,
   BuoyancyComponent,
   InventoryComponent,
+  PLAYER_JUMP_COMPONENT,
+  PlayerJumpComponent,
   PLAYER_MOVEMENT_COMPONENT,
   PlayerMovementComponent,
   TRANSFORM_COMPONENT,
   TransformComponent,
 } from '../../shared/actor/index.mjs';
 import { INPUT_TIME_BUDGET_SECONDS } from '../../shared/networkTuning.mjs';
+import {
+  GAME_ABILITY_COMPONENT,
+  GameAbilityComponent,
+  WaterMovementEffectController,
+  createPlayerMovementAttributes,
+} from '../../shared/abilities/index.mjs';
 
 /**
  * 按连接动态创建的玩家 Actor。玩家不属于场景固定 placements；其高频位置仍走
@@ -21,7 +29,20 @@ export class ServerPlayerActor extends Actor {
     if (archetype.components.buoyancy) {
       this.addComponent(new BuoyancyComponent(archetype.components.buoyancy));
     }
-    this.addComponent(new PlayerMovementComponent(archetype.components.playerMovement));
+    const movement = this.addComponent(new PlayerMovementComponent(
+      archetype.components.playerMovement,
+    ));
+    this.addComponent(new PlayerJumpComponent(archetype.components.playerJump));
+    const gameAbility = this.addComponent(new GameAbilityComponent({
+      attributes: createPlayerMovementAttributes(movement.walkSpeed),
+    }));
+    this.waterMovementEffect = new WaterMovementEffectController(gameAbility.abilitySystem);
+    // applyPlayerMovement 读取这份复用对象；每次输入只更新 GAS CurrentValue，避免热路径分配。
+    this.effectiveMovement = {
+      walkSpeed: movement.walkSpeed,
+      sprintMultiplier: movement.sprintMultiplier,
+      maximumStepHeight: movement.maximumStepHeight,
+    };
     this.addComponent(new InventoryComponent());
     const render = archetype.components.render;
     this.collisionRadius = render.collisionRadius ?? render.radius;
@@ -49,6 +70,33 @@ export class ServerPlayerActor extends Actor {
     return this.requireComponent(PLAYER_MOVEMENT_COMPONENT);
   }
 
+  get gameAbility() {
+    return this.requireComponent(GAME_ABILITY_COMPONENT);
+  }
+
+  get jump() {
+    return this.requireComponent(PLAYER_JUMP_COMPONENT);
+  }
+
+  get movementForSimulation() {
+    this.effectiveMovement.walkSpeed = (
+      this.waterMovementEffect.moveSpeed * this.jump.horizontalControlScale
+    );
+    return this.effectiveMovement;
+  }
+
+  get moveSpeed() {
+    return this.waterMovementEffect.moveSpeed;
+  }
+
+  get inWater() {
+    return this.waterMovementEffect.inWater;
+  }
+
+  syncWaterMovementEffect(inWater) {
+    return this.waterMovementEffect.sync(inWater);
+  }
+
   get transform() {
     return this.requireComponent(TRANSFORM_COMPONENT);
   }
@@ -65,5 +113,10 @@ export class ServerPlayerActor extends Actor {
 
   setPosition(x, z, y = this.y) {
     this.transform.setWorldTransform([x, y, z], this.yaw);
+  }
+
+  dispose() {
+    this.waterMovementEffect.dispose();
+    super.dispose();
   }
 }

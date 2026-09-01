@@ -29,6 +29,8 @@ export interface PlayerActorVisual {
     motion?: {
       velocityX: number;
       velocityZ: number;
+      verticalVelocity?: number;
+      grounded?: boolean;
       collisionDisplacement?: { x: number; z: number };
     },
   ): void;
@@ -93,6 +95,8 @@ export function createPlayerActorVisual(
             movementSpeed,
             movementVelocityX: motion?.velocityX,
             movementVelocityZ: motion?.velocityZ,
+            verticalVelocity: motion?.verticalVelocity,
+            grounded: motion?.grounded,
             collisionDisplacementX: motion?.collisionDisplacement?.x,
             collisionDisplacementZ: motion?.collisionDisplacement?.z,
           }

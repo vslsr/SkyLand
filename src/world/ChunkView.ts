@@ -7,6 +7,7 @@ import { TerrainChunkView } from './TerrainChunkView';
 
 export interface ChunkViewMaterials {
   fill: THREE.Material;
+  groundFill: THREE.Material;
   outline: THREE.Material;
   grid: THREE.Material;
   water?: OceanMaterials;
@@ -95,7 +96,7 @@ export class ChunkView {
       ...this.terrainOptions,
       chunkX: this.chunkX,
       chunkZ: this.chunkZ,
-      groundFillMaterial: this.materials.fill,
+      groundFillMaterial: this.materials.groundFill,
       groundGridMaterial: this.materials.grid,
       waterMaterials: this.materials.water,
       waterShoreMaterial: this.materials.waterShore,

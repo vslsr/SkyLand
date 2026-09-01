@@ -26,6 +26,7 @@ import {
   ItemStackComponent,
   LifetimeComponent,
   PlayerMovementComponent,
+  PlayerJumpComponent,
   ReplicationPolicyComponent,
   SIMPLE_COLLISION_COMPONENT,
   SimpleCollisionComponent,
@@ -611,6 +612,9 @@ export class ClientActorSystem implements SceneVisualSystem {
     }
     if (archetype.components.playerMovement) {
       actor.addComponent(new PlayerMovementComponent(archetype.components.playerMovement));
+    }
+    if (archetype.components.playerJump) {
+      actor.addComponent(new PlayerJumpComponent(archetype.components.playerJump));
     }
     if (archetype.components.vesselMotor) {
       actor.addComponent(new VesselMotorComponent(archetype.components.vesselMotor));

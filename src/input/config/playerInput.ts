@@ -32,6 +32,7 @@ export const PlayerInputActionIds = {
   Move: 'IA_Player_Move',
   VesselMove: 'IA_Vessel_Move',
   Sprint: 'IA_Player_Sprint',
+  Jump: 'IA_Player_Jump',
   Primary: 'IA_Player_Primary',
   Interact: 'IA_Player_Interact',
   WorldInteract: 'IA_World_Interact',
@@ -46,6 +47,7 @@ export const PlayerInputActionIds = {
 
 export const PlayerInputMappingIds = {
   DebugMenuKeyboard: 'DebugMenu.Keyboard.F8',
+  JumpKeyboard: 'Jump.Keyboard.Primary',
 } as const;
 
 const tagForAction = (actionId: string): string => {
@@ -60,6 +62,7 @@ export const PlayerInputTags = {
   Move: defineTag(tagForAction(PlayerInputActionIds.Move)),
   VesselMove: defineTag(tagForAction(PlayerInputActionIds.VesselMove)),
   Sprint: defineTag(tagForAction(PlayerInputActionIds.Sprint)),
+  Jump: defineTag(tagForAction(PlayerInputActionIds.Jump)),
   Primary: defineTag(tagForAction(PlayerInputActionIds.Primary)),
   Interact: defineTag(tagForAction(PlayerInputActionIds.Interact)),
   WorldInteract: defineTag(tagForAction(PlayerInputActionIds.WorldInteract)),

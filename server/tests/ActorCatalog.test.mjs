@@ -53,8 +53,16 @@ test('ActorCatalog 加载并净化木筏原型', async () => {
   assert.equal(player.components.render.radius, 0.42);
   assert.equal(player.components.playerMovement.walkSpeed, 3.2);
   assert.equal(player.components.playerMovement.maximumStepHeight, 0.2);
+  assert.deepEqual(player.components.playerJump, {
+    impulse: 7,
+    gravity: 22,
+    maximumFallSpeed: 20,
+    airControl: 0.85,
+  });
   assert.equal(player.components.buoyancy.parts[0].id, 'body');
   assert.equal(player.components.buoyancy.minimumDraft, 0.08);
+  assert.equal(player.components.buoyancy.bobAmplitude, 0.22);
+  assert.equal(player.components.buoyancy.bobFrequency, 0.55);
 
   const pbfSlime = catalog.require('pbf-slime');
   assert.equal(pbfSlime.components.render.model, 'line-art-pbf-slime');
@@ -66,7 +74,10 @@ test('ActorCatalog 加载并净化木筏原型', async () => {
   assert.equal(pbfSlime.components.render.centerForce, 22);
   assert.equal(pbfSlime.components.playerMovement.walkSpeed, 3.2);
   assert.equal(pbfSlime.components.playerMovement.maximumStepHeight, 0.2);
+  assert.equal(pbfSlime.components.playerJump.impulse, 7);
+  assert.equal(pbfSlime.components.playerJump.airControl, 0.85);
   assert.equal(pbfSlime.components.buoyancy.parts[0].buoyancy, 80);
+  assert.equal(pbfSlime.components.buoyancy.bobAmplitude, 0.3);
   assert.deepEqual(pbfSlime.components.slimeSurfaceDrag, {
     maximumDistance: 0.62,
     pullForce: 72,

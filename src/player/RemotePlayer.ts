@@ -23,6 +23,8 @@ export class RemotePlayer extends Actor {
   private readonly visual: PlayerActorVisual;
   private readonly buoyancy?: BuoyancyComponent;
   private speed = 0;
+  private verticalVelocity = 0;
+  private grounded = true;
 
   private readonly grassDisplacement: GrassDisplacementComponent;
 
@@ -57,10 +59,12 @@ export class RemotePlayer extends Actor {
     this.model.root.name = `remote-player-${state.id}`;
     this.model.root.position.set(
       state.x,
-      this.sampleHeight(state.x, state.z),
+      state.y ?? this.sampleHeight(state.x, state.z),
       state.z,
     );
     this.model.root.rotation.y = state.yaw;
+    this.verticalVelocity = state.verticalVelocity ?? 0;
+    this.grounded = state.grounded ?? true;
     this.grassDisplacement = this.addComponent(new GrassDisplacementComponent(
       this.model.root,
       grassInteraction,
@@ -80,9 +84,11 @@ export class RemotePlayer extends Actor {
       this.model.root.position.y,
       state.z,
     );
-    this.model.root.position.y = this.sampleHeight(state.x, state.z);
+    this.model.root.position.y = state.y ?? this.sampleHeight(state.x, state.z);
     this.model.root.rotation.y = state.yaw;
     this.speed = state.speed;
+    this.verticalVelocity = state.verticalVelocity ?? 0;
+    this.grounded = state.grounded ?? (state.y === undefined);
   }
 
   public update(deltaSeconds: number, elapsedSeconds: number): void {
@@ -91,6 +97,12 @@ export class RemotePlayer extends Actor {
       elapsedSeconds,
       this.speed,
       this.model.root.rotation.y,
+      {
+        velocityX: Math.sin(this.model.root.rotation.y) * this.speed,
+        velocityZ: Math.cos(this.model.root.rotation.y) * this.speed,
+        verticalVelocity: this.verticalVelocity,
+        grounded: this.grounded,
+      },
     );
     this.grassDisplacement.update(deltaSeconds);
   }

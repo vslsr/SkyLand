@@ -7,15 +7,15 @@ function snapshot(serverTime: number, players: Array<Record<string, unknown>>) {
   return { sceneId: 'grassland', tick: serverTime, serverTime, players } as never;
 }
 
-function player(id: string, x: number, z: number, yaw = 0, speed = 0) {
-  return { id, name: id, x, z, yaw, speed, sequence: 1 };
+function player(id: string, x: number, z: number, yaw = 0, speed = 0, y?: number) {
+  return { id, name: id, x, ...(y === undefined ? {} : { y }), z, yaw, speed, sequence: 1 };
 }
 
 /** 本地时钟与服务器完全同步时，渲染时间就是「现在减去插值延迟」。 */
 function buildBuffer() {
   const buffer = new SnapshotBuffer();
-  buffer.push(snapshot(1000, [player('a', 0, 0), player('b', 10, 0)]), 1000);
-  buffer.push(snapshot(1100, [player('a', 2, 4), player('b', 10, 0)]), 1100);
+  buffer.push(snapshot(1000, [player('a', 0, 0, 0, 0, -0.8), player('b', 10, 0)]), 1000);
+  buffer.push(snapshot(1100, [player('a', 2, 4, 0, 0, -0.2), player('b', 10, 0)]), 1100);
   return buffer;
 }
 
@@ -26,6 +26,7 @@ test('两份快照之间做线性插值', () => {
 
   assert.ok(Math.abs(a!.x - 1) < 1e-9);
   assert.ok(Math.abs(a!.z - 2) < 1e-9);
+  assert.ok(Math.abs(a!.y! + 0.5) < 1e-9, '权威浮力 Y 需要与 XZ 一起插值');
 });
 
 test('缓冲被抽干时停在最后一份状态而不是外推', () => {

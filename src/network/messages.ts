@@ -46,6 +46,7 @@ export type ClientMessage =
       deltaSeconds: number;
       move: PlayerInputFrame['move'];
       sprint: boolean;
+      jump?: boolean;
       yaw: number;
     }
   | { type: 'actor:claim'; actorId: string }

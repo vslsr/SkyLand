@@ -222,6 +222,8 @@ bindings.resetAllBindings();
 的脚印采样，允许沿斜坡连续升降、从断崖向下落地并穿过水块；向上跨层仍按角色的
 `maximumStepHeight` 判断。没有浮力时角色沿河床移动；史莱姆原型携带通用
 `BuoyancyComponent`，深水中由海平面减去吃水提供支撑，浅滩与凸起河床仍会阻挡。
+玩家的基础速度写入 GAS `Movement.Speed` 属性；进入水域时服务端与本地预测都会施加
+`Effect.Movement.WaterSlow`，把 CurrentValue 乘以 0.5，离水后移除并恢复 BaseValue。
 地形不注册成每格碰撞盒，
 所以内存与查询成本不随地图面积增长。
 
@@ -553,7 +555,8 @@ const page: CommonUIPage = {
 调试页；页面仍遵守栈顶输入、焦点、Escape/F8 关闭和 Scene 清理规则。调试页可以切换
 Actor 简易碰撞边框、温度标签和房间权威天气。天气按钮只发送切换请求，房间 DS 校验后
 随快照同步当前天气；雨雪等表现由客户端按本地玩家周围的 3×3 chunk 激活，粒子保持世界
-坐标固定，天气光照与雾通过场景共享 uniform 驱动。产品构建会移除
+坐标固定，天气光照与远景雾通过场景共享 uniform 驱动；纸面地表、地面网格与草叶
+不混入距离雾色。产品构建会移除
 该 Mapping，不占用 F8。
 
 ## 数据化场景
@@ -740,7 +743,9 @@ Actor 控制和断线清理逻辑。
 
 `shared/playerMovement.mjs` 是两端共用的移动实现，`TopDownController` 的本地预测与
 `ServerScene` 的权威计算调用同一个 `applyPlayerMovement`，相同输入必然得到相同位置，
-客户端预测才有对账的基础。速度与跨越高度来自服务器校验后的玩家 Actor 原型；
+客户端预测才有对账的基础。基础速度来自服务器校验后的玩家 Actor 原型，实际速度读取
+GAS `Movement.Speed` 的 CurrentValue；涉水 GameplayEffect 因此同时约束 DS 权威移动与
+客户端预测。跨越高度仍来自玩家 Actor 原型；
 `shared/networkTuning.mjs` 统一了频率、插值延迟与各项阈值。
 
 ### 服务端的校验
@@ -750,7 +755,7 @@ Actor 控制和断线清理逻辑。
 | 手段 | 位置 | 作用 |
 | --- | --- | --- |
 | 方向向量归一化到 ≤ 1 | `sanitizeMoveInput` | 放大向量换不来速度 |
-| 速度与倍率由服务端 Actor 原型限定 | `ActorCatalog` + `applyPlayerMovement` | 客户端不能提交或放大速度参数 |
+| 基础速度由 Actor 原型限定，环境倍率由 GAS Effect 聚合 | `ActorCatalog` + `Movement.Speed` + `applyPlayerMovement` | 客户端不能提交或放大速度参数 |
 | 低矮台阶按权威高度过滤 | `maximumStepHeight` + `CollisionWorld` | 低台阶可跨越，高障碍仍推出 |
 | 活动范围钳制 | `clampToPlayArea` | 走不出大世界的活动区 |
 | 单条输入时长上限 | `ServerScene.applyInput` | 一条消息最多推进 0.1 s |

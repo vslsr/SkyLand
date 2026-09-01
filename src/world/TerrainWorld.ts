@@ -3,6 +3,7 @@ import {
   resolveTerrainMovement,
   terrainMovementHeight,
 } from '../../shared/world/terrainMovement.mjs';
+import { TERRAIN_SURFACE } from '../../shared/world/terrainConfig.mjs';
 import { TerrainEditor } from '../../shared/world/terrainEditing.mjs';
 import { TerrainPatchStore } from '../../shared/world/terrainPatches.mjs';
 import {
@@ -57,6 +58,12 @@ export class TerrainWorld {
     return (
       sampleTerrain(this.worldSeed, x, z, SAMPLE, this.cellCodeAt) as TerrainSample
     ).groundY;
+  }
+
+  public isWaterAt(x: number, z: number): boolean {
+    return (
+      sampleTerrain(this.worldSeed, x, z, SAMPLE, this.cellCodeAt) as TerrainSample
+    ).surface === TERRAIN_SURFACE.WATER;
   }
 
   /** 普通低地返回 0；只有已标记为连通水域的格子才按海床计算水深。 */
