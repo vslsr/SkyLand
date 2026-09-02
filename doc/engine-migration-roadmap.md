@@ -333,6 +333,8 @@ DOM + CSS 布局 + 层叠 + 文本排版是三个巨型子系统，做出来只�
 
 关键设计取向：**编辑器编辑的是那些 JSON，不是运行时对象。** 这样编辑器与运行时之间只有一份 schema 契约，不需要反射系统，也不需要运行时暴露内部结构——对小团队是巨大的省力。
 
+落地形态（H5 编辑器怎么和 C++ 运行时接、为什么不内嵌 webview、编辑器如何复用现有的客户端协议）单独写在 **`tool-layer-implementation.md`**。
+
 ---
 
 ## 8. ResourceLayer 与资源生命周期
@@ -532,7 +534,7 @@ Render Worker 拿到 `transferControlToOffscreen()` 的 canvas，通过第 1 步
 | CoreLayer · JS 运行时 | 路线图外 | 独立项目 |
 | ResourceLayer 烘焙格式 | 第 4 步的前置 | 可并行，不阻塞 0／1／2 |
 | CoreLayer · 资源所有权表 | 第 4 步的前置 | 可并行，现在就能开 |
-| ToolLayer | 路线图外 | 可并行，现在就能开 |
+| ToolLayer | 路线图外 | 可并行，现在就能开（见 `tool-layer-implementation.md`） |
 
 关键路径其实只有两件事：**PlatformLayer 的线程抽象**和 **SceneLayer 的 Render 边界**。其余都可以挪后或并行。
 
