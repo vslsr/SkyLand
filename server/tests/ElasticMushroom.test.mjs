@@ -169,3 +169,97 @@ test('拔出来之前只是长在地上的东西：叼住拖拽都不产生刚�
     assert.equal(held.transform.z, initial.transform.z);
   }
 });
+
+test('拖拽行程从叼住那一刻起算，站多远按 E 都一样长', async () => {
+  const catalog = await SceneCatalog.load();
+  const mushroomId = 'elastic-mushroom-01';
+
+  /** 从指定距离叼住，返回还能后退多远才拔断。 */
+  const dragRange = (grabDistance) => {
+    const clock = createClock();
+    const scene = new ServerScene(catalog.require('grassland'), { now: clock.now });
+    scene.addPlayer({ id: 'puller', name: '拖拽者', slot: 0 });
+    const initial = scene.createSnapshot().actors.find((actor) => actor.id === mushroomId);
+    const player = scene.players.get('puller');
+    player.x = initial.transform.x - grabDistance;
+    player.z = initial.transform.z;
+    player.yaw = Math.PI / 2;
+    assert.equal(scene.interactWithActor('puller', { actorId: mushroomId, sequence: 1 }), true);
+    const snap = () => scene.createSnapshot().actors.find((actor) => actor.id === mushroomId);
+    for (let extra = 0; extra <= 4; extra += 0.02) {
+      player.x = initial.transform.x - grabDistance - extra;
+      clock.advance(0.02);
+      scene.update();
+      if (snap().elasticDetach.detached) return extra;
+    }
+    return undefined;
+  };
+
+  // 贴脸按和顶着交互距离按，拖拽行程必须接近；绝对 breakLength 判定下这两个
+  // 数字会差出两倍多，玩起来就是「走近按一下能拖、站远按一下直接掉」。
+  const close = dragRange(0.5);
+  const far = dragRange(1.35);
+  assert.ok(close !== undefined && far !== undefined, '一直没拔断');
+  assert.ok(far > 1.2, `站远按 E 只能拖 ${far?.toFixed(2)}m，几乎没有拖拽过程`);
+  assert.ok(
+    Math.abs(close - far) < 0.3,
+    `拖拽行程受起手距离影响太大：${close?.toFixed(2)}m vs ${far?.toFixed(2)}m`,
+  );
+});
+
+test('走远让 chunk 卸载再回来，躺在地上的蘑菇不会站起来', async () => {
+  const clock = createClock();
+  const catalog = await SceneCatalog.load();
+  const scene = new ServerScene(catalog.require('open-world'), { now: clock.now });
+  scene.addPlayer({ id: 'wanderer', name: '路过的人', slot: 0 });
+  const player = scene.players.get('wanderer');
+  const tick = (times) => {
+    for (let index = 0; index < times; index += 1) {
+      clock.advance(0.05);
+      scene.update();
+    }
+  };
+  tick(5);
+
+  const target = scene.createSnapshot().actors
+    .find((actor) => actor.archetypeId === 'elastic-mushroom');
+  assert.ok(target, '这一片没有生成蘑菇');
+  const find = () => scene.createSnapshot().actors.find((actor) => actor.id === target.id);
+
+  /** 菌柄的向上轴离竖直有多远：立着 ≈ 0°，躺倒 ≈ 90°。 */
+  const tiltDegrees = (rotation) => {
+    if (!Array.isArray(rotation)) return undefined;
+    const [x, , z] = rotation;
+    return Math.acos(Math.max(-1, Math.min(1, 1 - 2 * (x * x + z * z)))) * 180 / Math.PI;
+  };
+
+  player.x = target.transform.x - 1;
+  player.z = target.transform.z;
+  player.yaw = Math.PI / 2;
+  tick(1);
+  assert.equal(scene.interactWithActor('wanderer', { actorId: target.id, sequence: 1 }), true);
+  player.x = target.transform.x - 3.4;
+  tick(60);
+
+  const fallenTilt = tiltDegrees(find().elasticDetach.rotation);
+  assert.ok(fallenTilt > 60, `蘑菇没有躺下：${fallenTilt?.toFixed(1)}°`);
+
+  // 走出 keep 半径让 chunk 卸载，再走回来。
+  player.x = target.transform.x + 300;
+  player.z = target.transform.z + 300;
+  tick(40);
+  assert.equal(scene.actorWorld.getActor(target.id), undefined, 'chunk 没有卸载，用例没测到重建');
+
+  player.x = target.transform.x - 2;
+  player.z = target.transform.z;
+  tick(40);
+
+  const restored = find();
+  assert.ok(restored, '走回来蘑菇不见了');
+  assert.equal(restored.elasticDetach.detached, true);
+  const restoredTilt = tiltDegrees(restored.elasticDetach.rotation);
+  assert.ok(
+    restoredTilt > 60,
+    `重建之后蘑菇站起来了：${restoredTilt?.toFixed(1)}°（躺下时是 ${fallenTilt.toFixed(1)}°）`,
+  );
+});

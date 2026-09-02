@@ -10,6 +10,12 @@ export function grabElasticTether(tether, interactable, player, transform) {
   if (tether.holderPlayerId || !interactable.enabled) return false;
   tether.holderPlayerId = player.id;
   updateElasticTetherTarget(tether, player, transform);
+  // 拖拽行程从这里起算，玩家站多远按的 E 就不再决定还能拖多久。
+  tether.grabLength = Math.hypot(
+    tether.targetX - transform.x,
+    tether.targetY - transform.y,
+    tether.targetZ - transform.z,
+  );
   tether.revision += 1;
   interactable.enabled = false;
   interactable.revision += 1;

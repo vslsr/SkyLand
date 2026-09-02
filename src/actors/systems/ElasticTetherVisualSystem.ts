@@ -71,7 +71,7 @@ export class ElasticTetherVisualSystem {
       if (released) state.velocity.multiplyScalar(1.12);
       this.integrate(state, this.desired, deltaSeconds, tether.holderPlayerId !== null);
 
-      const maximumLength = tether.breakLength * 1.12;
+      const maximumLength = tether.detachLength * 1.12;
       let length = state.tip.length();
       if (!Number.isFinite(length) || length < rig.restLength * 0.35) {
         state.tip.set(0, rig.restLength, 0);

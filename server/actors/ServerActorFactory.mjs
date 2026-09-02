@@ -339,6 +339,8 @@ export function createActorSnapshots(world, options = {}) {
           targetX: elasticTether.targetX,
           targetY: elasticTether.targetY,
           targetZ: elasticTether.targetZ,
+          // 客户端的拉伸表现要按同一条阈值收放，否则菌柄会先到头、玩家还在走。
+          grabLength: elasticTether.grabLength,
           releaseRevision: elasticTether.releaseRevision,
           revision: elasticTether.revision,
         },
