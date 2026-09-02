@@ -109,7 +109,7 @@ export class ActorInteractionController {
       );
     }
     if (candidate.action === 'mushroom-bite') {
-      if (playerId && candidate.carriedByPlayerId === playerId) {
+      if (playerId && candidate.pickupHolderActorId === playerId) {
         return this.withInputLabel(
           this.port.getInputLabel(PlayerInputTags.WorldInteract),
           `放下「${candidate.label}」`,

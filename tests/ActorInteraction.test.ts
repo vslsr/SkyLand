@@ -89,8 +89,6 @@ const definition = {
         elasticTether: {
           restLength: 0.72,
           breakLength: 2.65,
-          mouthHeight: 0.3,
-          mouthForwardOffset: 0.36,
         },
         render: {
           model: 'line-art-elastic-mushroom', capColor: '#c97868', stemColor: '#eadfc5',

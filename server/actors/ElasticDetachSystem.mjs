@@ -3,10 +3,12 @@ import {
   ELASTIC_DETACH_COMPONENT,
   ELASTIC_TETHER_COMPONENT,
   INTERACTABLE_COMPONENT,
+  PICKUP_DROP_COMPONENT,
   SIMPLE_COLLISION_COMPONENT,
   TRANSFORM_COMPONENT,
 } from '../../shared/actor/index.mjs';
 import { releaseElasticTether } from './ElasticTetherMutations.mjs';
+import { pickupActor } from './PickupDropMutations.mjs';
 
 /**
  * 叼在嘴上时物件的姿态：把它自身的向上轴摆到玩家正前方，也就是横着衔住。
@@ -56,7 +58,8 @@ export class ElasticDetachSystem {
           detachable.pop(direction);
           releaseElasticTether(tether, interactable);
           // 拔下来之后它直接进嘴：既不弹飞，也不落地，等玩家再按一次才放下。
-          detachable.carry(holderId);
+          const holder = world.getActor(holderId);
+          if (!pickupActor(world, actor, holder)) continue;
           if (interactable.enabled) {
             interactable.enabled = false;
             interactable.revision += 1;
@@ -65,8 +68,9 @@ export class ElasticDetachSystem {
       }
       if (!detachable.detached || delta === 0) continue;
       // 叼在嘴上的这一段跟着玩家走，不进刚体世界：它的位置由嘴决定，不由重力决定。
-      if (detachable.carriedByPlayerId) {
-        this.followCarrier(world, actor, detachable, motion, transform);
+      const holderPickupDrop = actor.parent?.getComponent(PICKUP_DROP_COMPONENT);
+      if (holderPickupDrop?.heldActorId === actor.id) {
+        this.updateCarriedRotation(actor.parent, motion);
         continue;
       }
       if (!detachable.dropCollisionApplied) {
@@ -102,7 +106,8 @@ export class ElasticDetachSystem {
       TRANSFORM_COMPONENT,
     )) {
       const detachable = actor.requireComponent(ELASTIC_DETACH_COMPONENT);
-      if (!detachable.detached || detachable.carriedByPlayerId) continue;
+      const holderPickupDrop = actor.parent?.getComponent(PICKUP_DROP_COMPONENT);
+      if (!detachable.detached || holderPickupDrop?.heldActorId === actor.id) continue;
       this.syncActor(
         physics,
         actor,
@@ -136,16 +141,8 @@ export class ElasticDetachSystem {
     }
   }
 
-  /** 叼着的时候位置与姿态都由玩家决定，权威 Transform 每 tick 跟到嘴上。 */
-  followCarrier(world, actor, detachable, motion, transform) {
-    const carrier = world.context.players?.get(detachable.carriedByPlayerId);
-    if (!carrier) return;
-    const tether = actor.requireComponent(ELASTIC_TETHER_COMPONENT);
-    transform.setWorldTransform([
-      carrier.x + Math.sin(carrier.yaw) * tether.mouthForwardOffset,
-      carrier.y + tether.mouthHeight,
-      carrier.z + Math.cos(carrier.yaw) * tether.mouthForwardOffset,
-    ], carrier.yaw);
+  /** Attach 已负责位置；这里只维护蘑菇横衔所需的非位置姿态。 */
+  updateCarriedRotation(carrier, motion) {
     motion.setRotation(carriedRotation(carrier.yaw));
     motion.velocityX = 0;
     motion.velocityY = 0;

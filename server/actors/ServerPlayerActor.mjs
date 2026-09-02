@@ -2,6 +2,7 @@ import {
   Actor,
   BuoyancyComponent,
   InventoryComponent,
+  PickupDropComponent,
   PLAYER_JUMP_COMPONENT,
   PlayerJumpComponent,
   PLAYER_MOVEMENT_COMPONENT,
@@ -51,6 +52,9 @@ export class ServerPlayerActor extends Actor {
       maximumStepHeight: movement.maximumStepHeight,
     };
     this.addComponent(new InventoryComponent());
+    if (archetype.components.pickupDrop) {
+      this.addComponent(new PickupDropComponent(archetype.components.pickupDrop));
+    }
     const render = archetype.components.render;
     this.collisionRadius = render.collisionRadius ?? render.radius;
     this.collisionHeight = render.collisionHeight ?? render.radius * 2;

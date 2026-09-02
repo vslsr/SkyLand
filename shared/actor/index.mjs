@@ -58,6 +58,10 @@ export {
   ItemStackComponent,
 } from './components/ItemStackComponent.mjs';
 export {
+  PICKUP_DROP_COMPONENT,
+  PickupDropComponent,
+} from './components/PickupDropComponent.mjs';
+export {
   GENERATED_PROP_COMPONENT,
   GeneratedPropComponent,
 } from './components/GeneratedPropComponent.mjs';

@@ -258,6 +258,13 @@ test('真实 WebSocket 贯通史莱姆叼取、移动拉伸和自动脱离', asy
   const mushroom = actorFrom(released, 'elastic-mushroom-01');
   assert.equal(mushroom.interactable.enabled, false);
   assert.equal(mushroom.elasticDetach.detached, true);
+  assert.equal(
+    released.snapshot.players.find((player) => player.id === joined.player.id)?.heldActorId,
+    mushroom.id,
+  );
+  assert.equal(mushroom.parentActorId, joined.player.id);
+  assert.equal(mushroom.transform, undefined, '被拾取 Actor 不应继续同步世界位置');
+  assert.ok(mushroom.elasticDetach.rotation, '被拾取 Actor 的非位置姿态仍需同步');
   assert.equal(mushroom.elasticTether.releaseRevision, 1);
 });
 

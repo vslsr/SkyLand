@@ -59,7 +59,7 @@ import { toWorldSeed } from '../../shared/world/worldConfig.mjs';
 import { selectWorldPropVariant } from '../../shared/world/worldPropVariants.mjs';
 import type { FillMaterialEnvironment } from '../materials/createFillMaterial';
 import { createActorVisualModel } from '../models/actors/createActorVisualModel';
-import type { SnapshotActor } from '../network/protocol';
+import type { SnapshotActor, SnapshotPlayer } from '../network/protocol';
 import type { SceneDefinition } from '../scenes/data/SceneDefinition';
 import type {
   ActorInteractionCandidate,
@@ -134,6 +134,55 @@ type PropStateSnapshot = {
 };
 type PropOverrideTarget = (chunkX: number, chunkZ: number, propIndex: number, removed: boolean) => void;
 
+type ActorPose = { x: number; y: number; z: number; yaw: number };
+
+function composeAttachedPose(parent: ActorPose, local: NonNullable<SnapshotActor['localTransform']>): ActorPose {
+  const sinYaw = Math.sin(parent.yaw);
+  const cosYaw = Math.cos(parent.yaw);
+  return {
+    x: parent.x + cosYaw * local.x + sinYaw * local.z,
+    y: parent.y + local.y,
+    z: parent.z - sinYaw * local.x + cosYaw * local.z,
+    yaw: parent.yaw + local.yaw,
+  };
+}
+
+/** 用同时间戳的外部 Actor 姿态补出附件位置；线上无需复制附件世界 Transform。 */
+function resolveExternalAttachmentTransforms(
+  snapshots: readonly SnapshotActor[],
+  externalActors: readonly SnapshotPlayer[],
+): SnapshotActor[] {
+  const actors = new Map(snapshots.map((snapshot) => [snapshot.id, snapshot]));
+  const external = new Map<string, ActorPose>(externalActors.map((actor) => [actor.id, {
+    x: actor.x,
+    y: actor.y ?? 0,
+    z: actor.z,
+    yaw: actor.yaw,
+  }]));
+  const resolved = new Map<string, ActorPose>();
+  const resolving = new Set<string>();
+  const resolve = (snapshot: SnapshotActor): ActorPose | undefined => {
+    if (snapshot.transform) return snapshot.transform;
+    const cached = resolved.get(snapshot.id);
+    if (cached) return cached;
+    if (!snapshot.parentActorId || !snapshot.localTransform || resolving.has(snapshot.id)) return undefined;
+    resolving.add(snapshot.id);
+    const parentSnapshot = actors.get(snapshot.parentActorId);
+    const parent = external.get(snapshot.parentActorId)
+      ?? (parentSnapshot ? resolve(parentSnapshot) : undefined);
+    resolving.delete(snapshot.id);
+    if (!parent) return undefined;
+    const pose = composeAttachedPose(parent, snapshot.localTransform);
+    resolved.set(snapshot.id, pose);
+    return pose;
+  };
+  return snapshots.map((snapshot) => {
+    if (snapshot.transform) return snapshot;
+    const transform = resolve(snapshot);
+    return transform ? { ...snapshot, transform } : snapshot;
+  });
+}
+
 /** 接收服务端完整 Actor 快照并维护对应的客户端 Replica。 */
 export class ClientActorSystem implements SceneVisualSystem {
   public readonly root = new THREE.Group();
@@ -158,6 +207,8 @@ export class ClientActorSystem implements SceneVisualSystem {
     layers: number;
     actorId: string;
   }>();
+  /** Replica 的父节点若是 players 快照里的外部 Actor，就在这里保存 Attach 关系。 */
+  private readonly externalParentActorIds = new Map<string, string>();
   /** 快照换过一批 Actor 之后必须重新登记，置位后由下一次查询或 update 兑现。 */
   private collidersStale = true;
   private hoveredActorId?: string;
@@ -225,8 +276,13 @@ export class ClientActorSystem implements SceneVisualSystem {
     snapshots: readonly SnapshotActor[],
     serverTime: number,
     receivedAt = this.now(),
+    externalActors: readonly SnapshotPlayer[] = [],
   ): void {
-    this.snapshots.push(snapshots, serverTime, receivedAt);
+    this.snapshots.push(
+      resolveExternalAttachmentTransforms(snapshots, externalActors),
+      serverTime,
+      receivedAt,
+    );
   }
 
   private applySnapshotSet(snapshots: readonly SnapshotActor[]): void {
@@ -263,7 +319,13 @@ export class ClientActorSystem implements SceneVisualSystem {
     for (const snapshot of applicableSnapshots) {
       const actor = this.world.getActor(snapshot.id) as Actor;
       const parentActorId = snapshot.parentActorId ?? undefined;
-      if (actor.parent?.id !== parentActorId) {
+      // 玩家等外部 Actor 不在 Replica ActorWorld 中；它们的姿态已在快照入缓冲前合成。
+      if (parentActorId && !this.world.getActor(parentActorId)) {
+        this.externalParentActorIds.set(actor.id, parentActorId);
+      } else {
+        this.externalParentActorIds.delete(actor.id);
+      }
+      if ((!parentActorId || this.world.getActor(parentActorId)) && actor.parent?.id !== parentActorId) {
         this.world.setActorParent(actor.id, parentActorId, { worldPositionStays: true });
       }
     }
@@ -278,7 +340,10 @@ export class ClientActorSystem implements SceneVisualSystem {
         actor.hasComponents(REPLICATION_COMPONENT)
         && !actor.hasComponents(LOCAL_DERIVED_ACTOR_COMPONENT)
         && !liveIds.has(actor.id)
-      ) this.world.removeActor(actor.id);
+      ) {
+        this.externalParentActorIds.delete(actor.id);
+        this.world.removeActor(actor.id);
+      }
     }
     if (this.hoveredActorId && !this.world.getActor(this.hoveredActorId)) {
       this.setHoveredActorId(undefined);
@@ -324,10 +389,7 @@ export class ClientActorSystem implements SceneVisualSystem {
     ) as Actor[]) {
       // 与服务端一致：叼在嘴上的东西不参与碰撞，否则本地预测会被自己嘴里
       // 那一个顶住，走不动。
-      const detachable = actor.getComponent(
-        ELASTIC_DETACH_COMPONENT,
-      ) as ElasticDetachComponent | undefined;
-      if (detachable?.carriedByPlayerId) continue;
+      if (this.externalParentActorIds.has(actor.id)) continue;
       live.add(actor.id);
       let instance = this.colliderInstances.get(actor.id);
       if (!instance) {
@@ -381,6 +443,7 @@ export class ClientActorSystem implements SceneVisualSystem {
       this.physics?.removeActorCollider(actorId);
     }
     this.colliderInstances.clear();
+    this.externalParentActorIds.clear();
     this.highCountBatches.dispose();
     this.fruit.dispose();
     this.world.dispose();
@@ -599,10 +662,7 @@ export class ClientActorSystem implements SceneVisualSystem {
       INTERACTABLE_COMPONENT,
     ) as Actor[]) {
       const tether = actor.requireComponent(ELASTIC_TETHER_COMPONENT) as ElasticTetherComponent;
-      const detachable = actor.getComponent(
-        ELASTIC_DETACH_COMPONENT,
-      ) as ElasticDetachComponent | undefined;
-      if (tether.holderPlayerId !== playerId && detachable?.carriedByPlayerId !== playerId) {
+      if (tether.holderPlayerId !== playerId && this.externalParentActorIds.get(actor.id) !== playerId) {
         continue;
       }
       return this.createInteractionCandidate(
@@ -875,7 +935,6 @@ export class ClientActorSystem implements SceneVisualSystem {
         ELASTIC_DETACH_COMPONENT,
       ) as ElasticDetachComponent;
       detachable.detached = snapshot.elasticDetach.detached;
-      detachable.carriedByPlayerId = snapshot.elasticDetach.carriedByPlayerId ?? null;
       detachable.revision = snapshot.elasticDetach.revision;
       const rotation = snapshot.elasticDetach.rotation;
       if (rotation) {
@@ -957,16 +1016,13 @@ export class ClientActorSystem implements SceneVisualSystem {
       ELASTIC_TETHER_COMPONENT,
     ) as ElasticTetherComponent | undefined;
     const stack = actor.getComponent(ITEM_STACK_COMPONENT) as ItemStackComponent | undefined;
-    const detachable = actor.getComponent(
-      ELASTIC_DETACH_COMPONENT,
-    ) as ElasticDetachComponent | undefined;
     return {
       actorId: actor.id,
       label: interactable.label,
       action: interactable.action,
       carrierActorId: cargo?.carrierActorId ?? null,
       holderPlayerId: tether?.holderPlayerId ?? null,
-      carriedByPlayerId: detachable?.carriedByPlayerId ?? null,
+      pickupHolderActorId: this.externalParentActorIds.get(actor.id) ?? null,
       quantity: stack?.quantity,
     };
   }

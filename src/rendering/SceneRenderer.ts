@@ -19,7 +19,7 @@ import type {
   VesselHudState,
   WeatherVisualTarget,
 } from '../scene/SceneVisualSystem';
-import type { SnapshotActor } from '../network/protocol';
+import type { SnapshotActor, SnapshotPlayer } from '../network/protocol';
 import type { SceneBeforeRenderListener } from '../scene/components';
 import type { SceneDefinition } from '../scenes/data/SceneDefinition';
 import type { TerrainWorld } from '../world/TerrainWorld';
@@ -131,8 +131,12 @@ export class SceneRenderer implements GrassInteractionTarget {
     this.updatePhysicsDebug();
   }
 
-  public syncActors(snapshots: readonly SnapshotActor[], serverTime: number): void {
-    this.actorSnapshotTarget?.syncSnapshots(snapshots, serverTime);
+  public syncActors(
+    snapshots: readonly SnapshotActor[],
+    players: readonly SnapshotPlayer[],
+    serverTime: number,
+  ): void {
+    this.actorSnapshotTarget?.syncSnapshots(snapshots, serverTime, undefined, players);
   }
 
   public getActor(actorId: string): Actor | undefined {

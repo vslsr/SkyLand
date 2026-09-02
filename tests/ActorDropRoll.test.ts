@@ -10,6 +10,7 @@ import {
   ELASTIC_TETHER_COMPONENT,
   ElasticDetachComponent,
   ElasticTetherComponent,
+  TRANSFORM_COMPONENT,
   TransformComponent,
 } from '../shared/actor/index.mjs';
 import { ActorDropRollSystem } from '../src/actors/systems/ActorDropRollSystem';
@@ -46,8 +47,6 @@ function createMushroom(): { world: ActorWorld; actor: Actor; render: ThreeObjec
     restLength: 0.72,
     breakLength: 1.55,
     pullDistance: PULL_DISTANCE,
-    mouthHeight: 0.3,
-    mouthForwardOffset: 0.36,
   }));
   actor.addComponent(new ElasticDetachComponent({}));
   actor.addComponent(new DropMotionComponent({
@@ -279,12 +278,12 @@ test('手上有蘑菇时，交互键指向它并给出放下/松开提示', () =
     action: 'mushroom-bite',
     carrierActorId: null,
     holderPlayerId: null,
-    carriedByPlayerId: null,
+    pickupHolderActorId: null,
     ...over,
   });
 
   // 叼在嘴上：提示放下，按键指向它自己。
-  held = candidate({ carriedByPlayerId: 'me' });
+  held = candidate({ pickupHolderActorId: 'me' });
   trigger();
   controller.update(frame);
   assert.match(prompt ?? '', /放下/);
@@ -335,8 +334,6 @@ test('端到端：快照说我叼着它，按一次交互键就发出放下请�
           restLength: 0.72,
           breakLength: 1.55,
           pullDistance: PULL_DISTANCE,
-          mouthHeight: 0.3,
-          mouthForwardOffset: 0.36,
         },
         elasticDetach: {},
         dropMotion: {
@@ -371,7 +368,7 @@ test('端到端：快照说我叼着它，按一次交互键就发出放下请�
       holderPlayerId: null, targetX: 0, targetY: 0.72, targetZ: 0,
       releaseRevision: 0, revision: 1,
     },
-    elasticDetach: { detached: false, carriedByPlayerId: null, revision: 1 },
+    elasticDetach: { detached: false, revision: 1 },
     ...over,
   } as unknown as SnapshotActor);
 
@@ -418,9 +415,21 @@ test('端到端：快照说我叼着它，按一次交互键就发出放下请�
   sent.length = 0;
   now = 2_000;
   system.syncSnapshots([mushroom({
-    elasticDetach: { detached: true, carriedByPlayerId: 'me', revision: 2, rotation: [0, 0, 0, 1] },
-  })], now);
+    parentActorId: 'me',
+    transform: undefined,
+    localTransform: { x: 0, y: 0.3, z: 0.36, yaw: 0 },
+    elasticDetach: { detached: true, revision: 2, rotation: [0, 0, 0, 1] },
+  })], now, now, [{
+    id: 'me', name: '我', x: 2, y: 0.1, z: 3, yaw: 0.5,
+    speed: 0, ackTick: 0, sequence: 0,
+  }]);
+  now += INTERPOLATION_DELAY_MS;
   system.update(1 / 60, 1);
+  const attached = system.getActor('m1')!;
+  const attachedTransform = attached.requireComponent(TRANSFORM_COMPONENT) as TransformComponent;
+  assert.ok(Math.abs(attachedTransform.x - (2 + Math.sin(0.5) * 0.36)) < 1e-6);
+  assert.ok(Math.abs(attachedTransform.y - 0.4) < 1e-6);
+  assert.ok(Math.abs(attachedTransform.z - (3 + Math.cos(0.5) * 0.36)) < 1e-6);
   trigger();
   controller.update(frame);
   assert.deepEqual(sent, ['m1'], '叼着时按 E 没有发出请求');

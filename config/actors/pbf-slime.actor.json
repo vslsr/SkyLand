@@ -30,6 +30,12 @@
       "maximumFallSpeed": 20,
       "airControl": 0.85
     },
+    "pickupDrop": {
+      "mouthLocalX": 0,
+      "mouthLocalY": 0.5,
+      "mouthLocalZ": 0.42,
+      "mouthLocalYaw": 0
+    },
     "slimeSurfaceDrag": {
       "maximumDistance": 0.62,
       "pullForce": 72,

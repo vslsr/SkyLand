@@ -4,7 +4,7 @@ import type { CollisionWorld } from '../../shared/collision/index.mjs';
 import type { DayNightVisualTarget } from '../environment/EnvironmentTypes';
 import type { SceneEnvironmentRuntime } from '../materials/createFillMaterial';
 import type { GrassInteractionTarget } from '../grass';
-import type { SnapshotActor } from '../network/protocol';
+import type { SnapshotActor, SnapshotPlayer } from '../network/protocol';
 import type { ActorFloatState, ActorEventType } from '../network/protocol';
 import type { WeatherType } from '../weather/index';
 import type { TerrainWorld } from '../world/TerrainWorld';
@@ -37,7 +37,12 @@ export interface WeatherVisualTarget {
 }
 
 export interface ActorSnapshotTarget {
-  syncSnapshots(snapshots: readonly SnapshotActor[], serverTime: number, receivedAt?: number): void;
+  syncSnapshots(
+    snapshots: readonly SnapshotActor[],
+    serverTime: number,
+    receivedAt?: number,
+    externalActors?: readonly SnapshotPlayer[],
+  ): void;
   getActor(actorId: string): Actor | undefined;
   findOwnedActorId(playerId: string): string | undefined;
   findControllableActorId(): string | undefined;
@@ -66,7 +71,7 @@ export interface ActorInteractionCandidate {
   action: 'cargo-toggle' | 'mushroom-bite' | 'pickup-stack' | 'harvest-prop';
   carrierActorId: string | null;
   holderPlayerId: string | null;
-  carriedByPlayerId: string | null;
+  pickupHolderActorId: string | null;
   quantity?: number;
 }
 

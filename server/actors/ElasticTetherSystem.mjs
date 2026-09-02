@@ -30,7 +30,10 @@ export class ElasticTetherSystem {
         releaseElasticTether(tether, interactable);
         continue;
       }
-      updateElasticTetherTarget(tether, player, transform);
+      if (!updateElasticTetherTarget(tether, player)) {
+        releaseElasticTether(tether, interactable);
+        continue;
+      }
       const length = Math.hypot(
         tether.targetX - transform.x,
         tether.targetY - transform.y,

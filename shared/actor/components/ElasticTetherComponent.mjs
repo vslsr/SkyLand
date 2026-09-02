@@ -19,8 +19,6 @@ export class ElasticTetherComponent extends ActorComponent {
     this.pullDistance = Math.max(0, Number(definition.pullDistance) || 0);
     /** 运行态：叼住那一刻的弹性长度，拔断阈值以它为起点。 */
     this.grabLength = 0;
-    this.mouthHeight = definition.mouthHeight;
-    this.mouthForwardOffset = definition.mouthForwardOffset;
     this.holderPlayerId = null;
     this.targetX = 0;
     this.targetY = 0;

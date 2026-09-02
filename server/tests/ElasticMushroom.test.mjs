@@ -62,9 +62,12 @@ test('叼住 → 拖拽 → 拔断进嘴 → 放下落地：一整趟交互', as
   assert.equal(mushroom.elasticTether.releaseRevision, 1);
   assert.equal(mushroom.elasticDetach.detached, true);
   // 拔断之后它在嘴上，不是掉在地上：既没有落回地面，也还不是自由刚体。
-  assert.equal(mushroom.elasticDetach.carriedByPlayerId, 'player-a');
+  assert.equal(scene.createSnapshot().players.find((entry) => entry.id === 'player-a').heldActorId, mushroomId);
+  assert.equal(mushroom.parentActorId, 'player-a');
+  assert.equal(mushroom.transform, undefined, 'Attach 后不应继续复制冗余世界坐标');
+  assert.deepEqual(mushroom.localTransform, { x: 0, y: 0.3, z: 0.36, yaw: 0 });
+  assert.equal(mushroom.interactable.enabled, false, '非位置属性仍需正常同步');
   assert.equal(scene.physics.hasDynamicActor(mushroomId), false);
-  assert.ok(mushroom.transform.y > initial.transform.y);
 
   // 叼着走，蘑菇跟着嘴动。
   player.x = initial.transform.x + 6;
@@ -72,9 +75,9 @@ test('叼住 → 拖拽 → 拔断进嘴 → 放下落地：一整趟交互', as
   player.yaw = 0;
   clock.advance(0.05);
   scene.update();
-  mushroom = find();
+  const carriedTransform = scene.actorWorld.getActor(mushroomId).requireComponent('transform');
   assert.ok(
-    Math.hypot(mushroom.transform.x - player.x, mushroom.transform.z - player.z) < 1,
+    Math.hypot(carriedTransform.x - player.x, carriedTransform.z - player.z) < 1,
     '叼着的蘑菇没有跟着玩家走',
   );
 
@@ -82,7 +85,7 @@ test('叼住 → 拖拽 → 拔断进嘴 → 放下落地：一整趟交互', as
   assert.equal(scene.interactWithActor('player-a', { actorId: mushroomId, sequence: 2 }), true);
   const dropX = find().transform.x;
   const dropZ = find().transform.z;
-  assert.equal(find().elasticDetach.carriedByPlayerId, null);
+  assert.equal(scene.createSnapshot().players.find((entry) => entry.id === 'player-a').heldActorId, null);
   assert.equal(find().interactable.enabled, true);
   assert.equal(scene.physics.hasDynamicActor(mushroomId), true);
 
@@ -307,7 +310,7 @@ test('还没拔断时再按一次交互键，取消拖拽并恢复可交互', as
   const cancelled = find();
   assert.equal(cancelled.elasticTether.holderPlayerId, null);
   assert.equal(cancelled.elasticDetach.detached, false);
-  assert.equal(cancelled.elasticDetach.carriedByPlayerId, null);
+  assert.equal(scene.createSnapshot().players.find((entry) => entry.id === 'player-d').heldActorId, null);
   // 松开之后它还长在原地，而且可以重新叼。
   assert.equal(cancelled.interactable.enabled, true);
   assert.equal(cancelled.transform.x, initial.transform.x);
@@ -382,7 +385,7 @@ test('玩家离开房间时，叼着的那株原地落下，重进后仍可再�
   scene.removePlayer('leaver');
   const left = scene.createSnapshot().actors.find((actor) => actor.id === mushroomId);
   assert.ok(left, '玩家离开把蘑菇一起带走了');
-  assert.equal(left.elasticDetach.carriedByPlayerId, null);
+  assert.equal(left.parentActorId, null);
   assert.equal(left.interactable.enabled, true, '离房放下后没有恢复交互');
   assert.equal(scene.physics.hasDynamicActor(mushroomId), true, '没有变回自由刚体');
 
@@ -396,9 +399,23 @@ test('玩家离开房间时，叼着的那株原地落下，重进后仍可再�
     '重进房间后无法重新叼起脱落的蘑菇',
   );
   const pickedUpAgain = scene.createSnapshot().actors.find((actor) => actor.id === mushroomId);
-  assert.equal(pickedUpAgain.elasticDetach.carriedByPlayerId, 'returner');
+  assert.equal(scene.createSnapshot().players.find((entry) => entry.id === 'returner').heldActorId, mushroomId);
+  assert.equal(pickedUpAgain.parentActorId, 'returner');
+  assert.equal(pickedUpAgain.transform, undefined);
   assert.equal(pickedUpAgain.interactable.enabled, false);
   assert.equal(scene.physics.hasDynamicActor(mushroomId), false, '重新叼起后仍残留动态刚体');
+
+  assert.equal(
+    scene.interactWithActor('returner', { actorId: mushroomId, sequence: 2 }),
+    true,
+    '重新叼起后再次按 E 没有复用松口逻辑',
+  );
+  const droppedAgain = scene.createSnapshot().actors.find((actor) => actor.id === mushroomId);
+  assert.equal(scene.createSnapshot().players.find((entry) => entry.id === 'returner').heldActorId, null);
+  assert.equal(droppedAgain.parentActorId, null);
+  assert.ok(droppedAgain.transform);
+  assert.equal(droppedAgain.interactable.enabled, true);
+  assert.equal(scene.physics.hasDynamicActor(mushroomId), true, '再次松口后没有恢复动态刚体');
 });
 
 test('放进水里的物件停在水底，不会一直往下掉', async () => {

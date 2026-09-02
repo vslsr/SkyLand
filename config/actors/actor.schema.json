@@ -170,19 +170,28 @@
         "elasticTether": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["restLength", "breakLength", "mouthHeight", "mouthForwardOffset"],
+          "required": ["restLength", "breakLength"],
           "properties": {
             "restLength": { "type": "number", "exclusiveMinimum": 0, "maximum": 5 },
             "breakLength": { "type": "number", "exclusiveMinimum": 0, "maximum": 12 },
-            "pullDistance": { "type": "number", "minimum": 0, "maximum": 12 },
-            "mouthHeight": { "type": "number", "minimum": 0, "maximum": 3 },
-            "mouthForwardOffset": { "type": "number", "minimum": 0, "maximum": 2 }
+            "pullDistance": { "type": "number", "minimum": 0, "maximum": 12 }
           }
         },
         "elasticDetach": {
           "type": "object",
           "additionalProperties": false,
           "properties": {}
+        },
+        "pickupDrop": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["mouthLocalX", "mouthLocalY", "mouthLocalZ", "mouthLocalYaw"],
+          "properties": {
+            "mouthLocalX": { "type": "number", "minimum": -10, "maximum": 10 },
+            "mouthLocalY": { "type": "number", "minimum": -10, "maximum": 10 },
+            "mouthLocalZ": { "type": "number", "minimum": -10, "maximum": 10 },
+            "mouthLocalYaw": { "type": "number", "minimum": -6.2832, "maximum": 6.2832 }
+          }
         },
         "hazard": {
           "type": "object",

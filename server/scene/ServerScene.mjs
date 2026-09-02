@@ -28,6 +28,7 @@ import {
   INTERACTABLE_COMPONENT,
   INVENTORY_COMPONENT,
   ITEM_STACK_COMPONENT,
+  PICKUP_DROP_COMPONENT,
   sampleBuoyancyBobOffset,
   SIMPLE_COLLISION_COMPONENT,
   TRANSFORM_COMPONENT,
@@ -49,6 +50,7 @@ import {
   grabElasticTether,
   releaseElasticTether,
 } from '../actors/ElasticTetherMutations.mjs';
+import { dropPickedActor, pickupActor } from '../actors/PickupDropMutations.mjs';
 import { PlayerIdleSimulation } from './PlayerIdleSimulation.mjs';
 import { ServerChunkColliders } from './ServerChunkColliders.mjs';
 import { ServerTerrainColliders } from './ServerTerrainColliders.mjs';
@@ -412,24 +414,21 @@ export class ServerScene {
   /** 场景交互入口；按动作分别使用权威玩家或权威载具坐标校验。 */
   /** 这名玩家正叼着的那一株；嘴里同时只允许有一个。 */
   findCarriedActorId(playerId) {
-    for (const actor of this.actorWorld.query(ELASTIC_DETACH_COMPONENT)) {
-      if (actor.getComponent(ELASTIC_DETACH_COMPONENT).carriedByPlayerId === playerId) {
-        return actor.id;
-      }
-    }
-    return undefined;
+    return this.players.get(playerId)?.getComponent(PICKUP_DROP_COMPONENT)?.heldActorId ?? undefined;
   }
 
   /**
    * 放下叼着的物件：不给任何冲量，就在离手的姿态上变成自由刚体。落地是躺是立
    * 完全由叼住时的姿态决定，而叼着时它是横衔的。
    *
-   * 落点要放到身前，不能就地松口。嘴只在身前 mouthForwardOffset（0.36m）处，
+   * 落点要放到身前，不能就地松口。嘴的位置来自玩家 PickupDrop Component，
    * 而玩家半径加物件半径要 0.7m 才不重叠：就地放下等于把它塞进自己身体里，
    * 玩家会当场被自己刚放下的东西顶住走不动，看起来像根本没松口。
    */
-  dropCarriedActor(player, actor, detachable) {
-    if (!detachable.release()) return false;
+  dropCarriedActor(player, actor) {
+    const pickupDrop = player?.getComponent(PICKUP_DROP_COMPONENT);
+    if (pickupDrop?.heldActorId !== actor?.id) return false;
+    if (!dropPickedActor(this.actorWorld, player)) return false;
     const interactable = actor.getComponent(INTERACTABLE_COMPONENT);
     // 脱落后的蘑菇仍是可拾取物。叼住期间临时关闭交互，放下或玩家离房时
     // 必须重新打开，否则下一位（包括重进房间的同一玩家）只能看到却捡不起。
@@ -466,9 +465,10 @@ export class ServerScene {
   }
 
   /** 把已经脱落、落在地上的蘑菇重新叼起。 */
-  carryDetachedActor(playerId, actor, detachable, interactable) {
-    if (!detachable.detached || detachable.carriedByPlayerId) return false;
-    if (!detachable.carry(playerId)) return false;
+  carryDetachedActor(player, actor, detachable, interactable) {
+    const pickupDrop = player?.getComponent(PICKUP_DROP_COMPONENT);
+    if (!detachable.detached || !pickupDrop || pickupDrop.heldActorId) return false;
+    if (!pickupActor(this.actorWorld, actor, player)) return false;
     this.physics.removeDynamicActor(actor.id);
     if (interactable.enabled) {
       interactable.enabled = false;
@@ -482,11 +482,7 @@ export class ServerScene {
     const actorId = this.findCarriedActorId(playerId);
     if (!actorId) return false;
     const actor = this.actorWorld.getActor(actorId);
-    return this.dropCarriedActor(
-      this.players.get(playerId),
-      actor,
-      actor.getComponent(ELASTIC_DETACH_COMPONENT),
-    );
+    return this.dropCarriedActor(this.players.get(playerId), actor);
   }
 
   interactWithActor(playerId, message) {
@@ -504,9 +500,10 @@ export class ServerScene {
     if (interactable.action === 'mushroom-bite') {
       const tether = target.getComponent(ELASTIC_TETHER_COMPONENT);
       const detachable = target.getComponent(ELASTIC_DETACH_COMPONENT);
+      const pickupDrop = player.getComponent(PICKUP_DROP_COMPONENT);
       if (!tether) return false;
-      if (detachable?.carriedByPlayerId === playerId) {
-        if (!this.dropCarriedActor(player, target, detachable)) return false;
+      if (pickupDrop?.heldActorId === target.id) {
+        if (!this.dropCarriedActor(player, target)) return false;
         player.actorInteractionSequence = sequence;
         return true;
       }
@@ -517,14 +514,14 @@ export class ServerScene {
       }
       if (!interactable.enabled) return false;
       // 嘴里已经有一株就不能再叼，否则手上那株会失去唯一的放下入口。
-      if (this.findCarriedActorId(playerId)) return false;
+      if (!pickupDrop || pickupDrop.heldActorId) return false;
       const distance = Math.hypot(
         targetTransform.x - player.x,
         targetTransform.z - player.z,
       );
       if (distance > interactable.maximumDistance) return false;
       if (detachable?.detached) {
-        if (!this.carryDetachedActor(playerId, target, detachable, interactable)) return false;
+        if (!this.carryDetachedActor(player, target, detachable, interactable)) return false;
         player.actorInteractionSequence = sequence;
         return true;
       }
@@ -1062,6 +1059,8 @@ export class ServerScene {
         grounded: player.characterState.grounded,
         inventory: player.requireComponent(INVENTORY_COMPONENT).snapshot(),
         inventoryRevision: player.requireComponent(INVENTORY_COMPONENT).revision,
+        heldActorId: player.getComponent(PICKUP_DROP_COMPONENT)?.heldActorId ?? null,
+        pickupDropRevision: player.getComponent(PICKUP_DROP_COMPONENT)?.revision ?? 0,
       })),
     };
   }

@@ -30,6 +30,12 @@
       "maximumFallSpeed": 20,
       "airControl": 0.85
     },
+    "pickupDrop": {
+      "mouthLocalX": 0,
+      "mouthLocalY": 0.3,
+      "mouthLocalZ": 0.36,
+      "mouthLocalYaw": 0
+    },
     "render": {
       "model": "line-art-player-slime",
       "radius": 0.42,

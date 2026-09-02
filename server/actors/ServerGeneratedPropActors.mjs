@@ -3,6 +3,7 @@ import {
   ELASTIC_DETACH_COMPONENT,
   GENERATED_PROP_COMPONENT,
   INTERACTABLE_COMPONENT,
+  PICKUP_DROP_COMPONENT,
   REPLICATED_COMPONENT,
   ReplicatedComponent,
   TRANSFORM_COMPONENT,
@@ -254,7 +255,7 @@ export class ServerGeneratedPropActors {
       if (!actor) continue;
       // 叼在嘴上的那一株跟着玩家走，早已不在这个 chunk 里；跟着老家一起卸载
       // 会让它从玩家嘴上凭空消失。留着它，等放下之后再由所在 chunk 回收。
-      if (actor.getComponent(ELASTIC_DETACH_COMPONENT)?.carriedByPlayerId) {
+      if (actor.parent?.getComponent(PICKUP_DROP_COMPONENT)?.heldActorId === actor.id) {
         carried.push(actorId);
         continue;
       }

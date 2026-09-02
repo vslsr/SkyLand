@@ -173,13 +173,6 @@ function validateElasticTether(raw, filename) {
     ...(definition.pullDistance !== undefined ? {
       pullDistance: requireNumber(definition.pullDistance, `${path}.pullDistance`, 0, 12),
     } : {}),
-    mouthHeight: requireNumber(definition.mouthHeight, `${path}.mouthHeight`, 0, 3),
-    mouthForwardOffset: requireNumber(
-      definition.mouthForwardOffset,
-      `${path}.mouthForwardOffset`,
-      0,
-      2,
-    ),
   };
 }
 
@@ -303,6 +296,17 @@ function validateElasticDetach(raw, filename) {
   const path = `${filename}.components.elasticDetach`;
   requireObject(raw, path);
   return {};
+}
+
+function validatePickupDrop(raw, filename) {
+  const path = `${filename}.components.pickupDrop`;
+  const definition = requireObject(raw, path);
+  return {
+    mouthLocalX: requireNumber(definition.mouthLocalX, `${path}.mouthLocalX`, -10, 10),
+    mouthLocalY: requireNumber(definition.mouthLocalY, `${path}.mouthLocalY`, -10, 10),
+    mouthLocalZ: requireNumber(definition.mouthLocalZ, `${path}.mouthLocalZ`, -10, 10),
+    mouthLocalYaw: requireNumber(definition.mouthLocalYaw, `${path}.mouthLocalYaw`, -Math.PI * 2, Math.PI * 2),
+  };
 }
 
 function validatePlayerJump(raw, filename) {
@@ -690,6 +694,7 @@ function validateActorArchetype(raw, filename) {
     'cargo',
     'elasticTether',
     'elasticDetach',
+    'pickupDrop',
     'hazard',
     'temperature',
     'combustible',
@@ -736,6 +741,9 @@ function validateActorArchetype(raw, filename) {
   const elasticDetach = components.elasticDetach
     ? validateElasticDetach(components.elasticDetach, filename)
     : undefined;
+  const pickupDrop = components.pickupDrop
+    ? validatePickupDrop(components.pickupDrop, filename)
+    : undefined;
   if (elasticTether && interactable?.action !== 'mushroom-bite') {
     throw new TypeError(`${filename}.components.elasticTether 需要 mushroom-bite interactable`);
   }
@@ -750,6 +758,9 @@ function validateActorArchetype(raw, filename) {
   }
   if (playerMovement && !PLAYER_RENDER_MODELS.has(render?.model)) {
     throw new TypeError(`${filename}.components.playerMovement 需要玩家史莱姆 render`);
+  }
+  if (pickupDrop && !playerMovement) {
+    throw new TypeError(`${filename}.components.pickupDrop 需要 playerMovement`);
   }
   if (playerJump && (!playerMovement || !PLAYER_RENDER_MODELS.has(render?.model))) {
     throw new TypeError(`${filename}.components.playerJump 需要玩家移动与玩家史莱姆 render`);
@@ -822,6 +833,7 @@ function validateActorArchetype(raw, filename) {
       ...(components.cargo ? { cargo: validateCargo(components.cargo, filename) } : {}),
       ...(elasticTether ? { elasticTether } : {}),
       ...(elasticDetach ? { elasticDetach } : {}),
+      ...(pickupDrop ? { pickupDrop } : {}),
       ...(components.hazard ? { hazard: validateHazard(components.hazard, filename) } : {}),
       ...(temperature ? { temperature } : {}),
       ...(combustible ? { combustible } : {}),
