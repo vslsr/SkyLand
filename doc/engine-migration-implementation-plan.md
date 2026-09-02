@@ -19,6 +19,7 @@
 | 第 1 步 · 剥出 Render World 边界 | **已完成** | `src/render/`、`RenderProxyComponent`、`ActorTransformSystem` |
 | §8.2 · GPU 资源所有权表 | **已完成（最小核心）** | `src/core/assets/AssetOwner.ts`、`src/render/renderAssets.ts` |
 | 第 1.5 步 · 表现 Component 脱离 THREE | **已完成** · 棘轮 8 → 0 | 见 §1.5；玩家实体也接到了边界上 |
+| 第 1.75 步 · 拆掉表现 System 的夹心 | **已完成** | 见 §1.75；Actor 世界只剩四个不认识 three 的 System |
 | 第 2 步 · Sim Worker | 未开始 | 见 §2 |
 | 第 3 步 · OffscreenCanvas | 未开始 | 见 §3 |
 | 第 4 步 · 换掉 Three.js | 可无限期推迟 | 见 §4 |
@@ -258,21 +259,86 @@ Actor 是错的**——`submitTransforms` 给子节点写的是相对 yaw，读�
 - **Actor 世界改成总是建**，哪怕地图上一个 Actor 都没有。渲染世界那次翻面归它管
   （`RenderTransformSyncSystem` 夹在写 SoA 与依赖翻面结果的 Actor 表现 System 之间），
   按「有没有 Actor」建它会让没有 Actor 的地图上玩家整个不动。空的 `ActorWorld` 每帧什么都不做。
-- **那个夹心结构是第 2 步要拆的东西**：`AttachmentVisualSystem` 读的是翻面之后摆好的
-  Three 局部变换，所以 publish/submit 拆不出 Actor 世界。在拆开之前，「谁驱动谁就负责释放」
-  比多一个只管析构的系统更清楚——所以 `ClientActorSystem.dispose()` 仍然释放渲染世界。
+- **那个夹心结构在 §1.75 里拆掉了**：当时 `AttachmentVisualSystem` 读的是翻面之后摆好的
+  Three 局部变换，所以 publish/submit 拆不出 Actor 世界。现在它搬进了渲染世界，
+  Actor 世界里 `RenderTransformSyncSystem` 是最后一个。「谁驱动谁就负责释放」仍然成立：
+  `ClientActorSystem.dispose()` 释放渲染世界。
 
 ### 下一步
 
-棘轮空了，第 2 步的前置条件满足。但**棘轮为 0 不等于零耦合**：
-`src/scenes/GrasslandScene.ts` 这一层仍然同时握着输入、相机、玩家实体和渲染器，
-第 2 步要把其中属于玩法的那半搬进 worker，这条缝在哪儿划要在 §2 里定。
+Component 的棘轮空了，但 Actor 世界里跑的 **System** 还有五个握着 `ThreeRenderScene`。
+那是 §1.75。
+
+---
+
+## 第 1.75 步 · 拆掉表现 System 的夹心 ✅
+
+第 1.5 步把表现从 Component 上摘了下来，但 `ClientActorSystem` 往 `ActorWorld` 里
+注册的 System 还有五个直接改 Three 对象。其中一个是**真正的结构性障碍**：
+
+```text
+搬迁之前，Actor 世界里的顺序：
+  ActorTransformSystem        写 SoA
+  ActorVisualParamSystem      写 SoA
+  RenderTransformSyncSystem   publish + submitTransforms   ← 翻面被夹在中间
+  WaterBob / Cargo            改 visualRoot
+  AttachmentVisual            读父子两级刚摆好的 matrixWorld ← 就是它要求翻面先发生
+  ElasticTether / DropRoll    改 rig
+```
+
+`AttachmentVisualSystem` 读的是 `submitTransforms` 刚写进 `root`/`visualRoot` 的
+世界矩阵，所以翻面必须排在它前面；而写 SoA 又必须排在翻面前面。这个夹心结构让
+「Actor 世界整体搬进 worker、submit 留在主线程」这条第 2 步的路线走不通。
+
+而它真正需要的东西只有一样：**父子关系**——那本来就在 SoA 的 parents 段里。
+
+### 五个都搬了
+
+| 原 System | 现在 | 跨边界的 |
+| --- | --- | --- |
+| `WaterBobVisualSystem` | `ThreeWaterMotionVisual`（`hull`） | 吃水 + 两个静态倾斜 |
+| `CargoVisualSystem` | `ThreeWaterMotionVisual`（`cargo`） | 什么都不用加：transform 与 parent 都在 SoA 里 |
+| `AttachmentVisualSystem` | `ThreeAttachmentVisual` | 同上 |
+| `ElasticTetherVisualSystem` | `ThreeElasticTetherVisual` | 目标点、两个状态位、拔断长度、松手计数 |
+| `ActorDropRollSystem` | `ThreeDropRollVisual` | 半径 + 四元数 |
+
+几处值得记下来的判断：
+
+- **浪高不过边界。** 波面公式是渲染配置，不是玩法状态——渲染侧自己按世界坐标采样
+  就行。过边界的只有吃水深度和装载造成的静态倾斜。
+- **「船体还是货箱」是一个值，不是两个开关。** 原型里 `buoyancy` 与 `cargo` 互斥
+  （船有前者、箱有后者），所以 `MeshProxyDesc.waterMotion: 'hull' | 'cargo'`。
+- **弹性拉伸的相位改成哈希槽位。** 它以前哈希 Actor id，用途只有一个——把闲置摆动
+  错开。槽位在这个 proxy 活着的整段时间里不变，所以效果一样。
+- **`ThreeElasticTetherVisual` / `ThreeDropRollVisual` 不需要 desc 标记。** 只有弹性
+  蘑菇那种模型才会建出对应的 rig，而它们正是原来那两个 System 会挑中的 Actor——
+  rig 的有无本身就是那个事实。
+- 参数段 9 → 24。每槽位 24 个 f32、两份 bank、容量 256，合计约 49 KB，可以忽略。
+
+### 新棘轮：Actor 世界里的 System
+
+`tests/RenderSceneBoundary.test.ts` 里多了两条：
+
+1. `ActorTransformSystem` / `ActorVisualParamSystem` / `ActorGuidePathSyncSystem` /
+   `RenderTransformSyncSystem` 都不得 import 渲染实现；
+2. **这份名单必须等于 `ClientActorSystem` 里 `world.addSystem(...)` 的实际列表**。
+   少了第二条，新增一个 System 就会被第一条悄悄放过。
+
+为此 `GuidePathState` 挪到了 `RenderScene.ts`，`setGuidePath` 进了
+`RenderCommandSink`——引导路径同步因此也只依赖边界类型。
+
+### 下一步
+
+Actor 世界这一侧干净了。剩下的耦合在**上一层**：`ClientActorSystem` 自己仍然是
+render 与 game 混在一起的（合批、果实实例化、悬停高亮、`root` getter 都在里面），
+`src/scenes/GrasslandScene.ts` 也同时握着输入、相机、玩家实体和渲染器。
+第 2 步要划的缝就在这两处，见 §2。
 
 ---
 
 ## 第 2 步 · 网络 + Game World + 物理整体进 worker（未开始）
 
-依赖 0、1、1.5。
+依赖 0、1、1.5、1.75。
 
 - **不能拆网络与模拟**：紧耦合链「快照到达 → 和解 → 回放未确认固定步」是突发尖峰，
   拆两个线程只会凭空多一跳。`WebSocket` 在 Worker 里可用，整个搬进去。
@@ -294,7 +360,9 @@ Actor 是错的**——`submitTransforms` 给子节点写的是相对 yaw，读�
 
 1. `src/platform/` 加 worker 生成与消息通道（PlatformLayer 的第二块）；
 2. 输入按 tick 号序列化进一个 SAB 环形缓冲（主线程退化成 IO 线程）；
-3. `ClientActorSystem` + `GameTransport` + `PlayerReconciler` + `PhysicsWorld` 搬进 Sim Worker；
+3. `ClientActorSystem` 先按 game / render 一分为二：`ActorWorld` 与快照插值这一半进 worker，
+   合批、果实实例化、悬停高亮与 `root` 留在主线程（§1.75 已经把它的 System 列表清干净了，
+   现在挡路的是这个类自己）；`GameTransport` + `PlayerReconciler` + `PhysicsWorld` 一起进去；
 4. `RenderTransformSyncSystem` 的 `submitTransforms` 留在主线程，先只把模拟搬走；
 5. 帧时间打点：这一步的价值是**证据**——在写第一行 C++ 之前，先证明 worker 架构在这个项目里跑得通。
 
