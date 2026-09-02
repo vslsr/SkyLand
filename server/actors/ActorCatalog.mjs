@@ -305,18 +305,6 @@ function validateElasticDetach(raw, filename) {
   return {};
 }
 
-function validateMushroomPop(raw, filename) {
-  const path = `${filename}.components.mushroomPop`;
-  const definition = requireObject(raw, path);
-  return {
-    forwardImpulse: requireNumber(definition.forwardImpulse, `${path}.forwardImpulse`, 0, 20),
-    upwardImpulse: requireNumber(definition.upwardImpulse, `${path}.upwardImpulse`, 0, 20),
-    ...(definition.spinImpulse !== undefined ? {
-      spinImpulse: requireNumber(definition.spinImpulse, `${path}.spinImpulse`, 0, 20),
-    } : {}),
-  };
-}
-
 function validatePlayerJump(raw, filename) {
   const path = `${filename}.components.playerJump`;
   const definition = requireObject(raw, path);
@@ -702,7 +690,6 @@ function validateActorArchetype(raw, filename) {
     'cargo',
     'elasticTether',
     'elasticDetach',
-    'mushroomPop',
     'hazard',
     'temperature',
     'combustible',
@@ -749,9 +736,6 @@ function validateActorArchetype(raw, filename) {
   const elasticDetach = components.elasticDetach
     ? validateElasticDetach(components.elasticDetach, filename)
     : undefined;
-  const mushroomPop = components.mushroomPop
-    ? validateMushroomPop(components.mushroomPop, filename)
-    : undefined;
   if (elasticTether && interactable?.action !== 'mushroom-bite') {
     throw new TypeError(`${filename}.components.elasticTether 需要 mushroom-bite interactable`);
   }
@@ -763,9 +747,6 @@ function validateActorArchetype(raw, filename) {
   }
   if (elasticDetach && (!elasticTether || !components.dropMotion)) {
     throw new TypeError(`${filename}.components.elasticDetach 需要 elasticTether 和 dropMotion`);
-  }
-  if (mushroomPop && (!elasticDetach || render?.model !== 'line-art-elastic-mushroom')) {
-    throw new TypeError(`${filename}.components.mushroomPop 需要蘑菇 render 和 elasticDetach`);
   }
   if (playerMovement && !PLAYER_RENDER_MODELS.has(render?.model)) {
     throw new TypeError(`${filename}.components.playerMovement 需要玩家史莱姆 render`);
@@ -841,7 +822,6 @@ function validateActorArchetype(raw, filename) {
       ...(components.cargo ? { cargo: validateCargo(components.cargo, filename) } : {}),
       ...(elasticTether ? { elasticTether } : {}),
       ...(elasticDetach ? { elasticDetach } : {}),
-      ...(mushroomPop ? { mushroomPop } : {}),
       ...(components.hazard ? { hazard: validateHazard(components.hazard, filename) } : {}),
       ...(temperature ? { temperature } : {}),
       ...(combustible ? { combustible } : {}),

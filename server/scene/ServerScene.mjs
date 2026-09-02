@@ -21,6 +21,8 @@ import {
   BUOYANCY_COMPONENT,
   BuoyancyComponent,
   CARGO_COMPONENT,
+  DROP_MOTION_COMPONENT,
+  ELASTIC_DETACH_COMPONENT,
   ELASTIC_TETHER_COMPONENT,
   GENERATED_PROP_COMPONENT,
   INTERACTABLE_COMPONENT,
@@ -298,6 +300,7 @@ export class ServerScene {
   }
 
   removePlayer(playerId) {
+    this.dropCarriedActorsOf(playerId);
     for (const actor of this.actorWorld.query(
       ELASTIC_TETHER_COMPONENT,
       INTERACTABLE_COMPONENT,
@@ -404,6 +407,50 @@ export class ServerScene {
   }
 
   /** 场景交互入口；按动作分别使用权威玩家或权威载具坐标校验。 */
+  /** 这名玩家正叼着的那一株；嘴里同时只允许有一个。 */
+  findCarriedActorId(playerId) {
+    for (const actor of this.actorWorld.query(ELASTIC_DETACH_COMPONENT)) {
+      if (actor.getComponent(ELASTIC_DETACH_COMPONENT).carriedByPlayerId === playerId) {
+        return actor.id;
+      }
+    }
+    return undefined;
+  }
+
+  /**
+   * 放下叼着的物件：不给任何冲量，就在离手的位置和姿态上变成自由刚体。
+   * 落地是躺是立完全由叼住时的姿态决定，而叼着时它是横衔的。
+   */
+  dropCarriedActor(actor, detachable) {
+    if (!detachable.release()) return false;
+    const motion = actor.getComponent(DROP_MOTION_COMPONENT);
+    const transform = actor.getComponent(TRANSFORM_COMPONENT);
+    if (!motion || !transform) return true;
+    this.physics.createDynamicActor(actor.id, {
+      x: transform.x,
+      y: transform.y + motion.radius,
+      z: transform.z,
+      radius: motion.radius,
+      linearDamping: motion.drag,
+      angularDamping: motion.angularDamping,
+      restitution: motion.restitution,
+      friction: motion.groundDrag,
+      rotation: {
+        x: motion.rotationX, y: motion.rotationY, z: motion.rotationZ, w: motion.rotationW,
+      },
+    });
+    this.physics.setDynamicActorVelocity(actor.id, { x: 0, y: 0, z: 0 });
+    return true;
+  }
+
+  /** 玩家离开房间时，嘴里那一株原地落下，不能跟着连接一起消失。 */
+  dropCarriedActorsOf(playerId) {
+    const actorId = this.findCarriedActorId(playerId);
+    if (!actorId) return false;
+    const actor = this.actorWorld.getActor(actorId);
+    return this.dropCarriedActor(actor, actor.getComponent(ELASTIC_DETACH_COMPONENT));
+  }
+
   interactWithActor(playerId, message) {
     const player = this.players.get(playerId);
     if (!player) return false;
@@ -412,11 +459,27 @@ export class ServerScene {
     const target = this.actorWorld.getActor(sanitizeActorId(message?.actorId));
     const interactable = target?.getComponent(INTERACTABLE_COMPONENT);
     const targetTransform = target?.getComponent(TRANSFORM_COMPONENT);
-    if (!target || !interactable?.enabled || !targetTransform) return false;
+    if (!target || !interactable || !targetTransform) return false;
 
+    // 叼着和拉着的那一株，interactable 已经关掉了；再按一次交互键说的是
+    // 「放下」或「取消」，所以这两条要走在 enabled 检查之前。
     if (interactable.action === 'mushroom-bite') {
       const tether = target.getComponent(ELASTIC_TETHER_COMPONENT);
+      const detachable = target.getComponent(ELASTIC_DETACH_COMPONENT);
       if (!tether) return false;
+      if (detachable?.carriedByPlayerId === playerId) {
+        if (!this.dropCarriedActor(target, detachable)) return false;
+        player.actorInteractionSequence = sequence;
+        return true;
+      }
+      if (tether.holderPlayerId === playerId) {
+        if (!releaseElasticTether(tether, interactable)) return false;
+        player.actorInteractionSequence = sequence;
+        return true;
+      }
+      if (!interactable.enabled) return false;
+      // 嘴里已经有一株就不能再叼，否则手上那株会失去唯一的放下入口。
+      if (this.findCarriedActorId(playerId)) return false;
       const distance = Math.hypot(
         targetTransform.x - player.x,
         targetTransform.z - player.z,
@@ -426,6 +489,8 @@ export class ServerScene {
       player.actorInteractionSequence = sequence;
       return true;
     }
+
+    if (!interactable.enabled) return false;
 
     if (interactable.action === 'pickup-stack') {
       const stack = target.getComponent(ITEM_STACK_COMPONENT);

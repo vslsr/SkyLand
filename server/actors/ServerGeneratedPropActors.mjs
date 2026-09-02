@@ -248,12 +248,20 @@ export class ServerGeneratedPropActors {
     const actorIds = this.actorIdsByChunk.get(key);
     if (!actorIds) return;
     this.actorIdsByChunk.delete(key);
+    const carried = [];
     for (const actorId of actorIds) {
       const actor = this.world.getActor(actorId);
       if (!actor) continue;
+      // 叼在嘴上的那一株跟着玩家走，早已不在这个 chunk 里；跟着老家一起卸载
+      // 会让它从玩家嘴上凭空消失。留着它，等放下之后再由所在 chunk 回收。
+      if (actor.getComponent(ELASTIC_DETACH_COMPONENT)?.carriedByPlayerId) {
+        carried.push(actorId);
+        continue;
+      }
       this.captureDeviation(actor);
       this.world.removeActor(actorId);
     }
+    if (carried.length > 0) this.actorIdsByChunk.set(key, carried);
   }
 
   /**

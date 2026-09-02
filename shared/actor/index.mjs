@@ -38,10 +38,6 @@ export {
   ElasticDetachComponent,
 } from './components/ElasticDetachComponent.mjs';
 export {
-  MUSHROOM_POP_COMPONENT,
-  MushroomPopComponent,
-} from './components/MushroomPopComponent.mjs';
-export {
   HAZARD_COMPONENT,
   HazardComponent,
 } from './components/HazardComponent.mjs';

@@ -7,6 +7,8 @@ export class ElasticDetachComponent extends ActorComponent {
   constructor(definition = {}) {
     super(ELASTIC_DETACH_COMPONENT);
     this.detached = definition.detached === true;
+    /** 拔下来之后叼着它的玩家；放下之前它一直跟着嘴走，不参与刚体模拟。 */
+    this.carriedByPlayerId = definition.carriedByPlayerId ?? null;
     /** 本地运行态：掉落碰撞是否已经替换，既不持久化也不复制。 */
     this.dropCollisionApplied = false;
     this.revision = 0;
@@ -20,22 +22,30 @@ export class ElasticDetachComponent extends ActorComponent {
     return true;
   }
 
+  /** 拔断的一瞬间进嘴：这一段既不是长在地上，也还不是掉在地上的自由刚体。 */
+  carry(playerId) {
+    if (!playerId || this.carriedByPlayerId === playerId) return false;
+    this.carriedByPlayerId = playerId;
+    this.revision += 1;
+    return true;
+  }
+
+  release() {
+    if (!this.carriedByPlayerId) return false;
+    this.carriedByPlayerId = null;
+    this.revision += 1;
+    return true;
+  }
+
   onPopped(listener) {
     this.poppedListeners.add(listener);
     return () => this.poppedListeners.delete(listener);
   }
 
-  /**
-   * 脱离时把线冲量和角冲量都交给监听者填。角冲量不是装饰：掉在地上的物件
-   * 只有真的翻起来才会躺着，光靠水平位移换算出的滚动角远远不够。
-   */
+  /** 脱离事件：拔断方向交给监听者，用于表现或玩法反馈。 */
   pop(direction) {
     if (!this.markDetached()) return undefined;
-    const event = {
-      direction,
-      impulse: { x: 0, y: 0, z: 0 },
-      torqueImpulse: { x: 0, y: 0, z: 0 },
-    };
+    const event = { direction };
     for (const listener of this.poppedListeners) listener(event);
     return event;
   }

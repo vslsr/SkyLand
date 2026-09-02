@@ -580,6 +580,33 @@ export class ClientActorSystem implements SceneVisualSystem {
     return nearest?.candidate;
   }
 
+  /**
+   * 这名玩家手上那一株。
+   *
+   * 拉着的时候它可能已经被拖到就近搜索半径之外，叼着的时候它的 interactable
+   * 又是关掉的——两种情况都不会出现在就近候选里，但交互键必须能指向它，
+   * 否则玩家没有任何办法取消或放下。遍历量由 AOI 内的可拔物件数决定。
+   */
+  public findHeldInteractableActor(playerId: string): ActorInteractionCandidate | undefined {
+    for (const actor of this.world.query(
+      ELASTIC_TETHER_COMPONENT,
+      INTERACTABLE_COMPONENT,
+    ) as Actor[]) {
+      const tether = actor.requireComponent(ELASTIC_TETHER_COMPONENT) as ElasticTetherComponent;
+      const detachable = actor.getComponent(
+        ELASTIC_DETACH_COMPONENT,
+      ) as ElasticDetachComponent | undefined;
+      if (tether.holderPlayerId !== playerId && detachable?.carriedByPlayerId !== playerId) {
+        continue;
+      }
+      return this.createInteractionCandidate(
+        actor,
+        actor.requireComponent(INTERACTABLE_COMPONENT) as InteractableComponent,
+      );
+    }
+    return undefined;
+  }
+
   public setInteractionMarkerActorId(actorId?: string, inputLabel?: string): void {
     // Actor 数量由场景 Schema 固定在 256 以内；标记切换不随世界面积增长。
     for (const actor of this.world.query(INTERACTION_MARKER_COMPONENT) as Actor[]) {
@@ -842,6 +869,7 @@ export class ClientActorSystem implements SceneVisualSystem {
         ELASTIC_DETACH_COMPONENT,
       ) as ElasticDetachComponent;
       detachable.detached = snapshot.elasticDetach.detached;
+      detachable.carriedByPlayerId = snapshot.elasticDetach.carriedByPlayerId ?? null;
       detachable.revision = snapshot.elasticDetach.revision;
       const rotation = snapshot.elasticDetach.rotation;
       if (rotation) {
@@ -923,12 +951,16 @@ export class ClientActorSystem implements SceneVisualSystem {
       ELASTIC_TETHER_COMPONENT,
     ) as ElasticTetherComponent | undefined;
     const stack = actor.getComponent(ITEM_STACK_COMPONENT) as ItemStackComponent | undefined;
+    const detachable = actor.getComponent(
+      ELASTIC_DETACH_COMPONENT,
+    ) as ElasticDetachComponent | undefined;
     return {
       actorId: actor.id,
       label: interactable.label,
       action: interactable.action,
       carrierActorId: cargo?.carrierActorId ?? null,
       holderPlayerId: tether?.holderPlayerId ?? null,
+      carriedByPlayerId: detachable?.carriedByPlayerId ?? null,
       quantity: stack?.quantity,
     };
   }
