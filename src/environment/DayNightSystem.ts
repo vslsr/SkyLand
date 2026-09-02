@@ -26,6 +26,8 @@ import {
 export interface DayNightEnvironmentDefinition {
   /** 场景自己的纸面背景色；白昼段的天空就是它。 */
   backgroundColor: THREE.ColorRepresentation;
+  /** 场景地面色；决定半球光里从下方反弹回来的那一半是什么色相。 */
+  groundColor?: THREE.ColorRepresentation;
   /** 服务端净化过的昼夜配置，提供初始时刻与推进速率。 */
   dayNight: SceneDayNightDefinition;
 }
@@ -41,6 +43,9 @@ interface MeteorState {
 /** 日轮/月轮升到这个高度（占天球半径的比例）之上就完全显形。 */
 const HORIZON_FADE_HEIGHT = 0.1;
 
+/** 天球贴着相机远裁剪面留出的余量；再远一点就会被裁掉。 */
+const DOME_FAR_PLANE_MARGIN = 0.92;
+
 const STAR_FADE_SPEED = 2;
 const STAR_ROTATION_SPEED = 0.004;
 const METEOR_MINIMUM_INTERVAL = 3.5;
@@ -52,6 +57,10 @@ const NIGHT_AMBIENT_COLOR = new THREE.Color(0x2b3450);
 const MOON_AMBIENT_COLOR = new THREE.Color(0x6c7c96);
 const WARM_AMBIENT_COLOR = new THREE.Color(0xffd9a0);
 const EMBER_AMBIENT_COLOR = new THREE.Color(0xff9e7e);
+/** 高日角时的散射色：接近日轮本身的浅金色。 */
+const HIGH_SUN_SCATTER_COLOR = new THREE.Color(0xffe6b8);
+/** 贴地日角时的散射色：日出日落被大气拉长后的橙红。 */
+const LOW_SUN_SCATTER_COLOR = new THREE.Color(0xff8a4c);
 
 function lerp(from: number, to: number, amount: number): number {
   return from + (to - from) * amount;
@@ -92,6 +101,9 @@ export class DayNightSystem implements SceneVisualSystem, SkyStateSource, DayNig
     ambientColor: new THREE.Color(0xffffff),
     ambientBrightness: 1,
     sunDirection: new THREE.Vector3(-0.55, 0.9, 0.35).normalize(),
+    scatterColor: new THREE.Color(0xffe6b8),
+    scatterStrength: 0,
+    directLight: 1,
     sunElevation: 1,
     moonElevation: -1,
   };
@@ -184,16 +196,25 @@ export class DayNightSystem implements SceneVisualSystem, SkyStateSource, DayNig
       1 - night * 0.62 + this.state.moonlit * 0.3,
     );
 
+    this.updateScattering();
     this.updateSun(sunFade, cloudCover);
     this.updateMoon(moonFade, cloudCover, elapsedSeconds);
     this.updateStars(dt, elapsedSeconds, skyDarkness(this.state.skyColor), overcast);
     this.updateMeteors(dt);
   }
 
-  public beforeRender(_renderer: THREE.WebGLRenderer, camera: THREE.Camera): void {
+  public beforeRender(renderer: THREE.WebGLRenderer, camera: THREE.Camera): void {
     if (this.disposed) return;
     // 天体是无限远元素：整组跟着相机走，观察原点因此永远在天球中心。
     this.root.position.copy(camera.position);
+    // 天球按相机远裁剪面缩放：谁改了 far 或换了相机，星空都不会被裁掉一角。
+    const far = camera instanceof THREE.PerspectiveCamera ? camera.far : 0;
+    const domeScale = far > 0
+      ? far * DOME_FAR_PLANE_MARGIN / CELESTIAL_RADIUS.stars
+      : 1;
+    this.root.scale.setScalar(domeScale);
+    this.visuals.starMaterial.uniforms.uDomeScale.value = domeScale;
+    this.visuals.starMaterial.uniforms.uPixelRatio.value = renderer.getPixelRatio();
     if (this.visuals.sunRoot.visible) this.visuals.sunRoot.lookAt(camera.position);
     if (this.visuals.moonRoot.visible) this.visuals.moonRoot.lookAt(camera.position);
   }
@@ -231,6 +252,23 @@ export class DayNightSystem implements SceneVisualSystem, SkyStateSource, DayNig
     } else {
       this.state.sunDirection.set(0, 1, -0.25).normalize();
     }
+  }
+
+  /**
+   * 方向性散射与直射光硬度。
+   *
+   * 太阳越贴近地平线，穿过的大气越厚：散射越强、颜色越红，影子也越长越软。
+   * 这两个量分别喂给雾的朝阳染色和接触阴影，天气再按云量把它们压下去。
+   */
+  private updateScattering(): void {
+    const elevation = this.state.sunElevation;
+    const aboveHorizon = clamp01(elevation / 0.12);
+    const grazing = 1 - clamp01(elevation / 0.45);
+    this.state.scatterColor
+      .copy(HIGH_SUN_SCATTER_COLOR)
+      .lerp(LOW_SUN_SCATTER_COLOR, grazing * grazing);
+    this.state.scatterStrength = aboveHorizon * (0.26 + 0.56 * grazing);
+    this.state.directLight = aboveHorizon * (0.35 + 0.65 * clamp01(elevation / 0.55));
   }
 
   private updateSun(sunFade: number, cloudCover: number): void {

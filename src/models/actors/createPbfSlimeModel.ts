@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { createContactShadowMaterial } from '../../materials/createContactShadowMaterial';
 import { createSimpleCollisionFromRender } from '../../../shared/actor/simpleCollision.mjs';
 import type { ActorRenderDefinition } from '../../scenes/data/SceneDefinition';
 import {
@@ -183,12 +184,8 @@ export function createPbfSlimeModel(definition: PbfSlimeRenderDefinition): Actor
       definition.radius * HYBRID_SLIME_PLANAR_RADIUS_RATIO,
       24,
     ),
-    new THREE.MeshBasicMaterial({
-      color: definition.shadowColor,
-      transparent: true,
-      opacity: 0.15,
-      depthWrite: false,
-    }),
+    // 影子的方向、长度和浓度跟着房间权威时刻走，见 createContactShadowMaterial。
+    createContactShadowMaterial(definition.shadowColor, { opacity: 0.15 }),
   );
   shadow.name = 'pbf-slime-shadow';
   shadow.rotation.x = -Math.PI / 2;

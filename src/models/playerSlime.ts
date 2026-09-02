@@ -1,4 +1,8 @@
 import * as THREE from 'three';
+import {
+  createContactShadowMaterial,
+  type ContactShadowMaterial,
+} from '../materials/createContactShadowMaterial';
 import type { ActorRenderDefinition } from '../scenes/data/SceneDefinition';
 import type { ActorVisualModel } from './actors/ActorVisualModel';
 
@@ -20,7 +24,7 @@ export interface PlayerSlimeModel extends ActorVisualModel {
   originalPositions: Float32Array;
   core: THREE.Mesh<THREE.SphereGeometry, THREE.MeshBasicMaterial>;
   bubbles: SlimeBubble[];
-  shadow: THREE.Mesh<THREE.CircleGeometry, THREE.MeshBasicMaterial>;
+  shadow: THREE.Mesh<THREE.CircleGeometry, ContactShadowMaterial>;
   radius: number;
 }
 
@@ -186,12 +190,8 @@ export function createPlayerSlimeModel(
 
   body.add(createFace(radius, palette));
 
-  const shadowMaterial = new THREE.MeshBasicMaterial({
-    color: palette.shadow,
-    transparent: true,
-    opacity: 0.16,
-    depthWrite: false,
-  });
+  // 影子的方向、长度和浓度跟着房间权威时刻走，见 createContactShadowMaterial。
+  const shadowMaterial = createContactShadowMaterial(palette.shadow, { opacity: 0.16 });
   const shadow = new THREE.Mesh(new THREE.CircleGeometry(radius * 0.8, 24), shadowMaterial);
   shadow.rotation.x = -Math.PI / 2;
   shadow.position.y = 0.012;

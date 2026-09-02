@@ -194,7 +194,7 @@ export class HybridSlimeVisualComponent extends ActorComponent {
     this.rig.shadowRoot.position.set(0, 0, 0);
     this.rig.shadowRoot.rotation.y = -authorityYaw;
     this.rig.shadow.scale.set(1, 1, 1);
-    this.rig.shadow.material.opacity = Math.min(0.25, 0.16 + lagRatio * 0.24);
+    this.rig.shadow.material.setOpacity(Math.min(0.25, 0.16 + lagRatio * 0.24));
   }
 
   /** 贴地穹顶的最大半径位于地面，脸部必须采样中上层而不能继续放在赤道外沿。 */

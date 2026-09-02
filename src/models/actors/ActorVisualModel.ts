@@ -1,4 +1,5 @@
 import type * as THREE from 'three';
+import type { ContactShadowMaterial } from '../../materials/createContactShadowMaterial';
 
 export interface ActorSimpleCollision {
   readonly shape: 'box' | 'cylinder';
@@ -51,7 +52,7 @@ export interface PbfSlimeVisualRig {
   readonly faceRoot: THREE.Group;
   readonly bubbles: readonly PbfSlimeBubbleVisual[];
   readonly shadowRoot: THREE.Group;
-  readonly shadow: THREE.Mesh<THREE.CircleGeometry, THREE.MeshBasicMaterial>;
+  readonly shadow: THREE.Mesh<THREE.CircleGeometry, ContactShadowMaterial>;
   /** 阴影圆盘的动态顶点；边界逐点复用贴地蒙皮环。 */
   readonly shadowPosition: THREE.BufferAttribute;
   readonly shadowBoundaryVertices: Uint16Array;
