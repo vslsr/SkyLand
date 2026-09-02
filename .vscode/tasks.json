@@ -40,7 +40,10 @@
         },
         "background": {
           "activeOnStart": true,
-          "beginsPattern": "^.*$",
+          // 只认真正的启动/重启行。原来写成 ^.*$ 时，监听成功那行之后紧跟的
+          // "Web build missing" 会把任务重新标成「启动中」，依赖它的复合任务
+          // 因此可能一直等下去。node --watch 的重启也走这里。
+          "beginsPattern": "^.*(node --watch server/index\\.mjs|Restarting).*$",
           "endsPattern": "^SkyLand web \\+ DS server listening on .*$"
         }
       },
@@ -63,8 +66,51 @@
       "label": "SkyLand: 全部测试",
       "type": "npm",
       "script": "test",
+      "group": {
+        "kind": "test",
+        "isDefault": true
+      },
+      "problemMatcher": []
+    },
+    {
+      // 全套要跑几分钟；改服务端时只跑这一半。
+      "label": "SkyLand: 服务端测试",
+      "type": "npm",
+      "script": "test:server",
       "group": "test",
       "problemMatcher": []
+    },
+    {
+      "label": "SkyLand: 客户端测试",
+      "type": "npm",
+      "script": "test:client",
+      "group": "test",
+      "problemMatcher": []
+    },
+    {
+      // 与 Dockerfile 的运行形态一致：构建后由同一个 Node 进程提供
+      // dist、/api 与 /ws，不经过 Vite。用来验收「线上是这样跑的」。
+      "label": "SkyLand: 生产模式（构建后单进程）",
+      "type": "npm",
+      "script": "start:prod",
+      "isBackground": true,
+      "problemMatcher": {
+        "owner": "skyland-prod",
+        "pattern": {
+          "regexp": "^(.*)$",
+          "message": 1
+        },
+        "background": {
+          "activeOnStart": true,
+          "beginsPattern": "^.*(vite build|node server/index\\.mjs).*$",
+          "endsPattern": "^SkyLand web \\+ DS server listening on .*$"
+        }
+      },
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "group": "skyland-prod"
+      }
     },
     {
       "label": "SkyLand: 生产构建",

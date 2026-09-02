@@ -33,6 +33,41 @@
       ]
     },
     {
+      // 生产形态：Vite 不参与，dist、/api 与 /ws 都由这一个 Node 进程提供
+      // （和 Dockerfile 一致）。前置任务会先跑一次 npm run build。
+      "name": "SkyLand: 生产模式服务端（构建后单进程）",
+      "type": "node",
+      "request": "launch",
+      "program": "${workspaceFolder}/server/index.mjs",
+      "cwd": "${workspaceFolder}",
+      "preLaunchTask": "SkyLand: 生产构建",
+      "env": {
+        "SKYLAND_SERVER_HOST": "127.0.0.1",
+        "SKYLAND_SERVER_PORT": "3090"
+      },
+      "console": "integratedTerminal",
+      "internalConsoleOptions": "neverOpen",
+      "autoAttachChildProcesses": true,
+      "skipFiles": [
+        "<node_internals>/**",
+        "${workspaceFolder}/node_modules/**"
+      ]
+    },
+    {
+      // 连的是 3090（Node 直接吐 dist），不是 5180 的 Vite。
+      // 断点靠 vite build 产出的 sourcemap，行号会落在压缩前的源码上。
+      "name": "SkyLand: 生产模式客户端（Chrome + dist）",
+      "type": "chrome",
+      "request": "launch",
+      "url": "http://127.0.0.1:3090/",
+      "webRoot": "${workspaceFolder}",
+      "sourceMaps": true,
+      "resolveSourceMapLocations": [
+        "${workspaceFolder}/**",
+        "!**/node_modules/**"
+      ]
+    },
+    {
       "name": "SkyLand: 当前服务端测试文件",
       "type": "node",
       "request": "launch",
@@ -73,10 +108,21 @@
   ],
   "compounds": [
     {
+      // 日常入口：Node 服务端 + Vite 开发服务器 + 独立 Chrome 调试窗口。
+      // 客户端在 src/ 下断点，服务端在 server/ 下断点，房间子进程自动附加。
       "name": "SkyLand: 全栈调试",
       "configurations": [
         "SkyLand: 服务端（Node + 房间 DS）",
         "SkyLand: 客户端（Chrome + Vite）"
+      ],
+      "stopAll": true
+    },
+    {
+      // 验收线上形态用：先构建，再由单个 Node 进程提供一切。
+      "name": "SkyLand: 生产模式全栈",
+      "configurations": [
+        "SkyLand: 生产模式服务端（构建后单进程）",
+        "SkyLand: 生产模式客户端（Chrome + dist）"
       ],
       "stopAll": true
     }

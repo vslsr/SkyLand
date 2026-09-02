@@ -1,5 +1,8 @@
 {
   "recommendations": [
-    "rust-lang.rust-analyzer"
+    // 改 native/chunkgen/ 的 Rust 源码时需要；只跑引擎不需要装 Rust 工具链。
+    "rust-lang.rust-analyzer",
+    // src/shaders/ 的 GLSL 写在带 /* glsl */ 标记的模板字符串里，靠它高亮。
+    "boyswan.glsl-literal"
   ]
 }
