@@ -178,3 +178,34 @@ test('两份快照之间对朝向做球面插值，并且走近路', () => {
   assert.ok(rotation[0] > 0.2, `绕了远路：${rotation.join(',')}`);
   assert.ok(Math.abs(rotation[0] - Math.sin(Math.PI / 8)) < 0.02, rotation.join(','));
 });
+
+test('被叼住拖拽期间仍然归弹性拉伸管，翻滚系统不插手', () => {
+  const { world, actor, render } = createMushroom();
+  const tetherVisual = new ElasticTetherVisualSystem();
+  const rollSystem = new ActorDropRollSystem();
+  const rig = render.elasticTetherRig;
+  assert.ok(rig);
+
+  const tether = actor.requireComponent(ELASTIC_TETHER_COMPONENT) as ElasticTetherComponent;
+  tether.holderPlayerId = 'player-a';
+  tether.targetX = 2.1;
+  tether.targetY = 1.05;
+  tether.targetZ = 2;
+
+  // 即使刚体朝向字段里有值，只要还没拔断就不该被用上。
+  const motion = actor.requireComponent(DROP_MOTION_COMPONENT) as DropMotionComponent;
+  motion.setRotation({ x: Math.SQRT1_2, y: 0, z: 0, w: Math.SQRT1_2 });
+
+  for (let frame = 0; frame < 20; frame += 1) {
+    tetherVisual.update(world, 1 / 60, frame / 60);
+    rollSystem.update(world);
+  }
+
+  assert.ok(rig.stemRoot.scale.y !== 1, '拉伸表现被翻滚系统顶掉了');
+  assert.ok(
+    render.dropRollRig!.pivotRoot.quaternion.equals(new THREE.Quaternion()),
+    '还没拔断就开始翻滚了',
+  );
+  assert.equal(render.dropRollRig!.pivotRoot.position.y, 0);
+  assert.equal(render.dropRollRig!.bodyRoot.position.y, 0);
+});

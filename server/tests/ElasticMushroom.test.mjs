@@ -134,3 +134,38 @@ test('翻滚冲量绕着垂直于弹出方向的水平轴施加', () => {
   assert.equal(popped.torqueImpulse.y, 0);
   assert.ok(Math.abs(popped.torqueImpulse.z + 0.08) < 1e-9, JSON.stringify(popped.torqueImpulse));
 });
+
+test('拔出来之前只是长在地上的东西：叼住拖拽都不产生刚体，也不下发朝向', async () => {
+  const clock = createClock();
+  const catalog = await SceneCatalog.load();
+  const scene = new ServerScene(catalog.require('grassland'), { now: clock.now });
+  scene.addPlayer({ id: 'player-c', name: '还没拔断', slot: 0 });
+
+  const mushroomId = 'elastic-mushroom-01';
+  const initial = scene.createSnapshot().actors.find((actor) => actor.id === mushroomId);
+  const player = scene.players.get('player-c');
+  player.x = initial.transform.x - 0.8;
+  player.z = initial.transform.z;
+  assert.equal(scene.interactWithActor('player-c', { actorId: mushroomId, sequence: 1 }), true);
+
+  // 在断裂长度以内反复拖拽：这一整段里它都还长在地上。
+  for (const distance of [0.8, 1.0, 1.2, 0.9]) {
+    player.x = initial.transform.x - distance;
+    clock.advance(0.05);
+    scene.update();
+
+    const held = scene.createSnapshot().actors.find((actor) => actor.id === mushroomId);
+    assert.equal(held.elasticDetach.detached, false, `拖到 ${distance}m 就断了`);
+    assert.equal(held.elasticDetach.rotation, undefined, '没拔断却下发了刚体朝向');
+    assert.equal(
+      scene.physics.hasDynamicActor(mushroomId),
+      false,
+      '没拔断却已经建了动态刚体',
+    );
+    assert.equal(held.elasticTether.holderPlayerId, 'player-c');
+    // 长在地上的东西不会自己动：位置始终是原来那一个。
+    assert.equal(held.transform.x, initial.transform.x);
+    assert.equal(held.transform.y, initial.transform.y);
+    assert.equal(held.transform.z, initial.transform.z);
+  }
+});
