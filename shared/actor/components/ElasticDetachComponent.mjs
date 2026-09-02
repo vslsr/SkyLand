@@ -25,9 +25,17 @@ export class ElasticDetachComponent extends ActorComponent {
     return () => this.poppedListeners.delete(listener);
   }
 
+  /**
+   * 脱离时把线冲量和角冲量都交给监听者填。角冲量不是装饰：掉在地上的物件
+   * 只有真的翻起来才会躺着，光靠水平位移换算出的滚动角远远不够。
+   */
   pop(direction) {
     if (!this.markDetached()) return undefined;
-    const event = { direction, impulse: { x: 0, y: 0, z: 0 } };
+    const event = {
+      direction,
+      impulse: { x: 0, y: 0, z: 0 },
+      torqueImpulse: { x: 0, y: 0, z: 0 },
+    };
     for (const listener of this.poppedListeners) listener(event);
     return event;
   }

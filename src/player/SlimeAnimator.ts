@@ -99,6 +99,6 @@ export class SlimeAnimator {
 
     const shadowScale = 1 / Math.sqrt(scaleY);
     this.model.shadow.scale.set(shadowScale, shadowScale, 1);
-    this.model.shadow.material.opacity = 0.1 + 0.1 / scaleY;
+    this.model.shadow.material.setOpacity(0.1 + 0.1 / scaleY);
   }
 }

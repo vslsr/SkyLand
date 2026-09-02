@@ -11,13 +11,15 @@
     "elasticTether": {
       "restLength": 0.72,
       "breakLength": 1.55,
+      "pullDistance": 2.8,
       "mouthHeight": 0.3,
       "mouthForwardOffset": 0.36
     },
     "elasticDetach": {},
     "mushroomPop": {
       "forwardImpulse": 0.55,
-      "upwardImpulse": 2.2
+      "upwardImpulse": 2.2,
+      "spinImpulse": 0.075
     },
     "dropMotion": {
       "gravity": 9.8,
@@ -25,6 +27,7 @@
       "groundDrag": 7,
       "restitution": 0.28,
       "radius": 0.28,
+      "angularDamping": 0.35,
       "settleSpeed": 0.1
     },
     "replicationPolicy": {

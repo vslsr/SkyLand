@@ -86,6 +86,7 @@ import { RenderTransformSyncSystem } from './systems/RenderTransformSyncSystem';
 import { AttachmentVisualSystem } from './systems/AttachmentVisualSystem';
 import { CargoVisualSystem } from './systems/CargoVisualSystem';
 import { WaterBobVisualSystem } from './systems/WaterBobVisualSystem';
+import { ActorDropRollSystem } from './systems/ActorDropRollSystem';
 import { ElasticTetherVisualSystem } from './systems/ElasticTetherVisualSystem';
 import {
   FIRE_VISUAL_COMPONENT,
@@ -227,6 +228,8 @@ export class ClientActorSystem implements SceneVisualSystem {
     }
     this.world.addSystem(new AttachmentVisualSystem(this.renderScene));
     this.world.addSystem(new ElasticTetherVisualSystem(this.renderScene));
+    // 必须排在弹性拉伸之后：脱落物件的姿态由这一步覆盖成刚体朝向。
+    this.world.addSystem(new ActorDropRollSystem(this.renderScene));
     this.world.addSystem(new FireVisualSystem());
   }
 
@@ -825,6 +828,7 @@ export class ClientActorSystem implements SceneVisualSystem {
       tether.targetX = snapshot.elasticTether.targetX;
       tether.targetY = snapshot.elasticTether.targetY;
       tether.targetZ = snapshot.elasticTether.targetZ;
+      tether.grabLength = snapshot.elasticTether.grabLength ?? tether.grabLength;
       tether.releaseRevision = snapshot.elasticTether.releaseRevision;
       tether.revision = snapshot.elasticTether.revision;
     }
@@ -834,6 +838,11 @@ export class ClientActorSystem implements SceneVisualSystem {
       ) as ElasticDetachComponent;
       detachable.detached = snapshot.elasticDetach.detached;
       detachable.revision = snapshot.elasticDetach.revision;
+      const rotation = snapshot.elasticDetach.rotation;
+      if (rotation) {
+        const motion = actor.getComponent('dropMotion') as DropMotionComponent | undefined;
+        motion?.setRotation({ x: rotation[0], y: rotation[1], z: rotation[2], w: rotation[3] });
+      }
       if (detachable.detached && !detachable.dropCollisionApplied) {
         const motion = actor.getComponent('dropMotion') as DropMotionComponent | undefined;
         if (motion) {

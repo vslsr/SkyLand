@@ -51,6 +51,17 @@ export interface SkyState {
   ambientBrightness: number;
   /** 主光方向；太阳落山后交给月亮，夜里也保留方向感。 */
   sunDirection: THREE.Vector3;
+  /** 朝太阳方向看时雾被染成的颜色。 */
+  scatterColor: THREE.Color;
+  /** 方向性散射强度，0-1；日出日落最强，太阳落到地平线以下归零。 */
+  scatterStrength: number;
+  /**
+   * 直射光的"硬度"，0-1。
+   *
+   * 太阳高、天空干净时接近 1，接触阴影因此清晰；贴地或夜里趋近 0，
+   * 光变成漫射，影子自然化开。
+   */
+  directLight: number;
   /** 日轮高度，-1 到 1。 */
   sunElevation: number;
   /** 月轮高度，-1 到 1。 */

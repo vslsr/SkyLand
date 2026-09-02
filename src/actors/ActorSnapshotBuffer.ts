@@ -11,6 +11,33 @@ function blendNumber(from: number, to: number, amount: number): number {
   return from + (to - from) * amount;
 }
 
+type Rotation = readonly [number, number, number, number];
+
+/**
+ * 四元数球面插值。掉落物在两份快照之间可能翻过很大的角度，逐分量线性插值
+ * 会让它在中途「瘪」下去再弹回来；而且要先按点积取近路，否则会绕远整整一圈。
+ */
+function blendRotation(from: Rotation, to: Rotation, amount: number): Rotation {
+  let dot = from[0] * to[0] + from[1] * to[1] + from[2] * to[2] + from[3] * to[3];
+  const sign = dot < 0 ? -1 : 1;
+  dot = Math.abs(dot);
+  let fromScale = 1 - amount;
+  let toScale = amount;
+  if (dot < 0.9995) {
+    const angle = Math.acos(Math.min(1, dot));
+    const sinAngle = Math.sin(angle);
+    fromScale = Math.sin((1 - amount) * angle) / sinAngle;
+    toScale = Math.sin(amount * angle) / sinAngle;
+  }
+  const x = from[0] * fromScale + to[0] * sign * toScale;
+  const y = from[1] * fromScale + to[1] * sign * toScale;
+  const z = from[2] * fromScale + to[2] * sign * toScale;
+  const w = from[3] * fromScale + to[3] * sign * toScale;
+  const length = Math.hypot(x, y, z, w);
+  if (!(length > 1e-6)) return to;
+  return [x / length, y / length, z / length, w / length];
+}
+
 function blendActor(from: SnapshotActor, to: SnapshotActor, amount: number): SnapshotActor {
   return {
     ...to,
@@ -29,6 +56,16 @@ function blendActor(from: SnapshotActor, to: SnapshotActor, amount: number): Sna
         steering: blendNumber(from.vessel.steering, to.vessel.steering, amount),
       },
     } : {}),
+    ...(from.elasticDetach?.rotation
+      && to.elasticDetach?.rotation
+      && from.elasticDetach.detached === to.elasticDetach.detached
+      ? {
+          elasticDetach: {
+            ...to.elasticDetach,
+            rotation: blendRotation(from.elasticDetach.rotation, to.elasticDetach.rotation, amount),
+          },
+        }
+      : {}),
     ...(from.elasticTether
       && to.elasticTether
       && from.elasticTether.holderPlayerId

@@ -272,6 +272,9 @@ export class ServerGeneratedPropActors {
         elasticDetach: { detached: true },
         dropMotion: {
           velocity: [motion.velocityX, motion.velocityY, motion.velocityZ],
+          // 姿态和位置一样是「被动过」的一部分：只存位置的话，走远再回来
+          // 躺在地上的蘑菇会原地站起来。
+          rotation: [motion.rotationX, motion.rotationY, motion.rotationZ, motion.rotationW],
         },
       });
       return;

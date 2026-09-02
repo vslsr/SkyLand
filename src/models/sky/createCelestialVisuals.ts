@@ -12,7 +12,12 @@ export const CELESTIAL_VISUAL_CAPACITY = Object.freeze({
   meteorTrailPoints: 20,
 });
 
-/** 天体是无限远元素：每帧跟着相机平移，半径必须留在相机远裁剪面以内。 */
+/**
+ * 天球的基准半径。
+ *
+ * 天体是无限远元素：每帧跟着相机平移，整组再按相机的远裁剪面缩放，所以
+ * 换相机参数不会把星空裁掉一半。
+ */
 export const CELESTIAL_RADIUS = Object.freeze({
   sun: 78,
   moon: 78,
@@ -64,7 +69,11 @@ const GLOW_FRAGMENT_SHADER = /* glsl */ `
   void main() {
     float distanceFromCenter = length(vGlowUv - 0.5) * 2.0;
     float falloff = pow(max(0.0, 1.0 - distanceFromCenter), uFalloff);
-    gl_FragColor = vec4(uColor, falloff * uOpacity);
+    // 光晕铺满大半个屏幕、梯度又极缓，8 位色深下会出现同心色带；
+    // 加一点亚像素抖动把台阶打散，代价只有一次 hash。
+    float dither = fract(sin(dot(gl_FragCoord.xy, vec2(12.9898, 78.233))) * 43758.5453);
+    float alpha = falloff * uOpacity + (dither - 0.5) / 255.0;
+    gl_FragColor = vec4(uColor, max(0.0, alpha));
   }
 `;
 
@@ -74,6 +83,8 @@ const STAR_VERTEX_SHADER = /* glsl */ `
   attribute float aColorMix;
   attribute float aSize;
   uniform float uTime;
+  uniform float uPixelRatio;
+  uniform float uDomeScale;
   varying float vTwinkle;
   varying float vColorMix;
 
@@ -81,7 +92,10 @@ const STAR_VERTEX_SHADER = /* glsl */ `
     vec4 viewPosition = modelViewMatrix * vec4(position, 1.0);
     gl_Position = projectionMatrix * viewPosition;
     float twinkle = 0.45 + 0.55 * abs(sin(uTime * aSpeed * 0.5 + aTwinkle));
-    gl_PointSize = aSize * (0.75 + 0.55 * twinkle) * (200.0 / -viewPosition.z);
+    // gl_PointSize 是设备像素，不乘 pixelRatio 的话高 DPI 屏上星点会小一半；
+    // uDomeScale 抵消天球随相机远裁面缩放带来的视距变化。
+    float attenuation = 200.0 * uDomeScale / -viewPosition.z;
+    gl_PointSize = aSize * (0.75 + 0.55 * twinkle) * attenuation * uPixelRatio;
     vTwinkle = twinkle;
     vColorMix = aColorMix;
   }
@@ -210,7 +224,12 @@ function createStarField(): { points: THREE.Points; material: THREE.ShaderMateri
   geometry.setAttribute('aSize', new THREE.BufferAttribute(size, 1));
 
   const material = new THREE.ShaderMaterial({
-    uniforms: { uTime: { value: 0 }, uOpacity: { value: 0 } },
+    uniforms: {
+      uTime: { value: 0 },
+      uOpacity: { value: 0 },
+      uPixelRatio: { value: 1 },
+      uDomeScale: { value: 1 },
+    },
     vertexShader: STAR_VERTEX_SHADER,
     fragmentShader: STAR_FRAGMENT_SHADER,
     transparent: true,

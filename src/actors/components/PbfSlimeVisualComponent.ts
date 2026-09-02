@@ -375,10 +375,10 @@ export class PbfSlimeVisualComponent extends ActorComponent {
       shadowScale * adhesionStretch,
       1,
     );
-    this.rig.shadow.material.opacity = Math.min(
+    this.rig.shadow.material.setOpacity(Math.min(
       0.28,
       0.1 + 0.07 / Math.max(0.65, shadowScale) + lagRatio * 0.34,
-    );
+    ));
   }
 
   private measureSurfaceRadius(directionX: number, directionY: number, directionZ: number): number {

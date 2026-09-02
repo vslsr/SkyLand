@@ -30,7 +30,7 @@ export class ElasticDetachSystem {
         const dy = tether.targetY - transform.y;
         const dz = tether.targetZ - transform.z;
         const length = Math.hypot(dx, dy, dz);
-        if (length >= tether.breakLength) {
+        if (length >= tether.detachLength) {
           const inverseLength = length > 1e-6 ? 1 / length : 0;
           const direction = {
             x: dx * inverseLength,
@@ -45,16 +45,9 @@ export class ElasticDetachSystem {
             interactable.revision += 1;
           }
           if (popped && world.context.physics) {
-            world.context.physics.createDynamicActor(actor.id, {
-              x: transform.x,
-              y: transform.y + motion.radius,
-              z: transform.z,
-              radius: motion.radius,
-              linearDamping: motion.drag,
-              restitution: motion.restitution,
-              friction: motion.groundDrag,
-            });
+            this.createBody(world.context.physics, actor.id, motion, transform);
             world.context.physics.applyDynamicActorImpulse(actor.id, popped.impulse);
+            world.context.physics.applyDynamicActorTorqueImpulse(actor.id, popped.torqueImpulse);
           }
         }
       }
@@ -72,15 +65,7 @@ export class ElasticDetachSystem {
       const physics = world.context.physics;
       if (!physics) continue;
       if (!physics.hasDynamicActor(actor.id)) {
-        physics.createDynamicActor(actor.id, {
-          x: transform.x,
-          y: transform.y + motion.radius,
-          z: transform.z,
-          radius: motion.radius,
-          linearDamping: motion.drag,
-          restitution: motion.restitution,
-          friction: motion.groundDrag,
-        });
+        this.createBody(physics, actor.id, motion, transform);
         physics.setDynamicActorVelocity(actor.id, {
           x: motion.velocityX, y: motion.velocityY, z: motion.velocityZ,
         });
@@ -108,12 +93,31 @@ export class ElasticDetachSystem {
     }
   }
 
+  createBody(physics, actorId, motion, transform) {
+    physics.createDynamicActor(actorId, {
+      x: transform.x,
+      y: transform.y + motion.radius,
+      z: transform.z,
+      radius: motion.radius,
+      linearDamping: motion.drag,
+      angularDamping: motion.angularDamping,
+      restitution: motion.restitution,
+      friction: motion.groundDrag,
+      // chunk 卸载后重建时，物件已经躺在地上了，朝向必须跟着回来。
+      rotation: {
+        x: motion.rotationX, y: motion.rotationY, z: motion.rotationZ, w: motion.rotationW,
+      },
+    });
+  }
+
   syncActor(physics, actor, motion, transform) {
     const state = physics.getDynamicActorState(actor.id);
     if (!state) return;
     motion.velocityX = state.velocity.x;
     motion.velocityY = state.velocity.y;
     motion.velocityZ = state.velocity.z;
+    // 朝向和位置一样是权威结果；yaw 留给未脱离时的摆放，脱落后由四元数接管。
+    motion.setRotation(state.rotation);
     transform.setWorldTransform([
       state.position.x,
       state.position.y - motion.radius,

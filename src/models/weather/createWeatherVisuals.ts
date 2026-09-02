@@ -18,10 +18,18 @@ export interface WeatherCloudVisual {
   readonly floatPhase: number;
 }
 
+export interface CloudFillUniforms {
+  readonly uSunDirection: THREE.IUniform<THREE.Vector3>;
+  readonly uLitColor: THREE.IUniform<THREE.Color>;
+  readonly uShadowColor: THREE.IUniform<THREE.Color>;
+  readonly uOpacity: THREE.IUniform<number>;
+}
+
 export interface WeatherVisuals {
   readonly root: THREE.Group;
   readonly clouds: readonly WeatherCloudVisual[];
-  readonly cloudFillMaterial: THREE.MeshBasicMaterial;
+  readonly cloudFillMaterial: THREE.ShaderMaterial;
+  readonly cloudFillUniforms: CloudFillUniforms;
   readonly cloudLineMaterial: THREE.LineBasicMaterial;
   readonly rainLines: THREE.LineSegments;
   readonly rainGeometry: THREE.BufferGeometry;
@@ -42,6 +50,37 @@ export interface WeatherVisuals {
   dispose(): void;
 }
 
+/**
+ * 云的受光面。
+ *
+ * 参考项目的云是纯白球叶，正午好看，日落时天空是暖的、云却仍然中性白，
+ * 一眼就假。这里按世界法线在受光色与背光色之间过渡，日落的云因此会朝着
+ * 太阳那一侧亮起来。
+ */
+const CLOUD_VERTEX_SHADER = /* glsl */ `
+  varying vec3 vWorldNormal;
+
+  void main() {
+    vWorldNormal = normalize(mat3(modelMatrix) * normal);
+    gl_Position = projectionMatrix * viewMatrix * modelMatrix * vec4(position, 1.0);
+  }
+`;
+
+const CLOUD_FRAGMENT_SHADER = /* glsl */ `
+  uniform vec3 uSunDirection;
+  uniform vec3 uLitColor;
+  uniform vec3 uShadowColor;
+  uniform float uOpacity;
+
+  varying vec3 vWorldNormal;
+
+  void main() {
+    float lit = dot(normalize(vWorldNormal), normalize(uSunDirection)) * 0.5 + 0.5;
+    vec3 color = mix(uShadowColor, uLitColor, smoothstep(0.22, 0.86, lit));
+    gl_FragColor = vec4(color, uOpacity);
+  }
+`;
+
 function createRandom(seed: number): () => number {
   let state = seed >>> 0;
   return () => {
@@ -61,10 +100,17 @@ export function createWeatherVisuals(): WeatherVisuals {
   const root = new THREE.Group();
   root.name = 'chunk-weather-system';
 
-  const cloudFillMaterial = new THREE.MeshBasicMaterial({
-    color: 0xffffff,
+  const cloudFillUniforms: CloudFillUniforms = {
+    uSunDirection: { value: new THREE.Vector3(-0.55, 0.9, 0.35).normalize() },
+    uLitColor: { value: new THREE.Color(0xffffff) },
+    uShadowColor: { value: new THREE.Color(0xd8dde6) },
+    uOpacity: { value: 0.82 },
+  };
+  const cloudFillMaterial = new THREE.ShaderMaterial({
+    vertexShader: CLOUD_VERTEX_SHADER,
+    fragmentShader: CLOUD_FRAGMENT_SHADER,
+    uniforms: cloudFillUniforms as unknown as Record<string, THREE.IUniform>,
     transparent: true,
-    opacity: 0.82,
     depthWrite: false,
   });
   const cloudLineMaterial = new THREE.LineBasicMaterial({
@@ -199,6 +245,7 @@ export function createWeatherVisuals(): WeatherVisuals {
     root,
     clouds,
     cloudFillMaterial,
+    cloudFillUniforms,
     cloudLineMaterial,
     rainLines,
     rainGeometry,

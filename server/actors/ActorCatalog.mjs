@@ -170,6 +170,9 @@ function validateElasticTether(raw, filename) {
   return {
     restLength,
     breakLength,
+    ...(definition.pullDistance !== undefined ? {
+      pullDistance: requireNumber(definition.pullDistance, `${path}.pullDistance`, 0, 12),
+    } : {}),
     mouthHeight: requireNumber(definition.mouthHeight, `${path}.mouthHeight`, 0, 3),
     mouthForwardOffset: requireNumber(
       definition.mouthForwardOffset,
@@ -289,6 +292,9 @@ function validateDropMotion(raw, filename) {
     ...(definition.radius !== undefined ? {
       radius: requireNumber(definition.radius, `${path}.radius`, 0, 3),
     } : {}),
+    ...(definition.angularDamping !== undefined ? {
+      angularDamping: requireNumber(definition.angularDamping, `${path}.angularDamping`, 0, 50),
+    } : {}),
     settleSpeed: requireNumber(definition.settleSpeed, `${path}.settleSpeed`, Number.EPSILON, 10),
   };
 }
@@ -305,6 +311,9 @@ function validateMushroomPop(raw, filename) {
   return {
     forwardImpulse: requireNumber(definition.forwardImpulse, `${path}.forwardImpulse`, 0, 20),
     upwardImpulse: requireNumber(definition.upwardImpulse, `${path}.upwardImpulse`, 0, 20),
+    ...(definition.spinImpulse !== undefined ? {
+      spinImpulse: requireNumber(definition.spinImpulse, `${path}.spinImpulse`, 0, 20),
+    } : {}),
   };
 }
 

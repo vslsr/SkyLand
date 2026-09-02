@@ -1,6 +1,8 @@
 import * as THREE from 'three';
 import type { Actor, ActorWorld } from '../../../shared/actor/index.mjs';
 import {
+  ELASTIC_DETACH_COMPONENT,
+  type ElasticDetachComponent,
   ELASTIC_TETHER_COMPONENT,
   type ElasticTetherComponent,
   TRANSFORM_COMPONENT,
@@ -10,6 +12,7 @@ import {
   RENDER_PROXY_COMPONENT,
   type RenderProxyComponent,
 } from '../components/RenderProxyComponent';
+import type { ThreeMeshProxy } from '../../render/three/ThreeMeshProxy';
 import type { ThreeRenderScene } from '../../render/three/ThreeRenderScene';
 
 interface ElasticVisualState {
@@ -52,6 +55,16 @@ export class ElasticTetherVisualSystem {
       const proxy = actor.requireComponent(RENDER_PROXY_COMPONENT) as RenderProxyComponent;
       const rig = this.scene.resolve(proxy.proxyId)?.elasticTetherRig;
       if (!rig) continue;
+      // 已经脱落的物件不再是「长在地上、被拉长的菌柄」，姿态由刚体朝向接管。
+      // 这里若继续把它掰回竖直，翻滚就会被每帧拽回立姿。
+      const detachable = actor.getComponent(
+        ELASTIC_DETACH_COMPONENT,
+      ) as ElasticDetachComponent | undefined;
+      if (detachable?.detached) {
+        this.states.delete(actor.id);
+        this.restPose(rig);
+        continue;
+      }
       live.add(actor.id);
       const tether = actor.requireComponent(ELASTIC_TETHER_COMPONENT) as ElasticTetherComponent;
       const transform = actor.requireComponent(TRANSFORM_COMPONENT) as TransformComponent;
@@ -63,7 +76,7 @@ export class ElasticTetherVisualSystem {
       if (released) state.velocity.multiplyScalar(1.12);
       this.integrate(state, this.desired, deltaSeconds, tether.holderPlayerId !== null);
 
-      const maximumLength = tether.breakLength * 1.12;
+      const maximumLength = tether.detachLength * 1.12;
       let length = state.tip.length();
       if (!Number.isFinite(length) || length < rig.restLength * 0.35) {
         state.tip.set(0, rig.restLength, 0);
@@ -78,7 +91,10 @@ export class ElasticTetherVisualSystem {
       this.rotation.setFromUnitVectors(UP, this.direction);
       rig.elasticRoot.quaternion.copy(this.rotation);
 
-      const stretch = THREE.MathUtils.clamp(length / rig.restLength, 0.5, 4.2);
+      // 上限跟着这次叼取的拔断长度走，不能写死：菌盖位置直接取 length，
+      // 菌柄却按 stretch 缩放，两者用不同的上限就会在拉到头时脱开。
+      const maximumStretch = Math.max(1, maximumLength / rig.restLength);
+      const stretch = THREE.MathUtils.clamp(length / rig.restLength, 0.5, maximumStretch);
       const widthScale = THREE.MathUtils.clamp(1 / Math.sqrt(stretch), 0.55, 1.18);
       rig.stemRoot.scale.set(widthScale, stretch, widthScale);
       rig.capRoot.position.y = length;
@@ -97,6 +113,15 @@ export class ElasticTetherVisualSystem {
     for (const actorId of this.states.keys()) {
       if (!live.has(actorId)) this.states.delete(actorId);
     }
+  }
+
+  /** 脱落瞬间把拉伸、摆动和回弹一次性收回原状，交给翻滚系统摆姿势。 */
+  private restPose(rig: NonNullable<ThreeMeshProxy['elasticTetherRig']>): void {
+    rig.elasticRoot.quaternion.identity();
+    rig.stemRoot.scale.set(1, 1, 1);
+    rig.capRoot.position.y = rig.restLength;
+    rig.capRoot.scale.set(1, 1, 1);
+    rig.capRoot.rotation.set(0, 0, 0);
   }
 
   private createState(

@@ -229,12 +229,23 @@ export class PhysicsWorld {
     this.#assertAlive();
     this.removeActorCollider(id);
     this.removeDynamicActor(id);
-    const body = this.#world.createRigidBody(
-      this.#rapier.RigidBodyDesc.dynamic()
-        .setTranslation(finite(options.x), finite(options.y), finite(options.z))
-        .setLinearDamping(Math.max(0, finite(options.linearDamping, 1.8)))
-        .setAngularDamping(Math.max(0, finite(options.angularDamping, 2))),
-    );
+    const descriptor = this.#rapier.RigidBodyDesc.dynamic()
+      .setTranslation(finite(options.x), finite(options.y), finite(options.z))
+      .setLinearDamping(Math.max(0, finite(options.linearDamping, 1.8)))
+      .setAngularDamping(Math.max(0, finite(options.angularDamping, 2)));
+    // 重建一个已经躺在地上的物件时必须带回它的朝向，否则它会当场站起来。
+    const rotation = options.rotation;
+    if (rotation && Math.abs(Math.hypot(
+      finite(rotation.x), finite(rotation.y), finite(rotation.z), finite(rotation.w),
+    ) - 1) < 1e-3) {
+      descriptor.setRotation({
+        x: finite(rotation.x),
+        y: finite(rotation.y),
+        z: finite(rotation.z),
+        w: finite(rotation.w, 1),
+      });
+    }
+    const body = this.#world.createRigidBody(descriptor);
     const collider = this.#world.createCollider(
       this.#rapier.ColliderDesc.ball(positive(options.radius, 0.28))
         // 让玩法层配置的 impulse 数值可直接按约 1kg 物体理解，避免球体体积
@@ -263,6 +274,18 @@ export class PhysicsWorld {
     return true;
   }
 
+  /** 角冲量与线冲量分开给：弹出方向决定飞向哪，翻滚决定落地时是躺是立。 */
+  applyDynamicActorTorqueImpulse(id, torqueImpulse) {
+    const entry = this.#dynamicActors.get(id);
+    if (!entry) return false;
+    entry.body.applyTorqueImpulse({
+      x: finite(torqueImpulse?.x),
+      y: finite(torqueImpulse?.y),
+      z: finite(torqueImpulse?.z),
+    }, true);
+    return true;
+  }
+
   setDynamicActorVelocity(id, velocity) {
     const entry = this.#dynamicActors.get(id);
     if (!entry) return false;
@@ -284,12 +307,18 @@ export class PhysicsWorld {
     return true;
   }
 
+  /** 朝向和位置一样是刚体解算出来的：掉在地上的物件要能躺着，而不是永远立着。 */
   getDynamicActorState(id) {
     const entry = this.#dynamicActors.get(id);
     if (!entry) return undefined;
     const position = entry.body.translation();
     const velocity = entry.body.linvel();
-    return { position: { ...position }, velocity: { ...velocity } };
+    const rotation = entry.body.rotation();
+    return {
+      position: { ...position },
+      velocity: { ...velocity },
+      rotation: { ...rotation },
+    };
   }
 
   removeDynamicActor(id) {
