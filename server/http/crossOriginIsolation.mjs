@@ -9,7 +9,7 @@
  * COEP `require-corp` 会拦住没有 CORP 头的**跨源**子资源。本仓库目前零外部
  * 资源（全部几何与材质都是程序化生成的），所以打开它不会挡掉任何东西；
  * 之后若引入 CDN 字体或图片，必须让对方带上 `Cross-Origin-Resource-Policy`，
- * 否则会静默加载失败。真的需要临时退回时，用 SKYLAND_CROSS_ORIGIN_ISOLATION=off。
+ * 否则会静默加载失败。
  */
 
 export const CROSS_ORIGIN_ISOLATION_HEADERS = Object.freeze({
@@ -20,20 +20,12 @@ export const CROSS_ORIGIN_ISOLATION_HEADERS = Object.freeze({
   'Cross-Origin-Resource-Policy': 'same-origin',
 });
 
-/** 环境变量把值设成 off / 0 / false 时关闭隔离；其余情况一律开启。 */
-export function isCrossOriginIsolationEnabled(env = process.env) {
-  const value = String(env?.SKYLAND_CROSS_ORIGIN_ISOLATION ?? '').trim().toLowerCase();
-  return value !== 'off' && value !== '0' && value !== 'false';
-}
-
 /**
  * 在路由之前调用一次即可：`setHeader` 写入的头会与之后 `writeHead(status, headers)`
  * 传入的对象合并，所以静态文件、API 与错误响应共用同一份隔离策略。
  */
-export function applyCrossOriginIsolation(response, env = process.env) {
-  if (!isCrossOriginIsolationEnabled(env)) return false;
+export function applyCrossOriginIsolation(response) {
   for (const [name, value] of Object.entries(CROSS_ORIGIN_ISOLATION_HEADERS)) {
     response.setHeader(name, value);
   }
-  return true;
 }

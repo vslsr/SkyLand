@@ -7,13 +7,12 @@ import { join } from 'node:path';
 import {
   CROSS_ORIGIN_ISOLATION_HEADERS,
   applyCrossOriginIsolation,
-  isCrossOriginIsolationEnabled,
 } from '../http/crossOriginIsolation.mjs';
 import { sendJson } from '../http/HttpResponses.mjs';
 import { StaticWebServer } from '../http/StaticWebServer.mjs';
 
 /** 和 server/index.mjs 一样的接线顺序：先写隔离头，再路由。 */
-async function createFixture(env = {}) {
+async function createFixture() {
   const root = await mkdtemp(join(tmpdir(), 'skyland-coi-'));
   await mkdir(join(root, 'assets'));
   await writeFile(join(root, 'index.html'), '<!doctype html><title>SkyLand</title>');
@@ -22,7 +21,7 @@ async function createFixture(env = {}) {
   const staticWebServer = new StaticWebServer(root);
   const server = http.createServer(async (request, response) => {
     const url = new URL(request.url ?? '/', 'http://127.0.0.1');
-    applyCrossOriginIsolation(response, env);
+    applyCrossOriginIsolation(response);
     if (url.pathname.startsWith('/api/')) {
       sendJson(response, 200, { ok: true }, request.method);
       return;
@@ -82,23 +81,8 @@ test('隔离头不覆盖静态服务原有的缓存与类型契约', async () =>
   }
 });
 
-test('SKYLAND_CROSS_ORIGIN_ISOLATION=off 可以整体退回未隔离部署', async () => {
-  const fixture = await createFixture({ SKYLAND_CROSS_ORIGIN_ISOLATION: 'off' });
-  try {
-    const entry = await fetch(`${fixture.origin}/`);
-    assert.equal(entry.status, 200);
-    assert.equal(entry.headers.get('cross-origin-opener-policy'), null);
-    assert.equal(entry.headers.get('cross-origin-embedder-policy'), null);
-  } finally {
-    await fixture.close();
-  }
-});
-
-test('开关只认 off / 0 / false，其余取值一律保持隔离', () => {
-  assert.equal(isCrossOriginIsolationEnabled({}), true);
-  assert.equal(isCrossOriginIsolationEnabled({ SKYLAND_CROSS_ORIGIN_ISOLATION: 'on' }), true);
-  assert.equal(isCrossOriginIsolationEnabled({ SKYLAND_CROSS_ORIGIN_ISOLATION: ' OFF ' }), false);
-  assert.equal(isCrossOriginIsolationEnabled({ SKYLAND_CROSS_ORIGIN_ISOLATION: '0' }), false);
-  assert.equal(isCrossOriginIsolationEnabled({ SKYLAND_CROSS_ORIGIN_ISOLATION: 'false' }), false);
+test('隔离头是冻结常量，调用方改不动共享策略', () => {
   assert.equal(Object.isFrozen(CROSS_ORIGIN_ISOLATION_HEADERS), true);
+  assert.equal(CROSS_ORIGIN_ISOLATION_HEADERS['Cross-Origin-Opener-Policy'], 'same-origin');
+  assert.equal(CROSS_ORIGIN_ISOLATION_HEADERS['Cross-Origin-Embedder-Policy'], 'require-corp');
 });
