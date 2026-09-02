@@ -6,11 +6,14 @@ import {
 } from '../../shared/world/chunkKey.mjs';
 import { CHUNK_SIZE } from '../../shared/world/worldConfig.mjs';
 import type {
+  SkyState,
   SkyStateSource,
   WeatherFieldSource,
   WeatherFieldState,
 } from '../environment/EnvironmentTypes';
+import { CONTACT_SHADOW_UNIFORMS } from '../materials/createContactShadowMaterial';
 import type { SceneEnvironmentRuntime } from '../materials/createFillMaterial';
+import { applyEnvironmentInk, resetEnvironmentInk } from '../materials/lineMaterials';
 import {
   RAIN_SPLASH_SEGMENTS_PER_EFFECT,
   WEATHER_VISUAL_CAPACITY,
@@ -85,6 +88,8 @@ export interface WeatherEnvironmentDefinition {
    * 昼夜系统提供的天空状态。缺省时天空恒为场景背景色，等同于没有昼夜的场景。
    */
   sky?: SkyStateSource;
+  /** 场景地面色；半球光里从下方反弹回来的那一半取它的色相。 */
+  groundColor?: string;
 }
 
 const WEATHER_PRESETS: Readonly<Record<WeatherType, WeatherPreset>> = {
@@ -113,6 +118,28 @@ const TRANSITION_SPEED = 0.55;
 
 /** 没有昼夜系统时的中性白光。 */
 const NEUTRAL_AMBIENT_COLOR = new THREE.Color(0xffffff);
+
+/** 半球染色与墨线染色的强度：0 是完全中性，1 是完全跟着环境色走。 */
+const SKY_TINT_STRENGTH = 0.5;
+const BOUNCE_TINT_STRENGTH = 0.5;
+const INK_TINT_STRENGTH = 0.6;
+
+/**
+ * 把一个颜色归一化到平均值 1，再按 strength 混回白色。
+ *
+ * 结果只带色相不带亮度，所以它可以直接乘在已经算好的光照上：正午的中性
+ * 白光归一化后就是 1，画面和没有染色时逐像素一致。
+ */
+function normalizeTint(source: THREE.Color, strength: number, out: THREE.Color): THREE.Color {
+  const mean = (source.r + source.g + source.b) / 3;
+  if (!(mean > 1e-4)) return out.setRGB(1, 1, 1);
+  const scale = 1 / mean;
+  return out.setRGB(
+    lerp(1, source.r * scale, strength),
+    lerp(1, source.g * scale, strength),
+    lerp(1, source.b * scale, strength),
+  );
+}
 
 export const WEATHER_PARTICLE_LIMITS = Object.freeze({
   chunkSize: CHUNK_SIZE,
@@ -180,6 +207,8 @@ export class WeatherSystem implements SceneVisualSystem, WeatherVisualTarget, We
   private readonly baseFogColor: THREE.Color;
   /** 作者写下的雾色相对背景色的偏移；天空随昼夜变化时保留这份偏移。 */
   private readonly fogColorOffset: THREE.Color;
+  /** 半球光下半部分的基准色，取场景地面色。 */
+  private readonly baseBounceColor: THREE.Color;
   private readonly baseFogNear: number;
   private readonly baseFogFar: number;
   private readonly activeChunks = new Map<string, WeatherChunk>();
@@ -196,6 +225,12 @@ export class WeatherSystem implements SceneVisualSystem, WeatherVisualTarget, We
   private readonly fogColor = new THREE.Color();
   private readonly grayColor = new THREE.Color();
   private readonly cloudColor = new THREE.Color();
+  private readonly cloudLitColor = new THREE.Color();
+  private readonly tintColor = new THREE.Color();
+  private readonly scatterColor = new THREE.Color();
+  /** 云影噪声的滚动量，跟着风累积，不随帧率变化。 */
+  private cloudShadowOffsetX = 0;
+  private cloudShadowOffsetZ = 0;
   private readonly ambientColor = new THREE.Color(0xffffff);
   private readonly stormAmbientColor = new THREE.Color(0x87909c);
   private readonly lightningColor = new THREE.Color(0xffffff);
@@ -240,6 +275,7 @@ export class WeatherSystem implements SceneVisualSystem, WeatherVisualTarget, We
       this.baseFogColor.g - this.baseBackground.g,
       this.baseFogColor.b - this.baseBackground.b,
     );
+    this.baseBounceColor = new THREE.Color(environment.groundColor ?? 0xffffff);
     this.baseFogNear = environment.fogNear;
     this.baseFogFar = environment.fogFar;
     this.syncActiveChunks(0, 0);
@@ -346,6 +382,8 @@ export class WeatherSystem implements SceneVisualSystem, WeatherVisualTarget, We
     this.activeChunks.clear();
     this.activeChunkOrder = [];
     this.visuals.dispose();
+    // 共享墨线是跨场景的模块级材质，卸载时恢复基准色。
+    resetEnvironmentInk();
   }
 
   private syncActiveChunks(worldX: number, worldZ: number): void {
@@ -525,27 +563,97 @@ export class WeatherSystem implements SceneVisualSystem, WeatherVisualTarget, We
       .multiplyScalar(ambientBrightness * (sky ? sky.ambientBrightness : 1));
     if (lightningFlash > 0) this.ambientColor.lerp(this.lightningColor, lightningFlash * 0.55);
 
-    if (this.runtime) {
-      this.runtime.fogColor.value.copy(this.fogColor);
-      this.runtime.fogNear.value = fog.near;
-      this.runtime.fogFar.value = fog.far;
-      this.runtime.ambientColor.value.copy(this.ambientColor);
-      this.runtime.daylight.value = this.currentDaylight;
-      if (sky) this.runtime.sunDirection.value.copy(sky.sunDirection);
-    }
+    // 朝太阳看的那一侧雾被日光染暖；云越厚，透过来的直射光越少。
+    const scatterStrength = (sky ? sky.scatterStrength : 0)
+      * (1 - cloudCover * 0.7)
+      * (1 - clamp01(this.state.fog) * 0.35);
+    this.scatterColor.copy(sky ? sky.scatterColor : this.fogColor)
+      .lerp(this.fogColor, clamp01(this.state.gray) * 0.5);
 
+    // 云影跟着风漂：偏移按秒累积，帧率变化不会改变漂移速度。
+    const windSpeed = 0.35 + this.state.wind * 0.5;
+    this.cloudShadowOffsetX += WIND_X * windSpeed * deltaSeconds * 0.02;
+    this.cloudShadowOffsetZ += WIND_Z * windSpeed * deltaSeconds * 0.02;
+    // 只有白天的直射光才投得出云影；夜里和暴雨的漫射光下没有清晰的影子。
+    const cloudShadowStrength = clamp01(cloudCover * 1.35 - 0.25)
+      * clamp01((sky ? sky.directLight : 1) * 1.2)
+      * (1 - clamp01(this.state.fog) * 0.6)
+      * 0.42;
+
+    this.updateEnvironmentRuntime(fog, sky, scatterStrength, cloudShadowStrength);
+    this.updateCloudMaterials(deltaSeconds, sky);
+  }
+
+  /**
+   * 把合成好的环境写进整帧共用的状态。
+   *
+   * 共享 uniform、共享墨线材质和共享接触阴影 uniform 都只在这里写一次；
+   * 它们是全场景一份的，两个系统各写一遍就会在同一帧里互相覆盖。
+   */
+  private updateEnvironmentRuntime(
+    fog: THREE.Fog,
+    sky: Readonly<SkyState> | undefined,
+    scatterStrength: number,
+    cloudShadowStrength: number,
+  ): void {
+    // 墨线只跟着环境光换色相，浓度不变：夜里偏冷、黄昏偏暖。
+    normalizeTint(this.ambientColor, INK_TINT_STRENGTH, this.tintColor);
+    applyEnvironmentInk(this.tintColor);
+
+    // 接触阴影跟着主光走：太阳低就拉长，云厚或入夜就化开。
+    if (sky) CONTACT_SHADOW_UNIFORMS.uSunDirection.value.copy(sky.sunDirection);
+    CONTACT_SHADOW_UNIFORMS.uShadowStrength.value = clamp01(
+      (sky ? sky.directLight : 1) * (1 - this.field.cloudCover * 0.75),
+    );
+    CONTACT_SHADOW_UNIFORMS.uShadowTint.value.copy(this.tintColor);
+
+    const runtime = this.runtime;
+    if (!runtime) return;
+    runtime.fogColor.value.copy(this.fogColor);
+    runtime.fogNear.value = fog.near;
+    runtime.fogFar.value = fog.far;
+    runtime.ambientColor.value.copy(this.ambientColor);
+    runtime.daylight.value = this.currentDaylight;
+    if (sky) runtime.sunDirection.value.copy(sky.sunDirection);
+    runtime.inkTint.value.copy(this.tintColor);
+    // 半球染色：朝天的面取当前天色，朝下的面取地面反弹色。
+    normalizeTint(this.backgroundColor, SKY_TINT_STRENGTH, runtime.skyTint.value);
+    normalizeTint(this.baseBounceColor, BOUNCE_TINT_STRENGTH, runtime.bounceTint.value);
+    runtime.scatterColor.value.copy(this.scatterColor);
+    runtime.scatterStrength.value = clamp01(scatterStrength);
+    runtime.cloudShadowStrength.value = cloudShadowStrength;
+    runtime.cloudShadowOffset.value.set(this.cloudShadowOffsetX, this.cloudShadowOffsetZ);
+  }
+
+  /** 云的受光面取当前日光色，背光面取天色，日落的云因此会朝太阳一侧亮起来。 */
+  private updateCloudMaterials(
+    deltaSeconds: number,
+    sky: Readonly<SkyState> | undefined,
+  ): void {
     const fade = Math.min(1, deltaSeconds * 2);
-    this.visuals.cloudFillMaterial.opacity = lerp(
-      this.visuals.cloudFillMaterial.opacity,
+    const uniforms = this.visuals.cloudFillUniforms;
+    uniforms.uOpacity.value = lerp(
+      uniforms.uOpacity.value,
       0.88 - this.state.gray * 0.22,
       fade,
     );
+    if (sky) uniforms.uSunDirection.value.copy(sky.sunDirection);
+
     this.cloudColor.setHex(0xffffff).lerp(
       this.stormCloudColor,
       clamp01(this.state.gray * 1.15),
     );
-    this.visuals.cloudFillMaterial.color.copy(this.cloudColor);
-    this.visuals.cloudLineMaterial.color.copy(this.cloudColor).multiplyScalar(0.58);
+    // 受光面吸收日光的暖色，背光面压向天色，两者都还带着当前的环境亮度。
+    this.cloudLitColor.copy(this.cloudColor);
+    if (sky) {
+      this.cloudLitColor.lerp(this.scatterColor, clamp01(sky.scatterStrength) * 0.7);
+      this.cloudLitColor.multiplyScalar(0.35 + 0.65 * clamp01(sky.dayFactor + sky.moonlit));
+    }
+    uniforms.uLitColor.value.copy(this.cloudLitColor);
+    uniforms.uShadowColor.value.copy(this.cloudColor)
+      .multiplyScalar(0.72)
+      .lerp(this.backgroundColor, 0.35);
+    this.visuals.cloudLineMaterial.color.copy(this.cloudLitColor).multiplyScalar(0.58);
   }
 
   /** 把这一帧混合出的连续状态写进复用快照，供昼夜系统在下一帧读取。 */

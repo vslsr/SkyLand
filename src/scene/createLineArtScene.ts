@@ -58,6 +58,7 @@ export function createLineArtScene(
   // 昼夜先更新：天气要在同一帧里读它算出的天空底色，再合成最终环境。
   const dayNight = new DayNightSystem({
     backgroundColor: renderer.background,
+    groundColor: renderer.palette.ground,
     dayNight: definition.environment.dayNight,
   });
   const weather = new WeatherSystem(scene, {
@@ -67,6 +68,7 @@ export function createLineArtScene(
     fogFar: renderer.fog.far,
     runtime: environment.runtime,
     sky: dayNight,
+    groundColor: renderer.palette.ground,
     sampleGroundHeight: terrainWorld
       ? (x, z) => terrainWorld.sampleGroundHeight(x, z)
       : undefined,

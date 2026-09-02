@@ -1,4 +1,9 @@
 import { OCEAN_WAVE_TERMS } from '../ocean/oceanWaveMath';
+import {
+  ENVIRONMENT_LIGHTING_GLSL,
+  ENVIRONMENT_UNIFORMS_GLSL,
+  SCATTERED_FOG_GLSL,
+} from './environmentLighting';
 
 function glslNumber(value: number): string {
   return Number.isInteger(value) ? `${value}.0` : String(value);
@@ -149,33 +154,31 @@ export const OCEAN_GRID_VERTEX_SHADER = /* glsl */ `
 export const OCEAN_GRID_FRAGMENT_SHADER = /* glsl */ `
   uniform vec3 uLineColor;
   uniform float uOpacity;
-  uniform vec3 uFogColor;
-  uniform float uFogNear;
-  uniform float uFogFar;
+  uniform vec3 uInkTint;
+  ${ENVIRONMENT_UNIFORMS_GLSL}
 
   varying vec3 vWorldPosition;
+
+  ${SCATTERED_FOG_GLSL}
 
   void main() {
     float cameraDistance = distance(cameraPosition, vWorldPosition);
     float fogFactor = smoothstep(uFogNear, uFogFar, cameraDistance);
-    vec3 finalColor = mix(uLineColor, uFogColor, fogFactor);
+    vec3 finalColor = mix(uLineColor * uInkTint, scatteredFogColor(vWorldPosition), fogFactor);
     gl_FragColor = vec4(finalColor, uOpacity * (1.0 - fogFactor));
     #include <encodings_fragment>
   }
 `;
 
 export const OCEAN_SURFACE_FRAGMENT_SHADER = /* glsl */ `
-  uniform vec3 uAmbientColor;
-  uniform float uDaylight;
-  uniform vec3 uSunDirection;
-  uniform vec3 uFogColor;
-  uniform float uFogNear;
-  uniform float uFogFar;
+  ${ENVIRONMENT_UNIFORMS_GLSL}
 
   varying vec3 vColor;
   varying vec3 vWorldPosition;
   varying vec3 vWorldNormal;
   varying float vWaveLight;
+
+  ${ENVIRONMENT_LIGHTING_GLSL}
 
   void main() {
     vec3 surfaceNormal = normalize(vWorldNormal);
@@ -188,12 +191,13 @@ export const OCEAN_SURFACE_FRAGMENT_SHADER = /* glsl */ `
     float softHighlight = pow(max(dot(surfaceNormal, halfDirection), 0.0), 36.0) * 0.065;
     float crestHighlight = smoothstep(0.68, 1.0, vWaveLight) * 0.018;
     vec3 highlightColor = vec3(0.90, 0.97, 1.0);
-    vec3 surfaceColor = vColor * uAmbientColor * waveTone
-      + highlightColor * uAmbientColor
+    // 水面几乎全部朝上，半球染色因此主要是天空色；黄昏的海面会跟着天色走。
+    vec3 ambient = uAmbientColor * hemisphereTint(surfaceNormal)
+      * cloudShadowAt(vWorldPosition.xz);
+    vec3 surfaceColor = vColor * ambient * waveTone
+      + highlightColor * ambient
         * (softHighlight * uDaylight + crestHighlight);
-    float cameraDistance = distance(cameraPosition, vWorldPosition);
-    float fogFactor = smoothstep(uFogNear, uFogFar, cameraDistance);
-    vec3 finalColor = mix(surfaceColor, uFogColor, fogFactor);
+    vec3 finalColor = applySceneFog(surfaceColor, vWorldPosition);
 
     gl_FragColor = vec4(finalColor, 1.0);
     #include <encodings_fragment>

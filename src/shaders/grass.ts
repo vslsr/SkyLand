@@ -1,3 +1,9 @@
+import {
+  CLOUD_SHADOW_GLSL,
+  ENVIRONMENT_LIGHT_UNIFORMS_GLSL,
+  HEMISPHERE_TINT_GLSL,
+} from './environmentLighting';
+
 const GRASS_VERTEX_DEFORMATION = /* glsl */ `
   uniform float uTime;
   uniform sampler2D uBendTexture;
@@ -101,9 +107,7 @@ export const GRASS_FILL_VERTEX_SHADER = /* glsl */ `
 
 export const GRASS_FILL_FRAGMENT_SHADER = /* glsl */ `
   uniform vec3 uFillColor;
-  uniform vec3 uAmbientColor;
-  uniform float uDaylight;
-  uniform vec3 uSunDirection;
+  ${ENVIRONMENT_LIGHT_UNIFORMS_GLSL}
 
   varying vec3 vWorldPosition;
   varying vec3 vWorldNormal;
@@ -111,14 +115,22 @@ export const GRASS_FILL_FRAGMENT_SHADER = /* glsl */ `
   varying float vTone;
   varying float vBendStrength;
 
+  ${HEMISPHERE_TINT_GLSL}
+  ${CLOUD_SHADOW_GLSL}
+
   void main() {
     vec3 normal = normalize(vWorldNormal);
-    float diffuse = max(dot(normal, normalize(uSunDirection)), 0.0);
+    vec3 lightDirection = normalize(uSunDirection);
+    float diffuse = max(dot(normal, lightDirection), 0.0);
     float paperVariation = 0.91 + vHeightRatio * 0.08 + vTone * 0.035;
     float touchHighlight = vBendStrength * vHeightRatio * 0.045;
-    float softLight = 0.82 + diffuse * (0.04 + uDaylight * 0.10);
-    vec3 color = uFillColor * uAmbientColor * paperVariation * softLight
-      + uAmbientColor * touchHighlight;
+    // 草叶几乎是竖直的，太阳压低时侧面受光最明显。
+    float grazing = 1.0 - clamp(lightDirection.y, 0.0, 1.0);
+    float softLight = 0.82 + diffuse * (0.04 + uDaylight * 0.10) * (1.0 + grazing * 0.9);
+    vec3 ambient = uAmbientColor * hemisphereTint(normal)
+      * cloudShadowAt(vWorldPosition.xz);
+    vec3 color = uFillColor * ambient * paperVariation * softLight
+      + ambient * touchHighlight;
 
     // 地面草叶保持参考项目的纸面颜色，不叠加天气距离雾。
     gl_FragColor = vec4(color, 1.0);
@@ -139,6 +151,7 @@ export const GRASS_OUTLINE_VERTEX_SHADER = /* glsl */ `
 
 export const GRASS_OUTLINE_FRAGMENT_SHADER = /* glsl */ `
   uniform vec3 uLineColor;
+  uniform vec3 uInkTint;
 
   varying vec3 vWorldPosition;
   varying float vDistanceLod;
@@ -151,7 +164,7 @@ export const GRASS_OUTLINE_FRAGMENT_SHADER = /* glsl */ `
       discard;
     }
 
-    gl_FragColor = vec4(uLineColor, 1.0);
+    gl_FragColor = vec4(uLineColor * uInkTint, 1.0);
     #include <encodings_fragment>
   }
 `;

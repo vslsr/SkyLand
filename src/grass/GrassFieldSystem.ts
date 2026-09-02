@@ -1,5 +1,8 @@
 import * as THREE from 'three';
-import type { FillMaterialEnvironment } from '../materials/createFillMaterial';
+import {
+  createEnvironmentUniforms,
+  type FillMaterialEnvironment,
+} from '../materials/createFillMaterial';
 import {
   createGrassFieldGeometry,
   type GrassFieldBounds,
@@ -36,8 +39,8 @@ export class GrassFieldSystem implements SceneVisualSystem {
     this.interaction = this.interactionQueue;
     this.bendField = new GrassBendField(options.bounds);
     const field = createGrassFieldGeometry({ bounds: options.bounds });
-    const runtime = options.environment.runtime;
     this.sharedUniforms = {
+      ...createEnvironmentUniforms(options.environment),
       uTime: { value: 0 },
       uBendTexture: { value: this.bendField.texture },
       uFieldBounds: {
@@ -47,14 +50,6 @@ export class GrassFieldSystem implements SceneVisualSystem {
           options.bounds.maximumX,
           options.bounds.maximumZ,
         ),
-      },
-      uFogColor: runtime?.fogColor ?? { value: new THREE.Color(options.environment.fogColor) },
-      uFogNear: runtime?.fogNear ?? { value: options.environment.fogNear },
-      uFogFar: runtime?.fogFar ?? { value: options.environment.fogFar },
-      uAmbientColor: runtime?.ambientColor ?? { value: new THREE.Color(0xffffff) },
-      uDaylight: runtime?.daylight ?? { value: 1 },
-      uSunDirection: runtime?.sunDirection ?? {
-        value: new THREE.Vector3(-0.55, 0.9, 0.35).normalize(),
       },
       uGrassLodNear: { value: GRASS_LOD_NEAR_DISTANCE },
       uGrassLodFar: { value: GRASS_LOD_FAR_DISTANCE },
