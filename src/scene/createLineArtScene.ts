@@ -1,5 +1,7 @@
 import * as THREE from 'three';
 import { ClientActorSystem } from '../actors/ClientActorSystem';
+import { RenderTransformBuffer } from '../render/RenderTransformBuffer';
+import { ThreeRenderScene } from '../render/three/ThreeRenderScene';
 import { CollisionWorld } from '../../shared/collision/index.mjs';
 import { getRapier, PhysicsWorld } from '../../shared/physics/index.mjs';
 import { GrassFieldSystem, type GrassInteractionTarget } from '../grass';
@@ -36,23 +38,26 @@ export function createLineArtScene(
         definition.gameplay.water?.seaLevel ?? 0,
       )
     : undefined;
+  // 渲染世界归场景所有，不归 ClientActorSystem：本地玩家也要往里建 proxy，
+  // 而它不是 Replica（实现路径文档 §1.5 的第 1 条注意）。
+  const renderWorldRoot = new THREE.Group();
+  renderWorldRoot.name = 'render-world';
+  const renderScene = new ThreeRenderScene(renderWorldRoot, environment);
+  const renderTransforms = new RenderTransformBuffer();
   let grassInteraction: GrassInteractionTarget | undefined;
-  let actorSnapshotTarget: ClientActorSystem | undefined;
-  const hasWorldPropActors = Object.values(definition.gameplay.worldProps ?? {})
-    .some((variants) => (variants?.length ?? 0) > 0);
-  if (
-    definition.actors.length > 0
-    || (definition.gameplay.runtimeActorArchetypes?.length ?? 0) > 0
-    || hasWorldPropActors
-  ) {
-    actorSnapshotTarget = new ClientActorSystem({
-      definition,
-      environment,
-      collision: collisionWorld,
-      physics: physicsWorld,
-      worldSeed,
-    });
-  }
+  // Actor 世界总是建，哪怕这张地图一个 Actor 都没有：**渲染世界那次翻面归它管**
+  // （`RenderTransformSyncSystem` 夹在写入与依赖翻面结果的表现 System 之间），
+  // 而本地玩家的 proxy 现在也在同一段 SoA 里。按「有没有 Actor」建它，
+  // 会让没有 Actor 的地图上玩家整个不动。空的 ActorWorld 每帧什么都不做。
+  const actorSnapshotTarget = new ClientActorSystem({
+    definition,
+    environment,
+    collision: collisionWorld,
+    physics: physicsWorld,
+    worldSeed,
+    renderScene,
+    transforms: renderTransforms,
+  });
   scene.background = new THREE.Color(renderer.background);
   scene.fog = new THREE.Fog(renderer.fog.color, renderer.fog.near, renderer.fog.far);
   // 昼夜先更新：天气要在同一帧里读它算出的天空底色，再合成最终环境。
@@ -160,10 +165,9 @@ export function createLineArtScene(
     scene.add(ocean.root);
     visualSystems.push(ocean);
   }
-  if (actorSnapshotTarget) {
-    scene.add(actorSnapshotTarget.root);
-    visualSystems.push(actorSnapshotTarget);
-  }
+  // 渲染世界的根总是挂进场景：本地玩家的 proxy 也在它下面，与有没有 Replica 无关。
+  scene.add(renderWorldRoot);
+  visualSystems.push(actorSnapshotTarget);
   return {
     scene,
     visualSystems,
@@ -172,6 +176,8 @@ export function createLineArtScene(
     environmentRuntime: environment.runtime,
     grassInteraction,
     actorSnapshotTarget,
+    renderScene,
+    renderTransforms,
     collisionWorld,
     terrainWorld,
     physicsWorld,

@@ -22,6 +22,8 @@ import type {
 } from '../scene/SceneVisualSystem';
 import type { SnapshotActor, SnapshotPlayer } from '../network/protocol';
 import type { ThreeMeshProxy } from '../render/three/ThreeMeshProxy';
+import type { ThreeRenderScene } from '../render/three/ThreeRenderScene';
+import type { RenderTransformBuffer } from '../render/RenderTransformBuffer';
 import type { SceneBeforeRenderListener } from '../scene/components';
 import type { SceneDefinition } from '../scenes/data/SceneDefinition';
 import type { TerrainWorld } from '../world/TerrainWorld';
@@ -55,6 +57,8 @@ export class SceneRenderer implements GrassInteractionTarget {
   private visualSystems: SceneVisualSystem[] = [];
   private grassInteraction?: GrassInteractionTarget;
   private actorSnapshotTarget?: ActorSnapshotTarget;
+  private renderScene?: ThreeRenderScene;
+  private renderTransforms?: RenderTransformBuffer;
   private weatherTarget?: WeatherVisualTarget;
   private dayNightTarget?: DayNightVisualTarget;
   private sceneEnvironmentRuntime?: SceneEnvironmentRuntime;
@@ -99,6 +103,15 @@ export class SceneRenderer implements GrassInteractionTarget {
       system.beforeRender?.(this.renderer, this.camera);
     }
     this.renderer.render(this.scene, this.camera);
+  }
+
+  /**
+   * 当前地图的渲染世界。玩家实体（本地与远端）经由它建自己的 proxy——
+   * 它们不是 Replica，但必须和 Actor 共用同一个渲染世界和同一段边界字节。
+   */
+  public get renderWorld(): { scene: ThreeRenderScene; transforms: RenderTransformBuffer } | undefined {
+    if (!this.renderScene || !this.renderTransforms) return undefined;
+    return { scene: this.renderScene, transforms: this.renderTransforms };
   }
 
   public addWorldObject(object: THREE.Object3D): void {
@@ -359,6 +372,8 @@ export class SceneRenderer implements GrassInteractionTarget {
     this.sceneEnvironmentRuntime = composition.environmentRuntime;
     this.grassInteraction = composition.grassInteraction;
     this.actorSnapshotTarget = composition.actorSnapshotTarget;
+    this.renderScene = composition.renderScene;
+    this.renderTransforms = composition.renderTransforms;
     this.collisionWorld = composition.collisionWorld;
     this.terrainWorld = composition.terrainWorld;
     this.physicsWorld = composition.physicsWorld;

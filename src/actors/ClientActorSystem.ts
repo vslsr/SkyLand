@@ -113,6 +113,15 @@ export interface ClientActorSystemOptions {
    */
   collision?: CollisionWorld;
   physics?: PhysicsWorld;
+  /**
+   * 场景共用的渲染世界与它的边界缓冲。
+   *
+   * 传进来时 Actor Replica 与本地玩家共用同一个渲染世界、同一段 transform SoA
+   * ——本地玩家因此也能拿到 ProxyId。不传就自己建一对，单独使用这个 System 的
+   * 测试不需要额外搭场景。
+   */
+  renderScene?: ThreeRenderScene;
+  transforms?: RenderTransformBuffer;
 }
 
 type PropStateSnapshot = {
@@ -177,14 +186,25 @@ function resolveExternalAttachmentTransforms(
 
 /** 接收服务端完整 Actor 快照并维护对应的客户端 Replica。 */
 export class ClientActorSystem implements SceneVisualSystem {
-  public readonly root = new THREE.Group();
   /**
    * Game World 与 Render World 之间那条边界（路线图 §2 / 第 1 步）。
    * Actor 手上只有 proxyId；Object3D 全部住在 renderScene 里，
    * 两侧靠 transforms 这段字节通信。
    */
-  private readonly transforms = new RenderTransformBuffer();
+  private readonly transforms: RenderTransformBuffer;
   private readonly renderScene: ThreeRenderScene;
+  /** 渲染世界是不是外面给的。是的话就不该由这个 System 释放它。 */
+  private readonly ownsRenderScene: boolean;
+
+  /**
+   * 这个 System 往场景图里挂东西的那个节点，就是渲染世界的根。
+   *
+   * 两者必须是同一个组：proxy 由渲染世界挂载，合批与悬停高亮由这里挂载，
+   * 分成两个节点会让其中一个不在场景图里。
+   */
+  public get root(): THREE.Group {
+    return this.renderScene.root;
+  }
   private readonly world = new ActorWorld();
   private readonly archetypes: Map<string, SceneDefinition['actorArchetypes'][number]>;
   private readonly snapshots = new ActorSnapshotBuffer();
@@ -229,7 +249,6 @@ export class ClientActorSystem implements SceneVisualSystem {
   private readonly worldSeed: number;
 
   public constructor(options: ClientActorSystemOptions) {
-    this.root.name = 'replicated-actor-world';
     this.archetypes = new Map(
       options.definition.actorArchetypes.map((definition) => [definition.id, definition]),
     );
@@ -250,7 +269,10 @@ export class ClientActorSystem implements SceneVisualSystem {
     this.physics = options.physics;
     this.highCountBatches = new HighCountActorBatchSystem(options.environment, this.archetypes);
     this.fruit = new GeneratedPropFruitSystem(options.environment, this.archetypes);
-    this.renderScene = new ThreeRenderScene(this.root, options.environment);
+    this.transforms = options.transforms ?? new RenderTransformBuffer();
+    this.ownsRenderScene = options.renderScene === undefined;
+    this.renderScene = options.renderScene
+      ?? new ThreeRenderScene(createActorWorldRoot(), options.environment);
     // 客户端不运行 AttachmentSystem：最终世界坐标来自快照插值，不能被
     // localTransform 再次解算覆盖。
     //
@@ -441,7 +463,8 @@ export class ClientActorSystem implements SceneVisualSystem {
     // world.dispose() 逐个跑 endPlay，正常路径下每个 RenderProxyComponent 都会
     // 还掉自己的槽位。这一句兜住不正常的路径：渲染世界的资源不该依赖「每个 proxy
     // 都恰好有一个活着的 Actor 持有它」这条不变量才能释放。
-    this.renderScene.dispose();
+    // 场景注入的渲染世界由场景释放——本地玩家的 proxy 也在里面。
+    if (this.ownsRenderScene) this.renderScene.dispose();
   }
 
   public getActor(actorId: string): Actor | undefined {
@@ -1080,4 +1103,11 @@ export class ClientActorSystem implements SceneVisualSystem {
       this.generatedPropArchetypeVariants.get(kind) ?? [],
     )?.archetype;
   }
+}
+
+/** 没有注入渲染世界时（独立使用这个 System 的测试）自己建的那个根节点。 */
+function createActorWorldRoot(): THREE.Group {
+  const root = new THREE.Group();
+  root.name = 'replicated-actor-world';
+  return root;
 }
