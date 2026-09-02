@@ -23,7 +23,7 @@
 | 第 2 步 · Sim Worker | **前提被测量推翻** · 已打点、已量、结论见 §2 | 搬进 worker 只能省约 1.2 ms／帧 |
 | §2 第 1 项 · 摊平 `render-spawn` | **已完成** | 进房间那一帧 146 ms → 15 ms，见 §2「已经做了的」 |
 | §2 第 2 项 · 地形碰撞网格进 worker | **已完成** | PlatformLayer 第二块 + chunk 挂载 4.2 → 2.45 ms |
-| 第 3 步 · OffscreenCanvas | 未开始 | 见 §3 |
+| 第 3 步 · OffscreenCanvas | **进行中** · 可行性已验证、前置已拆一件 | 见 §3 |
 | 第 4 步 · 换掉 Three.js | 可无限期推迟 | 见 §4 |
 
 依赖关系没变，仍然是路线图里那条：`0 → 0.5 → 1 → 2 → 3 → 4`，§8.1 / §8.2 与 ToolLayer 可并行。
@@ -512,7 +512,7 @@ offscreen-canvas`。
 
 ---
 
-## 第 3 步 · OffscreenCanvas + 渲染线程（未开始）
+## 第 3 步 · OffscreenCanvas + 渲染线程（进行中）
 
 依赖 1、2。Render Worker 拿 `transferControlToOffscreen()` 的 canvas，通过第 1 步定好的
 `RenderTransformBuffer` 读 transform；`RenderTransformSyncSystem` 在这一步删除。
@@ -520,7 +520,81 @@ offscreen-canvas`。
 
 **§2 的实测把这一步的优先级抬上来了**：主线程的时间几乎全在渲染侧
 （`draw` + `chunk-geometry` + `render-spawn` + `render-visuals`），而这些**只有到这一步
-才挪得走**。能力也已经就绪——启动日志里的 `offscreen-canvas` 是有的。
+才挪得走**。
+
+### 可行性已经验证过了
+
+先做了一个最小尖刀（scratch，不入库）：`transferControlToOffscreen()` 出来的画布交给
+worker，在 worker 里取 WebGL 上下文并清屏。结果：
+
+```text
+offscreenSupported: true
+WebGL 2.0 (OpenGL ES 3.0 Chromium)
+crossOriginIsolated: true
+```
+
+跑在与线上同一组隔离头（COOP/COEP/CORP）下，用的也是验证时一直用的
+headless Chromium + SwiftShader。**所以这一步在这个仓库、这套验证环境里是能做完、
+也能验证的**——这是开工前该先花二十分钟买到的确定性。
+
+### 要搬的东西有多少
+
+`src/` 下有 **79 个文件** import `three`。渲染世界搬进线程意味着它们全部跟着走：
+模型、chunk 几何、草地、天气、昼夜、海面、合批、`ThreeRenderScene`、相机、
+`WebGLRenderer`。Three 的对象过不了线程边界，所以**没有「只搬渲染器不搬场景图」
+这个中间态**。
+
+好消息是前面几步已经把大部分脏活做完了。整条渲染栈里只剩 **三处**碰 DOM：
+
+| 位置 | 用途 | 怎么办 |
+| --- | --- | --- |
+| `createInteractionMarkerVisual.ts` | `document.createElement('canvas')` 画标签贴图 | 换 `OffscreenCanvas` |
+| `createTemperatureMarkerVisual.ts` | 同上 | 换 `OffscreenCanvas` |
+| `MouseGrassInteractor.ts` | `getBoundingClientRect` | 它是**输入**适配器，本来就该留在主线程 |
+| `loadChunkGenerator.ts` | `window.location.search` 读 `?chunkgen=js` | 调试开关，加个 guard |
+
+### 真正要做选择的只有一处
+
+`pickActorInteraction`：`ClientActorSystem` 内部拿 `THREE.Raycaster` 打 proxy 的
+场景图，返回「准星指着哪个可交互 Actor」。渲染世界进线程之后它就地做不了，
+而调用方（交互控制器）是**同步的玩法逻辑**。两条路：
+
+1. 渲染线程每帧回送一个「准星命中了谁」（多一帧延迟，但准星本来就跟着相机走）；
+2. 玩法侧用碰撞体重做一次解析求交（不依赖渲染，但和肉眼看到的轮廓会有出入）。
+
+这个还没定。**除它之外，玩法侧问渲染世界的问题一个都没有了**——这正是第 1 / 1.5 /
+1.75 步一路收窄边界的结果。
+
+### 已经做了的：把玩法查询从 `SceneRenderer` 里拆出来 ✅
+
+`SceneRenderer` 同时是四件事：渲染器、场景宿主、地形查询服务、Actor 查询服务。
+四件里只有第一件该跟着 canvas 走——**玩法每帧都要问「脚下多高」「前面挡不挡镜头」，
+那不能变成一次跨线程往返。**
+
+新增 `src/scene/SceneWorld.ts` 收下后三件里属于玩法的部分：地形采样、物理查询、
+Actor 查询、草地脉冲入口。`SceneRenderer` 只剩渲染核心、表现开关，以及两个确实属于
+渲染侧的查找（`getActorRenderProxy`、`setTerrainHighlight`）。
+
+**这一半几乎不碰 Three**：地形是纯数据、物理是 Rapier、Actor 查询走 Game World。
+唯一的例外就是上面那个 `pickActorInteraction`。
+
+场景组合目前仍由 `SceneRenderer` 装配，所以换场景时由它把玩法那一半交给
+`SceneWorld`；canvas 真搬走的时候装配会跟着走，那条依赖会反过来——现在先把
+**接口**拆干净，不动装配的归属。
+
+### 还没做的
+
+| | 说明 |
+| --- | --- |
+| 拆 `ClientActorSystem` | 它同时跑 Actor 世界（玩法）和持有渲染世界、合批、悬停高亮 |
+| 拆 `ChunkStreamer` | 流送规划（玩法）+ 几何（渲染）+ 碰撞体注册（物理）三合一 |
+| 相机每帧过边界 | `CameraFrame` 在主线程按输入算出来，要送到渲染线程 |
+| 两处 `document.createElement('canvas')` | 换 `OffscreenCanvas` |
+| `pickActorInteraction` 的选择 | 见上 |
+
+后两项是小活；前三项是这一步的主体，而且**和第 2 步是同一条缝**——
+`ClientActorSystem` 与 `ChunkStreamer` 按 game / render 切开这件事，
+两步都要它。所以先切缝，再决定哪个 worker 先上。
 
 `SceneRenderer` 目前混着渲染核心（`WebGLRenderer` + camera）与一堆 Game World 查询
 （`sampleGroundHeight` / `raycastGround` / `pickTerrainCell`）。搬 canvas 之前要先按这条线拆开：
