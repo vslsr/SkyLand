@@ -4,6 +4,7 @@ import {
   hybridSlimeFloorY,
   hybridSlimeRestY,
 } from './HybridSlimeRestShape';
+import { HybridSlimeVolumeFlow } from './HybridSlimeVolumeFlow';
 
 export interface HybridSlimeSimulationOptions {
   readonly radius: number;
@@ -26,6 +27,8 @@ export interface HybridSlimeSimulationStats {
   readonly surfaceDragActive: boolean;
   readonly surfaceDragExtensionRatio: number;
   readonly surfaceDragForceScale: number;
+  /** 蒙皮相对静止体积的缺口比例；正数表示外壳里还有正在被填充的空隙。 */
+  readonly surfaceVolumeError: number;
 }
 
 export interface HybridSlimeSurfaceDragOptions {
@@ -101,6 +104,7 @@ export class HybridSlimeSimulation {
   private readonly accelerations: Float32Array;
   private readonly surfaceDragWeights: Float32Array;
   private readonly surfaceDragStartPositions: Float32Array;
+  private readonly volumeFlow: HybridSlimeVolumeFlow;
   private readonly floorY: number;
   private readonly centerY: number;
   private readonly maximumBodyLag: number;
@@ -166,6 +170,10 @@ export class HybridSlimeSimulation {
     this.targetForceCenterY = this.centerY;
     this.center = new Float32Array([0, this.centerY, 0]);
     this.forceCenter = new Float32Array([0, this.centerY, 0]);
+    this.volumeFlow = new HybridSlimeVolumeFlow(options.surfaceDirections, {
+      radius: options.radius,
+      floorY: this.floorY,
+    });
     this.rebuildAnchors(0);
     this.positions.set(this.anchors);
   }
@@ -397,6 +405,7 @@ export class HybridSlimeSimulation {
 
   public sleep(): void {
     this.velocities.fill(0);
+    this.volumeFlow.reset();
     this.coreVelocityX = 0;
     this.coreVelocityY = 0;
     this.coreVelocityZ = 0;
@@ -416,6 +425,7 @@ export class HybridSlimeSimulation {
       surfaceDragActive: this.surfaceDragActive,
       surfaceDragExtensionRatio: this.surfaceDragExtensionRatio,
       surfaceDragForceScale: this.surfaceDragForceScale,
+      surfaceVolumeError: this.volumeFlow.lastVolumeError,
     };
   }
 
@@ -457,6 +467,9 @@ export class HybridSlimeSimulation {
     this.center[2] = this.coreZ;
 
     this.rebuildAnchors(deltaSeconds);
+    // 局部弹簧只知道自己的锚点。空隙、凹陷和被拉出的凸起都是全局的体积变化，
+    // 必须先把材料重新分配到锚点上，蒙皮才会像流体一样下坠填充而不是各自回弹。
+    this.volumeFlow.apply(this.anchors, this.positions, this.center, deltaSeconds);
     if (this.takeoffPulse > 0) {
       // 起跳脉冲只短暂加速蒙皮追赶，不修改权威根节点，也不长期提高弹簧刚度。
       const directFollow = 1 - Math.exp(
