@@ -7,6 +7,8 @@ import {
   COMBUSTIBLE_COMPONENT,
   type CombustibleComponent,
   GENERATED_PROP_COMPONENT,
+  GUIDE_PATH_COMPONENT,
+  type GuidePathComponent,
   INTERACTABLE_COMPONENT,
   type InteractableComponent,
   type GeneratedPropComponent,
@@ -46,6 +48,10 @@ import {
   type HybridSlimeVisualComponent,
 } from '../src/actors/components/HybridSlimeVisualComponent';
 import { SlimeSurfaceDragComponent } from '../src/actors/components/SlimeSurfaceDragComponent';
+import {
+  GUIDE_PATH_VISUAL_COMPONENT,
+  type GuidePathVisualComponent,
+} from '../src/actors/components/GuidePathVisualComponent';
 import type { SnapshotActor } from '../src/network/protocol';
 import { createPlayerActorVisual } from '../src/player/PlayerActorVisual';
 import type { SceneDefinition } from '../src/scenes/data/SceneDefinition';
@@ -255,6 +261,29 @@ const woodPileArchetype: SceneDefinition['actorArchetypes'][number] = {
   },
 };
 
+const guidePathArchetype: SceneDefinition['actorArchetypes'][number] = {
+  schemaVersion: 1,
+  id: 'guide-path',
+  components: {
+    guidePath: {
+      points: [[0, 0.4, 0], [2, 0.4, -2], [4, 0.4, 0]],
+      curve: 'catmull-rom',
+      lineColor: '#fffdf4',
+      shadowColor: '#544b43',
+      markerColor: '#fffdf4',
+      lineWidth: 5,
+      dashLength: 0.8,
+      gapLength: 0.55,
+      dashSpeed: 0.5,
+      markerSize: 0.6,
+      hitRadius: 1.25,
+      autoAdvance: true,
+      loop: false,
+      enabled: true,
+    },
+  },
+};
+
 const woodLogArchetype: SceneDefinition['actorArchetypes'][number] = {
   schemaVersion: 1,
   id: 'wood-log',
@@ -359,6 +388,7 @@ const definition = {
     stonePileArchetype,
     generatedRockArchetype,
     pbfSlimeArchetype,
+    guidePathArchetype,
   ],
   renderer: {
     type: 'line-art',
@@ -953,6 +983,52 @@ test('混合史莱姆用单球核心与休眠弹簧蒙皮，且不会改写权�
       '内部气泡必须留在核心附近，不能穿出蒙皮形成随机凸块',
     );
   }
+  system.dispose();
+});
+
+test('无模型 GuidePath Actor 只在快照存在时创建客户端 Three.js 表现', () => {
+  let now = 1_000;
+  const system = new ClientActorSystem({
+    definition,
+    environment: { fogColor: '#ffffff', fogNear: 20, fogFar: 60 },
+    now: () => now,
+  });
+  const guideSnapshot: SnapshotActor = {
+    id: 'guide-path-01',
+    archetypeId: 'guide-path',
+    revision: 3,
+    transform: { x: 6, y: 0, z: -4, yaw: 0.25 },
+    guidePath: {
+      points: [[0, 0.4, 0], [3, 0.4, -1], [5, 0.4, 2]],
+      curve: 'linear',
+      enabled: true,
+      currentPointIndex: 1,
+      pathRevision: 2,
+      revision: 3,
+    },
+  };
+
+  system.syncSnapshots([guideSnapshot], 1_000);
+  system.update(1 / 60, 0);
+
+  const actor = system.getActor(guideSnapshot.id)!;
+  const state = actor.requireComponent(GUIDE_PATH_COMPONENT) as GuidePathComponent;
+  const visual = actor.requireComponent(GUIDE_PATH_VISUAL_COMPONENT) as GuidePathVisualComponent;
+  const render = actor.requireComponent(THREE_OBJECT_COMPONENT) as ThreeObjectComponent;
+  assert.equal(actor.hasComponents(SIMPLE_COLLISION_COMPONENT), false);
+  assert.equal(state.currentPointIndex, 1);
+  assert.equal(state.curve, 'linear');
+  assert.equal(visual.guide.currentMarkerIndex, 1);
+  assert.equal(render.root.position.x, 6);
+  assert.equal(render.root.position.z, -4);
+  assert.ok(render.visualRoot.children.includes(visual.guide.root));
+
+  now = 1_100;
+  system.syncSnapshots([], 1_100);
+  now = 1_230;
+  system.update(0, 0);
+  assert.equal(system.getActor(guideSnapshot.id), undefined);
+  assert.equal(system.root.getObjectByName('actor-guide-path-01-root'), undefined);
   system.dispose();
 });
 

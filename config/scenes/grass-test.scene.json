@@ -6,7 +6,13 @@
   "description": "无树木与雾气遮挡的线稿草场，用于观察风动、移动碰撞与弯曲恢复。",
   "capacity": 4,
   "sceneComponents": [{ "type": "mouse-grass-interaction" }],
-  "actors": [],
+  "actors": [
+    {
+      "id": "wayfinder-guide-01",
+      "archetype": "guide-path",
+      "localTransform": { "position": [0, 0, 0], "yaw": 0 }
+    }
+  ],
   "renderer": {
     "type": "line-art",
     "background": "#fbf7ec",

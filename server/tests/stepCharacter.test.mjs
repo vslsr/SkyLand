@@ -153,3 +153,29 @@ test('upward collision clears vertical velocity at a ceiling', () => {
   assert.ok(state.y < 0.58);
   physics.dispose();
 });
+
+test('岸边进入水域只通过重力与浮力速度积分下降，不会把 Y 钉到吃水线', () => {
+  const targetY = -0.6;
+  const { physics, state, params } = setup(
+    { x: -1, y: 0, z: 0 },
+    [box(-2.5, -0.2, 0, 2.5), box(2.5, -1.2, -1, 2.5)],
+  );
+  let leftShore;
+  let maximumStepDrop = 0;
+  let previousY = state.y;
+  for (let tick = 0; tick < 300; tick += 1) {
+    params.buoyancyHeight = state.x >= 0 ? targetY : undefined;
+    stepCharacter(state, { move: { x: 1, z: 0 } }, DT, physics, params);
+    const stepDrop = previousY - state.y;
+    maximumStepDrop = Math.max(maximumStepDrop, stepDrop);
+    if (!state.grounded && !leftShore) leftShore = { y: state.y, vy: state.vy };
+    previousY = state.y;
+  }
+
+  assert.ok(leftShore, '角色没有离开岸边支撑');
+  assert.ok(leftShore.y > targetY + 0.3, `离岸首步被钉到吃水线：${leftShore.y}`);
+  assert.ok(leftShore.vy < 0, '离岸后应由向下速度开始下落');
+  assert.ok(maximumStepDrop < 0.12, `出现单步 Y 瞬移：${maximumStepDrop}`);
+  assert.ok(Math.abs(state.y - targetY) < 0.06, `浮力未稳定在吃水线附近：${state.y}`);
+  physics.dispose();
+});

@@ -94,6 +94,12 @@ test('ActorCatalog 加载并净化木筏原型', async () => {
   assert.equal(hay.components.combustible.ignitionTemperature, 75);
   assert.equal(hay.components.render.model, 'line-art-dry-hay');
 
+  const guidePath = catalog.require('guide-path');
+  assert.equal(guidePath.components.render, undefined);
+  assert.equal(guidePath.components.guidePath.points.length, 4);
+  assert.equal(guidePath.components.guidePath.autoAdvance, true);
+  assert.equal(guidePath.components.guidePath.currentPointIndex, 0);
+
   const wood = catalog.require('wood-pile');
   assert.equal(wood.components.itemStack.itemType, 'wood');
   assert.equal(wood.components.actorResidency.dormantEligible, true);

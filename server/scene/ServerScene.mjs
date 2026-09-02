@@ -660,7 +660,7 @@ export class ServerScene {
       player.yaw = normalizeAngle(toFiniteNumber(input.yaw, player.yaw));
       const move = sanitizeMoveInput({ ...input.move, sprint: input.sprint === true });
       player.syncWaterMovementEffect(
-        player.characterState.grounded && this.isWaterAt(player.x, player.z),
+        this.isWaterAt(player.x, player.z),
       );
       player.characterParams.walkSpeed = player.waterMovementEffect.moveSpeed;
       player.characterParams.buoyancyHeight = this.isWaterAt(player.x, player.z)
@@ -683,7 +683,7 @@ export class ServerScene {
         player.characterState.grounded,
       );
       player.syncWaterMovementEffect(
-        player.characterState.grounded && this.isWaterAt(player.x, player.z),
+        this.isWaterAt(player.x, player.z),
       );
       player.speed = Math.hypot(player.characterState.vx, player.characterState.vz);
       player.ackTick = input.tick;
@@ -750,10 +750,7 @@ export class ServerScene {
         === TERRAIN_SURFACE.WATER;
   }
 
-  /**
-   * 玩家权威 Y：地面/海床支撑先由共享地形决定，水中再叠加有界解析浮动。
-   * 每名玩家每 tick 只采样一次，成本与在线玩家数成正比，不扫描水面或 chunk。
-   */
+  /** 出生定位使用的初始支撑高度；运行后的 Y 只由共享固定物理步推进。 */
   playerVerticalHeightAt(player, x, z, timeSeconds) {
     if (player.characterState?.grounded === false) return player.y;
     return this.playerSupportHeightAt(player, x, z, timeSeconds);
@@ -770,25 +767,10 @@ export class ServerScene {
         buoyancy?.draft,
       );
       if (!water || !buoyancy) return support;
-      return Math.max(
-        terrain.groundY,
-        support + sampleBuoyancyBobOffset(
-          player.id,
-          timeSeconds,
-          buoyancy.bobAmplitude,
-          buoyancy.bobFrequency,
-        ),
-      );
+      return Math.max(terrain.groundY, support);
     }
     if (!water || !buoyancy) return 0;
-    return this.actorWorld.context.seaLevel
-      - buoyancy.draft
-      + sampleBuoyancyBobOffset(
-        player.id,
-        timeSeconds,
-        buoyancy.bobAmplitude,
-        buoyancy.bobFrequency,
-      );
+    return this.actorWorld.context.seaLevel - buoyancy.draft;
   }
 
   playerBuoyancyOffsetAt(player, timeSeconds) {
@@ -817,16 +799,6 @@ export class ServerScene {
         player.stepBudget + elapsedSeconds / SIMULATION_STEP_SECONDS,
       );
       if (now - player.lastInputAt > MOVEMENT_IDLE_TIMEOUT_MS) player.speed = 0;
-      if (
-        player.characterState.grounded
-        && this.isWaterAt(player.x, player.z)
-        && player.getComponent(BUOYANCY_COMPONENT)
-      ) {
-        const supportY = this.playerSupportHeightAt(player, player.x, player.z, now / 1000);
-        player.setPosition(player.x, player.z, supportY);
-        player.characterState.vy = 0;
-        this.physics.setCharacterTranslation(player.id, player.characterState);
-      }
     }
     // Actor 的碰撞盒由 ActorColliderIndex 在 tick 内同步，这里不用再管。
     this.actorWorld.update(elapsedSeconds, now / 1000);

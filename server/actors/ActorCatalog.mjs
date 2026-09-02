@@ -358,6 +358,72 @@ function validateReplicationPolicy(raw, filename) {
   return { mode: definition.mode, radiusChunks };
 }
 
+function validateGuidePath(raw, filename) {
+  const path = `${filename}.components.guidePath`;
+  const definition = requireObject(raw, path);
+  const knownKeys = new Set([
+    'points',
+    'curve',
+    'lineColor',
+    'shadowColor',
+    'markerColor',
+    'lineWidth',
+    'dashLength',
+    'gapLength',
+    'dashSpeed',
+    'markerSize',
+    'hitRadius',
+    'autoAdvance',
+    'loop',
+    'enabled',
+    'currentPointIndex',
+  ]);
+  const unknownKeys = Object.keys(definition).filter((key) => !knownKeys.has(key));
+  if (unknownKeys.length > 0) throw new TypeError(`${path} 包含未知字段：${unknownKeys.join(', ')}`);
+  if (!Array.isArray(definition.points) || definition.points.length < 2 || definition.points.length > 32) {
+    throw new TypeError(`${path}.points 必须包含 2-32 个三维路点`);
+  }
+  const points = definition.points.map((rawPoint, pointIndex) => {
+    if (!Array.isArray(rawPoint) || rawPoint.length !== 3) {
+      throw new TypeError(`${path}.points[${pointIndex}] 必须包含 3 个数字`);
+    }
+    return rawPoint.map((value, axis) => (
+      requireNumber(value, `${path}.points[${pointIndex}][${axis}]`)
+    ));
+  });
+  if (definition.curve !== 'linear' && definition.curve !== 'catmull-rom') {
+    throw new TypeError(`${path}.curve 必须是 linear 或 catmull-rom`);
+  }
+  for (const key of ['autoAdvance', 'loop', 'enabled']) {
+    if (typeof definition[key] !== 'boolean') throw new TypeError(`${path}.${key} 必须是布尔值`);
+  }
+  const currentPointIndex = definition.currentPointIndex ?? 0;
+  if (
+    !Number.isInteger(currentPointIndex)
+    || currentPointIndex < 0
+    || currentPointIndex > points.length
+  ) {
+    throw new TypeError(`${path}.currentPointIndex 必须是 0-${points.length} 的整数`);
+  }
+  return {
+    points,
+    curve: definition.curve,
+    lineColor: requireColor(definition.lineColor, `${path}.lineColor`),
+    shadowColor: requireColor(definition.shadowColor, `${path}.shadowColor`),
+    markerColor: requireColor(definition.markerColor, `${path}.markerColor`),
+    lineWidth: requireNumber(definition.lineWidth, `${path}.lineWidth`, 1, 20),
+    dashLength: requireNumber(definition.dashLength, `${path}.dashLength`, 0.05, 8),
+    gapLength: requireNumber(definition.gapLength, `${path}.gapLength`, 0, 8),
+    dashSpeed: requireNumber(definition.dashSpeed, `${path}.dashSpeed`, -8, 8),
+    markerSize: requireNumber(definition.markerSize, `${path}.markerSize`, 0.1, 4),
+    hitRadius: requireNumber(definition.hitRadius, `${path}.hitRadius`, 0.1, 8),
+    autoAdvance: definition.autoAdvance,
+    loop: definition.loop,
+    enabled: definition.enabled,
+    currentPointIndex,
+  };
+}
+
 function validateGeneratedProp(raw, filename) {
   const path = `${filename}.components.generatedProp`;
   const definition = requireObject(raw, path);
@@ -617,6 +683,7 @@ function validateActorArchetype(raw, filename) {
     'lifetime',
     'replicationPolicy',
     'generatedProp',
+    'guidePath',
     'render',
   ]);
   for (const componentName of Object.keys(components)) {
@@ -628,8 +695,11 @@ function validateActorArchetype(raw, filename) {
   const generatedProp = components.generatedProp
     ? validateGeneratedProp(components.generatedProp, filename)
     : undefined;
-  if (!render && !generatedProp) {
-    throw new TypeError(`${filename}.components 至少需要 render 或 generatedProp`);
+  const guidePath = components.guidePath
+    ? validateGuidePath(components.guidePath, filename)
+    : undefined;
+  if (!render && !generatedProp && !guidePath) {
+    throw new TypeError(`${filename}.components 至少需要 render、generatedProp 或 guidePath`);
   }
   const playerMovement = components.playerMovement
     ? validatePlayerMovement(components.playerMovement, filename)
@@ -738,6 +808,7 @@ function validateActorArchetype(raw, filename) {
       ...(lifetime ? { lifetime } : {}),
       ...(replicationPolicy ? { replicationPolicy } : {}),
       ...(generatedProp ? { generatedProp } : {}),
+      ...(guidePath ? { guidePath } : {}),
       ...(render ? { render } : {}),
     },
   };

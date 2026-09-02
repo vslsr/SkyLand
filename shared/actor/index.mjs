@@ -58,6 +58,11 @@ export {
   GeneratedPropComponent,
 } from './components/GeneratedPropComponent.mjs';
 export {
+  GUIDE_PATH_COMPONENT,
+  GuidePathComponent,
+  MAX_GUIDE_PATH_POINTS,
+} from './components/GuidePathComponent.mjs';
+export {
   LIFETIME_COMPONENT,
   LifetimeComponent,
 } from './components/LifetimeComponent.mjs';

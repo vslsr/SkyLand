@@ -177,6 +177,23 @@ export interface ActorArchetypeDefinition {
   schemaVersion: 1;
   id: string;
   components: {
+    guidePath?: {
+      points: Array<[number, number, number]>;
+      curve: 'linear' | 'catmull-rom';
+      lineColor: string;
+      shadowColor: string;
+      markerColor: string;
+      lineWidth: number;
+      dashLength: number;
+      gapLength: number;
+      dashSpeed: number;
+      markerSize: number;
+      hitRadius: number;
+      autoAdvance: boolean;
+      loop: boolean;
+      enabled: boolean;
+      currentPointIndex: number;
+    };
     playerMovement?: {
       walkSpeed: number;
       sprintMultiplier: number;

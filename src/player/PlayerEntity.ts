@@ -36,7 +36,6 @@ import {
   WaterMovementEffectController,
   createPlayerMovementAttributes,
 } from '../../shared/abilities/playerMovementEffects.mjs';
-import { PlayerBuoyancyHeightController } from './PlayerBuoyancyHeightController';
 import type { PhysicsWorld } from '../../shared/physics/PhysicsWorld.mjs';
 import type { PlayerInputStep } from '../network/protocol';
 import { MAXIMUM_PENDING_INPUT_STEPS } from '../../shared/networkTuning.mjs';
@@ -85,7 +84,6 @@ export class PlayerEntity extends Actor {
   private readonly gameAbility: GameAbilityComponent;
   private readonly waterMovementEffect: WaterMovementEffectController;
   private readonly jumpAbility: PlayerJumpComponent;
-  private readonly buoyancyHeight?: PlayerBuoyancyHeightController;
   private readonly isWaterAt?: (x: number, z: number) => boolean;
   private readonly unsubscribeTerrainChanges?: () => void;
   private readonly pendingInputSteps: PlayerInputStep[] = [];
@@ -138,13 +136,7 @@ export class PlayerEntity extends Actor {
       ? (x: number, z: number): number => grassInteraction.samplePlayerHeight!(x, z, buoyancy.draft)
       : sampleGroundHeight;
     this.isWaterAt = grassInteraction.isWaterAt?.bind(grassInteraction);
-    this.buoyancyHeight = buoyancy && sampleBasePlayerHeight
-      ? new PlayerBuoyancyHeightController(
-          sampleBasePlayerHeight,
-          buoyancy.bobAmplitude,
-        )
-      : undefined;
-    const samplePlayerHeight = this.buoyancyHeight?.sampleHeight ?? sampleBasePlayerHeight;
+    const samplePlayerHeight = sampleBasePlayerHeight;
     const raycastGround = grassInteraction.raycastGround?.bind(grassInteraction);
     this.model.root.name = 'local-player-slime';
     this.model.root.position.set(spawn.x, samplePlayerHeight?.(spawn.x, spawn.z) ?? 0, spawn.z);
@@ -159,11 +151,10 @@ export class PlayerEntity extends Actor {
       physicsWorld: grassInteraction.getPhysicsWorld?.(),
       characterId: playerId,
       updateMovementState: () => this.waterMovementEffect.sync(
-        this.jumpAbility.grounded
-          && (grassInteraction.isWaterAt?.(
-            this.model.root.position.x,
-            this.model.root.position.z,
-          ) ?? false),
+        this.isWaterAt?.(
+          this.controller?.position.x ?? spawn.x,
+          this.controller?.position.z ?? spawn.z,
+        ) ?? false,
       ),
       resolveWalkSpeed: () => this.waterMovementEffect.moveSpeed,
       resolveBuoyancyHeight: () => (
@@ -247,9 +238,6 @@ export class PlayerEntity extends Actor {
     grounded?: boolean,
   ): PlayerAuthoritativeApplyResult {
     const pendingBefore = this.pendingInputSteps.length;
-    if (y !== undefined && grounded !== false) {
-      this.buoyancyHeight?.setAuthoritativeHeight(x, z, y);
-    }
     if (
       y === undefined
       || grounded === undefined
@@ -304,11 +292,6 @@ export class PlayerEntity extends Actor {
       );
     }
     this.gameAbility.update(deltaSeconds);
-    this.buoyancyHeight?.update(
-      deltaSeconds,
-      this.isWaterAt?.(this.model.root.position.x, this.model.root.position.z) ?? false,
-      this.controller.isGrounded,
-    );
     this.slimeSurfaceDragController?.update();
     const movementSpeed = this.controller.movementSpeed;
     const horizontalVelocity = this.controller.horizontalVelocity;

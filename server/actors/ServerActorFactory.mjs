@@ -21,6 +21,8 @@ import {
   HeatEmitterComponent,
   GENERATED_PROP_COMPONENT,
   GeneratedPropComponent,
+  GUIDE_PATH_COMPONENT,
+  GuidePathComponent,
   AttachmentSystem,
   INTERACTABLE_COMPONENT,
   InteractableComponent,
@@ -53,6 +55,7 @@ import { VesselMotorSystem } from './VesselMotorSystem.mjs';
 import { ElasticTetherSystem } from './ElasticTetherSystem.mjs';
 import { TemperatureSystem } from './TemperatureSystem.mjs';
 import { HighCountActorSystem } from './HighCountActorSystem.mjs';
+import { GuidePathSystem } from './GuidePathSystem.mjs';
 import { CHUNK_SIZE } from '../../shared/world/worldConfig.mjs';
 
 export function createServerActor(spawn, archetype, runtime = {}) {
@@ -100,6 +103,12 @@ export function createServerActor(spawn, archetype, runtime = {}) {
       runtime.generatedProp,
     ));
   }
+  if (archetype.components.guidePath) {
+    actor.addComponent(new GuidePathComponent({
+      ...archetype.components.guidePath,
+      ...runtime.guidePath,
+    }));
+  }
   const temperature = actor.getComponent(TEMPERATURE_COMPONENT);
   const combustible = actor.getComponent(COMBUSTIBLE_COMPONENT);
   const stack = actor.getComponent(ITEM_STACK_COMPONENT);
@@ -145,6 +154,7 @@ export function createServerActorWorld(sceneDefinition, options = {}) {
   // 父 Actor 的玩法移动先完成，再统一按拓扑解算所有子 Actor。
   world.addSystem(new AttachmentSystem());
   world.addSystem(new TemperatureSystem());
+  world.addSystem(new GuidePathSystem());
   const highCountActors = new HighCountActorSystem(options.highCountActors);
   world.context.highCountActors = highCountActors;
   world.addSystem(highCountActors);
@@ -205,6 +215,7 @@ export function createActorSnapshots(world, options = {}) {
     const itemStack = actor.getComponent(ITEM_STACK_COMPONENT);
     const residency = actor.getComponent(ACTOR_RESIDENCY_COMPONENT);
     const generatedProp = actor.getComponent(GENERATED_PROP_COMPONENT);
+    const guidePath = actor.getComponent(GUIDE_PATH_COMPONENT);
     // 生成物件的 id 已经携带种类与位置地址。偏离态只发 id + 状态，
     // 默认 Interactable 与最大生命由两端同一原型提供。
     if (generatedProp) {
@@ -237,6 +248,7 @@ export function createActorSnapshots(world, options = {}) {
         combustible?.revision ?? 0,
         itemStack?.revision ?? 0,
         residency?.revision ?? 0,
+        guidePath?.revision ?? 0,
       ),
       transform: {
         x: transform.x,
@@ -331,6 +343,7 @@ export function createActorSnapshots(world, options = {}) {
           revision: residency.revision,
         },
       } : {}),
+      ...(guidePath ? { guidePath: guidePath.snapshot() } : {}),
     };
     });
 }

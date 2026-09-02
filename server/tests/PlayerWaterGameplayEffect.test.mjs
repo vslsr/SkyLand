@@ -5,7 +5,6 @@ import {
   MOVE_SPEED_ATTRIBUTE,
   WATER_MOVEMENT_EFFECT_ID,
 } from '../../shared/abilities/index.mjs';
-import { sampleBuoyancyBobOffset } from '../../shared/actor/buoyancyMotion.mjs';
 import {
   encodeTerrainCell,
   terrainCellCodeAt,
@@ -71,7 +70,7 @@ function createDefinition(spawn, seaLevel = 0) {
   };
 }
 
-test('玩家进水时 GAS 减速，权威 Y 即使没有输入也按大振幅浮力持续上下变化', () => {
+test('玩家进水时 GAS 减速，权威 Y 只随固定物理输入步变化', () => {
   let now = 1_000_000;
   const water = findCell(TERRAIN_SURFACE.WATER);
   const ground = findCell(TERRAIN_SURFACE.GROUND);
@@ -92,15 +91,12 @@ test('玩家进水时 GAS 减速，权威 Y 即使没有输入也按大振幅浮
   );
   const terrain = sampleTerrain(DEFAULT_WORLD_SEED, water.x, water.z);
   const support = terrainMovementHeight(terrain, 0, player.getComponent('buoyancy').draft);
-  const expectedInitialY = Math.max(
-    terrain.groundY,
-    support + sampleBuoyancyBobOffset('water-player', now / 1000, 0.3, 0.55),
-  );
+  const expectedInitialY = Math.max(terrain.groundY, support);
   assert.ok(Math.abs(player.y - expectedInitialY) < 1e-9);
   const initialY = player.y;
   now += 400;
   scene.update();
-  assert.ok(Math.abs(player.y - initialY) > 0.2, '±0.30m 浮动应该有明显的上下位移');
+  assert.equal(player.y, initialY, '房间 update 不能绕过固定物理步直接覆盖玩家 Y');
   assert.equal(scene.createSnapshot('water-player').players[0].y, Math.round(player.y * 1000) / 1000);
 
   const beforeX = player.x;
@@ -114,6 +110,7 @@ test('玩家进水时 GAS 减速，权威 Y 即使没有输入也按大振幅浮
     })),
   });
   assert.ok(player.x > beforeX);
+  assert.notEqual(player.y, initialY, '浮力应通过输入固定步里的垂直速度积分生效');
   assert.ok(player.speed <= 1.6 + 1e-6);
   assert.equal(abilities.createSnapshot().effects.length, 1, '水中连续输入不能重复堆叠效果');
 

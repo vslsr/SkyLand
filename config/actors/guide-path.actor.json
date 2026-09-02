@@ -1,0 +1,23 @@
+{
+  "$schema": "./actor.schema.json",
+  "schemaVersion": 1,
+  "id": "guide-path",
+  "components": {
+    "guidePath": {
+      "points": [[0, 0.45, 0], [-5, 0.45, -4], [0, 0.45, -9], [6, 0.45, -5]],
+      "curve": "catmull-rom",
+      "lineColor": "#fffdf4",
+      "shadowColor": "#544b43",
+      "markerColor": "#fff8d6",
+      "lineWidth": 5,
+      "dashLength": 0.8,
+      "gapLength": 0.55,
+      "dashSpeed": 0.5,
+      "markerSize": 0.6,
+      "hitRadius": 1.25,
+      "autoAdvance": true,
+      "loop": true,
+      "enabled": true
+    }
+  }
+}

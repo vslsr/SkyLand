@@ -67,6 +67,15 @@ test('loads every selectable map from an independent scene JSON', async () => {
   const grassTest = catalog.require('grass-test');
   assert.equal(grassTest.renderer.content.grass, true);
   assert.deepEqual(grassTest.sceneComponents, [{ type: 'mouse-grass-interaction' }]);
+  assert.deepEqual(
+    grassTest.actors.find((actor) => actor.id === 'wayfinder-guide-01'),
+    {
+      id: 'wayfinder-guide-01',
+      archetypeId: 'guide-path',
+      parentActorId: null,
+      localTransform: { position: [0, 0, 0], yaw: 0 },
+    },
+  );
   assert.equal(grassTest.renderer.content.trees, false);
   assert.equal(grassTest.renderer.content.ocean, false);
   assert.equal(grassTest.camera.mode, 'topdown');

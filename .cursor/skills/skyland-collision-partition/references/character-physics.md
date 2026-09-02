@@ -124,9 +124,10 @@ SkyLand 有一米高的垂直块边，Rapier heightfield 无法表达，必须�
 水面不是 Rapier 实体地面。进入水面支持时：
 
 - 临时关闭 snap-to-ground，避免海岸低地把玩家从水面向下吸；
-- 由权威/预测双方提供同定义的 `buoyancyHeight`；
-- 下降到水面时接地，仍允许从水面按 jump 起跳；
-- 不允许视觉 bobbing 写回逻辑 Transform。
+- 由权威/预测双方提供同定义的 `buoyancyHeight` 作为弹簧目标，而不是直接写 Y；
+- 岸边进入水域先按重力下落，浸入吃水线后由共享固定步的弹簧/阻尼改变 `vy`；
+- 接近稳定吃水线时才获得可跳跃的浮力支撑状态；
+- 波浪 bobbing 只能写 `visualRoot`，不能进入玩法吃水线或逻辑 Transform。
 
 ## Collider authoring 与 layer
 
@@ -199,4 +200,3 @@ Rapier 原生 `debugRender()` 只画当前常驻 collider，因此仍满足大�
 | 相机 probe/layer | Rapier runtime test 与 `tests/CameraBoom.test.ts` |
 
 任何碰撞改动至少运行命中的 focused test，然后运行全量 server/client/build。手工验收必须在真实房间完成，因为“客户端自己很顺”不能证明 DS 使用相同 collider 和输入步。
-

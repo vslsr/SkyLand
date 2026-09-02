@@ -3,6 +3,7 @@ import test from 'node:test';
 import {
   BUOYANCY_COMPONENT,
   COMBUSTIBLE_COMPONENT,
+  GUIDE_PATH_COMPONENT,
   SIMPLE_COLLISION_COMPONENT,
   TEMPERATURE_COMPONENT,
   TRANSFORM_COMPONENT,
@@ -371,6 +372,35 @@ test('混合软体测试场景按连接生成新的可操控史莱姆 Actor', as
     })),
   });
   assert.ok(player.z >= transform.z + clearance - 1e-6, '内部圆柱应被测试障碍权威推出');
+});
+
+test('引导路径 Actor 在服务器记录路径、状态、推进与存在性', async () => {
+  const catalog = await SceneCatalog.load();
+  const scene = new ServerScene(catalog.require('grass-test'), { now: () => 1_000_000 });
+  const actor = scene.actorWorld.getActor('wayfinder-guide-01');
+  const guide = actor.requireComponent(GUIDE_PATH_COMPONENT);
+
+  let snapshot = scene.createSnapshot().actors.find((entry) => entry.id === actor.id);
+  assert.equal(snapshot.archetypeId, 'guide-path');
+  assert.deepEqual(snapshot.guidePath.points, guide.points);
+  assert.equal(snapshot.guidePath.currentPointIndex, 0);
+
+  guide.setPath([[0, 0.5, 0], [3, 0.5, -2]], { curve: 'linear' });
+  guide.setEnabled(false);
+  snapshot = scene.createSnapshot().actors.find((entry) => entry.id === actor.id);
+  assert.deepEqual(snapshot.guidePath.points, [[0, 0.5, 0], [3, 0.5, -2]]);
+  assert.equal(snapshot.guidePath.curve, 'linear');
+  assert.equal(snapshot.guidePath.enabled, false);
+  assert.equal(snapshot.guidePath.pathRevision, 1);
+
+  guide.setEnabled(true);
+  scene.addPlayer({ id: 'guide-runner', name: '引导测试', slot: 0 });
+  scene.players.get('guide-runner').setPosition(0, 0);
+  scene.actorWorld.update(0.05, 0.05);
+  assert.equal(guide.currentPointIndex, 1);
+
+  scene.actorWorld.removeActor(actor.id);
+  assert.equal(scene.createSnapshot().actors.some((entry) => entry.id === actor.id), false);
 });
 
 test('玩家 Actor 的 maximumStepHeight 允许跨过低矮场景 Actor', async () => {

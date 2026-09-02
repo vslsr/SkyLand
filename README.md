@@ -673,6 +673,12 @@ Replica。Actor 使用服务端校验的 `parentActorId + localTransform` 构成
 Transform 回退 120 ms 插值；父子关系不插值，海浪造成的上下浮动仍只作用于视觉子节点，
 不改写权威 Transform。
 
+`guide-path.actor.json` 是无服务端 Mesh 的展示型 Actor：`GuidePathComponent` 权威保存
+局部路径点、启用态和当前节点，并提供 `setPath()`、`setEnabled()`、
+`setCurrentPointIndex()`、`advance()` 与 `reset()`。这些离散状态随 Actor 快照复制；客户端
+`GuidePathVisualSystem` 才创建流动虚线与发光 Billboard。删除服务器 Actor 就会让所有
+客户端移除对应 Replica，并释放该路径独占的几何、材质和贴图。
+
 每个受支持的 Actor 模型在创建时会从 `render` 的 authoring 尺寸自动生成一个简易有向盒，
 无需再维护重复碰撞配置。玩家圆形碰撞、可控 Actor 推出和客户端预测共用
 `shared/actor/simpleCollision.mjs`；房间 DS 仍是最终权威。宽相只查询玩家附近的网格格子，
