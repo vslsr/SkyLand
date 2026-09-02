@@ -20,7 +20,7 @@
 | §8.2 · GPU 资源所有权表 | **已完成（最小核心）** | `src/core/assets/AssetOwner.ts`、`src/render/renderAssets.ts` |
 | 第 1.5 步 · 表现 Component 脱离 THREE | **已完成** · 棘轮 8 → 0 | 见 §1.5；玩家实体也接到了边界上 |
 | 第 1.75 步 · 拆掉表现 System 的夹心 | **已完成** | 见 §1.75；Actor 世界只剩四个不认识 three 的 System |
-| 第 2 步 · Sim Worker | 未开始 | 见 §2 |
+| 第 2 步 · Sim Worker | **前提被测量推翻** · 已打点、已量、结论见 §2 | 搬进 worker 只能省约 1.2 ms／帧 |
 | 第 3 步 · OffscreenCanvas | 未开始 | 见 §3 |
 | 第 4 步 · 换掉 Three.js | 可无限期推迟 | 见 §4 |
 
@@ -336,9 +336,86 @@ render 与 game 混在一起的（合批、果实实例化、悬停高亮、`roo
 
 ---
 
-## 第 2 步 · 网络 + Game World + 物理整体进 worker（未开始）
+## 第 2 步 · 网络 + Game World + 物理整体进 worker（**前提已被测量推翻**）
 
-依赖 0、1、1.5、1.75。
+依赖 0、1、1.5、1.75。改动清单的第 5 项（帧时间打点）**先做了**，因为路线图自己写着
+「方向认同，但归因建议先测」。量完之后前四项失去了依据，所以这一节改成先摆证据。
+
+### 怎么量的
+
+`src/platform/FrameTimeline.ts`：分阶段**自耗时**、环形窗口、p50/p95/max。
+阶段可以嵌套，子阶段的整段耗时从父阶段扣掉——`createReplica` 里那次建模型嵌在
+`applySnapshotSet` 里，平的记法会让同一段时间既算进 `sim-actors` 又算进
+`render-spawn`，把「搬进 worker 能省多少」凭空翻倍。
+
+打点按**「第 2 步之后这段代码会在哪个线程上」**分组，不按模块分。
+
+环境：headless Chromium + SwiftShader（软件光栅），`无边草原` 流式地图，一路向前走
+22 秒。**`draw` 因此被严重放大**（真实 GPU 上它是提交命令的 CPU 时间，不是光栅化），
+其余阶段是 CPU 侧的真实数字。跨源隔离已生效：`isolated · shared-memory · workers ·
+offscreen-canvas`。
+
+### 稳态（不建 chunk 的帧，n≈46–64，整帧 p50 ≈ 10.7 ms）
+
+| 阶段 | p50 | 第 2 步之后在哪 |
+| --- | --- | --- |
+| `draw` | 6.33 ms | 主线程（SwiftShader 放大，真实 GPU 上远小于此） |
+| `sim-colliders` | 0.61 ms | **Sim Worker** |
+| `sim-actors` | 0.49 ms | **Sim Worker** |
+| `render-visuals` | 0.30 ms | 主线程 |
+| `scene-systems` | 0.24 ms | 主线程 |
+| `render-batches` | 0.14 ms | 主线程 |
+| `sim-player` | 0.06 ms | **Sim Worker** |
+
+**要搬进 Sim Worker 的三项加起来是 1.16 ms，占整帧 11%。** 把 `draw` 换算成真实 GPU
+（假设 1 ms），整帧约 5.5 ms，Sim 占比也就 21%——仍然不是瓶颈所在。
+
+### 建一个 chunk 的那一帧（n≈5–15 帧／窗口）
+
+| 阶段 | p50 | 性质 |
+| --- | --- | --- |
+| `chunk-geometry` | 2.10–2.45 ms | Three 对象；第 3 步之前挪不走 |
+| `chunk-terrain-build` | 1.34–1.37 ms | 纯计算，可挪 |
+| `chunk-terrain-register` | 0.63–0.97 ms | 往 Rapier 的 WASM 堆里塞，随物理世界走 |
+| `chunk-props-collide` | 0.21–0.32 ms | 纯计算，可挪 |
+| **`chunk-gen`** | **0.17 ms（WASM）／0.34 ms（JS）** | 纯计算，可挪 |
+| `chunk-grass` | 0.15–0.29 ms | |
+
+### 三条结论
+
+1. **「`native/chunkgen` 单独一个 worker」这条建议的前提是错的。** 路线图的理由是
+   「`CHUNK_BUILD_BUDGET_PER_FRAME = 1` 这个预算本身就是『生成在主线程会卡帧』的补丁」。
+   实测：生成是这六项里**最便宜**的一项，WASM 下 0.17 ms。预算是被
+   `chunk-geometry`（2.1 ms）+ `chunk-terrain-build`（1.3 ms）逼出来的。
+   强制走 JS 后端（`?chunkgen=js`）也只有 0.34 ms——**这就是这个 worker 的收益上限**。
+
+2. **整个 Sim Worker 只能省约 1.2 ms／帧。** 它不是吞吐量优化。
+
+3. **两处真正的卡顿都在渲染侧，Sim Worker 一点忙都帮不上：**
+   - `render-spawn`：进房间那一帧 **31–146 ms**，n=1。`createReplica` 把当批 Replica 的
+     模型一次全建出来（`createMeshProxy` → `createActorVisualModel`）。
+   - chunk 挂载：约 4–5 ms 的尖峰，其中最大的一块是 Three 几何。
+
+### 那第 2 步还做不做
+
+**做，但理由要换掉，而且不该排在最前面。** 换掉之后仍然成立的理由只剩两条，
+它们都不是吞吐量：
+
+- **模拟脱离 rAF**。现在固定步被绑在渲染帧上，`MAXIMUM_SIMULATION_CATCH_UP_STEPS = 5`
+  就是「切后台标签会积压」的补丁。搬进 worker 之后模拟按自己的时钟走，这个补丁可以删。
+- **渲染线程能在两帧模拟之间插值**：144 Hz 屏幕上跑 144 Hz 画面，模拟仍是 60 Hz。
+  这条要等第 3 步，第 2 步是它的前置。
+
+按证据重排的话，性价比顺序是：
+
+| 顺序 | 做什么 | 依据 |
+| --- | --- | --- |
+| 1 | **摊平 `render-spawn`**：proxy 创建按帧配额分摊，照 `CHUNK_BUILD_BUDGET_PER_FRAME` 的先例 | 单帧 31–146 ms，是全程最大的一次卡顿 |
+| 2 | **`chunk-terrain-build` + `chunk-props-collide` 进 worker**（不是 `chunk-gen`） | 两项合计约 1.6 ms，是 chunk 尖峰里唯一挪得走的部分 |
+| 3 | 第 3 步 · OffscreenCanvas | `chunk-geometry` 与 `render-visuals` 只有到那时才挪得走 |
+| 4 | 第 2 步 · Sim Worker | 收益是决定论与解耦，不是帧时间 |
+
+### 原改动清单（保留，但 1–4 项的依据已经不成立）
 
 - **不能拆网络与模拟**：紧耦合链「快照到达 → 和解 → 回放未确认固定步」是突发尖峰，
   拆两个线程只会凭空多一跳。`WebSocket` 在 Worker 里可用，整个搬进去。
@@ -352,11 +429,8 @@ render 与 game 混在一起的（合批、果实实例化、悬停高亮、`roo
   在快照率提到 30–60 Hz、压低插值延迟、或面对高丢包移动网络之前，换传输
   属于没有证据支撑的优化（§6.3：120 ms 插值缓冲正好吃掉一次 TCP 重传，
   而快照是全量状态，丢一帧只靠外推撑过去）。
-- **`native/chunkgen` 单独一个 worker**。`ChunkStreamer.drainBuildBudget()` 的「每帧最多建一个
-  chunk」本身就是「生成在主线程会卡帧」的补丁，挪走后可以并行建、放开视距。
-- 做完可以删掉 `MAXIMUM_SIMULATION_CATCH_UP_STEPS = 5`——那个常量只是「模拟被绑在渲染帧上」的补丁。
-
-改动清单（预估）：
+- 做完可以删掉 `MAXIMUM_SIMULATION_CATCH_UP_STEPS = 5`——那个常量只是「模拟被绑在
+  渲染帧上」的补丁。**这条仍然成立，而且是第 2 步剩下的主要理由。**
 
 1. `src/platform/` 加 worker 生成与消息通道（PlatformLayer 的第二块）；
 2. 输入按 tick 号序列化进一个 SAB 环形缓冲（主线程退化成 IO 线程）；
@@ -364,7 +438,8 @@ render 与 game 混在一起的（合批、果实实例化、悬停高亮、`roo
    合批、果实实例化、悬停高亮与 `root` 留在主线程（§1.75 已经把它的 System 列表清干净了，
    现在挡路的是这个类自己）；`GameTransport` + `PlayerReconciler` + `PhysicsWorld` 一起进去；
 4. `RenderTransformSyncSystem` 的 `submitTransforms` 留在主线程，先只把模拟搬走；
-5. 帧时间打点：这一步的价值是**证据**——在写第一行 C++ 之前，先证明 worker 架构在这个项目里跑得通。
+5. ~~帧时间打点~~ **已完成**：`src/platform/FrameTimeline.ts`，报表每 10 秒打一次
+   （`[frame]` 开头）。第 2 步的价值本来就是证据——证据拿到了，见上面三条结论。
 
 ---
 
@@ -373,6 +448,10 @@ render 与 game 混在一起的（合批、果实实例化、悬停高亮、`roo
 依赖 1、2。Render Worker 拿 `transferControlToOffscreen()` 的 canvas，通过第 1 步定好的
 `RenderTransformBuffer` 读 transform；`RenderTransformSyncSystem` 在这一步删除。
 到这里就是完整的 UE 线程模型，而渲染仍然可以是 Three.js。
+
+**§2 的实测把这一步的优先级抬上来了**：主线程的时间几乎全在渲染侧
+（`draw` + `chunk-geometry` + `render-spawn` + `render-visuals`），而这些**只有到这一步
+才挪得走**。能力也已经就绪——启动日志里的 `offscreen-canvas` 是有的。
 
 `SceneRenderer` 目前混着渲染核心（`WebGLRenderer` + camera）与一堆 Game World 查询
 （`sampleGroundHeight` / `raycastGround` / `pickTerrainCell`）。搬 canvas 之前要先按这条线拆开：
@@ -387,7 +466,9 @@ render 与 game 混在一起的（合批、果实实例化、悬停高亮、`roo
 遍历里读的是 `THREE.Mesh` / `THREE.LineSegments`）。
 
 按 §4 特化之后要写的是 **2 个 shader + 6 个 pass**，不是通用 RHI。
-如果第 2 步做完帧时间已经够了，这一步的代价是零——第 1 步定的那条边界本来就是自研渲染器需要的那条。
+路线图原话是「如果第 2 步做完帧时间已经够了，这一步的代价是零」；§2 的实测说明
+**帧时间不会因为第 2 步变够**——真要动帧时间，得从渲染侧下手。
+但这不改变结论：第 1 步定的那条边界本来就是自研渲染器需要的那条，换不换随时可决定。
 
 ---
 
@@ -449,5 +530,6 @@ render 与 game 混在一起的（合批、果实实例化、悬停高亮、`roo
 | 决定 | 当前默认 | 何时必须定 |
 | --- | --- | --- |
 | Web 还是 Native 是第一目标 | Web 后端先行 | 第 2 步之前——它决定 CoreLayer 的工作量能差一个数量级 |
+| 第 2 步与第 3 步的先后 | 按 §2 的实测，第 3 步的收益更大 | 下一次动线程之前 |
 | 物理引擎 | 保留 Rapier | 已由 §0.5b 的分析加固：两端同一份 `.wasm` 是 0.06 米容差的前提 |
 | 线协议 | 先不动 JSON | 和 SAB 布局一起换，别分两次 |
