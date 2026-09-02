@@ -86,7 +86,10 @@ export class ElasticTetherVisualSystem {
       this.rotation.setFromUnitVectors(UP, this.direction);
       rig.elasticRoot.quaternion.copy(this.rotation);
 
-      const stretch = THREE.MathUtils.clamp(length / rig.restLength, 0.5, 4.2);
+      // 上限跟着这次叼取的拔断长度走，不能写死：菌盖位置直接取 length，
+      // 菌柄却按 stretch 缩放，两者用不同的上限就会在拉到头时脱开。
+      const maximumStretch = Math.max(1, maximumLength / rig.restLength);
+      const stretch = THREE.MathUtils.clamp(length / rig.restLength, 0.5, maximumStretch);
       const widthScale = THREE.MathUtils.clamp(1 / Math.sqrt(stretch), 0.55, 1.18);
       rig.stemRoot.scale.set(widthScale, stretch, widthScale);
       rig.capRoot.position.y = length;

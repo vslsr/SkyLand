@@ -11,7 +11,7 @@
     "elasticTether": {
       "restLength": 0.72,
       "breakLength": 1.55,
-      "pullDistance": 1.6,
+      "pullDistance": 2.8,
       "mouthHeight": 0.3,
       "mouthForwardOffset": 0.36
     },

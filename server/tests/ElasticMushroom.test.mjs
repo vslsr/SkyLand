@@ -7,6 +7,24 @@ import {
   MushroomPopComponent,
 } from '../../shared/actor/index.mjs';
 
+/**
+ * 把玩家拖到「一定拉得断」的距离。
+ *
+ * 拔断阈值是「叼住那一刻的长度 + pullDistance」，所以写死一个米数会随配置调整
+ * 失效；这里直接读权威的 detachLength 再多留一点余量。
+ */
+function pullUntilDetached(scene, clock, playerId, actorId, anchorX) {
+  const player = scene.players.get(playerId);
+  const tether = scene.actorWorld.getActor(actorId).requireComponent('elastic-tether');
+  player.x = anchorX - (tether.detachLength + 1);
+  for (let index = 0; index < 20; index += 1) {
+    clock.advance(0.05);
+    scene.update();
+    if (scene.actorWorld.getActor(actorId).requireComponent('elasticDetach').detached) return true;
+  }
+  return false;
+}
+
 function createClock(startAt = 1_000_000) {
   let current = startAt;
   return {
@@ -45,10 +63,11 @@ test('史莱姆把蘑菇拉过断裂长度后，蘑菇脱离、获得冲量并�
     sequence: 2,
   }), false);
 
-  player.x = initial.transform.x - 3.4;
   player.z = initial.transform.z;
-  clock.advance(0.05);
-  scene.update();
+  assert.equal(
+    pullUntilDetached(scene, clock, 'player-a', mushroomId, initial.transform.x),
+    true,
+  );
   mushroom = scene.createSnapshot().actors.find((actor) => actor.id === mushroomId);
   assert.equal(mushroom.elasticTether.holderPlayerId, null);
   assert.equal(mushroom.elasticTether.releaseRevision, 1);
@@ -90,9 +109,10 @@ test('蘑菇脱落后翻倒在地，权威朝向随快照下发', async () => {
   player.x = initial.transform.x - 0.8;
   player.z = initial.transform.z;
   scene.interactWithActor('player-b', { actorId: mushroomId, sequence: 1 });
-  player.x = initial.transform.x - 3.4;
-  clock.advance(0.05);
-  scene.update();
+  assert.equal(
+    pullUntilDetached(scene, clock, 'player-b', mushroomId, initial.transform.x),
+    true,
+  );
 
   for (let index = 0; index < 100; index += 1) {
     clock.advance(0.05);
@@ -238,7 +258,10 @@ test('走远让 chunk 卸载再回来，躺在地上的蘑菇不会站起来', a
   player.yaw = Math.PI / 2;
   tick(1);
   assert.equal(scene.interactWithActor('wanderer', { actorId: target.id, sequence: 1 }), true);
-  player.x = target.transform.x - 3.4;
+  assert.equal(
+    pullUntilDetached(scene, clock, 'wanderer', target.id, target.transform.x),
+    true,
+  );
   tick(60);
 
   const fallenTilt = tiltDegrees(find().elasticDetach.rotation);

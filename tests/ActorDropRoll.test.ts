@@ -30,6 +30,8 @@ const RENDER = {
   height: 0.95,
 } as const;
 const DROP_RADIUS = 0.28;
+/** 与 elastic-mushroom.actor.json 保持一致：叼住之后还要再拉这么远才拔断。 */
+const PULL_DISTANCE = 2.8;
 
 function createMushroom(): { world: ActorWorld; actor: Actor; render: ThreeObjectComponent } {
   const world = new ActorWorld();
@@ -38,6 +40,7 @@ function createMushroom(): { world: ActorWorld; actor: Actor; render: ThreeObjec
   actor.addComponent(new ElasticTetherComponent({
     restLength: 0.72,
     breakLength: 1.55,
+    pullDistance: PULL_DISTANCE,
     mouthHeight: 0.3,
     mouthForwardOffset: 0.36,
   }));
@@ -208,4 +211,33 @@ test('被叼住拖拽期间仍然归弹性拉伸管，翻滚系统不插手', ()
   );
   assert.equal(render.dropRollRig!.pivotRoot.position.y, 0);
   assert.equal(render.dropRollRig!.bodyRoot.position.y, 0);
+});
+
+test('拉到最长时菌盖仍然长在菌柄顶端，不会脱开', () => {
+  const { world, actor, render } = createMushroom();
+  const tetherVisual = new ElasticTetherVisualSystem();
+  const rig = render.elasticTetherRig;
+  assert.ok(rig);
+
+  const tether = actor.requireComponent(ELASTIC_TETHER_COMPONENT) as ElasticTetherComponent;
+  tether.holderPlayerId = 'player-a';
+  // 顶着交互距离叼住，再拉满整段拖拽行程：这是弹性能到的最长状态。
+  tether.grabLength = 1.03;
+  tether.targetX = 1;
+  tether.targetY = 20;
+  tether.targetZ = 2;
+  for (let frame = 0; frame < 240; frame += 1) {
+    tetherVisual.update(world, 1 / 60, frame / 60);
+  }
+
+  const stemTop = rig.restLength * rig.stemRoot.scale.y;
+  assert.ok(
+    Math.abs(rig.capRoot.position.y - stemTop) < 1e-6,
+    `菌盖悬空了：菌盖在 ${rig.capRoot.position.y.toFixed(3)}m，菌柄顶端在 ${stemTop.toFixed(3)}m`,
+  );
+  // 拉伸倍率必须真的越过旧的写死上限 4.2，否则这条用例根本没碰到回归点。
+  assert.ok(
+    stemTop > rig.restLength * 4.2,
+    `没有拉到旧上限之外，用例失去意义：${stemTop.toFixed(2)}m`,
+  );
 });
