@@ -1,0 +1,1528 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SkyLand 引擎自研路线图</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700;800&family=IBM+Plex+Mono:wght@400;500;600&family=Noto+Sans+SC:wght@400;500;700&display=swap">
+<style>
+  /* ---- 调色板取自引擎自身的常量：纸面、墨线、网格灰、地形高亮、夜色环境光 ---- */
+  :root {
+    color-scheme: light;
+
+    --paper:      #fdfbf6;  /* EMPTY_SCENE_COLOR */
+    --ink:        #171614;  /* OUTLINE_MATERIAL */
+    --grid:       #9d9a90;  /* GROUND_GRID_MATERIAL */
+    --amber:      #f0a33c;  /* terrain-edit-highlight */
+    --night:      #2b3450;  /* NIGHT_AMBIENT_COLOR */
+
+    --bg:         var(--paper);
+    --surface:    #ffffff;
+    --surface-2:  #f5f2ea;
+    --text:       var(--ink);
+    --text-muted: #6f6b62;
+    --text-faint: var(--grid);
+    --rule:       #dedace;
+    --rule-firm:  #b9b3a4;
+    --accent:     #b9701a;
+    --accent-mark:var(--amber);
+    --accent-soft:#fbf0dd;
+
+    --fig-bg:     #ffffff;
+    --fig-box:    #f7f4ec;
+    --fig-line:   #171614;
+
+    --font-display: "Archivo", "Noto Sans SC", system-ui, sans-serif;
+    --font-body:    "Noto Sans SC", "Archivo", system-ui, sans-serif;
+    --font-mono:    "IBM Plex Mono", ui-monospace, SFMono-Regular, monospace;
+
+    --measure: 68ch;
+    --wide: 980px;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      color-scheme: dark;
+      --bg:         #161b27;
+      --surface:    #1e2434;
+      --surface-2:  var(--night);
+      --text:       #e9e6dd;
+      --text-muted: #a6adbd;
+      --text-faint: #6c7c96;  /* MOON_AMBIENT_COLOR */
+      --rule:       #333c52;
+      --rule-firm:  #4c5772;
+      --accent:     #f0a33c;
+      --accent-mark:#ffd9a0;  /* WARM_AMBIENT_COLOR */
+      --accent-soft:#2c2a25;
+
+      --fig-bg:     #1a2030;
+      --fig-box:    #232a3c;
+      --fig-line:   #cdd3e0;
+    }
+  }
+
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --bg:         #161b27;
+    --surface:    #1e2434;
+    --surface-2:  var(--night);
+    --text:       #e9e6dd;
+    --text-muted: #a6adbd;
+    --text-faint: #6c7c96;
+    --rule:       #333c52;
+    --rule-firm:  #4c5772;
+    --accent:     #f0a33c;
+    --accent-mark:#ffd9a0;
+    --accent-soft:#2c2a25;
+
+    --fig-bg:     #1a2030;
+    --fig-box:    #232a3c;
+    --fig-line:   #cdd3e0;
+  }
+
+  /* ---------------- base ---------------- */
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--font-body);
+    font-size: 16px;
+    line-height: 1.85;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .page {
+    max-width: var(--wide);
+    margin: 0 auto;
+    padding: 0 24px 96px;
+  }
+
+  .col { max-width: var(--measure); }
+
+  p { margin: 0 0 1.1em; }
+  strong { font-weight: 700; color: var(--text); }
+
+  a {
+    color: var(--accent);
+    text-underline-offset: 3px;
+    text-decoration-thickness: 1px;
+  }
+  a:focus-visible,
+  button:focus-visible {
+    outline: 2px solid var(--accent-mark);
+    outline-offset: 2px;
+  }
+
+  code, .mono { font-family: var(--font-mono); }
+
+  code {
+    font-size: 0.855em;
+    background: var(--surface-2);
+    border: 1px solid var(--rule);
+    border-radius: 2px;
+    padding: 0.08em 0.34em;
+    word-break: break-word;
+  }
+
+  /* ---------------- masthead ---------------- */
+  .masthead {
+    border-bottom: 1.5px solid var(--text);
+    padding: 56px 0 22px;
+    margin-bottom: 40px;
+  }
+  .eyebrow {
+    font-family: var(--font-mono);
+    font-size: 11.5px;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--text-faint);
+    margin: 0 0 14px;
+  }
+  h1 {
+    font-family: var(--font-display);
+    font-weight: 800;
+    font-size: clamp(34px, 6vw, 54px);
+    line-height: 1.06;
+    letter-spacing: -0.02em;
+    text-wrap: balance;
+    margin: 0 0 18px;
+  }
+  .standfirst {
+    max-width: var(--measure);
+    font-size: 17px;
+    color: var(--text-muted);
+    margin: 0 0 24px;
+  }
+  .masthead-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 22px;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    color: var(--text-faint);
+  }
+  .masthead-meta span { white-space: nowrap; }
+
+  /* ---------------- sections ---------------- */
+  section { margin-bottom: 68px; }
+
+  h2 {
+    font-family: var(--font-display);
+    font-weight: 700;
+    font-size: clamp(23px, 3.2vw, 30px);
+    line-height: 1.2;
+    letter-spacing: -0.012em;
+    text-wrap: balance;
+    margin: 0 0 6px;
+    padding-top: 14px;
+    border-top: 1.5px solid var(--rule-firm);
+  }
+  .kicker {
+    font-family: var(--font-mono);
+    font-size: 11.5px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin: 0 0 22px;
+  }
+  h3 {
+    font-family: var(--font-display);
+    font-weight: 700;
+    font-size: 18px;
+    letter-spacing: -0.005em;
+    margin: 32px 0 8px;
+  }
+
+  /* ---------------- verdicts ---------------- */
+  .verdicts {
+    display: grid;
+    gap: 1px;
+    background: var(--rule-firm);
+    border: 1px solid var(--rule-firm);
+    margin-bottom: 8px;
+  }
+  @media (min-width: 700px) { .verdicts { grid-template-columns: repeat(2, 1fr); } }
+
+  .verdict {
+    background: var(--surface);
+    padding: 22px 20px 24px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  .verdict-tag {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    letter-spacing: 0.13em;
+    text-transform: uppercase;
+    color: var(--text-faint);
+  }
+  .verdict-claim {
+    font-family: var(--font-display);
+    font-weight: 700;
+    font-size: 19px;
+    line-height: 1.35;
+    letter-spacing: -0.008em;
+  }
+  .verdict p { font-size: 14.5px; line-height: 1.75; color: var(--text-muted); margin: 0; }
+
+  /* ---------------- figures ---------------- */
+  figure {
+    margin: 30px 0 34px;
+    background: var(--fig-bg);
+    border: 1px solid var(--rule-firm);
+    border-radius: 2px;
+  }
+  .fig-scroll { overflow-x: auto; padding: 22px 20px 6px; }
+  figure svg {
+    display: block;
+    width: 100%;
+    min-width: 700px;
+    max-width: 100%;
+    height: auto;
+    color: var(--fig-line);
+  }
+  figcaption {
+    border-top: 1px solid var(--rule);
+    padding: 13px 20px 15px;
+    font-size: 13.5px;
+    line-height: 1.7;
+    color: var(--text-muted);
+  }
+  figcaption b { color: var(--text); font-weight: 700; }
+
+  .fig-label { font-family: var(--font-mono); font-size: 12px; }
+  .fig-title {
+    font-family: var(--font-mono);
+    font-size: 11.5px;
+    letter-spacing: 0.13em;
+    text-transform: uppercase;
+  }
+  .fig-note { font-family: var(--font-body); font-size: 12px; }
+  .fig-mark { fill: var(--amber); }
+  .fig-mark-stroke { stroke: var(--amber); }
+
+  /* ---------------- tables ---------------- */
+  .table-wrap { overflow-x: auto; margin: 24px 0 8px; border: 1px solid var(--rule-firm); }
+  table {
+    width: 100%;
+    min-width: 520px;
+    border-collapse: collapse;
+    background: var(--surface);
+    font-size: 14.5px;
+  }
+  th, td {
+    text-align: left;
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--rule);
+    vertical-align: top;
+    line-height: 1.65;
+  }
+  thead th {
+    font-family: var(--font-mono);
+    font-size: 11.5px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--text-faint);
+    font-weight: 500;
+    background: var(--surface-2);
+  }
+  tbody tr:last-child td { border-bottom: 0; }
+  td.lead { font-weight: 700; white-space: nowrap; }
+  .num { font-variant-numeric: tabular-nums; }
+
+  /* ---------------- steps ---------------- */
+  .steps { display: flex; flex-direction: column; gap: 1px; background: var(--rule-firm); border: 1px solid var(--rule-firm); }
+  .step {
+    background: var(--surface);
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 4px;
+    padding: 24px 20px 26px;
+  }
+  @media (min-width: 760px) {
+    .step { grid-template-columns: 92px 1fr; gap: 0 28px; }
+  }
+  .step-n {
+    font-family: var(--font-mono);
+    font-weight: 600;
+    font-size: 30px;
+    line-height: 1.1;
+    letter-spacing: -0.03em;
+    color: var(--text-faint);
+    font-variant-numeric: tabular-nums;
+  }
+  .step-body > :first-child { margin-top: 0; }
+  .step h3 { margin-top: 0; margin-bottom: 4px; font-size: 19px; }
+  .step p { font-size: 15px; margin-bottom: 0.9em; }
+  .step p:last-child { margin-bottom: 0; }
+  .step ul { margin: 0 0 0.9em; padding-left: 1.15em; font-size: 15px; }
+  .step li { margin-bottom: 0.4em; }
+
+  .chips { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 14px; }
+  .chip {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    letter-spacing: 0.06em;
+    padding: 3px 9px;
+    border: 1px solid var(--rule-firm);
+    border-radius: 2px;
+    color: var(--text-muted);
+    white-space: nowrap;
+  }
+  .chip.now { border-color: var(--accent); color: var(--accent); }
+  .chip.gate { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
+
+  /* ---------------- callout ---------------- */
+  .callout {
+    border: 1px solid var(--rule-firm);
+    border-left: 3px solid var(--amber);
+    background: var(--surface);
+    padding: 18px 20px;
+    margin: 26px 0;
+    border-radius: 0 2px 2px 0;
+  }
+  .callout p:last-child { margin-bottom: 0; }
+  .callout-head {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    letter-spacing: 0.13em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin: 0 0 8px;
+  }
+
+  /* ---------------- code block ---------------- */
+  pre {
+    margin: 22px 0;
+    padding: 18px 20px;
+    background: var(--surface-2);
+    border: 1px solid var(--rule);
+    border-radius: 2px;
+    overflow-x: auto;
+    font-family: var(--font-mono);
+    font-size: 13px;
+    line-height: 1.7;
+    color: var(--text);
+  }
+  pre code { background: none; border: 0; padding: 0; font-size: inherit; }
+
+  /* ---------------- fact list ---------------- */
+  .facts { display: grid; gap: 1px; background: var(--rule); border: 1px solid var(--rule-firm); }
+  @media (min-width: 700px) { .facts { grid-template-columns: 1fr 1fr; } }
+  .fact { background: var(--surface); padding: 14px 16px; }
+  .fact dt {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    color: var(--accent);
+    margin-bottom: 3px;
+    word-break: break-all;
+  }
+  .fact dd { margin: 0; font-size: 14px; line-height: 1.6; color: var(--text-muted); }
+
+  ul.plain { padding-left: 1.15em; margin: 0 0 1.1em; }
+  ul.plain li { margin-bottom: 0.45em; }
+
+  footer {
+    border-top: 1.5px solid var(--text);
+    padding-top: 18px;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    color: var(--text-faint);
+    line-height: 1.8;
+  }
+</style>
+
+</head>
+<body>
+
+<div class="page">
+
+  <header class="masthead">
+    <p class="eyebrow">SkyLand · 架构提案 · 供团队讨论</p>
+    <h1>从 Three.js 走到自研引擎</h1>
+    <p class="standfirst">
+      一份分步路线图。核心主张：<strong>起点不是渲染器，是 Game World 与 Render World 之间那条边界</strong>——
+      它现在就能定，定完之后每一步都可增量、可暂停，而且无论最终是否写 C++ 渲染器，这条边界都是同一条。
+    </p>
+    <div class="masthead-meta">
+      <span>vslsr/SkyLand</span>
+      <span>three@0.128.0 · rapier3d@0.20</span>
+      <span>client 84 files · shared 7,278 lines</span>
+      <span>6 layers × 3 threads</span>
+      <span>2026-09</span>
+    </div>
+  </header>
+
+  <section>
+    <h2>四条结论</h2>
+    <p class="kicker">如果只读一屏，读这个</p>
+    <div class="verdicts">
+      <div class="verdict">
+        <span class="verdict-tag">前提修正</span>
+        <span class="verdict-claim">浏览器有真多线程</span>
+        <p>
+          Worker 是真 OS 线程，Emscripten pthreads 让 C++ 的 <code>std::thread</code> 直接可用。缺的只是跨源隔离响应头——本仓库目前<strong>未配置</strong>，半天就能补上。
+        </p>
+      </div>
+      <div class="verdict">
+        <span class="verdict-tag">起点</span>
+        <span class="verdict-claim">先剥边界，不动渲染器</span>
+        <p>
+          把 <code>THREE.Object3D</code> 从 Actor 上摘掉、换成 <code>proxyId</code> + SoA 数据。这一步<strong>不改一个像素</strong>，却是"以后能不能上 worker"的唯一决定性因素。
+        </p>
+      </div>
+      <div class="verdict">
+        <span class="verdict-tag">范围收缩</span>
+        <span class="verdict-claim">物理不进 C++ 核心</span>
+        <p>
+          Rapier 已是 Rust/WASM 且客户端与服务端<strong>共用同一份二进制</strong>。
+          C++ 只做渲染器，项目量级从 18 个月掉回几个月。
+        </p>
+      </div>
+      <div class="verdict">
+        <span class="verdict-tag">范围收缩</span>
+        <span class="verdict-claim">CoreLayer 里砍掉 DOM</span>
+        <p>
+          为了跑自己写的 UI 而实现一个浏览器，方向是反的。游戏运行时不需要 DOM，编辑器可以留在真浏览器里——<strong>这一刀砍掉的是整个计划最大的单项成本</strong>。
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>浏览器的三条真约束</h2>
+    <p class="kicker">和 UE 面对的约束几乎一样</p>
+    <div class="col">
+      <p>
+        "浏览器不支持多线程"这个前提需要修正。<code>Web Worker</code> 是真线程，
+        <code>SharedArrayBuffer</code> + <code>Atomics</code> 提供共享内存与无锁同步；对 C++ 核心更直接——Emscripten 的 pthreads 就是真的 pthreads，底下映射到 Worker + SAB。选 C++ 这件事，恰好把这个顾虑消掉了大半。
+      </p>
+      <p>
+        前置条件只有一个：<strong>跨源隔离</strong>（<code>crossOriginIsolated === true</code>），需要服务端发 <code>Cross-Origin-Opener-Policy: same-origin</code> 与
+        <code>Cross-Origin-Embedder-Policy: require-corp</code>。本仓库的 <code>server/http/</code> 与 <code>vite.config.ts</code> 里都搜不到，所以 SAB 目前是禁用状态。
+      </p>
+    </div>
+
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th style="width: 38%">真正的约束</th><th>对架构的后果</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="lead">一个 GPU context<br>只能被一个线程拥有</td>
+            <td>必须有独立渲染线程。这本来就是目标架构，不是障碍——Emscripten 的 <code>OFFSCREENCANVAS_SUPPORT</code> 让 GL context 归一个 pthread 所有。</td>
+          </tr>
+          <tr>
+            <td class="lead">DOM 与输入事件<br>只在主线程</td>
+            <td>输入要序列化后投递，并且必须带 tick 号，否则预测的输入序列和服务端对不齐。主线程退化成 IO 线程。</td>
+          </tr>
+          <tr>
+            <td class="lead">对象不能跨线程，<br>只有 SAB 里的字节能</td>
+            <td><strong>这条才是逼着改架构的那条。</strong>Game World 与 Render World 之间不能共享指针——也就是下一节要解决的问题。</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section>
+    <h2>边界的性质决定一切</h2>
+    <p class="kicker">第 1 步做的就是这一件事</p>
+    <div class="col">
+      <p>
+        初步设计的分层（Game World / Render World / Physics World）是对的，但 UE 里
+        <code>Component → Primitive</code> 那条箭头<strong>不是引用</strong>：中间隔着
+        <code>FPrimitiveSceneProxy</code>（渲染线程独占的镜像）、命令队列和双缓冲，游戏线程与渲染线程差一帧。
+      </p>
+      <p>
+        如果箭头落地成直接引用，就是现在的做法——<code>ThreeObjectComponent</code> 直接持有
+        <code>THREE.Group</code>，<code>ActorTransformSystem</code> 直接写
+        <code>render.root.position.set(…)</code>。单线程能跑，一上 worker 全废。
+      </p>
+    </div>
+
+    <figure>
+      <div class="fig-scroll">
+        <svg viewBox="0 0 900 396" role="img" aria-label="对比图：现在 Actor 的组件直接持有 THREE.Object3D，这条引用跨不过线程边界；第 1 步之后组件只持有 proxyId，通过位于边界上的 SharedArrayBuffer 双缓冲把 transform 交给 RenderScene。">
+          <defs>
+            <marker id="d1-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="currentColor"></path>
+            </marker>
+            <marker id="d1-arrow-amber" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="#f0a33c"></path>
+            </marker>
+          </defs>
+
+          <!-- 线程边界 -->
+          <line x1="16" y1="236" x2="884" y2="236" stroke="currentColor" stroke-width="1.25" stroke-dasharray="7 6" opacity="0.65"></line>
+          <text class="fig-title" x="16" y="227" fill="currentColor" opacity="0.7">线程边界</text>
+
+          <!-- 左：现在 -->
+          <text class="fig-title" x="230" y="24" text-anchor="middle" fill="currentColor" opacity="0.7">现在</text>
+          <rect x="110" y="44" width="240" height="34" fill="var(--fig-box)" stroke="currentColor" stroke-width="1.25"></rect>
+          <text class="fig-label" x="230" y="66" text-anchor="middle" fill="currentColor">Actor</text>
+          <line x1="230" y1="78" x2="230" y2="106" stroke="currentColor" stroke-width="1.25" marker-end="url(#d1-arrow)"></line>
+
+          <rect x="70" y="108" width="320" height="56" fill="var(--fig-box)" stroke="currentColor" stroke-width="1.25"></rect>
+          <text class="fig-label" x="230" y="130" text-anchor="middle" fill="currentColor">ThreeObjectComponent</text>
+          <text class="fig-note" x="230" y="150" text-anchor="middle" fill="currentColor" opacity="0.72">持有 THREE.Group</text>
+
+          <line x1="230" y1="164" x2="230" y2="266" stroke="#f0a33c" stroke-width="1.75" marker-end="url(#d1-arrow-amber)"></line>
+          <text class="fig-note" x="222" y="200" text-anchor="end" fill="currentColor" opacity="0.72">position.set()</text>
+          <line x1="221" y1="227" x2="239" y2="245" stroke="#f0a33c" stroke-width="2.25"></line>
+          <line x1="239" y1="227" x2="221" y2="245" stroke="#f0a33c" stroke-width="2.25"></line>
+          <text class="fig-note" x="250" y="241" fill="#b9701a">对象过不去</text>
+
+          <rect x="70" y="268" width="320" height="56" fill="var(--fig-box)" stroke="currentColor" stroke-width="1.25"></rect>
+          <text class="fig-label" x="230" y="290" text-anchor="middle" fill="currentColor">THREE.Object3D</text>
+          <text class="fig-note" x="230" y="310" text-anchor="middle" fill="currentColor" opacity="0.72">与上面是同一个对象</text>
+
+          <!-- 分隔 -->
+          <line x1="450" y1="40" x2="450" y2="356" stroke="currentColor" stroke-width="1" opacity="0.22"></line>
+
+          <!-- 右：第 1 步之后 -->
+          <text class="fig-title" x="670" y="24" text-anchor="middle" fill="currentColor" opacity="0.7">第 1 步之后</text>
+          <rect x="550" y="44" width="240" height="34" fill="var(--fig-box)" stroke="currentColor" stroke-width="1.25"></rect>
+          <text class="fig-label" x="670" y="66" text-anchor="middle" fill="currentColor">Actor</text>
+          <line x1="670" y1="78" x2="670" y2="106" stroke="currentColor" stroke-width="1.25" marker-end="url(#d1-arrow)"></line>
+
+          <rect x="510" y="108" width="320" height="56" fill="var(--fig-box)" stroke="currentColor" stroke-width="1.25"></rect>
+          <text class="fig-label" x="670" y="130" text-anchor="middle" fill="currentColor">RenderProxyComponent</text>
+          <text class="fig-note" x="670" y="150" text-anchor="middle" fill="currentColor" opacity="0.72">只持有 proxyId: u32</text>
+
+          <line x1="670" y1="164" x2="670" y2="204" stroke="currentColor" stroke-width="1.25" marker-end="url(#d1-arrow)"></line>
+          <text class="fig-note" x="682" y="188" fill="currentColor" opacity="0.72">写 SoA</text>
+
+          <rect x="510" y="206" width="320" height="60" fill="var(--fig-bg)" stroke="#f0a33c" stroke-width="1.75"></rect>
+          <text class="fig-label" x="670" y="230" text-anchor="middle" fill="currentColor">SharedArrayBuffer · 双缓冲</text>
+          <text class="fig-note" x="670" y="250" text-anchor="middle" fill="currentColor" opacity="0.72">Float32Array transform</text>
+
+          <line x1="670" y1="266" x2="670" y2="296" stroke="currentColor" stroke-width="1.25" marker-end="url(#d1-arrow)"></line>
+          <text class="fig-note" x="682" y="284" fill="currentColor" opacity="0.72">读</text>
+
+          <rect x="510" y="298" width="320" height="58" fill="var(--fig-box)" stroke="currentColor" stroke-width="1.25"></rect>
+          <text class="fig-label" x="670" y="321" text-anchor="middle" fill="currentColor">RenderScene (FScene)</text>
+          <text class="fig-note" x="670" y="341" text-anchor="middle" fill="currentColor" opacity="0.72">PrimitiveProxy · 无 Actor 指针</text>
+        </svg>
+      </div>
+      <figcaption>
+        <b>同一条线程边界，两种穿越方式。</b>左边那条引用无论怎么优化都过不去——对象不能跨线程。右边的 SAB 双缓冲坐在边界上，两侧各自读写自己那一份字节。右侧的硬约束是：<b>Render World 里不允许出现指向 Actor 的指针，只能有 id 和自己的数据副本。</b>
+        这条约束现在（单线程、还用着 Three.js）就能靠代码强制。
+      </figcaption>
+    </figure>
+
+    <div class="col">
+      <p>第 1 步落地成一个接口，现有 Three 代码原样搬进它的第一个实现：</p>
+    </div>
+    <pre><code>interface RenderScene {
+  createProxy(desc: PrimitiveDesc): ProxyId;
+  destroyProxy(id: ProxyId): void;
+  submitTransforms(soa: Float32Array): void;   // 不是 Object3D
+  submitView(view: ViewUniforms): void;
+  render(): void;
+}
+
+class ThreeRenderScene implements RenderScene { /* 现有代码搬进来 */ }</code></pre>
+    <div class="col">
+      <p>
+        做完这一步，Three.js 被关进一个盒子里，帧率不变、画面不变。而<strong>这个盒子的接口，和以后 C++ 渲染器的接口是同一个</strong>——这是整个迁移里回报最高的一步。
+      </p>
+    </div>
+  </section>
+
+  <section>
+    <h2>线程布局</h2>
+    <p class="kicker">网络跟着模拟走，物理跟着角色走</p>
+    <div class="col">
+      <p>
+        网络层不该独占一个线程。理由是那条紧耦合链：<em>快照到达 → 和解 → 回放未确认固定步</em>。
+        10 Hz 快照配 60 Hz 模拟，稳态每次回放约 6 个固定步，抖动时更多（上限 <code>MAXIMUM_PENDING_INPUT_STEPS = 120</code>）。这是个突发尖峰；把网络和模拟拆到两个线程只会凭空多一跳、还强制异步化。
+        <code>WebSocket</code> 在 Worker 里可用，整个搬进去即可。
+      </p>
+    </div>
+
+    <figure>
+      <div class="fig-scroll">
+        <svg viewBox="0 0 940 500" role="img" aria-label="线程布局图：房间进程通过 WebSocket 把快照送进 Sim Worker；主线程只做 DOM、UI 与输入采集，经 SAB 环形缓冲把输入送进 Sim Worker；Sim Worker 承载网络、UWorld、预测与和解，以 60Hz 固定步运行，并通过 transform SoA 双缓冲交给 Render Worker；物理在 Sim Worker 之下，角色查询同步、刚体推进可异步。">
+          <defs>
+            <marker id="d2-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="currentColor"></path>
+            </marker>
+          </defs>
+
+          <!-- 房间进程 -->
+          <rect x="352" y="14" width="260" height="54" fill="var(--fig-box)" stroke="currentColor" stroke-width="1.25"></rect>
+          <text class="fig-label" x="482" y="38" text-anchor="middle" fill="currentColor">房间进程 · Node fork</text>
+          <text class="fig-note" x="482" y="57" text-anchor="middle" fill="currentColor" opacity="0.72">20Hz tick · 10Hz 快照 · 权威</text>
+          <line x1="482" y1="68" x2="482" y2="116" stroke="currentColor" stroke-width="1.25" marker-end="url(#d2-arrow)"></line>
+          <text class="fig-note" x="494" y="96" fill="currentColor" opacity="0.72">WebSocket（在 worker 内）</text>
+
+          <!-- 主线程 -->
+          <rect x="24" y="118" width="200" height="172" fill="var(--fig-bg)" stroke="currentColor" stroke-width="1.25"></rect>
+          <text class="fig-title" x="124" y="144" text-anchor="middle" fill="currentColor" opacity="0.7">主线程</text>
+          <line x1="40" y1="156" x2="208" y2="156" stroke="currentColor" stroke-width="1" opacity="0.3"></line>
+          <text class="fig-note" x="124" y="180" text-anchor="middle" fill="currentColor">DOM / UI（src/ui/）</text>
+          <text class="fig-note" x="124" y="204" text-anchor="middle" fill="currentColor">输入采集 + tick 号</text>
+          <text class="fig-note" x="124" y="228" text-anchor="middle" fill="currentColor">canvas 一次性移交</text>
+          <text class="fig-note" x="124" y="266" text-anchor="middle" fill="currentColor" opacity="0.6">无模拟 · 无渲染</text>
+
+          <!-- Sim Worker -->
+          <rect x="352" y="118" width="260" height="202" fill="var(--fig-bg)" stroke="#f0a33c" stroke-width="1.75"></rect>
+          <text class="fig-title" x="482" y="144" text-anchor="middle" fill="currentColor" opacity="0.7">Sim Worker</text>
+          <line x1="368" y1="156" x2="596" y2="156" stroke="currentColor" stroke-width="1" opacity="0.3"></line>
+          <text class="fig-note" x="482" y="180" text-anchor="middle" fill="currentColor">GameTransport / 协议</text>
+          <text class="fig-note" x="482" y="204" text-anchor="middle" fill="currentColor">UWorld · Actor · Component</text>
+          <text class="fig-note" x="482" y="228" text-anchor="middle" fill="currentColor">预测 + PlayerReconciler</text>
+          <text class="fig-note" x="482" y="252" text-anchor="middle" fill="currentColor">角色控制器查询</text>
+          <text class="fig-note" x="482" y="292" text-anchor="middle" fill="#b9701a">60Hz 固定步 · 与 rAF 解耦</text>
+
+          <!-- Render Worker -->
+          <rect x="740" y="118" width="176" height="172" fill="var(--fig-bg)" stroke="currentColor" stroke-width="1.25"></rect>
+          <text class="fig-title" x="828" y="144" text-anchor="middle" fill="currentColor" opacity="0.7">Render Worker</text>
+          <line x1="756" y1="156" x2="900" y2="156" stroke="currentColor" stroke-width="1" opacity="0.3"></line>
+          <text class="fig-note" x="828" y="180" text-anchor="middle" fill="currentColor">FScene / Proxy</text>
+          <text class="fig-note" x="828" y="204" text-anchor="middle" fill="currentColor">OffscreenCanvas</text>
+          <text class="fig-note" x="828" y="228" text-anchor="middle" fill="currentColor">GL / WebGPU 命令</text>
+          <text class="fig-note" x="828" y="266" text-anchor="middle" fill="currentColor" opacity="0.6">显示器刷新率 · 插值</text>
+
+          <!-- 横向箭头 -->
+          <line x1="224" y1="206" x2="350" y2="206" stroke="currentColor" stroke-width="1.5" marker-end="url(#d2-arrow)"></line>
+          <text class="fig-note" x="287" y="196" text-anchor="middle" fill="currentColor" opacity="0.78">输入 SAB 环</text>
+          <line x1="612" y1="206" x2="738" y2="206" stroke="currentColor" stroke-width="1.5" marker-end="url(#d2-arrow)"></line>
+          <text class="fig-note" x="675" y="196" text-anchor="middle" fill="currentColor" opacity="0.78">transform SoA</text>
+
+          <!-- 物理 -->
+          <rect x="352" y="398" width="260" height="76" fill="var(--fig-box)" stroke="currentColor" stroke-width="1.25"></rect>
+          <text class="fig-label" x="482" y="424" text-anchor="middle" fill="currentColor">PhysicsWorld · Rust / Rapier</text>
+          <text class="fig-note" x="482" y="445" text-anchor="middle" fill="currentColor" opacity="0.72">与服务端同一份 .wasm</text>
+
+          <line x1="428" y1="320" x2="428" y2="396" stroke="currentColor" stroke-width="1.25" marker-end="url(#d2-arrow)"></line>
+          <line x1="536" y1="396" x2="536" y2="322" stroke="currentColor" stroke-width="1.25" marker-end="url(#d2-arrow)"></line>
+          <text class="fig-note" x="418" y="362" text-anchor="end" fill="currentColor" opacity="0.78">角色查询 · 同步</text>
+          <text class="fig-note" x="546" y="362" fill="currentColor" opacity="0.78">刚体推进 · 可异步</text>
+        </svg>
+      </div>
+      <figcaption>
+        <b>网络与模拟同处一个 worker，物理挂在它下面。</b>
+        角色控制器必须与输入处理同步——它在预测的关键路径上，不能差一帧；刚体推进（船、掉落物、蘑菇）才可以异步。附带收益：模拟一旦脱离渲染帧，<code>MAXIMUM_SIMULATION_CATCH_UP_STEPS = 5</code>
+        这个"切后台标签会积压"的补丁可以删掉，而渲染线程能在两帧模拟之间插值——
+        <b>144Hz 屏幕上跑出 144Hz 画面，模拟仍是 60Hz 固定步。</b>
+      </figcaption>
+    </figure>
+  </section>
+
+  <section>
+    <h2>物理层：不要动它</h2>
+    <p class="kicker">这一层决定 C++ 核心要不要上服务端</p>
+    <div class="col">
+      <p>
+        <code>shared/physics/PhysicsWorld.mjs</code> 这一个文件，浏览器和房间进程<strong>都在跑</strong>
+        （<code>createLineArtScene.ts:32</code> 与 <code>ServerScene.mjs:137</code>）。玩家移动走 Rapier 的 <code>computeColliderMovement</code>，客户端预测和服务端权威调的是同一个函数。
+      </p>
+      <p>
+        和解容差 <code>RECONCILE_TOLERANCE = 0.06</code> 米——这 6 厘米是靠"两端是同一份 WASM 二进制"撑住的。
+        WASM 的浮点是严格 IEEE-754：没有 x87 80 位中间精度、没有 FMA 收缩、没有编译器重排，
+        <strong>同一个 <code>.wasm</code> 在任何机器上逐位一致</strong>。这比"C++ 分别为客户端和服务端编译两次"强得多。
+      </p>
+    </div>
+
+    <figure>
+      <div class="fig-scroll">
+        <svg viewBox="0 0 880 336" role="img" aria-label="双端一致性图：浏览器 Sim Worker 与房间进程各自运行预测和权威模拟，但两者引用的是同一份 Rapier wasm，因此和解容差只需 6 厘米；换掉任一端的物理引擎会击穿这个容差。">
+          <defs>
+            <marker id="d3-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="currentColor"></path>
+            </marker>
+          </defs>
+
+          <rect x="30" y="48" width="290" height="104" fill="var(--fig-bg)" stroke="currentColor" stroke-width="1.25"></rect>
+          <text class="fig-title" x="175" y="74" text-anchor="middle" fill="currentColor" opacity="0.7">浏览器 · Sim Worker</text>
+          <text class="fig-note" x="175" y="103" text-anchor="middle" fill="currentColor">预测 60Hz 固定步</text>
+          <text class="fig-note" x="175" y="127" text-anchor="middle" fill="currentColor">rewindAndReplay 未确认步</text>
+
+          <rect x="560" y="48" width="290" height="104" fill="var(--fig-bg)" stroke="currentColor" stroke-width="1.25"></rect>
+          <text class="fig-title" x="705" y="74" text-anchor="middle" fill="currentColor" opacity="0.7">房间进程 · Node fork</text>
+          <text class="fig-note" x="705" y="103" text-anchor="middle" fill="currentColor">权威 20Hz tick</text>
+          <text class="fig-note" x="705" y="127" text-anchor="middle" fill="currentColor">ServerScene.mjs:137</text>
+
+          <line x1="322" y1="86" x2="556" y2="86" stroke="currentColor" stroke-width="1.25" marker-end="url(#d3-arrow)"></line>
+          <text class="fig-note" x="439" y="76" text-anchor="middle" fill="currentColor" opacity="0.78">输入 + tick 号</text>
+          <line x1="558" y1="122" x2="324" y2="122" stroke="currentColor" stroke-width="1.25" marker-end="url(#d3-arrow)"></line>
+          <text class="fig-note" x="439" y="142" text-anchor="middle" fill="currentColor" opacity="0.78">快照 10Hz · 容差 0.06m</text>
+
+          <line x1="175" y1="152" x2="322" y2="206" stroke="currentColor" stroke-width="1.25" stroke-dasharray="5 4"></line>
+          <line x1="705" y1="152" x2="558" y2="206" stroke="currentColor" stroke-width="1.25" stroke-dasharray="5 4"></line>
+
+          <rect x="290" y="208" width="300" height="70" fill="var(--fig-box)" stroke="#f0a33c" stroke-width="1.75"></rect>
+          <text class="fig-label" x="440" y="234" text-anchor="middle" fill="currentColor">同一份 Rapier .wasm</text>
+          <text class="fig-note" x="440" y="256" text-anchor="middle" fill="currentColor" opacity="0.72">shared/physics/PhysicsWorld.mjs</text>
+
+          <text class="fig-note" x="440" y="306" text-anchor="middle" fill="#b9701a">换掉任一端 → 6cm 容差击穿 → 2.5m 瞬移频繁触发</text>
+        </svg>
+      </div>
+      <figcaption>
+        <b>6 厘米容差的来源是这个共享的三角形，不是算法调参。</b>
+        在客户端换成 Jolt、服务端仍是 Rapier，结果不是"精度下降"，而是
+        <code>RECONCILE_SNAP_DISTANCE = 2.5</code> 频繁触发——肉眼可见的橡皮筋。要么两边同时换（一次提交内），要么不换。
+      </figcaption>
+    </figure>
+
+    <div class="callout">
+      <p class="callout-head">建议</p>
+      <p>
+        把物理明确划给 <strong>Rust 一侧，保留 Rapier</strong>。真正需要 C++ 的是渲染器（GL/WebGPU 状态机、命令缓冲、job system），物理不在这个列表里。换 Jolt 能买到多线程 island 求解和为回滚设计的 <code>SaveState</code>，但代价是赔上"客户端服务端同一份模拟"这个最大的资产。
+      </p>
+      <p>
+        这个决定顺带把范围收缩了：<strong>C++ 核心可以只做渲染器，不必上服务端</strong>——
+        因为需要双端一致的那部分（物理 + gameplay）根本没进 C++。它也让 Rust 与 C++ 不必链进同一个 WASM 模块（那件事很痛），两者本来就是两个模块，只交换数据。
+      </p>
+    </div>
+
+    <h3>两个已知的坑</h3>
+    <ul class="plain">
+      <li>
+        <strong>惰性 step 有语义。</strong><code>PhysicsWorld.step()</code> 是查询驱动的（<code>prepareQueries()</code>），代码里留着一句
+        <code>do not remove this apparently empty tick</code>。这种"空 step 其实有意义"的地方最容易在迁移时出事，先补测试钉住。
+      </li>
+      <li>
+        <strong>两套碰撞并存。</strong><code>shared/collision/</code> 那张均匀网格还在服务非玩家 Actor 的推出与交互宽相。自研之前先合并成一套，否则会把技术债原样搬进新引擎。
+      </li>
+      <li>
+        <strong>SAB 上的堆会失效。</strong>Emscripten 开 pthreads 后 WASM heap 是 SharedArrayBuffer，堆增长会让 JS 侧所有 <code>Float32Array</code> 视图失效。必须封装成"每次访问重新取视图"，否则是只在内存增长时复现的随机 bug——这条约定要写进第 1 步的接口。
+      </li>
+    </ul>
+  </section>
+
+  <section>
+    <h2>网络层：现状比预期的好</h2>
+    <p class="kicker">传输层不用动，协议先别急着换</p>
+    <div class="col">
+      <p>
+        <code>src/network/transport/GameTransport.ts</code> 已经按
+        <code>'reliable-ordered' | 'unreliable-sequenced'</code> 双通道抽象好了——
+        这是照着 WebTransport / UDP 画的接口，<code>WebSocketTransport</code> 只是当前的一个实现。这一层直接能用。
+      </p>
+      <p>
+        线协议现在是 <code>JSON.stringify</code>／<code>JSON.parse</code>。直觉上该换二进制，但建议<strong>先测再换</strong>：10 Hz 快照加上已有的 AOI／dormant 机制已经把 Actor 数量限住了，JSON 未必是瓶颈。
+      </p>
+      <p>
+        真要换的时候，让它和 SAB 决策绑在一起——快照直接解码进 SAB 上的 SoA 布局，模拟 worker 写、渲染 worker 读，零拷贝。
+        <strong>二进制协议和多线程是同一次改动的两个面</strong>，分开做等于做两遍。
+      </p>
+    </div>
+
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th style="width: 34%">同步节奏（现状）</th><th style="width: 18%" class="num">值</th><th>迁移后的变化</th></tr>
+        </thead>
+        <tbody>
+          <tr><td class="lead">服务端 tick</td><td class="num mono">20 Hz</td><td>不变</td></tr>
+          <tr><td class="lead">快照广播</td><td class="num mono">10 Hz</td><td>不变；解码目标改为 SAB 上的 SoA</td></tr>
+          <tr><td class="lead">预测固定步</td><td class="num mono">1/60 s</td><td>不变，但脱离 rAF，由 Sim Worker 自己驱动</td></tr>
+          <tr><td class="lead">远端插值回退</td><td class="num mono">120 ms</td><td>插值移到渲染线程，按显示器刷新率求值</td></tr>
+          <tr><td class="lead">单帧补跑上限</td><td class="num mono">5 步</td><td><strong>可删除</strong>——这个常量只是"模拟被绑在渲染帧上"的补丁</td></tr>
+          <tr><td class="lead">和解容差 / 瞬移</td><td class="num mono">0.06 / 2.5 m</td><td>不变——前提是物理不换（见上一节）</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section>
+    <h2>分层架构</h2>
+    <p class="kicker">层是依赖方向，线程是执行边界，两者正交</p>
+    <div class="col">
+      <p>
+        初步分层是 ToolLayer / FunctionLayer / ResourceLayer / CoreLayer / PlatformLayer。骨架成立，下面是四处修改，以及一个必须先回答的前提问题。
+      </p>
+      <p>
+        <strong>最主要的意见：竖着的层表达不了线程模型</strong>，而线程恰好是这个项目最难的部分。UE 也是两个轴——层是竖切的（Core / Engine / Game），线程边界是横切的（Game / Render / RHI thread）。具体后果是：前面那条 <code>RenderProxy</code> + SAB 双缓冲，<strong>它是 SceneLayer 内部的一条线，不是层与层之间的边界</strong>。按层边界去实现它，会得到一个错误的抽象——Render World 被下沉进 CoreLayer，然后它就需要知道 Actor 是什么。
+      </p>
+    </div>
+
+    <figure>
+      <div class="fig-scroll">
+        <svg viewBox="0 0 940 462" role="img" aria-label="层与线程的双轴矩阵：纵向是六层（ToolLayer、新增的 SceneLayer、FunctionLayer、ResourceLayer、CoreLayer、PlatformLayer），横向是三个线程（主线程、Sim Worker、Render Worker）。层边界是横线，代表依赖方向，可以是接口调用；线程边界是竖的虚线，只能传数据。RenderProxy 的 SAB 边界位于 SceneLayer 这一行内部，是线程边界而非层边界。">
+          <!-- 表头 -->
+          <text class="fig-title" x="16" y="26" fill="currentColor" opacity="0.55">层 ↓</text>
+          <text class="fig-title" x="325" y="26" text-anchor="middle" fill="currentColor" opacity="0.7">主线程</text>
+          <text class="fig-title" x="565" y="26" text-anchor="middle" fill="currentColor" opacity="0.7">Sim Worker</text>
+          <text class="fig-title" x="805" y="26" text-anchor="middle" fill="currentColor" opacity="0.7">Render Worker</text>
+
+          <!-- PlatformLayer 连续基带（先画，后面的虚线压在它上面） -->
+          <rect x="216" y="311" width="698" height="38" fill="var(--fig-box)" stroke="currentColor" stroke-width="1.25"></rect>
+          <text class="fig-label" x="565" y="335" text-anchor="middle" fill="currentColor">线程 · 图形 · 音频 · 文件 · 网络 · 时钟</text>
+
+          <!-- 各层单元格 -->
+          <rect x="216" y="51" width="218" height="38" fill="var(--fig-box)" stroke="currentColor" stroke-width="1.25"></rect>
+          <text class="fig-note" x="325" y="75" text-anchor="middle" fill="currentColor">编辑器 · DOM / Web</text>
+
+          <rect x="456" y="103" width="218" height="38" fill="var(--fig-box)" stroke="currentColor" stroke-width="1.25"></rect>
+          <text class="fig-note" x="565" y="127" text-anchor="middle" fill="currentColor">Game World · Physics</text>
+          <rect x="696" y="103" width="218" height="38" fill="var(--fig-box)" stroke="currentColor" stroke-width="1.25"></rect>
+          <text class="fig-note" x="805" y="127" text-anchor="middle" fill="currentColor">Render World</text>
+
+          <rect x="456" y="155" width="218" height="38" fill="var(--fig-box)" stroke="currentColor" stroke-width="1.25"></rect>
+          <text class="fig-note" x="565" y="179" text-anchor="middle" fill="currentColor">网络复制 · Ability</text>
+          <rect x="696" y="155" width="218" height="38" fill="var(--fig-box)" stroke="currentColor" stroke-width="1.25"></rect>
+          <text class="fig-note" x="805" y="179" text-anchor="middle" fill="currentColor">动画 · 粒子表现</text>
+
+          <rect x="456" y="207" width="218" height="38" fill="var(--fig-box)" stroke="currentColor" stroke-width="1.25"></rect>
+          <text class="fig-note" x="565" y="231" text-anchor="middle" fill="currentColor">加载 · 流送</text>
+          <rect x="696" y="207" width="218" height="38" fill="var(--fig-box)" stroke="currentColor" stroke-width="1.25"></rect>
+          <text class="fig-note" x="805" y="231" text-anchor="middle" fill="currentColor">GPU 上传</text>
+
+          <rect x="216" y="259" width="218" height="38" fill="var(--fig-box)" stroke="currentColor" stroke-width="1.25"></rect>
+          <text class="fig-note" x="325" y="283" text-anchor="middle" fill="currentColor">事件 · 输入</text>
+          <rect x="456" y="259" width="218" height="38" fill="var(--fig-box)" stroke="currentColor" stroke-width="1.25"></rect>
+          <text class="fig-note" x="565" y="283" text-anchor="middle" fill="currentColor">容器 · 数学 · Job</text>
+          <rect x="696" y="259" width="218" height="38" fill="var(--fig-box)" stroke="currentColor" stroke-width="1.25"></rect>
+          <text class="fig-note" x="805" y="283" text-anchor="middle" fill="currentColor">RHI · 命令缓冲</text>
+
+          <!-- 层边界（横线） -->
+          <line x1="16" y1="44" x2="920" y2="44" stroke="currentColor" stroke-width="1.25" opacity="0.75"></line>
+          <line x1="16" y1="96" x2="920" y2="96" stroke="currentColor" stroke-width="1.25" opacity="0.75"></line>
+          <line x1="16" y1="148" x2="920" y2="148" stroke="currentColor" stroke-width="1.25" opacity="0.75"></line>
+          <line x1="16" y1="200" x2="920" y2="200" stroke="currentColor" stroke-width="1.25" opacity="0.75"></line>
+          <line x1="16" y1="252" x2="920" y2="252" stroke="currentColor" stroke-width="1.25" opacity="0.75"></line>
+          <line x1="16" y1="304" x2="920" y2="304" stroke="currentColor" stroke-width="1.25" opacity="0.75"></line>
+          <line x1="16" y1="356" x2="920" y2="356" stroke="currentColor" stroke-width="1.25" opacity="0.75"></line>
+
+          <!-- 线程边界（竖虚线） -->
+          <line x1="445" y1="44" x2="445" y2="356" stroke="currentColor" stroke-width="1.25" stroke-dasharray="6 5" opacity="0.6"></line>
+          <line x1="685" y1="44" x2="685" y2="356" stroke="currentColor" stroke-width="1.25" stroke-dasharray="6 5" opacity="0.6"></line>
+
+          <!-- RenderProxy：SceneLayer 行内部、Game World 与 Render World 之间的那一段 -->
+          <line x1="685" y1="96" x2="685" y2="148" stroke="#f0a33c" stroke-width="3"></line>
+          <line x1="685" y1="84" x2="685" y2="96" stroke="#f0a33c" stroke-width="1.25"></line>
+          <text class="fig-label" x="693" y="78" fill="#b9701a">RenderProxy · SAB</text>
+
+          <!-- 层名 -->
+          <text class="fig-label" x="196" y="75" text-anchor="end" fill="currentColor">ToolLayer</text>
+          <text class="fig-label" x="196" y="127" text-anchor="end" fill="#b9701a">SceneLayer ★</text>
+          <text class="fig-label" x="196" y="179" text-anchor="end" fill="currentColor">FunctionLayer</text>
+          <text class="fig-label" x="196" y="231" text-anchor="end" fill="currentColor">ResourceLayer</text>
+          <text class="fig-label" x="196" y="283" text-anchor="end" fill="currentColor">CoreLayer</text>
+          <text class="fig-label" x="196" y="335" text-anchor="end" fill="currentColor">PlatformLayer</text>
+
+          <!-- 图例 -->
+          <line x1="16" y1="392" x2="46" y2="392" stroke="currentColor" stroke-width="1.25"></line>
+          <text class="fig-note" x="54" y="396" fill="currentColor" opacity="0.8">层边界 · 依赖方向 · 可以是接口调用</text>
+          <line x1="16" y1="418" x2="46" y2="418" stroke="currentColor" stroke-width="1.25" stroke-dasharray="6 5"></line>
+          <text class="fig-note" x="54" y="422" fill="currentColor" opacity="0.8">线程边界 · 执行边界 · 只能是数据</text>
+          <line x1="16" y1="444" x2="46" y2="444" stroke="#f0a33c" stroke-width="3"></line>
+          <text class="fig-note" x="54" y="448" fill="#b9701a">RenderProxy 是 SceneLayer 内部的线程边界，不是层边界</text>
+        </svg>
+      </div>
+      <figcaption>
+        <b>同一份代码要同时落在两个轴上。</b>横线是层边界，跨过它可以是接口调用；竖虚线是线程边界，跨过它只能是数据。
+        新增的 <b>SceneLayer</b> 是原方案里缺的那一层——Game World / Render World / Physics World 在原来的五层里没有家，塞进 FunctionLayer 会很快失控。
+        <b>PlatformLayer 是一条连续基带</b>：它在每个线程上都存在，提供同一套 API。
+      </figcaption>
+    </figure>
+
+    <h3>四处修改</h3>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th style="width: 24%">修改</th><th style="width: 30%">原方案</th><th>之后</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="lead">新增 SceneLayer</td>
+            <td>UWorld / FScene / PhysicsWorld 无归属</td>
+            <td>插在 Function 与 Tool 之间。三个 World 有了家，<code>RenderProxy</code> 边界明确为它的内部实现。</td>
+          </tr>
+          <tr>
+            <td class="lead">Web 降级为后端</td>
+            <td>Web 是特殊情况，靠"特化浏览器核心"抹平</td>
+            <td>Web 只是 PlatformLayer 的一个后端。<strong>CoreLayer 不需要"是一个浏览器"，只需要能移植到 PlatformLayer 之上。</strong></td>
+          </tr>
+          <tr>
+            <td class="lead">CoreLayer 砍掉 DOM</td>
+            <td>自研 DOM + WebGL + WebAudio</td>
+            <td>拆成三块分别决策：JS/TS 运行时（价值最高）、图形 RHI、音频。DOM 砍掉或外包给 CEF / Ultralight / Servo。</td>
+          </tr>
+          <tr>
+            <td class="lead">ResourceLayer 按现状定形</td>
+            <td>图片 / 模型 / 骨骼模型</td>
+            <td>现状是<strong>零资产加载</strong>。先定形为程序化模板 + WASM 模块 + 场景/Actor JSON 三类；骨骼与贴图留接口不实现。</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3>为什么 DOM 该砍掉</h3>
+    <div class="col">
+      <p>
+        现状核实：<code>src/ui/</code> 12 个文件里 8 个用 <code>document.createElement</code>，UI 完全是 DOM + CSS。所以"要 DOM"的直觉有来源，但要区分两种理由：
+      </p>
+      <ul class="plain">
+        <li><strong>因为 UI 是用 HTML/CSS 写的</strong> → 为了跑自己控制的 UI 而去实现一个浏览器，方向反了。</li>
+        <li><strong>因为要 web 部署</strong> → 那本来就有真浏览器，不需要自己写。</li>
+      </ul>
+      <p>
+        DOM + CSS 布局 + 层叠 + 文本排版是三个巨型子系统，做出来只是为了渲染自己写的几个面板。两条更划算的路：<strong>游戏运行时根本不要 DOM</strong>（HUD 用自己的渲染器画——项目里已有 <code>IconSprite</code>、3D 交互标记、温度标记这些自绘先例），<strong>编辑器留在真浏览器里</strong>（作为 web app 通过 socket 连运行时，顺带让编辑器和运行时的迭代解耦）。
+      </p>
+    </div>
+
+    <h3>PlatformLayer 的后端映射</h3>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th style="width: 26%">能力</th><th style="width: 37%">Web 后端</th><th>Native 后端</th></tr>
+        </thead>
+        <tbody>
+          <tr><td class="lead">线程</td><td class="mono">Worker + SharedArrayBuffer</td><td class="mono">std::thread</td></tr>
+          <tr><td class="lead">图形</td><td class="mono">WebGL2 / WebGPU</td><td class="mono">GL / Vulkan / Metal</td></tr>
+          <tr><td class="lead">音频</td><td class="mono">WebAudio</td><td class="mono">WASAPI / CoreAudio / OpenSL</td></tr>
+          <tr><td class="lead">文件</td><td class="mono">fetch / OPFS</td><td class="mono">mmap / fopen</td></tr>
+          <tr><td class="lead">网络</td><td class="mono">WebSocket / WebTransport</td><td class="mono">TCP / UDP</td></tr>
+          <tr><td class="lead">时钟</td><td class="mono">performance.now</td><td class="mono">QPC / mach_absolute_time</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="col">
+      <p style="margin-top: 20px">
+        实践建议：<strong>Web 后端先行</strong>。它的约束最紧（见前面三条真约束），而 native 是放松约束、不是新增约束。反过来先做 native 再适配 Web，一定会漏。
+      </p>
+    </div>
+
+    <div class="callout">
+      <p class="callout-head">ToolLayer 的地基比预期好</p>
+      <p>
+        <code>config/</code> 里 23 个 Actor 原型 + 6 张地图<strong>全是 JSON，并且都带 <code>.schema.json</code></strong>，加上已有的 <code>TerrainEditorPanel</code> 与 <code>DebugMenuPage</code>，编辑器地基是现成的。
+      </p>
+      <p>
+        关键设计取向：<strong>编辑器编辑的是那些 JSON，不是运行时对象。</strong>这样编辑器与运行时之间只有一份 schema 契约，不需要反射系统，也不需要运行时暴露内部结构——对小团队是巨大的省力。
+      </p>
+    </div>
+
+    <h3>层与路线图的对应</h3>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th style="width: 36%">层</th><th style="width: 24%">对应路线图</th><th>能否并行</th></tr>
+        </thead>
+        <tbody>
+          <tr><td class="lead">PlatformLayer 线程抽象</td><td class="mono">第 0、2 步</td><td><strong>关键路径</strong></td></tr>
+          <tr><td class="lead">SceneLayer 的 Render 边界</td><td class="mono">第 1 步</td><td><strong>关键路径</strong>，回报最高</td></tr>
+          <tr><td class="lead">CoreLayer · RHI / 3D world</td><td class="mono">第 4 步</td><td>可无限期推迟</td></tr>
+          <tr><td class="lead">CoreLayer · JS 运行时</td><td class="mono">路线图外</td><td>独立项目</td></tr>
+          <tr><td class="lead">ResourceLayer 烘焙格式</td><td class="mono">第 4 步的前置</td><td>可并行，不阻塞 0／1／2</td></tr>
+          <tr><td class="lead">CoreLayer · 资源所有权表</td><td class="mono">第 4 步的前置</td><td>可并行，现在就能开</td></tr>
+          <tr><td class="lead">ToolLayer</td><td class="mono">路线图外</td><td>可并行，现在就能开</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="col">
+      <p style="margin-top: 20px">
+        关键路径其实只有两件事：<strong>PlatformLayer 的线程抽象</strong>和 <strong>SceneLayer 的 Render 边界</strong>。其余都可以挪后或并行。
+      </p>
+    </div>
+  </section>
+
+  <section>
+    <h2>ResourceLayer 与资源生命周期</h2>
+    <p class="kicker">两件事：数据长什么样，以及谁负责释放它</p>
+    <div class="col">
+      <p>
+        这一层有两个独立的问题，容易被混成一个"资产系统"去立项。分开看，结论差别很大：<strong>格式的理由是解耦（而不是性能），所有权的理由是现在就有一个真实缺陷。</strong>两者都必须在路线图第 4 步之前完成，且都不阻塞第 0 / 1 / 2 步。
+      </p>
+    </div>
+
+    <h3>一 · 要设计的是烘焙产物格式，不是导入格式</h3>
+    <div class="col">
+      <p>
+        仓库里<strong>零资产可导入</strong>，所以"图片 / 模型 / 骨骼的导入管线"是在为不存在的内容建设施。但有一个真实的、资产形状的问题：<strong>每次加载场景、每次 spawn Actor，都在运行时重算一遍完全确定性的几何体。</strong>
+      </p>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th style="width: 30%">耦合点</th><th>后果</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="lead">几何定义绑在 Three.js 上<br><span class="mono" style="font-size:12px">chunkTemplates.ts:114</span></td>
+            <td><code>createTemplateFromObject</code> 的输入类型就是 <code>THREE.Mesh</code> / <code>THREE.LineSegments</code>。<strong>只要几何还是"运行时用 Three 算出来的"，第 4 步就换不掉 Three。</strong>这是这件事最主要的理由。</td>
+          </tr>
+          <tr>
+            <td class="lead">每个 Actor spawn 重算<br><span class="mono" style="font-size:12px">ClientActorSystem.ts:742</span></td>
+            <td><code>createActorVisualModel(...)</code> 逐 Actor 调用，每次新建几何并跑一次 <code>EdgesGeometry</code>（拓扑边提取）。只有物品堆走了 <code>HighCountActorBatchSystem</code> 的共享批次。</td>
+          </tr>
+          <tr>
+            <td class="lead">配色被烘进顶点流<br><span class="mono" style="font-size:12px">TEMPLATE_FILL_STRIDE = 9</span></td>
+            <td>颜色逐顶点写死，模板<strong>无法跨配色复用</strong>——同一棵树在 <code>grassland</code> 与 <code>open-world</code> 得各烘一遍。</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="col">
+      <p style="margin-top: 22px">
+        <strong>格式设计里唯一真正的结构决定：把 color 拆出去。</strong>这一条要在写第一版之前定好，之后再改就要重烘全部产物。
+      </p>
+    </div>
+    <pre><code>现在   stride 9   [ px py pz │ nx ny nz │ r  g  b ]     每套配色烘一份
+
+建议   stride 6   [ px py pz │ nx ny nz ]                几何全局烘一次
+       + u8       [ paletteIndex ]                       每顶点 1 字节
+       + 每场景一张 16 色查色表                            配色 = 上传时查表</code></pre>
+
+    <div class="col">
+      <p>
+        容器本身不要 glTF、不要 FBX、不要自定义 IFF。<strong>判断格式成不成功只有一条标准：运行时能不能直接当 typed array 视图用。</strong>
+      </p>
+    </div>
+    <pre><code>header   { magic, version, contentHash, templateCount }
+index[]  { kind, fillOffset, fillCount, lineOffset, lineCount }
+blob       交错顶点块（position+normal 一段，paletteIndex 另一段）
+
+运行时     fetch → new Float32Array(buffer, fillOffset, fillCount)
+           零解析 · 零拷贝 · 零对象分配</code></pre>
+
+    <div class="col">
+      <p>
+        生成方式沿用项目已有的两个 bake 步骤——<code>build:abilities</code>（esbuild 产 <code>.mjs</code>）和 <code>build:wasm</code>（cargo 产 <code>.wasm</code>，<strong>产物签入仓库</strong>）。加一个 <code>build:assets</code>，不引入新的工具链概念。
+      </p>
+    </div>
+
+    <div class="callout">
+      <p class="callout-head">必须带 contentHash——这是现在就缺的防线</p>
+      <p>
+        <code>chunkgen.wasm</code> 现在签入仓库、改了 Rust 才手动 rebuild，<strong>忘了 rebuild 没有任何防线</strong>。烘焙几何会把这个问题放大：改了 <code>tree.ts</code> 忘了重烘，画面静默用旧模型。
+      </p>
+      <p>
+        运行时校验哈希，不匹配就<strong>降级回运行时生成并告警</strong>。这同时给出一条平滑迁移路径——烘焙产物可以从"可选加速"开始，而不是一上来就是唯一路径。
+      </p>
+    </div>
+
+    <div class="col">
+      <p>
+        <strong>什么时候不该做：</strong>如果只图性能，现在不值当——chunk 模板只有 5 个（tree / grass / rock / mushroom / ground），构建成本是毫秒级。Actor 那条成本更真实，但也该先在 <code>createChunkTemplates</code> 与 <code>createActorVisualModel</code> 前后打点拿到数字。<strong>按性能立项会发现收益不够；按解耦立项它是第 4 步的必要前置。</strong>
+      </p>
+    </div>
+
+    <h3>二 · 所有权表：现在已经有三套规则，互相不一致</h3>
+    <div class="col">
+      <p>
+        全仓 <code>.dispose()</code> 出现 <strong>143 次，散在 56 个文件</strong>。释放逻辑被写成了三套各自为政的手写约定，其中第三套和前两套的哲学直接冲突。
+      </p>
+    </div>
+
+    <figure>
+      <div class="fig-scroll">
+        <svg viewBox="0 0 900 336" role="img" aria-label="对比图：现在三个释放路径各自直接 dispose 共享的模块级单例材质，换场景时它被无差别释放；引入 AssetOwner 引用计数表之后，三个调用方都只调 release，引用计数归零才真正销毁资源。">
+          <defs>
+            <marker id="d5-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="currentColor"></path>
+            </marker>
+            <marker id="d5-arrow-amber" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="#f0a33c"></path>
+            </marker>
+          </defs>
+
+          <text class="fig-title" x="230" y="22" text-anchor="middle" fill="currentColor" opacity="0.7">现在</text>
+          <text class="fig-title" x="670" y="22" text-anchor="middle" fill="currentColor" opacity="0.7">所有权表之后</text>
+          <line x1="450" y1="34" x2="450" y2="300" stroke="currentColor" stroke-width="1" opacity="0.22"></line>
+
+          <!-- 左：三个调用方 -->
+          <rect x="30" y="42" width="124" height="46" fill="var(--fig-box)" stroke="#f0a33c" stroke-width="1.5"></rect>
+          <text class="fig-note" x="92" y="62" text-anchor="middle" fill="currentColor">disposeScene</text>
+          <text class="fig-note" x="92" y="79" text-anchor="middle" fill="#b9701a">无差别遍历</text>
+
+          <rect x="168" y="42" width="124" height="46" fill="var(--fig-box)" stroke="currentColor" stroke-width="1.25"></rect>
+          <text class="fig-note" x="230" y="62" text-anchor="middle" fill="currentColor">ChunkView</text>
+          <text class="fig-note" x="230" y="79" text-anchor="middle" fill="currentColor" opacity="0.7">注释避让</text>
+
+          <rect x="306" y="42" width="124" height="46" fill="var(--fig-box)" stroke="currentColor" stroke-width="1.25"></rect>
+          <text class="fig-note" x="368" y="62" text-anchor="middle" fill="currentColor">disposeObject</text>
+          <text class="fig-note" x="368" y="79" text-anchor="middle" fill="currentColor" opacity="0.7">marker 剪枝</text>
+
+          <line x1="92" y1="88" x2="164" y2="206" stroke="#f0a33c" stroke-width="1.75" marker-end="url(#d5-arrow-amber)"></line>
+          <line x1="230" y1="88" x2="230" y2="206" stroke="currentColor" stroke-width="1.25" marker-end="url(#d5-arrow)"></line>
+          <line x1="368" y1="88" x2="296" y2="206" stroke="currentColor" stroke-width="1.25" marker-end="url(#d5-arrow)"></line>
+
+          <rect x="110" y="208" width="240" height="54" fill="var(--fig-box)" stroke="currentColor" stroke-width="1.25"></rect>
+          <text class="fig-label" x="230" y="230" text-anchor="middle" fill="currentColor">OUTLINE_MATERIAL</text>
+          <text class="fig-note" x="230" y="250" text-anchor="middle" fill="currentColor" opacity="0.72">模块级单例</text>
+          <text class="fig-note" x="230" y="286" text-anchor="middle" fill="#b9701a">换场景即被 dispose</text>
+
+          <!-- 右：三个调用方 → AssetOwner -->
+          <rect x="470" y="42" width="124" height="46" fill="var(--fig-box)" stroke="currentColor" stroke-width="1.25"></rect>
+          <text class="fig-note" x="532" y="62" text-anchor="middle" fill="currentColor">disposeScene</text>
+          <text class="fig-note" x="532" y="79" text-anchor="middle" fill="currentColor" opacity="0.7">release()</text>
+
+          <rect x="608" y="42" width="124" height="46" fill="var(--fig-box)" stroke="currentColor" stroke-width="1.25"></rect>
+          <text class="fig-note" x="670" y="62" text-anchor="middle" fill="currentColor">ChunkView</text>
+          <text class="fig-note" x="670" y="79" text-anchor="middle" fill="currentColor" opacity="0.7">release()</text>
+
+          <rect x="746" y="42" width="124" height="46" fill="var(--fig-box)" stroke="currentColor" stroke-width="1.25"></rect>
+          <text class="fig-note" x="808" y="62" text-anchor="middle" fill="currentColor">disposeObject</text>
+          <text class="fig-note" x="808" y="79" text-anchor="middle" fill="currentColor" opacity="0.7">release()</text>
+
+          <line x1="532" y1="88" x2="606" y2="132" stroke="currentColor" stroke-width="1.25" marker-end="url(#d5-arrow)"></line>
+          <line x1="670" y1="88" x2="670" y2="132" stroke="currentColor" stroke-width="1.25" marker-end="url(#d5-arrow)"></line>
+          <line x1="808" y1="88" x2="734" y2="132" stroke="currentColor" stroke-width="1.25" marker-end="url(#d5-arrow)"></line>
+
+          <rect x="548" y="134" width="244" height="48" fill="var(--fig-bg)" stroke="#f0a33c" stroke-width="1.75"></rect>
+          <text class="fig-label" x="670" y="154" text-anchor="middle" fill="currentColor">AssetOwner</text>
+          <text class="fig-note" x="670" y="172" text-anchor="middle" fill="currentColor" opacity="0.72">refcount 3 → 2 → 1 → 0</text>
+
+          <line x1="670" y1="182" x2="670" y2="206" stroke="currentColor" stroke-width="1.25" marker-end="url(#d5-arrow)"></line>
+
+          <rect x="550" y="208" width="240" height="54" fill="var(--fig-box)" stroke="currentColor" stroke-width="1.25"></rect>
+          <text class="fig-label" x="670" y="230" text-anchor="middle" fill="currentColor">OUTLINE_MATERIAL</text>
+          <text class="fig-note" x="670" y="250" text-anchor="middle" fill="currentColor" opacity="0.72">归零才 destroy</text>
+          <text class="fig-note" x="670" y="286" text-anchor="middle" fill="currentColor" opacity="0.8">谁 acquire 谁 release</text>
+        </svg>
+      </div>
+      <figcaption>
+        <b>一个机制换掉三处手写特例，外加一个实际缺陷。</b>
+        <code>OUTLINE_MATERIAL</code> 与 <code>GROUND_GRID_MATERIAL</code> 是模块级单例，几乎每个物体的轮廓线都指向同一个实例；而 <code>replaceScene</code> 每次换地图都会遍历整棵场景树无差别 dispose，把这个进程级单例一起释放掉。
+        现在没炸，是因为 Three 会在下次使用时重建 program 与 VBO——所以它表现为<b>换场景后的一次着色器重编译毛刺</b>，不是崩溃。
+      </figcaption>
+    </figure>
+
+    <div class="callout">
+      <p class="callout-head">为什么它必须排在第 4 步之前</p>
+      <p>
+        自研渲染器自己管 GL 对象之后，<strong>没有"重建"这层兜底</strong>——dispose 一个还被别人引用的资源，就是 use-after-free：要么黑屏，要么驱动崩。同一段代码，现在是毛刺，那时是崩溃。
+      </p>
+    </div>
+
+    <div class="col">
+      <p>
+        最小核心就三个方法，配一条规则：<strong>谁 acquire 谁 release；遍历场景树永远不 dispose。</strong>
+      </p>
+    </div>
+    <pre><code>type AssetHandle&lt;T&gt; = number &amp; { readonly __asset: unique symbol };
+
+interface AssetOwner {
+  /** 同 key 复用同一份资源，引用计数 +1 */
+  acquire&lt;T&gt;(key: string, create: () =&gt; T, destroy: (value: T) =&gt; void): AssetHandle&lt;T&gt;;
+  get&lt;T&gt;(handle: AssetHandle&lt;T&gt;): T;
+  /** 引用计数归零才真正 destroy */
+  release&lt;T&gt;(handle: AssetHandle&lt;T&gt;): void;
+}</code></pre>
+
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th style="width: 40%">现在</th><th style="width: 24%">改成</th><th>收益</th></tr>
+        </thead>
+        <tbody>
+          <tr><td class="lead">disposeScene 遍历式 dispose</td><td>release 本场景 acquire 的句柄</td><td>单例缺陷消失</td></tr>
+          <tr><td class="lead">ChunkView.dispose 小心避让共享材质</td><td>直接 release</td><td>那条注释约定可以删了</td></tr>
+          <tr><td class="lead">disposeObject 的 ACTOR_ROOT_MARKER 剪枝</td><td>直接 release</td><td>整套剪枝逻辑可以删了</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3>三 · 现在不要做的四件事</h3>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th style="width: 24%">能力</th><th style="width: 40%">现在的替代</th><th>触发条件</th></tr>
+        </thead>
+        <tbody>
+          <tr><td class="lead">异步加载 + 去重</td><td><code>initRapier</code> 已是 singleton + promise guard；全仓只有 2 处异步资源</td><td>上面那个 <code>.bin</code> 格式落地时</td></tr>
+          <tr><td class="lead">LRU / 驻留预算</td><td><code>ChunkStreamer</code> 的 loadRadius / keepRadius 已针对 chunk 语义调过</td><td>出现第二类需要驻留预算的资源时</td></tr>
+          <tr><td class="lead">热重载</td><td>无</td><td>ToolLayer 真正开工时</td></tr>
+          <tr><td class="lead">依赖图</td><td>无贴图、无材质实例化，依赖是平的</td><td>美术方向引入贴图时</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="col">
+      <p style="margin-top: 20px">
+        提前把这四样做进去，会得到一个比 <code>ChunkStreamer</code> 更弱、又必须去替换它的抽象。所以立项名字应该是<strong>「GPU 资源所有权表」而不是 RuntimeAssetManager</strong>；等 <code>.bin</code> 格式落地、异步与去重挂上来之后，它才成为 <code>RuntimeAssetManager</code>。
+      </p>
+    </div>
+
+    <h3>四 · 归属与线程</h3>
+    <div class="col">
+      <ul class="plain">
+        <li><strong>CoreLayer</strong>（"内存 GC"那格）→ 句柄表 + 引用计数 + 释放。<strong>不知道资产是什么</strong>，只知道有人持有。</li>
+        <li><strong>ResourceLayer</strong> → 加载、烘焙产物解码、key 的命名与去重。<code>RuntimeAssetManager</code> 是这一层的门面，建立在 CoreLayer 的所有权表之上。</li>
+      </ul>
+      <p>
+        Sim / Render worker 拆开之后，<strong>GPU 资源只存在于渲染线程</strong>，所有权表必须住在那一侧，Sim 侧只能拿到一个整数句柄。这和第 1 步的 <code>proxyId</code> 是同构的——都是"跨线程只传 id，实体留在拥有它的那一侧"，两者可以共用同一套句柄语义，不需要两套。
+      </p>
+    </div>
+  </section>
+
+  <section>
+    <h2>语言划分</h2>
+    <p class="kicker">C++ 底层 + TS / Rust 上层，具体怎么切</p>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th style="width: 30%">层</th><th style="width: 16%">语言</th><th>理由</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="lead">Renderer<br>job system / 内存</td>
+            <td class="mono">C++</td>
+            <td>这是唯一真正需要重写的东西。Emscripten pthreads + OffscreenCanvas 给到真正的渲染线程。</td>
+          </tr>
+          <tr>
+            <td class="lead">Physics (Rapier)<br>chunkgen</td>
+            <td class="mono">Rust</td>
+            <td>已有、已确定性、已双端共用。<code>native/chunkgen</code> 现在这个"纯数据进纯数据出、5.9 KB"的形态很健康，别为统一而统一。</td>
+          </tr>
+          <tr>
+            <td class="lead">Gameplay<br>Actor / 网络逻辑</td>
+            <td class="mono">TypeScript</td>
+            <td>迭代速度，且 <code>shared/</code> 那 7,278 行已与服务端共用、零 Three 依赖——它已经是一个干净的 Game World 核心。</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="col">
+      <p style="margin-top: 20px">
+        Three.js 的替换难度比想象中低。统计实际用到的符号：<code>Group</code> 138 次、<code>Vector3</code> 129、
+        <code>BufferGeometry</code> 75、<code>ShaderMaterial</code> 43、<code>EdgesGeometry</code> 13。而 <code>castShadow</code>、<code>shadowMap</code>、<code>GLTFLoader</code>、<code>MeshStandardMaterial</code>、
+        <code>SkinnedMesh</code>、<code>AnimationMixer</code>、任何 <code>THREE.Light</code>——<strong>全是 0</strong>。没有后处理、没有 PBR、没有阴影贴图、没有骨骼动画、没有资源加载器；光照是手写 GLSL。
+      </p>
+      <p>
+        要自研的其实只有：GL 状态机 + BufferGeometry 上传 + 一棵 transform 树 + 视锥剔除。真正烦的只有 <code>EdgesGeometry</code>（拓扑边提取）和 <code>Raycaster</code>，而这两个都不在热路径，可以最后做、甚至永久保留移植版。
+      </p>
+    </div>
+  </section>
+
+  <section>
+    <h2>路线图</h2>
+    <p class="kicker">顺序是有依赖的，不是优先级排序</p>
+    <div class="steps">
+
+      <div class="step">
+        <div class="step-n">0</div>
+        <div class="step-body">
+          <h3>打开跨源隔离</h3>
+          <div class="chips">
+            <span class="chip now">现在就能做</span>
+            <span class="chip">半天</span>
+            <span class="chip">零架构风险</span>
+          </div>
+          <p>
+            <code>server/http/</code> 加 COOP/COEP 响应头，<code>vite.config.ts</code> 加 dev server headers。做完 <code>SharedArrayBuffer</code> 可用。
+          </p>
+          <p>
+            顺带能立刻暴露"哪些外部资源会被 CORP 挡掉"——这种问题晚发现很贵，而它和后面所有步骤都无关，可以今天就合。
+          </p>
+        </div>
+      </div>
+
+      <div class="step">
+        <div class="step-n">0.5</div>
+        <div class="step-body">
+          <h3>清掉会被一起搬走的债</h3>
+          <div class="chips">
+            <span class="chip now">现在就能做</span>
+            <span class="chip">纯清理</span>
+          </div>
+          <ul>
+            <li>合并 <code>shared/collision/</code> 与 <code>PhysicsWorld</code> 两套碰撞。</li>
+            <li>给 <code>step()</code> 的惰性语义补测试（那句 <code>apparently empty tick</code>）。</li>
+          </ul>
+          <p>
+            不做的话，这两样会被原样搬进新引擎，而且是在最难调试的阶段暴露。
+          </p>
+        </div>
+      </div>
+
+      <div class="step">
+        <div class="step-n">1</div>
+        <div class="step-body">
+          <h3>剥出 Render World 的边界</h3>
+          <div class="chips">
+            <span class="chip gate">回报最高</span>
+            <span class="chip">不改一个像素</span>
+            <span class="chip">依赖 0.5</span>
+          </div>
+          <ul>
+            <li><code>ThreeObjectComponent</code> → <code>RenderProxyComponent { proxyId }</code>，不再持有 <code>THREE.Group</code>。</li>
+            <li><code>ActorTransformSystem</code> 改成往 <code>Float32Array</code> 写 SoA，不再 <code>position.set()</code>。</li>
+            <li>现有 Three 代码整体搬进 <code>ThreeRenderScene implements RenderScene</code>。</li>
+          </ul>
+          <p>
+            仍然单线程、仍然用 Three.js、帧率不变。但"Render World 不引用 Actor"这条约束<strong>被代码强制了</strong>，而这个盒子的接口就是以后 C++ 渲染器的接口。
+          </p>
+        </div>
+      </div>
+
+      <div class="step">
+        <div class="step-n">2</div>
+        <div class="step-body">
+          <h3>网络 + Game World + 物理整体进 worker</h3>
+          <div class="chips">
+            <span class="chip">首个可测收益</span>
+            <span class="chip">依赖 0、1</span>
+          </div>
+          <ul>
+            <li>网络、UWorld、预测和解、角色控制器查询同处一个 Sim Worker（不能拆，见线程布局）。</li>
+            <li><code>native/chunkgen</code> 单独一个 worker。现在 <code>ChunkStreamer</code>
+              <em>每帧最多建一个 chunk</em>（<code>drainBuildBudget()</code>）——这个预算本身就是"生成在主线程会卡帧"的补丁，挪走后可以并行建、放开视距。</li>
+          </ul>
+          <p>
+            这一步做完，主线程只剩 UI 和输入。<strong>它同时是在证明 worker 架构在这个项目里跑得通——
+            在写第一行 C++ 之前拿到这个证据很重要。</strong>
+          </p>
+        </div>
+      </div>
+
+      <div class="step">
+        <div class="step-n">3</div>
+        <div class="step-body">
+          <h3>OffscreenCanvas + 渲染线程</h3>
+          <div class="chips">
+            <span class="chip">依赖 1、2</span>
+          </div>
+          <p>
+            Render Worker 拿到 <code>transferControlToOffscreen()</code> 的 canvas，通过第 1 步定好的 SAB 双缓冲读 transform。对应 Emscripten 侧的 <code>OFFSCREENCANVAS_SUPPORT</code>，让 GL context 归一个 pthread 所有。
+          </p>
+          <p>
+            到这里就是完整的 UE 线程模型了，而且渲染仍然可以是 Three.js。
+          </p>
+        </div>
+      </div>
+
+      <div class="step">
+        <div class="step-n">4</div>
+        <div class="step-body">
+          <h3>才是换掉 Three.js</h3>
+          <div class="chips">
+            <span class="chip">可无限期推迟</span>
+            <span class="chip">依赖 1、3</span>
+          </div>
+          <p>
+            到这里 Three.js 只剩下"把 proxy 数据翻译成 GL 调用"。附带理由：项目锁在 <strong>three@0.128（2021）</strong>，
+            <code>outputEncoding</code>／<code>sRGBEncoding</code>（<code>SceneRenderer.ts:82</code>）、
+            <code>PlaneBufferGeometry</code>（<code>GrassBendField.ts:15</code>）都已是被删除的 API——
+            "升级 Three" 和 "换掉 Three" 的成本差距没那么大。
+          </p>
+          <p>
+            后者能直接上 WebGPU：<strong>compute shader 是绕开单线程的另一条路</strong>，草地弯曲场（现在是 ping-pong render target）、粒子这类完全可以搬上去。
+          </p>
+        </div>
+      </div>
+
+    </div>
+
+    <div class="callout">
+      <p class="callout-head">对"后期会吃力"的一个反向意见</p>
+      <p>
+        方向认同，但归因建议先测。按现在的代码，主线程大头很可能是 chunk 生成／合批（已知会卡，否则不会有每帧一个的预算）和 <code>PbfSlimeSimulation</code>／
+        <code>HybridSlimeSimulation</code>（固定步长子步循环）——
+        <strong>这两样在第 2 步就解决了，都不需要自研渲染器</strong>。而 draw call 侧现在是 4–8 次／chunk，在 WebGL 上远谈不上瓶颈。
+      </p>
+      <p>
+        所以：如果第 2 步做完帧时间已经够了，<strong>第 4 步可以无限期推迟，代价是零</strong>——
+        因为第 1 步定的那条边界本来就是自研渲染器需要的那条边界。
+      </p>
+    </div>
+  </section>
+
+  <section>
+    <h2>待决事项</h2>
+    <p class="kicker">需要团队拍板的，不是我能替你们定的</p>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th style="width: 30%">决定</th><th style="width: 24%">建议</th><th>如果选另一边</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="lead">Web 还是 Native<br>是第一目标</td>
+            <td><strong>最该先定的一个</strong></td>
+            <td>两个都要 → 必须按<strong>交集</strong>设计，浏览器那三条约束仍然全部生效，自研运行时只为 native 构建买单。Web 只是预览 → native 侧线程模型可以完全自由。不定下来，CoreLayer 的工作量能差一个数量级。</td>
+          </tr>
+          <tr>
+            <td class="lead">美术方向是否<br>保持程序化</td>
+            <td>保持</td>
+            <td>决定 ResourceLayer 的形态。保持 → 实质是模板缓存 + chunk 流送预算，与 glTF／骨骼无关。要上骨骼动画 → 那是一条新的美术管线，应独立于自研引擎排期，不要绑在一起。</td>
+          </tr>
+          <tr>
+            <td class="lead">物理引擎</td>
+            <td>保留 Rapier</td>
+            <td>换 Jolt 必须<strong>客户端服务端同一次提交内一起换</strong>，并重新标定和解容差。</td>
+          </tr>
+          <tr>
+            <td class="lead"><code>shared/</code> 7,278 行的归属</td>
+            <td>留在 TS（方案 B）</td>
+            <td>方案 A：重写成 C++ 并让 Node 也加载同一份 WASM，彻底消灭"双后端逐位一致"的维护成本——但这是项目量级的分水岭。第 1–3 步在两条路下完全一样，可以推迟到有实测数据后再定。</td>
+          </tr>
+          <tr>
+            <td class="lead">烘焙格式何时做</td>
+            <td>按解耦立项，不按性能</td>
+            <td>按性能立项会发现收益不够（chunk 模板只有 5 个）。但它是第 4 步换掉 Three 的前置——几何不脱离 <code>THREE.Mesh</code>，渲染器就换不掉。先打点拿数字，再决定排在第 4 步前多久。</td>
+          </tr>
+          <tr>
+            <td class="lead">线协议</td>
+            <td>先不动 JSON</td>
+            <td>要换就和 SAB 布局一起换，别分两次。</td>
+          </tr>
+          <tr>
+            <td class="lead">WebGL 还是 WebGPU</td>
+            <td>第 4 步再定</td>
+            <td>WebGPU 的 compute 对草地／粒子有实质价值，但会把浏览器支持面收窄，需要保留 WebGL 后端。</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="col">
+      <p style="margin-top: 20px">
+        最后一条运维提醒：<code>RoomProcessManager.mjs:57</code> 是每房间 <code>fork</code> 一个子进程，每个都会加载一份 Rapier WASM。如果以后有别的 WASM 模块也上服务端，内存要按房间数乘一遍算预算。
+      </p>
+    </div>
+  </section>
+
+  <section>
+    <h2>结论所依据的现状</h2>
+    <p class="kicker">全部可在当前 main 上复核</p>
+    <dl class="facts">
+      <div class="fact">
+        <dt>COOP / COEP</dt>
+        <dd>未配置——<code>server/</code>、<code>vite.config.ts</code> 中均无匹配，SAB 目前禁用。</dd>
+      </div>
+      <div class="fact">
+        <dt>Worker 使用</dt>
+        <dd>客户端零使用。服务端是每房间 <code>fork</code> 子进程。</dd>
+      </div>
+      <div class="fact">
+        <dt>shared/ 的纯度</dt>
+        <dd>76 个文件、7,278 行，<strong>零 Three 依赖</strong>——已经是一个可移植的 Game World 核心。</dd>
+      </div>
+      <div class="fact">
+        <dt>Three 依赖面</dt>
+        <dd>84 个文件 import three，其中 36 个在 <code>src/models/</code>（程序化建模，输出 BufferGeometry）。</dd>
+      </div>
+      <div class="fact">
+        <dt>createLineArtScene.ts:32<br>ServerScene.mjs:137</dt>
+        <dd>同一个 <code>PhysicsWorld</code> 类，两端各实例化一次。</dd>
+      </div>
+      <div class="fact">
+        <dt>PhysicsWorld.mjs:290</dt>
+        <dd><code>computeColliderMovement</code>——预测与权威共用的角色移动入口。</dd>
+      </div>
+      <div class="fact">
+        <dt>ActorTransformSystem.ts:38</dt>
+        <dd><code>render.root.position.set(...)</code>——当前 Game→Render 的直接写入点。</dd>
+      </div>
+      <div class="fact">
+        <dt>ChunkStreamer.ts:255</dt>
+        <dd><code>drainBuildBudget()</code>——每帧最多构建一个 chunk 的预算。</dd>
+      </div>
+      <div class="fact">
+        <dt>PhysicsWorld.mjs:323</dt>
+        <dd><code>do not remove this apparently empty tick</code>——惰性 step 的隐含语义。</dd>
+      </div>
+      <div class="fact">
+        <dt>GameTransport.ts:3</dt>
+        <dd><code>reliable-ordered | unreliable-sequenced</code>——传输层已按 WebTransport 抽象。</dd>
+      </div>
+      <div class="fact">
+        <dt>src/ui/ 的形态</dt>
+        <dd>12 个文件中 8 个使用 <code>document.createElement</code>，UI 完全是 DOM + CSS。</dd>
+      </div>
+      <div class="fact">
+        <dt>资产加载</dt>
+        <dd><strong>全仓零资产加载。</strong>唯一的 <code>fetch</code> 是 <code>chunkgen.wasm</code> 与房间目录 API；无 <code>TextureLoader</code> / <code>GLTFLoader</code> / <code>SkinnedMesh</code> / <code>AnimationMixer</code>。</dd>
+      </div>
+      <div class="fact">
+        <dt>config/ 的数据化程度</dt>
+        <dd>23 个 <code>*.actor.json</code> + 6 个 <code>*.scene.json</code>，两类各带一份 <code>.schema.json</code>——ToolLayer 的现成目标。</dd>
+      </div>
+      <div class="fact">
+        <dt>dispose 的散落</dt>
+        <dd><code>.dispose()</code> 出现 <strong>143 次，散在 56 个文件</strong>，分属三套互不一致的手写所有权约定。</dd>
+      </div>
+      <div class="fact">
+        <dt>lineMaterials.ts:3</dt>
+        <dd><code>OUTLINE_MATERIAL</code> / <code>GROUND_GRID_MATERIAL</code> 是<strong>模块级单例</strong>，被 <code>disposeScene</code> 的遍历式释放一并 dispose。</dd>
+      </div>
+      <div class="fact">
+        <dt>chunkTemplates.ts:114</dt>
+        <dd><code>createTemplateFromObject</code> 的输入类型是 <code>THREE.Mesh</code> / <code>THREE.LineSegments</code>——几何与 Three 的耦合点。</dd>
+      </div>
+      <div class="fact">
+        <dt>src/models/</dt>
+        <dd>38 个文件全部为程序化建模，输出 <code>BufferGeometry</code>；没有任何外部模型资源。</dd>
+      </div>
+    </dl>
+  </section>
+
+  <footer>
+    SkyLand · 渲染管线迁移提案 · 分支 claude/project-rendering-pipeline-ubjzq9<br>
+    调色板取自引擎自身：#fdfbf6 纸面 / #171614 墨线 / #9d9a90 网格 / #f0a33c 地形高亮 / #2b3450 夜色环境光
+  </footer>
+
+</div>
+
+</body>
+</html>
