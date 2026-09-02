@@ -165,3 +165,49 @@ export function createSpawnPoint(slot, spawn = DEFAULT_SPAWN_CONFIG, bounds = PL
     z: centerZ + Math.cos(angle) * radius,
   }, bounds);
 }
+
+/**
+ * 把出生点推出已有玩家的圆柱。
+ *
+ * 玩家现在是实心的，而角色控制器不会把已经互相嵌进去的两具身体分开：出生在
+ * 别人身上的人会当场卡住，只能靠对方走开。座位号本来就把出生点分散在一个圆周
+ * 上，这里只处理座位重复、圆周半径太小或出生点被地形/物件挤到一起的残余情况。
+ *
+ * 成本是「房间人数 × 迭代次数」，与世界面积无关。
+ *
+ * @param {PlayerPoint} spawn
+ * @param {number} radius 新玩家的碰撞半径
+ * @param {Iterable<{ x: number, z: number, collisionRadius?: number }>} players
+ * @param {number} [defaultRadius] 既有玩家没有声明半径时用的回退值
+ * @returns {PlayerPoint}
+ */
+export function separateSpawnFromPlayers(
+  spawn,
+  radius,
+  players,
+  defaultRadius = PLAYER_COLLISION_RADIUS,
+) {
+  const moverRadius = Math.max(0, toFiniteNumber(radius, defaultRadius));
+  // 下面要多趟扫描，先落成数组：Map.values() 这类迭代器只能消费一次。
+  const others = [...(players ?? [])];
+  let x = toFiniteNumber(spawn?.x);
+  let z = toFiniteNumber(spawn?.z);
+  // 推开一个人可能又撞上另一个；固定迭代次数上限即可收敛，也不会退化成搜索。
+  for (let pass = 0; pass < 4; pass += 1) {
+    let moved = false;
+    for (const other of others) {
+      const clearance = moverRadius + Math.max(0, toFiniteNumber(other.collisionRadius, defaultRadius));
+      const deltaX = x - toFiniteNumber(other.x);
+      const deltaZ = z - toFiniteNumber(other.z);
+      const distance = Math.hypot(deltaX, deltaZ);
+      if (distance >= clearance) continue;
+      // 完全重合时没有方向可用，按玩家编号给一个稳定的散开角度。
+      const angle = distance > 1e-6 ? Math.atan2(deltaX, deltaZ) : pass * (Math.PI / 2);
+      x = toFiniteNumber(other.x) + Math.sin(angle) * clearance;
+      z = toFiniteNumber(other.z) + Math.cos(angle) * clearance;
+      moved = true;
+    }
+    if (!moved) break;
+  }
+  return { x, z };
+}

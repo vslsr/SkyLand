@@ -150,6 +150,44 @@ test('注水编辑会产生真实水深而不是只有变暗的干河床', async
   );
 });
 
+test('服务端连续抬高水格后广播 GROUND，客户端不会把编辑台阶当作水面', async () => {
+  const { scene } = await createScene();
+  const player = scene.players.get('builder');
+  const baseX = Math.floor(player.x / TERRAIN_CELL_SIZE);
+  const baseZ = Math.floor(player.z / TERRAIN_CELL_SIZE);
+  let waterCell;
+  for (let radius = 0; radius <= 16 && !waterCell; radius += 1) {
+    for (let dz = -radius; dz <= radius && !waterCell; dz += 1) {
+      for (let dx = -radius; dx <= radius; dx += 1) {
+        const cellX = baseX + dx;
+        const cellZ = baseZ + dz;
+        if (terrainCellSurface(scene.terrainPatches.cellCodeAt(cellX, cellZ)) === TERRAIN_SURFACE.WATER) {
+          waterCell = { cellX, cellZ };
+          break;
+        }
+      }
+    }
+  }
+  assert.ok(waterCell, '出生点附近应能找到天然水格');
+  standNextTo(scene, waterCell.cellX, waterCell.cellZ);
+
+  let sequence = 1;
+  let result;
+  do {
+    result = scene.editTerrain('builder', {
+      sequence,
+      cellX: waterCell.cellX,
+      cellZ: waterCell.cellZ,
+      operation: 'raise',
+    });
+    sequence += 1;
+    assert.equal(result.length, 1);
+  } while (terrainCellHeightLevel(result[0].code) < 0);
+
+  assert.equal(terrainCellSurface(result[0].code), TERRAIN_SURFACE.GROUND);
+  assert.equal(scene.terrainEditor.readCell(waterCell.cellX, waterCell.cellZ).waterDepth, 0);
+});
+
 test('重放的序号不生效，未知操作也不生效', async () => {
   const { scene } = await createScene();
   const cell = nearbyGroundCell(scene);

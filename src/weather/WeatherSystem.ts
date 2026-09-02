@@ -15,6 +15,7 @@ import { CONTACT_SHADOW_UNIFORMS } from '../materials/createContactShadowMateria
 import type { SceneEnvironmentRuntime } from '../materials/createFillMaterial';
 import { applyEnvironmentInk, resetEnvironmentInk } from '../materials/lineMaterials';
 import {
+  RAIN_SPLASH_SEGMENTS_PER_EFFECT,
   WEATHER_VISUAL_CAPACITY,
   createWeatherVisuals,
 } from '../models/weather/createWeatherVisuals';
@@ -44,6 +45,17 @@ interface RainDrop {
   z: number;
   groundY: number;
   speed: number;
+  /** 出生时已有粗略高度；接近地面后只再精确采样一次。 */
+  groundProbePending: boolean;
+}
+
+interface RainSplash {
+  x: number;
+  y: number;
+  z: number;
+  age: number;
+  lifetime: number;
+  active: boolean;
 }
 
 interface SnowFlake {
@@ -61,13 +73,8 @@ interface SnowFlake {
 
 interface WeatherChunk {
   readonly key: string;
-  readonly chunkX: number;
-  readonly chunkZ: number;
-  readonly originX: number;
-  readonly originZ: number;
+  /** Chunk 自己持有确定性随机流；窗口回收粒子时从玩家所在 Chunk 取样。 */
   readonly random: () => number;
-  readonly rainDrops: RainDrop[];
-  readonly snowFlakes: SnowFlake[];
 }
 
 export interface WeatherEnvironmentDefinition {
@@ -98,6 +105,12 @@ const WEATHER_PRESETS: Readonly<Record<WeatherType, WeatherPreset>> = {
 const WEATHER_CHUNK_RADIUS = 1;
 const MAXIMUM_ACTIVE_CHUNKS = (WEATHER_CHUNK_RADIUS * 2 + 1) ** 2;
 const PRECIPITATION_HEIGHT = 18;
+const PRECIPITATION_WINDOW_HALF_SIZE = 17;
+const PRECIPITATION_RESPAWN_MINIMUM_HEIGHT = 11;
+const PRECIPITATION_RESPAWN_HEIGHT_RANGE = 3;
+const RAIN_GROUND_PROBE_HEIGHT = 2.5;
+const RAIN_SPLASH_LIFETIME_MINIMUM = 0.22;
+const RAIN_SPLASH_LIFETIME_RANGE = 0.12;
 const CLOUD_WRAP_HALF_SIZE = 70;
 const WIND_X = 0.86;
 const WIND_Z = 0.51;
@@ -132,9 +145,8 @@ export const WEATHER_PARTICLE_LIMITS = Object.freeze({
   chunkSize: CHUNK_SIZE,
   activationRadius: WEATHER_CHUNK_RADIUS,
   maximumActiveChunks: MAXIMUM_ACTIVE_CHUNKS,
-  rainDropsPerChunk: WEATHER_VISUAL_CAPACITY.rainDropsPerChunk,
-  snowFlakesPerChunk: WEATHER_VISUAL_CAPACITY.snowFlakesPerChunk,
   rainDrops: WEATHER_VISUAL_CAPACITY.rainDrops,
+  rainSplashes: WEATHER_VISUAL_CAPACITY.rainSplashes,
   snowFlakes: WEATHER_VISUAL_CAPACITY.snowFlakes,
 });
 
@@ -203,6 +215,12 @@ export class WeatherSystem implements SceneVisualSystem, WeatherVisualTarget, We
   private activeChunkOrder: WeatherChunk[] = [];
   private readonly cloudOpacities = new Float32Array(WEATHER_VISUAL_CAPACITY.clouds);
   private readonly random = createRandom(0x79a3_5f21);
+  /** 玩家附近 34×34 米的固定容量雨幕；世界再大也只维护这 560 个槽位。 */
+  private readonly rainDrops: RainDrop[] = [];
+  /** 共享几何体背后的固定水花状态池。 */
+  private readonly rainSplashes: RainSplash[] = [];
+  /** 雪花使用同一局部窗口；440 个槽位与参考实现一致。 */
+  private readonly snowFlakes: SnowFlake[] = [];
   private readonly backgroundColor = new THREE.Color();
   private readonly fogColor = new THREE.Color();
   private readonly grayColor = new THREE.Color();
@@ -224,6 +242,8 @@ export class WeatherSystem implements SceneVisualSystem, WeatherVisualTarget, We
   private focusX = 0;
   private focusZ = 0;
   private visibleRainCount = 0;
+  private visibleRainSplashCount = 0;
+  private rainSplashCursor = 0;
   private visibleSnowCount = 0;
   private currentDaylight = 1;
   private lightningRemaining = 0;
@@ -259,6 +279,22 @@ export class WeatherSystem implements SceneVisualSystem, WeatherVisualTarget, We
     this.baseFogNear = environment.fogNear;
     this.baseFogFar = environment.fogFar;
     this.syncActiveChunks(0, 0);
+    for (let index = 0; index < WEATHER_VISUAL_CAPACITY.rainDrops; index += 1) {
+      this.rainDrops.push(this.createRainDrop(0, 0, false));
+    }
+    for (let index = 0; index < WEATHER_VISUAL_CAPACITY.rainSplashes; index += 1) {
+      this.rainSplashes.push({
+        x: 0,
+        y: 0,
+        z: 0,
+        age: 0,
+        lifetime: RAIN_SPLASH_LIFETIME_MINIMUM,
+        active: false,
+      });
+    }
+    for (let index = 0; index < WEATHER_VISUAL_CAPACITY.snowFlakes; index += 1) {
+      this.snowFlakes.push(this.createSnowFlake(0, 0, false));
+    }
   }
 
   public get weather(): WeatherType {
@@ -283,6 +319,8 @@ export class WeatherSystem implements SceneVisualSystem, WeatherVisualTarget, We
       this.focusX = context.focusX;
       this.focusZ = context.focusZ;
       this.syncActiveChunks(context.focusX, context.focusZ);
+      this.syncRainWindow(context.focusX, context.focusZ);
+      this.syncSnowWindow(context.focusX, context.focusZ);
     }
 
     const target = WEATHER_PRESETS[this.weatherType];
@@ -299,11 +337,16 @@ export class WeatherSystem implements SceneVisualSystem, WeatherVisualTarget, We
     this.updateEnvironment(dt);
     this.updateClouds(dt, elapsedSeconds);
     this.updateRain(dt);
+    this.updateRainSplashes(dt);
     this.updateSnow(dt, elapsedSeconds);
   }
 
-  public getParticleCounts(): { rain: number; snow: number } {
-    return { rain: this.visibleRainCount, snow: this.visibleSnowCount };
+  public getParticleCounts(): { rain: number; rainSplashes: number; snow: number } {
+    return {
+      rain: this.visibleRainCount,
+      rainSplashes: this.visibleRainSplashCount,
+      snow: this.visibleSnowCount,
+    };
   }
 
   /** 供 F8 诊断与单测读取；返回副本，外部无法修改激活集合。 */
@@ -369,76 +412,98 @@ export class WeatherSystem implements SceneVisualSystem, WeatherVisualTarget, We
   }
 
   private createWeatherChunk(chunkX: number, chunkZ: number): WeatherChunk {
-    const random = createRandom(createChunkSeed(chunkX, chunkZ));
-    const chunk: WeatherChunk = {
+    return {
       key: toChunkKey(chunkX, chunkZ),
-      chunkX,
-      chunkZ,
-      originX: chunkX * CHUNK_SIZE,
-      originZ: chunkZ * CHUNK_SIZE,
-      random,
-      rainDrops: [],
-      snowFlakes: [],
+      random: createRandom(createChunkSeed(chunkX, chunkZ)),
     };
-    for (let index = 0; index < WEATHER_VISUAL_CAPACITY.rainDropsPerChunk; index += 1) {
-      chunk.rainDrops.push(this.createRainDrop(chunk));
-    }
-    for (let index = 0; index < WEATHER_VISUAL_CAPACITY.snowFlakesPerChunk; index += 1) {
-      chunk.snowFlakes.push(this.createSnowFlake(chunk));
-    }
-    return chunk;
   }
 
-  private createRainDrop(chunk: WeatherChunk): RainDrop {
-    const x = chunk.random() * CHUNK_SIZE;
-    const z = chunk.random() * CHUNK_SIZE;
-    const groundY = this.safeGroundHeight(chunk.originX + x, chunk.originZ + z);
+  private precipitationRandom(focusX: number, focusZ: number): () => number {
+    const key = toChunkKey(toChunkCoordinate(focusX), toChunkCoordinate(focusZ));
+    return this.activeChunks.get(key)?.random ?? this.random;
+  }
+
+  private createRainDrop(focusX: number, focusZ: number, respawning: boolean): RainDrop {
+    const random = this.precipitationRandom(focusX, focusZ);
+    const x = focusX + (random() * 2 - 1) * PRECIPITATION_WINDOW_HALF_SIZE;
+    const z = focusZ + (random() * 2 - 1) * PRECIPITATION_WINDOW_HALF_SIZE;
+    const groundY = this.safeGroundHeight(x, z);
     return {
       x,
-      y: groundY + chunk.random() * PRECIPITATION_HEIGHT,
+      y: groundY + (respawning
+        ? PRECIPITATION_RESPAWN_MINIMUM_HEIGHT
+          + random() * PRECIPITATION_RESPAWN_HEIGHT_RANGE
+        : random() * (
+          PRECIPITATION_RESPAWN_MINIMUM_HEIGHT + PRECIPITATION_RESPAWN_HEIGHT_RANGE
+        )),
       z,
       groundY,
-      speed: 9 + chunk.random() * 4,
+      speed: 9 + random() * 4,
+      groundProbePending: true,
     };
   }
 
-  private resetRainDrop(drop: RainDrop, chunk: WeatherChunk): void {
-    drop.x = chunk.random() * CHUNK_SIZE;
-    drop.z = chunk.random() * CHUNK_SIZE;
-    drop.groundY = this.safeGroundHeight(
-      chunk.originX + drop.x,
-      chunk.originZ + drop.z,
-    );
-    drop.y = drop.groundY + PRECIPITATION_HEIGHT * (0.78 + chunk.random() * 0.22);
+  private resetRainDrop(drop: RainDrop, focusX = this.focusX, focusZ = this.focusZ): void {
+    const replacement = this.createRainDrop(focusX, focusZ, true);
+    drop.x = replacement.x;
+    drop.y = replacement.y;
+    drop.z = replacement.z;
+    drop.groundY = replacement.groundY;
+    drop.speed = replacement.speed;
+    drop.groundProbePending = replacement.groundProbePending;
   }
 
-  private createSnowFlake(chunk: WeatherChunk): SnowFlake {
-    const x = chunk.random() * CHUNK_SIZE;
-    const z = chunk.random() * CHUNK_SIZE;
-    const groundY = this.safeGroundHeight(chunk.originX + x, chunk.originZ + z);
+  /**
+   * 小范围移动保留雨点的绝对世界坐标，只把落到滑动窗口外的槽位重投放；
+   * 快速传送也只重置固定 560 个对象，不沿路径补算、不扫描世界 Chunk。
+   */
+  private syncRainWindow(focusX: number, focusZ: number): void {
+    for (const drop of this.rainDrops) {
+      if (
+        Math.abs(drop.x - focusX) <= PRECIPITATION_WINDOW_HALF_SIZE
+        && Math.abs(drop.z - focusZ) <= PRECIPITATION_WINDOW_HALF_SIZE
+      ) continue;
+      this.resetRainDrop(drop, focusX, focusZ);
+    }
+  }
+
+  private createSnowFlake(focusX: number, focusZ: number, respawning: boolean): SnowFlake {
+    const random = this.precipitationRandom(focusX, focusZ);
+    const x = focusX + (random() * 2 - 1) * PRECIPITATION_WINDOW_HALF_SIZE;
+    const z = focusZ + (random() * 2 - 1) * PRECIPITATION_WINDOW_HALF_SIZE;
+    const groundY = this.safeGroundHeight(x, z);
     return {
       x,
-      y: groundY + chunk.random() * PRECIPITATION_HEIGHT,
+      y: groundY + (respawning
+        ? PRECIPITATION_RESPAWN_MINIMUM_HEIGHT
+          + random() * PRECIPITATION_RESPAWN_HEIGHT_RANGE
+        : random() * (
+          PRECIPITATION_RESPAWN_MINIMUM_HEIGHT + PRECIPITATION_RESPAWN_HEIGHT_RANGE
+        )),
       z,
       groundY,
-      speed: 0.6 + chunk.random() * 0.5,
-      phase: chunk.random() * Math.PI * 2,
-      amplitude: 0.35 + chunk.random() * 0.4,
-      frequency: 0.5 + chunk.random() * 0.7,
-      rotation: chunk.random() * Math.PI * 2,
-      rotationSpeed: (chunk.random() - 0.5) * 2,
+      speed: 0.6 + random() * 0.5,
+      phase: random() * Math.PI * 2,
+      amplitude: 0.35 + random() * 0.4,
+      frequency: 0.5 + random() * 0.7,
+      rotation: random() * Math.PI * 2,
+      rotationSpeed: (random() - 0.5) * 2,
     };
   }
 
-  private resetSnowFlake(flake: SnowFlake, chunk: WeatherChunk): void {
-    flake.x = chunk.random() * CHUNK_SIZE;
-    flake.z = chunk.random() * CHUNK_SIZE;
-    flake.groundY = this.safeGroundHeight(
-      chunk.originX + flake.x,
-      chunk.originZ + flake.z,
-    );
-    flake.y = flake.groundY
-      + PRECIPITATION_HEIGHT * (0.78 + chunk.random() * 0.22);
+  private resetSnowFlake(flake: SnowFlake, focusX = this.focusX, focusZ = this.focusZ): void {
+    const replacement = this.createSnowFlake(focusX, focusZ, true);
+    Object.assign(flake, replacement);
+  }
+
+  private syncSnowWindow(focusX: number, focusZ: number): void {
+    for (const flake of this.snowFlakes) {
+      if (
+        Math.abs(flake.x - focusX) <= PRECIPITATION_WINDOW_HALF_SIZE
+        && Math.abs(flake.z - focusZ) <= PRECIPITATION_WINDOW_HALF_SIZE
+      ) continue;
+      this.resetSnowFlake(flake, focusX, focusZ);
+    }
   }
 
   private safeGroundHeight(x: number, z: number): number {
@@ -635,98 +700,177 @@ export class WeatherSystem implements SceneVisualSystem, WeatherVisualTarget, We
   }
 
   private updateRain(deltaSeconds: number): void {
-    const rainPerChunk = Math.min(
-      WEATHER_VISUAL_CAPACITY.rainDropsPerChunk,
-      Math.round(this.state.rain / MAXIMUM_ACTIVE_CHUNKS),
+    const wantedRainCount = Math.min(
+      WEATHER_VISUAL_CAPACITY.rainDrops,
+      Math.round(this.state.rain),
     );
     const speedMultiplier = 1 + this.state.wind * 0.35;
     const drift = this.state.wind * 5.5;
     const lineLength = 0.42 + this.state.wind * 0.28;
     let offset = 0;
     let rainCount = 0;
-    for (const chunk of this.activeChunkOrder) {
-      for (let index = 0; index < rainPerChunk; index += 1) {
-        const drop = chunk.rainDrops[index];
-        drop.y -= drop.speed * speedMultiplier * deltaSeconds;
-        drop.x += WIND_X * drift * deltaSeconds;
-        drop.z += WIND_Z * drift * deltaSeconds;
-        if (
-          drop.y < drop.groundY
-          || drop.x < 0
-          || drop.x >= CHUNK_SIZE
-          || drop.z < 0
-          || drop.z >= CHUNK_SIZE
-        ) this.resetRainDrop(drop, chunk);
+    for (let index = 0; index < wantedRainCount; index += 1) {
+      const drop = this.rainDrops[index];
+      drop.y -= drop.speed * speedMultiplier * deltaSeconds;
+      drop.x += WIND_X * drift * deltaSeconds;
+      drop.z += WIND_Z * drift * deltaSeconds;
+      let velocityX = WIND_X * drift;
+      let velocityY = -drop.speed * speedMultiplier;
+      let velocityZ = WIND_Z * drift;
+      let lengthScale = lineLength / Math.hypot(velocityX, velocityY, velocityZ);
+      const outsideWindow = (
+        Math.abs(drop.x - this.focusX) > PRECIPITATION_WINDOW_HALF_SIZE
+        || Math.abs(drop.z - this.focusZ) > PRECIPITATION_WINDOW_HALF_SIZE
+      );
 
-        const velocityX = WIND_X * drift;
-        const velocityY = -drop.speed * speedMultiplier;
-        const velocityZ = WIND_Z * drift;
-        const lengthScale = lineLength / Math.hypot(velocityX, velocityY, velocityZ);
-        const worldX = chunk.originX + drop.x;
-        const worldZ = chunk.originZ + drop.z;
-        this.visuals.rainPositions[offset++] = worldX;
-        this.visuals.rainPositions[offset++] = drop.y;
-        this.visuals.rainPositions[offset++] = worldZ;
-        this.visuals.rainPositions[offset++] = worldX + velocityX * lengthScale;
-        this.visuals.rainPositions[offset++] = drop.y + velocityY * lengthScale;
-        this.visuals.rainPositions[offset++] = worldZ + velocityZ * lengthScale;
-        rainCount += 1;
+      if (outsideWindow) {
+        // 窗口回收不是落地，不能生成远处水花。
+        this.resetRainDrop(drop);
+      } else {
+        // 出生高度用于快速下降；仅在接近地面时按当前 x/z 再采样一次，
+        // 修正风造成的水平位移以及运行时地形编辑。
+        if (drop.groundProbePending && drop.y - drop.groundY <= RAIN_GROUND_PROBE_HEIGHT) {
+          drop.groundY = this.safeGroundHeight(drop.x, drop.z);
+          drop.groundProbePending = false;
+        }
+        const tailY = drop.y + velocityY * lengthScale;
+        if (tailY <= drop.groundY) {
+          this.spawnRainSplash(drop.x, drop.groundY, drop.z);
+          this.resetRainDrop(drop);
+        }
       }
+
+      // 重投放后速度会变化，重新计算线尾，避免第一帧沿用旧雨滴长度。
+      velocityX = WIND_X * drift;
+      velocityY = -drop.speed * speedMultiplier;
+      velocityZ = WIND_Z * drift;
+      lengthScale = lineLength / Math.hypot(velocityX, velocityY, velocityZ);
+      this.visuals.rainPositions[offset++] = drop.x;
+      this.visuals.rainPositions[offset++] = drop.y;
+      this.visuals.rainPositions[offset++] = drop.z;
+      this.visuals.rainPositions[offset++] = drop.x + velocityX * lengthScale;
+      this.visuals.rainPositions[offset++] = drop.y + velocityY * lengthScale;
+      this.visuals.rainPositions[offset++] = drop.z + velocityZ * lengthScale;
+      rainCount += 1;
     }
     this.visibleRainCount = rainCount;
     this.visuals.rainLines.visible = rainCount > 0;
     this.visuals.rainGeometry.setDrawRange(0, rainCount * 2);
     if (rainCount === 0) return;
     this.visuals.rainGeometry.getAttribute('position').needsUpdate = true;
-    this.visuals.rainMaterial.opacity = 0.35 + 0.25 * Math.min(1, this.state.rain / 300);
+    this.visuals.rainMaterial.opacity = 0.58 + 0.22 * Math.min(1, this.state.rain / 300);
+  }
+
+  private spawnRainSplash(x: number, groundY: number, z: number): void {
+    const splash = this.rainSplashes[this.rainSplashCursor];
+    this.rainSplashCursor = (
+      this.rainSplashCursor + 1
+    ) % WEATHER_VISUAL_CAPACITY.rainSplashes;
+    splash.x = x;
+    splash.y = groundY + 0.025;
+    splash.z = z;
+    splash.age = 0;
+    splash.lifetime = RAIN_SPLASH_LIFETIME_MINIMUM
+      + this.random() * RAIN_SPLASH_LIFETIME_RANGE;
+    splash.active = true;
+  }
+
+  /**
+   * 把固定池中的有效水花压紧写入一个动态顶点缓冲。每个效果只有 12 条线，
+   * 不做射线、不建临时 Mesh，也不会因暴雨增加 Object3D 数量。
+   */
+  private updateRainSplashes(deltaSeconds: number): void {
+    let offset = 0;
+    let splashCount = 0;
+    for (const splash of this.rainSplashes) {
+      if (!splash.active) continue;
+      splash.age += deltaSeconds;
+      if (splash.age >= splash.lifetime) {
+        splash.active = false;
+        continue;
+      }
+
+      const progress = splash.age / splash.lifetime;
+      const radius = 0.045 + progress * 0.24;
+      const ringY = splash.y + Math.sin(progress * Math.PI) * 0.018;
+      for (let segment = 0; segment < 8; segment += 1) {
+        const angleA = segment * Math.PI / 4;
+        const angleB = (segment + 1) * Math.PI / 4;
+        this.visuals.rainSplashPositions[offset++] = splash.x + Math.cos(angleA) * radius;
+        this.visuals.rainSplashPositions[offset++] = ringY;
+        this.visuals.rainSplashPositions[offset++] = splash.z + Math.sin(angleA) * radius;
+        this.visuals.rainSplashPositions[offset++] = splash.x + Math.cos(angleB) * radius;
+        this.visuals.rainSplashPositions[offset++] = ringY;
+        this.visuals.rainSplashPositions[offset++] = splash.z + Math.sin(angleB) * radius;
+      }
+
+      const crownRadius = radius * 0.62;
+      const crownHeight = Math.sin(progress * Math.PI) * 0.16;
+      for (let ray = 0; ray < 4; ray += 1) {
+        const angle = ray * Math.PI / 2 + Math.PI / 4;
+        const directionX = Math.cos(angle);
+        const directionZ = Math.sin(angle);
+        this.visuals.rainSplashPositions[offset++] = splash.x + directionX * radius * 0.16;
+        this.visuals.rainSplashPositions[offset++] = splash.y;
+        this.visuals.rainSplashPositions[offset++] = splash.z + directionZ * radius * 0.16;
+        this.visuals.rainSplashPositions[offset++] = splash.x + directionX * crownRadius;
+        this.visuals.rainSplashPositions[offset++] = splash.y + crownHeight;
+        this.visuals.rainSplashPositions[offset++] = splash.z + directionZ * crownRadius;
+      }
+      splashCount += 1;
+    }
+
+    this.visibleRainSplashCount = splashCount;
+    this.visuals.rainSplashLines.visible = splashCount > 0;
+    this.visuals.rainSplashGeometry.setDrawRange(
+      0,
+      splashCount * RAIN_SPLASH_SEGMENTS_PER_EFFECT * 2,
+    );
+    if (splashCount > 0) {
+      this.visuals.rainSplashGeometry.getAttribute('position').needsUpdate = true;
+    }
   }
 
   private updateSnow(deltaSeconds: number, elapsedSeconds: number): void {
-    const snowPerChunk = Math.min(
-      WEATHER_VISUAL_CAPACITY.snowFlakesPerChunk,
-      Math.round(this.state.snow / MAXIMUM_ACTIVE_CHUNKS),
+    const wantedSnowCount = Math.min(
+      WEATHER_VISUAL_CAPACITY.snowFlakes,
+      Math.round(this.state.snow),
     );
     const arm = 0.085;
     const drift = this.state.wind * 3.2;
     let offset = 0;
     let snowCount = 0;
-    for (const chunk of this.activeChunkOrder) {
-      for (let index = 0; index < snowPerChunk; index += 1) {
-        const flake = chunk.snowFlakes[index];
-        flake.y -= flake.speed * (1 + this.state.wind * 1.3) * deltaSeconds;
-        flake.x += (
-          Math.sin(elapsedSeconds * flake.frequency + flake.phase) * flake.amplitude
-          + WIND_X * drift
-        ) * deltaSeconds;
-        flake.z += (
-          Math.cos(elapsedSeconds * flake.frequency * 0.8 + flake.phase)
-            * flake.amplitude * 0.6
-          + WIND_Z * drift
-        ) * deltaSeconds;
-        flake.rotation += flake.rotationSpeed * deltaSeconds;
-        if (
-          flake.y < flake.groundY
-          || flake.x < 0
-          || flake.x >= CHUNK_SIZE
-          || flake.z < 0
-          || flake.z >= CHUNK_SIZE
-        ) this.resetSnowFlake(flake, chunk);
+    for (let index = 0; index < wantedSnowCount; index += 1) {
+      const flake = this.snowFlakes[index];
+      flake.y -= flake.speed * (1 + this.state.wind * 1.3) * deltaSeconds;
+      flake.x += (
+        Math.sin(elapsedSeconds * flake.frequency + flake.phase) * flake.amplitude
+        + WIND_X * drift
+      ) * deltaSeconds;
+      flake.z += (
+        Math.cos(elapsedSeconds * flake.frequency * 0.8 + flake.phase)
+          * flake.amplitude * 0.6
+        + WIND_Z * drift
+      ) * deltaSeconds;
+      flake.rotation += flake.rotationSpeed * deltaSeconds;
+      if (
+        flake.y < flake.groundY
+        || Math.abs(flake.x - this.focusX) > PRECIPITATION_WINDOW_HALF_SIZE
+        || Math.abs(flake.z - this.focusZ) > PRECIPITATION_WINDOW_HALF_SIZE
+      ) this.resetSnowFlake(flake);
 
-        const worldX = chunk.originX + flake.x;
-        const worldZ = chunk.originZ + flake.z;
-        for (let armIndex = 0; armIndex < 3; armIndex += 1) {
-          const angle = flake.rotation + armIndex * Math.PI / 3;
-          const dx = Math.cos(angle) * arm;
-          const dy = Math.sin(angle) * arm;
-          this.visuals.snowPositions[offset++] = worldX - dx;
-          this.visuals.snowPositions[offset++] = flake.y - dy;
-          this.visuals.snowPositions[offset++] = worldZ;
-          this.visuals.snowPositions[offset++] = worldX + dx;
-          this.visuals.snowPositions[offset++] = flake.y + dy;
-          this.visuals.snowPositions[offset++] = worldZ;
-        }
-        snowCount += 1;
+      for (let armIndex = 0; armIndex < 3; armIndex += 1) {
+        const angle = flake.rotation + armIndex * Math.PI / 3;
+        const dx = Math.cos(angle) * arm;
+        const dy = Math.sin(angle) * arm;
+        this.visuals.snowPositions[offset++] = flake.x - dx;
+        this.visuals.snowPositions[offset++] = flake.y - dy;
+        this.visuals.snowPositions[offset++] = flake.z;
+        this.visuals.snowPositions[offset++] = flake.x + dx;
+        this.visuals.snowPositions[offset++] = flake.y + dy;
+        this.visuals.snowPositions[offset++] = flake.z;
       }
+      snowCount += 1;
     }
     this.visibleSnowCount = snowCount;
     this.visuals.snowLines.visible = snowCount > 0;

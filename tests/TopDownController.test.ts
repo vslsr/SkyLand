@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { Object3D } from 'three';
+import { TopDownCameraOrbit } from '../src/camera/TopDownCameraOrbit';
 import {
   SLIME_SURFACE_DRAG_COMPONENT,
   type SlimeSurfaceDragComponent,
@@ -36,9 +37,15 @@ class TestKeyboardMouseDevice extends BufferedInputDevice {
 
 function createCanvas(): {
   canvas: HTMLCanvasElement;
-  dispatchPointer(type: string, clientX: number, clientY: number): void;
+  dispatchPointer(
+    type: string,
+    clientX: number,
+    clientY: number,
+    options?: { pointerId?: number; button?: number },
+  ): void;
 } {
   const listeners = new Map<string, Set<(event: PointerEvent) => void>>();
+  const capturedPointers = new Set<number>();
   const canvas = {
     addEventListener(type: string, listener: (event: PointerEvent) => void): void {
       const matching = listeners.get(type) ?? new Set();
@@ -54,12 +61,29 @@ function createCanvas(): {
       width: 1000,
       height: 1000,
     }),
+    setPointerCapture(pointerId: number): void {
+      capturedPointers.add(pointerId);
+    },
+    hasPointerCapture(pointerId: number): boolean {
+      return capturedPointers.has(pointerId);
+    },
+    releasePointerCapture(pointerId: number): void {
+      capturedPointers.delete(pointerId);
+    },
   } as unknown as HTMLCanvasElement;
   return {
     canvas,
-    dispatchPointer(type, clientX, clientY): void {
+    dispatchPointer(type, clientX, clientY, options = {}): void {
       for (const listener of listeners.get(type) ?? []) {
-        listener({ type, clientX, clientY, pointerId: 1 } as PointerEvent);
+        listener({
+          type,
+          clientX,
+          clientY,
+          pointerId: options.pointerId ?? 1,
+          button: options.button ?? 0,
+          cancelable: true,
+          preventDefault: () => undefined,
+        } as unknown as PointerEvent);
       }
     },
   };
@@ -69,6 +93,24 @@ function assertAngleClose(actual: number, expected: number, message: string): vo
   const difference = Math.abs(normalizeAngle(actual - expected));
   assert.ok(difference < 1e-9, `${message}：相差 ${difference}`);
 }
+
+test('TopDown 垂直拖动保持距离并把俯仰限制在可移动范围', () => {
+  const initial: [number, number, number] = [0, 7.5, 10];
+  const distance = Math.hypot(...initial);
+  const orbit = new TopDownCameraOrbit(initial);
+
+  orbit.addPointerDelta(0, 100_000);
+  orbit.update(1 / 60);
+  const raised = orbit.currentOffset;
+  assert.ok(Math.hypot(raised[0], raised[2]) > 1, '俯角上限不能让水平移动轴退化');
+  assert.ok(Math.abs(Math.hypot(...raised) - distance) < 1e-9);
+
+  orbit.addPointerDelta(0, -100_000);
+  orbit.update(1 / 60);
+  const lowered = orbit.currentOffset;
+  assert.ok(lowered[1] > 0, '俯角下限不能让 TopDown 镜头翻到地面下方');
+  assert.ok(Math.abs(Math.hypot(...lowered) - distance) < 1e-9);
+});
 
 test('TopDown 移动决定朝向，按住鼠标主操作时只让鼠标决定朝向', () => {
   let now = 0;
@@ -126,6 +168,72 @@ test('TopDown 移动决定朝向，按住鼠标主操作时只让鼠标决定朝
     frame.yaw,
     Math.atan2(frame.move.x, frame.move.z),
     '松开鼠标后应恢复面向移动方向',
+  );
+
+  controller.dispose();
+  input.dispose();
+});
+
+test('TopDown 拖动屏幕旋转镜头，移动立即改用新的相机前方', () => {
+  let now = 0;
+  const device = new TestKeyboardMouseDevice(() => now);
+  const scheme = createPlayerInputScheme({ storage: null });
+  const input = new InputSubsystem({
+    actions: scheme.actions,
+    config: scheme.config,
+    contexts: scheme.contexts,
+    devices: [device],
+    now: () => now,
+  });
+  const { canvas, dispatchPointer } = createCanvas();
+  const controller = new TopDownController(canvas, new Object3D(), input, {
+    cameraOffset: [0, 7.5, 10],
+  });
+  const initialFrame = controller.frame;
+  const initialDistance = Math.hypot(
+    initialFrame.position[0],
+    initialFrame.position[1] - 0.25,
+    initialFrame.position[2],
+  );
+
+  dispatchPointer('pointerdown', 500, 500);
+  device.emit('Mouse.Button0', true);
+  now = 16;
+  input.update(now);
+  dispatchPointer('pointermove', 700, 500);
+  for (let frame = 0; frame < 30; frame += 1) controller.update(1 / 60);
+  dispatchPointer('pointerup', 700, 500);
+  device.emit('Mouse.Button0', false);
+  now = 32;
+  input.update(now);
+
+  const rotatedFrame = controller.frame;
+  const rotatedDistance = Math.hypot(
+    rotatedFrame.position[0],
+    rotatedFrame.position[1] - 0.25,
+    rotatedFrame.position[2],
+  );
+  assert.ok(Math.abs(rotatedFrame.position[0]) > 5, '水平拖动应该绕玩家旋转机位');
+  assert.ok(
+    Math.abs(rotatedDistance - initialDistance) < 1e-9,
+    '轨道旋转不能改写 Scene 配置的镜头距离',
+  );
+
+  device.emit('Keyboard.KeyW', true);
+  now = 48;
+  input.update(now);
+  const beforeMove = controller.position;
+  controller.update(0.1);
+  const afterMove = controller.position;
+  const displacementX = afterMove.x - beforeMove.x;
+  const displacementZ = afterMove.z - beforeMove.z;
+  const displacementLength = Math.hypot(displacementX, displacementZ);
+  const move = controller.inputFrame.move;
+  assert.ok(Math.abs(move.x) > 0.5, '旋转后 W 不应继续沿原来的世界 Z 轴移动');
+  assert.ok(
+    Math.abs(displacementX / displacementLength - move.x) < 1e-9
+      && Math.abs(displacementZ / displacementLength - move.z) < 1e-9,
+    '实际位移必须与新的相机前方一致',
   );
 
   controller.dispose();
@@ -473,6 +581,8 @@ test('旧房间缺少拖拽配置时 PBF 玩家仍自动装配 Component，并�
     SLIME_SURFACE_DRAG_COMPONENT,
   ) as SlimeSurfaceDragComponent;
   assert.equal(drag.isDragging, false);
+  player.controller.setInputEnabled(true);
+  const cameraBeforeSurfaceDrag = [...player.controller.frame.position];
 
   // 相机中心正对玩家；物理按键只由测试设备送入 InputSubsystem。
   dispatchPointer('pointerdown', 500, 500);
@@ -481,6 +591,13 @@ test('旧房间缺少拖拽配置时 PBF 玩家仍自动装配 Component，并�
   device.emit('Mouse.Button0', true);
   now = 16;
   input.update(now);
+  assert.equal(drag.isDragging, true, '表面拖拽应在 TopDown 更新前抢占这次手势');
+  player.controller.update(1 / 60);
+  assert.deepEqual(
+    player.controller.frame.position,
+    cameraBeforeSurfaceDrag,
+    '拖动史莱姆表面时不能同时旋转镜头',
+  );
   player.update(1 / 60, 1 / 60);
   assert.equal(drag.isDragging, true);
 

@@ -387,6 +387,8 @@ export class GrasslandScene extends Scene {
       input: this.input,
       renderer: this.renderer,
       player: this.player,
+      worldSeed: joined.room.worldSeed,
+      getFocus: () => this.currentFocus(),
     });
     this.hud.setRoom(joined.room);
     this.debugMenuPage?.setTransformLogAvailable(Boolean(this.player));

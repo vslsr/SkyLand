@@ -14,9 +14,55 @@
       "additionalProperties": false,
       "anyOf": [
         { "required": ["render"] },
-        { "required": ["generatedProp"] }
+        { "required": ["generatedProp"] },
+        { "required": ["guidePath"] }
       ],
       "properties": {
+        "guidePath": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "points",
+            "curve",
+            "lineColor",
+            "markerColor",
+            "lineWidth",
+            "dashLength",
+            "gapLength",
+            "dashSpeed",
+            "markerSize",
+            "hitRadius",
+            "autoAdvance",
+            "loop",
+            "enabled"
+          ],
+          "properties": {
+            "points": {
+              "type": "array",
+              "minItems": 2,
+              "maxItems": 32,
+              "items": {
+                "type": "array",
+                "minItems": 3,
+                "maxItems": 3,
+                "items": { "type": "number", "minimum": -64, "maximum": 64 }
+              }
+            },
+            "curve": { "enum": ["linear", "catmull-rom"] },
+            "lineColor": { "$ref": "#/$defs/color" },
+            "markerColor": { "$ref": "#/$defs/color" },
+            "lineWidth": { "type": "number", "minimum": 1, "maximum": 20 },
+            "dashLength": { "type": "number", "minimum": 0.05, "maximum": 8 },
+            "gapLength": { "type": "number", "minimum": 0, "maximum": 8 },
+            "dashSpeed": { "type": "number", "minimum": -8, "maximum": 8 },
+            "markerSize": { "type": "number", "minimum": 0.1, "maximum": 4 },
+            "hitRadius": { "type": "number", "minimum": 0.1, "maximum": 8 },
+            "autoAdvance": { "type": "boolean" },
+            "loop": { "type": "boolean" },
+            "enabled": { "type": "boolean" },
+            "currentPointIndex": { "type": "integer", "minimum": 0, "maximum": 32 }
+          }
+        },
         "playerMovement": {
           "type": "object",
           "additionalProperties": false,
@@ -130,6 +176,20 @@
             "breakLength": { "type": "number", "exclusiveMinimum": 0, "maximum": 12 },
             "mouthHeight": { "type": "number", "minimum": 0, "maximum": 3 },
             "mouthForwardOffset": { "type": "number", "minimum": 0, "maximum": 2 }
+          }
+        },
+        "elasticDetach": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {}
+        },
+        "mushroomPop": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["forwardImpulse", "upwardImpulse"],
+          "properties": {
+            "forwardImpulse": { "type": "number", "minimum": 0, "maximum": 20 },
+            "upwardImpulse": { "type": "number", "minimum": 0, "maximum": 20 }
           }
         },
         "hazard": {

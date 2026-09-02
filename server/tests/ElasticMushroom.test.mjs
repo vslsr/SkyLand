@@ -11,7 +11,7 @@ function createClock(startAt = 1_000_000) {
   };
 }
 
-test('史莱姆近距离叼住蘑菇，拉过断裂长度后权威释放并恢复交互', async () => {
+test('史莱姆把蘑菇拉过断裂长度后，蘑菇脱离、获得冲量并落回地面', async () => {
   const clock = createClock();
   const catalog = await SceneCatalog.load();
   const scene = new ServerScene(catalog.require('grassland'), { now: clock.now });
@@ -48,17 +48,25 @@ test('史莱姆近距离叼住蘑菇，拉过断裂长度后权威释放并恢�
   mushroom = scene.createSnapshot().actors.find((actor) => actor.id === mushroomId);
   assert.equal(mushroom.elasticTether.holderPlayerId, null);
   assert.equal(mushroom.elasticTether.releaseRevision, 1);
-  assert.equal(mushroom.interactable.enabled, true);
+  assert.equal(mushroom.elasticDetach.detached, true);
+  assert.equal(mushroom.interactable.enabled, false);
+  assert.ok(mushroom.transform.y > initial.transform.y);
 
   player.x = initial.transform.x - 0.7;
   assert.equal(scene.interactWithActor('player-a', {
     actorId: mushroomId,
     sequence: 3,
-  }), true);
+  }), false);
+  for (let index = 0; index < 100; index += 1) {
+    clock.advance(0.05);
+    scene.update();
+  }
+  mushroom = scene.createSnapshot().actors.find((actor) => actor.id === mushroomId);
+  assert.ok(Math.abs(mushroom.transform.y) < 1e-4);
   scene.removePlayer('player-a');
   mushroom = scene.createSnapshot().actors.find((actor) => actor.id === mushroomId);
   assert.equal(mushroom.elasticTether.holderPlayerId, null);
-  assert.equal(mushroom.elasticTether.releaseRevision, 2);
-  assert.equal(mushroom.interactable.enabled, true);
+  assert.equal(mushroom.elasticTether.releaseRevision, 1);
+  assert.equal(mushroom.interactable.enabled, false);
 });
 import './initRapier.mjs';

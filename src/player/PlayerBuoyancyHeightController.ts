@@ -4,6 +4,8 @@ import * as THREE from 'three';
  * 本地玩家的权威浮力高度平滑器。
  *
  * 服务端快照给目标 Y；客户端只平滑这个已批准的偏移，不自行扩大玩法高度。
+ * 这里只提供给共享物理读取的采样值，绝不直接写角色 Transform；否则角色中心
+ * 跨过台阶边界时，点采样的低地会覆盖仍受圆柱边缘支撑的物理解算高度。
  * 状态固定为两个数字，每帧 O(1)，快速离开水域时立即把目标收回地面。
  */
 export class PlayerBuoyancyHeightController {
@@ -11,7 +13,6 @@ export class PlayerBuoyancyHeightController {
   private targetOffset = 0;
 
   public constructor(
-    private readonly root: THREE.Object3D,
     private readonly sampleBaseHeight: (x: number, z: number) => number,
     private readonly maximumAmplitude: number,
   ) {}
@@ -44,6 +45,5 @@ export class PlayerBuoyancyHeightController {
       this.targetOffset,
       amount,
     );
-    this.root.position.y = this.sampleHeight(this.root.position.x, this.root.position.z);
   }
 }

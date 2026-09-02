@@ -3,6 +3,7 @@ import test from 'node:test';
 import {
   BUOYANCY_COMPONENT,
   COMBUSTIBLE_COMPONENT,
+  GUIDE_PATH_COMPONENT,
   SIMPLE_COLLISION_COMPONENT,
   TEMPERATURE_COMPONENT,
   TRANSFORM_COMPONENT,
@@ -344,7 +345,7 @@ test('混合软体测试场景按连接生成新的可操控史莱姆 Actor', as
   assert.equal(player.collisionRadius, 0.52);
   assert.equal(player.collisionHeight, 0.72);
   assert.equal(player.movement.walkSpeed, 3.2);
-  assert.equal(player.requireComponent(BUOYANCY_COMPONENT).draft, 0.18);
+  assert.ok(Math.abs(player.requireComponent(BUOYANCY_COMPONENT).draft - 0.4) < 1e-9);
   assert.equal(scene.createSnapshot().actors.some((actor) => actor.archetypeId === 'pbf-slime'), false);
   assert.deepEqual(
     scene.createSnapshot().actors.map((actor) => actor.id),
@@ -371,6 +372,49 @@ test('混合软体测试场景按连接生成新的可操控史莱姆 Actor', as
     })),
   });
   assert.ok(player.z >= transform.z + clearance - 1e-6, '内部圆柱应被测试障碍权威推出');
+});
+
+test('引导路径 Actor 在服务器记录路径、状态、推进与存在性', async () => {
+  const catalog = await SceneCatalog.load();
+  const scene = new ServerScene(catalog.require('grass-test'), { now: () => 1_000_000 });
+  const actor = scene.actorWorld.getActor('wayfinder-guide-01');
+  const guide = actor.requireComponent(GUIDE_PATH_COMPONENT);
+
+  let snapshot = scene.createSnapshot().actors.find((entry) => entry.id === actor.id);
+  assert.equal(snapshot.archetypeId, 'guide-path');
+  assert.deepEqual(snapshot.guidePath.points, guide.points);
+  assert.equal(snapshot.guidePath.currentPointIndex, 0);
+
+  guide.setPath([[0, 0.5, 0], [3, 0.5, -2]], { curve: 'linear' });
+  guide.setEnabled(false);
+  snapshot = scene.createSnapshot().actors.find((entry) => entry.id === actor.id);
+  assert.deepEqual(snapshot.guidePath.points, [[0, 0.5, 0], [3, 0.5, -2]]);
+  assert.equal(snapshot.guidePath.curve, 'linear');
+  assert.equal(snapshot.guidePath.enabled, false);
+  assert.equal(snapshot.guidePath.pathRevision, 1);
+
+  guide.setEnabled(true);
+  scene.addPlayer({ id: 'guide-runner', name: '引导测试', slot: 0 });
+  scene.players.get('guide-runner').setPosition(0, 0);
+  assert.equal(
+    scene.createSnapshot('guide-runner').actors.some((entry) => entry.id === actor.id),
+    true,
+    'AOI 内才复制 GuidePath',
+  );
+  scene.actorWorld.update(0.05, 0.05);
+  assert.equal(guide.currentPointIndex, 0, '低于 10 Hz 步长时不做权威距离扫描');
+  scene.actorWorld.update(0.05, 0.1);
+  assert.equal(guide.currentPointIndex, 1);
+
+  scene.players.get('guide-runner').setPosition(1_000, 1_000);
+  assert.equal(
+    scene.createSnapshot('guide-runner').actors.some((entry) => entry.id === actor.id),
+    false,
+    'AOI 外不复制或渲染 GuidePath',
+  );
+
+  scene.actorWorld.removeActor(actor.id);
+  assert.equal(scene.createSnapshot().actors.some((entry) => entry.id === actor.id), false);
 });
 
 test('玩家 Actor 的 maximumStepHeight 允许跨过低矮场景 Actor', async () => {
@@ -404,7 +448,7 @@ test('玩家 Actor 的 maximumStepHeight 允许跨过低矮场景 Actor', async 
 
   assert.equal(player.archetypeId, 'player-slime');
   assert.equal(player.movement.maximumStepHeight, 0.2);
-  assert.equal(player.requireComponent(BUOYANCY_COMPONENT).draft, 0.18);
+  assert.ok(Math.abs(player.requireComponent(BUOYANCY_COMPONENT).draft - 0.34) < 1e-9);
   assert.ok(player.z < startZ - 0.25);
   assert.equal(
     scene.createSnapshot().actors.some((actor) => actor.id === 'step-walker'),

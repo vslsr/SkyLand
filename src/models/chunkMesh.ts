@@ -12,7 +12,12 @@ import { createFillMaterial, type FillMaterialEnvironment } from '../materials/c
 export function createChunkFillMaterial(
   environment: FillMaterialEnvironment,
 ): THREE.ShaderMaterial {
-  return createFillMaterial(0xffffff, environment, { vertexTint: true });
+  return createFillMaterial(0xffffff, environment, {
+    vertexTint: true,
+    // 流式物件是唯一需要距离雾的主体：只在 far 前最后 12 米收拢，
+    // 各种天气下近中景都保持参考项目那样清晰，同时不暴露 chunk 边缘。
+    fog: true,
+  });
 }
 
 /** 台地顶面单独绕过距离雾，避免雾天把玩家脚下的纸面洗成灰白色。 */

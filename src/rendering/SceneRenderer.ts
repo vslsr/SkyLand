@@ -63,6 +63,7 @@ export class SceneRenderer implements GrassInteractionTarget {
   private physicsDebug?: THREE.LineSegments;
   private terrainHighlight?: THREE.LineSegments;
   private fixedWaterWorld = false;
+  private fixedWaterLevel = 0;
   private currentWeather: WeatherType = DEFAULT_WEATHER;
   private simpleCollisionVisible = false;
   private temperatureVisible = false;
@@ -181,7 +182,10 @@ export class SceneRenderer implements GrassInteractionTarget {
   }
 
   public samplePlayerHeight(x: number, z: number, buoyancyDraft?: number): number {
-    return this.terrainWorld?.sampleMovementHeight(x, z, buoyancyDraft) ?? 0;
+    if (this.terrainWorld) return this.terrainWorld.sampleMovementHeight(x, z, buoyancyDraft);
+    return this.fixedWaterWorld && Number.isFinite(buoyancyDraft)
+      ? this.fixedWaterLevel - Math.max(0, Number(buoyancyDraft))
+      : 0;
   }
 
   public getPhysicsWorld(): PhysicsWorld | undefined {
@@ -315,12 +319,14 @@ export class SceneRenderer implements GrassInteractionTarget {
     this.currentWeather = DEFAULT_WEATHER;
     this.fixedWaterWorld = definition.renderer.content.ocean === true
       && definition.renderer.content.ground === false;
+    this.fixedWaterLevel = definition.gameplay.water?.seaLevel ?? 0;
     this.replaceScene(createLineArtScene(definition, worldSeed));
   }
 
   public showEmptyScene(): void {
     this.currentWeather = DEFAULT_WEATHER;
     this.fixedWaterWorld = false;
+    this.fixedWaterLevel = 0;
     this.replaceScene({ scene: createEmptyScene(), visualSystems: [] });
   }
 

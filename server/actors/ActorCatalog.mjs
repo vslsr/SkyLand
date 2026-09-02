@@ -1,6 +1,7 @@
 import { readdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { MAX_GUIDE_LOCAL_COORDINATE } from '../../shared/actor/components/GuidePathComponent.mjs';
 
 export const DEFAULT_ACTOR_DIRECTORY = fileURLToPath(new URL('../../config/actors/', import.meta.url));
 
@@ -292,6 +293,21 @@ function validateDropMotion(raw, filename) {
   };
 }
 
+function validateElasticDetach(raw, filename) {
+  const path = `${filename}.components.elasticDetach`;
+  requireObject(raw, path);
+  return {};
+}
+
+function validateMushroomPop(raw, filename) {
+  const path = `${filename}.components.mushroomPop`;
+  const definition = requireObject(raw, path);
+  return {
+    forwardImpulse: requireNumber(definition.forwardImpulse, `${path}.forwardImpulse`, 0, 20),
+    upwardImpulse: requireNumber(definition.upwardImpulse, `${path}.upwardImpulse`, 0, 20),
+  };
+}
+
 function validatePlayerJump(raw, filename) {
   const path = `${filename}.components.playerJump`;
   const definition = requireObject(raw, path);
@@ -356,6 +372,75 @@ function validateReplicationPolicy(raw, filename) {
   const radiusChunks = requireNumber(definition.radiusChunks, `${path}.radiusChunks`, 0, 8);
   if (!Number.isInteger(radiusChunks)) throw new TypeError(`${path}.radiusChunks 必须是整数`);
   return { mode: definition.mode, radiusChunks };
+}
+
+function validateGuidePath(raw, filename) {
+  const path = `${filename}.components.guidePath`;
+  const definition = requireObject(raw, path);
+  const knownKeys = new Set([
+    'points',
+    'curve',
+    'lineColor',
+    'markerColor',
+    'lineWidth',
+    'dashLength',
+    'gapLength',
+    'dashSpeed',
+    'markerSize',
+    'hitRadius',
+    'autoAdvance',
+    'loop',
+    'enabled',
+    'currentPointIndex',
+  ]);
+  const unknownKeys = Object.keys(definition).filter((key) => !knownKeys.has(key));
+  if (unknownKeys.length > 0) throw new TypeError(`${path} 包含未知字段：${unknownKeys.join(', ')}`);
+  if (!Array.isArray(definition.points) || definition.points.length < 2 || definition.points.length > 32) {
+    throw new TypeError(`${path}.points 必须包含 2-32 个三维路点`);
+  }
+  const points = definition.points.map((rawPoint, pointIndex) => {
+    if (!Array.isArray(rawPoint) || rawPoint.length !== 3) {
+      throw new TypeError(`${path}.points[${pointIndex}] 必须包含 3 个数字`);
+    }
+    return rawPoint.map((value, axis) => (
+      requireNumber(
+        value,
+        `${path}.points[${pointIndex}][${axis}]`,
+        -MAX_GUIDE_LOCAL_COORDINATE,
+        MAX_GUIDE_LOCAL_COORDINATE,
+      )
+    ));
+  });
+  if (definition.curve !== 'linear' && definition.curve !== 'catmull-rom') {
+    throw new TypeError(`${path}.curve 必须是 linear 或 catmull-rom`);
+  }
+  for (const key of ['autoAdvance', 'loop', 'enabled']) {
+    if (typeof definition[key] !== 'boolean') throw new TypeError(`${path}.${key} 必须是布尔值`);
+  }
+  const currentPointIndex = definition.currentPointIndex ?? 0;
+  if (
+    !Number.isInteger(currentPointIndex)
+    || currentPointIndex < 0
+    || currentPointIndex > points.length
+  ) {
+    throw new TypeError(`${path}.currentPointIndex 必须是 0-${points.length} 的整数`);
+  }
+  return {
+    points,
+    curve: definition.curve,
+    lineColor: requireColor(definition.lineColor, `${path}.lineColor`),
+    markerColor: requireColor(definition.markerColor, `${path}.markerColor`),
+    lineWidth: requireNumber(definition.lineWidth, `${path}.lineWidth`, 1, 20),
+    dashLength: requireNumber(definition.dashLength, `${path}.dashLength`, 0.05, 8),
+    gapLength: requireNumber(definition.gapLength, `${path}.gapLength`, 0, 8),
+    dashSpeed: requireNumber(definition.dashSpeed, `${path}.dashSpeed`, -8, 8),
+    markerSize: requireNumber(definition.markerSize, `${path}.markerSize`, 0.1, 4),
+    hitRadius: requireNumber(definition.hitRadius, `${path}.hitRadius`, 0.1, 8),
+    autoAdvance: definition.autoAdvance,
+    loop: definition.loop,
+    enabled: definition.enabled,
+    currentPointIndex,
+  };
 }
 
 function validateGeneratedProp(raw, filename) {
@@ -607,6 +692,8 @@ function validateActorArchetype(raw, filename) {
     'interactable',
     'cargo',
     'elasticTether',
+    'elasticDetach',
+    'mushroomPop',
     'hazard',
     'temperature',
     'combustible',
@@ -617,6 +704,7 @@ function validateActorArchetype(raw, filename) {
     'lifetime',
     'replicationPolicy',
     'generatedProp',
+    'guidePath',
     'render',
   ]);
   for (const componentName of Object.keys(components)) {
@@ -628,8 +716,11 @@ function validateActorArchetype(raw, filename) {
   const generatedProp = components.generatedProp
     ? validateGeneratedProp(components.generatedProp, filename)
     : undefined;
-  if (!render && !generatedProp) {
-    throw new TypeError(`${filename}.components 至少需要 render 或 generatedProp`);
+  const guidePath = components.guidePath
+    ? validateGuidePath(components.guidePath, filename)
+    : undefined;
+  if (!render && !generatedProp && !guidePath) {
+    throw new TypeError(`${filename}.components 至少需要 render、generatedProp 或 guidePath`);
   }
   const playerMovement = components.playerMovement
     ? validatePlayerMovement(components.playerMovement, filename)
@@ -646,6 +737,12 @@ function validateActorArchetype(raw, filename) {
   const elasticTether = components.elasticTether
     ? validateElasticTether(components.elasticTether, filename)
     : undefined;
+  const elasticDetach = components.elasticDetach
+    ? validateElasticDetach(components.elasticDetach, filename)
+    : undefined;
+  const mushroomPop = components.mushroomPop
+    ? validateMushroomPop(components.mushroomPop, filename)
+    : undefined;
   if (elasticTether && interactable?.action !== 'mushroom-bite') {
     throw new TypeError(`${filename}.components.elasticTether 需要 mushroom-bite interactable`);
   }
@@ -654,6 +751,12 @@ function validateActorArchetype(raw, filename) {
   }
   if (elasticTether && render?.model !== 'line-art-elastic-mushroom') {
     throw new TypeError(`${filename}.components.elasticTether 需要 line-art-elastic-mushroom render`);
+  }
+  if (elasticDetach && (!elasticTether || !components.dropMotion)) {
+    throw new TypeError(`${filename}.components.elasticDetach 需要 elasticTether 和 dropMotion`);
+  }
+  if (mushroomPop && (!elasticDetach || render?.model !== 'line-art-elastic-mushroom')) {
+    throw new TypeError(`${filename}.components.mushroomPop 需要蘑菇 render 和 elasticDetach`);
   }
   if (playerMovement && !PLAYER_RENDER_MODELS.has(render?.model)) {
     throw new TypeError(`${filename}.components.playerMovement 需要玩家史莱姆 render`);
@@ -728,6 +831,8 @@ function validateActorArchetype(raw, filename) {
       ...(interactable ? { interactable } : {}),
       ...(components.cargo ? { cargo: validateCargo(components.cargo, filename) } : {}),
       ...(elasticTether ? { elasticTether } : {}),
+      ...(elasticDetach ? { elasticDetach } : {}),
+      ...(mushroomPop ? { mushroomPop } : {}),
       ...(components.hazard ? { hazard: validateHazard(components.hazard, filename) } : {}),
       ...(temperature ? { temperature } : {}),
       ...(combustible ? { combustible } : {}),
@@ -738,6 +843,7 @@ function validateActorArchetype(raw, filename) {
       ...(lifetime ? { lifetime } : {}),
       ...(replicationPolicy ? { replicationPolicy } : {}),
       ...(generatedProp ? { generatedProp } : {}),
+      ...(guidePath ? { guidePath } : {}),
       ...(render ? { render } : {}),
     },
   };

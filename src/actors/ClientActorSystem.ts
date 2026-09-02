@@ -13,6 +13,8 @@ import {
   COMBUSTIBLE_COMPONENT,
   CombustibleComponent,
   DropMotionComponent,
+  ELASTIC_DETACH_COMPONENT,
+  ElasticDetachComponent,
   ELASTIC_TETHER_COMPONENT,
   ElasticTetherComponent,
   HazardComponent,
@@ -20,6 +22,8 @@ import {
   HeatEmitterComponent,
   GENERATED_PROP_COMPONENT,
   GeneratedPropComponent,
+  GUIDE_PATH_COMPONENT,
+  GuidePathComponent,
   INTERACTABLE_COMPONENT,
   InteractableComponent,
   ITEM_STACK_COMPONENT,
@@ -97,6 +101,11 @@ import {
   LOCAL_DERIVED_ACTOR_COMPONENT,
   LocalDerivedActorComponent,
 } from './components/LocalDerivedActorComponent';
+import {
+  GUIDE_PATH_VISUAL_COMPONENT,
+  GuidePathVisualComponent,
+} from './components/GuidePathVisualComponent';
+import { GuidePathVisualSystem } from './systems/GuidePathVisualSystem';
 
 export interface ClientActorSystemOptions {
   definition: SceneDefinition;
@@ -195,6 +204,7 @@ export class ClientActorSystem implements SceneVisualSystem {
     // 客户端不运行 AttachmentSystem：最终世界坐标来自快照插值，不能被
     // localTransform 再次解算覆盖。
     this.world.addSystem(new ActorTransformSystem(this.root));
+    this.world.addSystem(new GuidePathVisualSystem());
     this.world.addSystem(new HybridSlimeVisualSystem());
     if (options.definition.renderer.ocean) {
       this.world.addSystem(new WaterBobVisualSystem(options.definition.renderer.ocean));
@@ -333,6 +343,12 @@ export class ClientActorSystem implements SceneVisualSystem {
   }
 
   public beforeRender(_renderer: THREE.WebGLRenderer, camera: THREE.Camera): void {
+    for (const actor of this.world.query(GUIDE_PATH_VISUAL_COMPONENT) as Actor[]) {
+      const visual = actor.requireComponent(
+        GUIDE_PATH_VISUAL_COMPONENT,
+      ) as GuidePathVisualComponent;
+      visual.setResolution(_renderer.domElement.width, _renderer.domElement.height);
+    }
     for (const actor of this.world.query(INTERACTION_MARKER_COMPONENT) as Actor[]) {
       const marker = actor.requireComponent(
         INTERACTION_MARKER_COMPONENT,
@@ -618,6 +634,9 @@ export class ClientActorSystem implements SceneVisualSystem {
       position: [snapshot.transform.x, snapshot.transform.y, snapshot.transform.z],
       yaw: snapshot.transform.yaw,
     }));
+    if (archetype.components.guidePath) {
+      actor.addComponent(new GuidePathComponent(archetype.components.guidePath));
+    }
     if (archetype.components.buoyancy) {
       actor.addComponent(new BuoyancyComponent(archetype.components.buoyancy));
     }
@@ -639,6 +658,9 @@ export class ClientActorSystem implements SceneVisualSystem {
     }
     if (archetype.components.elasticTether) {
       actor.addComponent(new ElasticTetherComponent(archetype.components.elasticTether));
+    }
+    if (archetype.components.elasticDetach) {
+      actor.addComponent(new ElasticDetachComponent(archetype.components.elasticDetach));
     }
     if (archetype.components.hazard) {
       actor.addComponent(new HazardComponent(archetype.components.hazard));
@@ -686,6 +708,36 @@ export class ClientActorSystem implements SceneVisualSystem {
       return actor;
     }
 
+    if (!archetype.components.render && archetype.components.guidePath) {
+      const root = new THREE.Group();
+      const visualRoot = new THREE.Group();
+      root.name = `actor-${snapshot.id}-root`;
+      visualRoot.name = `actor-${snapshot.id}-visual`;
+      root.add(visualRoot);
+      const render = new ThreeObjectComponent({
+        root,
+        visualRoot,
+        length: 0,
+        width: 0,
+        simpleCollision: {
+          shape: 'box',
+          centerX: 0,
+          centerZ: 0,
+          halfWidth: 0,
+          halfLength: 0,
+          minimumY: 0,
+          maximumY: 0,
+          supportShape: 'box',
+          supportHalfWidth: 0,
+          supportHalfLength: 0,
+        },
+      });
+      actor.addComponent(render);
+      this.attachGuidePathVisual(actor, render);
+      this.root.add(root);
+      this.world.addActor(actor);
+      return actor;
+    }
     if (!archetype.components.render) throw new Error(`可视 Actor ${archetype.id} 缺少 render`);
     const model = createActorVisualModel(this.environment, archetype.components.render);
     model.root.name = `actor-${snapshot.id}-root`;
@@ -694,6 +746,7 @@ export class ClientActorSystem implements SceneVisualSystem {
     const render = new ThreeObjectComponent(model);
     render.setSimpleCollisionVisible(this.simpleCollisionVisible);
     actor.addComponent(render);
+    this.attachGuidePathVisual(actor, render);
     if (
       archetype.components.render.model === 'line-art-pbf-slime'
       && render.pbfSlimeVisualRig
@@ -780,6 +833,27 @@ export class ClientActorSystem implements SceneVisualSystem {
       tether.releaseRevision = snapshot.elasticTether.releaseRevision;
       tether.revision = snapshot.elasticTether.revision;
     }
+    if (snapshot.elasticDetach) {
+      const detachable = actor.requireComponent(
+        ELASTIC_DETACH_COMPONENT,
+      ) as ElasticDetachComponent;
+      detachable.detached = snapshot.elasticDetach.detached;
+      detachable.revision = snapshot.elasticDetach.revision;
+      if (detachable.detached && !detachable.dropCollisionApplied) {
+        const motion = actor.getComponent('dropMotion') as DropMotionComponent | undefined;
+        if (motion) {
+          (actor.requireComponent(SIMPLE_COLLISION_COMPONENT) as SimpleCollisionComponent)
+            .setDefinition({
+              shape: 'cylinder',
+              halfWidth: motion.radius,
+              halfLength: motion.radius,
+              minimumY: -motion.radius,
+              maximumY: motion.radius,
+            });
+          detachable.dropCollisionApplied = true;
+        }
+      }
+    }
     if (snapshot.thermal) {
       const temperature = actor.requireComponent(TEMPERATURE_COMPONENT) as TemperatureComponent;
       temperature.temperature = snapshot.thermal.temperature;
@@ -806,6 +880,10 @@ export class ClientActorSystem implements SceneVisualSystem {
       const residency = actor.requireComponent(ACTOR_RESIDENCY_COMPONENT) as ActorResidencyComponent;
       residency.state = snapshot.residency.state;
       residency.revision = snapshot.residency.revision;
+    }
+    if (snapshot.guidePath) {
+      const guidePath = actor.requireComponent(GUIDE_PATH_COMPONENT) as GuidePathComponent;
+      guidePath.applySnapshot(snapshot.guidePath);
     }
     if (snapshot.propState) {
       this.applyGeneratedPropState(actor, {
@@ -896,6 +974,15 @@ export class ClientActorSystem implements SceneVisualSystem {
       : undefined;
     if (archetype) return archetype.id;
     throw new Error(`Actor ${snapshot.id} 的快照缺少 archetypeId`);
+  }
+
+  private attachGuidePathVisual(actor: Actor, render: ThreeObjectComponent): void {
+    const state = actor.getComponent(GUIDE_PATH_COMPONENT) as GuidePathComponent | undefined;
+    if (!state) return;
+    const visual = new GuidePathVisualComponent(state);
+    visual.guide.root.name = `actor-${actor.id}-guide-path`;
+    render.visualRoot.add(visual.guide.root);
+    actor.addComponent(visual);
   }
 
   private archetypeForGeneratedProp(

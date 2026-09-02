@@ -103,6 +103,18 @@ export interface SnapshotActor {
     state: 'active' | 'sleeping';
     revision: number;
   };
+  elasticDetach?: {
+    detached: boolean;
+    revision: number;
+  };
+  guidePath?: {
+    points: Array<[number, number, number]>;
+    curve: 'linear' | 'catmull-rom';
+    enabled: boolean;
+    currentPointIndex: number;
+    pathRevision: number;
+    revision: number;
+  };
   propState?: {
     /** 掉血形态才有；可再生物件没有血量。 */
     health?: number;

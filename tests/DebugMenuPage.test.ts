@@ -56,6 +56,13 @@ test('F8 调试菜单温度按钮切换文案、无障碍状态并派发回调',
 
   try {
     const page = new DebugMenuPage();
+    const modalBody = fakeDocument.elements.find((element) => (
+      element.className === 'modal-window__body'
+    ));
+    assert.ok(modalBody);
+    assert.equal(modalBody.children[0]?.children[0]?.textContent, 'ROOM DAY / NIGHT');
+    assert.equal(modalBody.children[1]?.children[0]?.textContent, 'ROOM WEATHER');
+
     const transformLogButton = fakeDocument.elements.find((element) => (
       element.tagName === 'button' && element.textContent === '开始记录玩家 Transform'
     ));

@@ -23,13 +23,13 @@ export interface ActorBuoyancyPartDefinition {
   localZ: number;
 }
 
-export interface InteractiveParticleSceneComponentDefinition {
+interface InteractiveParticleSceneComponentBaseDefinition {
   type: 'interactive-particle-effect';
   id: string;
   preset: 'line-art-leaves';
-  position: [number, number, number];
   particleCount: number;
-  radius: number;
+  /** 每个生成点覆盖的圆形落叶团半径；不会缩放单片落叶。 */
+  clusterRadius: number;
   seed: number;
   fillColor: string;
   accentColor: string;
@@ -37,6 +37,20 @@ export interface InteractiveParticleSceneComponentDefinition {
   interactionRadius: number;
   impulseStrength: number;
 }
+
+export type InteractiveParticleSceneComponentDefinition =
+  InteractiveParticleSceneComponentBaseDefinition & (
+    | {
+        /** 固定场景中的单个落叶团中心。 */
+        position: [number, number, number];
+        worldGeneration?: never;
+      }
+    | {
+        position?: never;
+        /** 流式世界中每个 chunk 的确定性候选点配置。 */
+        worldGeneration: { spawnChance: number };
+      }
+  );
 
 export type SceneComponentDefinition =
   | { type: 'mouse-grass-interaction' }
@@ -177,6 +191,22 @@ export interface ActorArchetypeDefinition {
   schemaVersion: 1;
   id: string;
   components: {
+    guidePath?: {
+      points: Array<[number, number, number]>;
+      curve: 'linear' | 'catmull-rom';
+      lineColor: string;
+      markerColor: string;
+      lineWidth: number;
+      dashLength: number;
+      gapLength: number;
+      dashSpeed: number;
+      markerSize: number;
+      hitRadius: number;
+      autoAdvance: boolean;
+      loop: boolean;
+      enabled: boolean;
+      currentPointIndex: number;
+    };
     playerMovement?: {
       walkSpeed: number;
       sprintMultiplier: number;
@@ -234,6 +264,12 @@ export interface ActorArchetypeDefinition {
       breakLength: number;
       mouthHeight: number;
       mouthForwardOffset: number;
+    };
+    elasticDetach?: {
+    };
+    mushroomPop?: {
+      forwardImpulse: number;
+      upwardImpulse: number;
     };
     hazard?: {
       radius: number;

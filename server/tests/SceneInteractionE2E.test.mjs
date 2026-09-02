@@ -256,7 +256,8 @@ test('真实 WebSocket 贯通史莱姆叼取、移动拉伸和自动脱离', asy
   }, 50);
   const released = await releasedState.finally(() => clearInterval(movement));
   const mushroom = actorFrom(released, 'elastic-mushroom-01');
-  assert.equal(mushroom.interactable.enabled, true);
+  assert.equal(mushroom.interactable.enabled, false);
+  assert.equal(mushroom.elasticDetach.detached, true);
   assert.equal(mushroom.elasticTether.releaseRevision, 1);
 });
 

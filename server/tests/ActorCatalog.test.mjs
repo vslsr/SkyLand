@@ -4,6 +4,7 @@ import { mkdtemp, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { ActorCatalog } from '../actors/ActorCatalog.mjs';
+import { BuoyancyComponent } from '../../shared/actor/components/BuoyancyComponent.mjs';
 
 async function loadSingleActor(definition) {
   const directory = await mkdtemp(join(tmpdir(), 'skyland-actor-'));
@@ -18,6 +19,9 @@ test('ActorCatalog 加载并净化木筏原型', async () => {
   assert.equal(raft.components.render.model, 'line-art-raft');
   assert.equal(raft.components.render.length, 4.8);
   assert.equal(raft.components.buoyancy.parts.length, 6);
+  assert.equal(raft.components.buoyancy.minimumDraft, 0.08);
+  assert.equal(raft.components.buoyancy.maximumDraft, 0.28);
+  const raftBuoyancy = new BuoyancyComponent(raft.components.buoyancy);
   assert.ok(raft.components.buoyancy.parts.every((part) => part.integrity === 1));
   assert.equal(raft.components.vesselMotor.maximumForwardSpeed, 4.2);
   assert.equal(raft.components.vesselMotor.inputTimeoutMs, 300);
@@ -33,7 +37,9 @@ test('ActorCatalog 加载并净化木筏原型', async () => {
 
   const mushroom = catalog.require('elastic-mushroom');
   assert.equal(mushroom.components.interactable.action, 'mushroom-bite');
-  assert.equal(mushroom.components.elasticTether.breakLength, 2.65);
+  assert.equal(mushroom.components.elasticTether.breakLength, 1.55);
+  assert.equal(mushroom.components.mushroomPop.upwardImpulse, 2.2);
+  assert.equal(mushroom.components.dropMotion.restitution, 0.28);
   assert.equal(mushroom.components.render.model, 'line-art-elastic-mushroom');
 
   const dummy = catalog.require('training-dummy');
@@ -60,9 +66,12 @@ test('ActorCatalog 加载并净化木筏原型', async () => {
     airControl: 0.85,
   });
   assert.equal(player.components.buoyancy.parts[0].id, 'body');
-  assert.equal(player.components.buoyancy.minimumDraft, 0.08);
+  assert.equal(player.components.buoyancy.minimumDraft, 0.24);
+  assert.equal(player.components.buoyancy.maximumDraft, 0.44);
   assert.equal(player.components.buoyancy.bobAmplitude, 0.22);
   assert.equal(player.components.buoyancy.bobFrequency, 0.55);
+  assert.ok(player.components.buoyancy.minimumDraft > player.components.buoyancy.bobAmplitude);
+  const playerBuoyancy = new BuoyancyComponent(player.components.buoyancy);
 
   const pbfSlime = catalog.require('pbf-slime');
   assert.equal(pbfSlime.components.render.model, 'line-art-pbf-slime');
@@ -77,7 +86,15 @@ test('ActorCatalog 加载并净化木筏原型', async () => {
   assert.equal(pbfSlime.components.playerJump.impulse, 7);
   assert.equal(pbfSlime.components.playerJump.airControl, 0.85);
   assert.equal(pbfSlime.components.buoyancy.parts[0].buoyancy, 80);
+  assert.equal(pbfSlime.components.buoyancy.minimumDraft, 0.32);
+  assert.equal(pbfSlime.components.buoyancy.maximumDraft, 0.48);
   assert.equal(pbfSlime.components.buoyancy.bobAmplitude, 0.3);
+  assert.ok(pbfSlime.components.buoyancy.minimumDraft > pbfSlime.components.buoyancy.bobAmplitude);
+  const pbfSlimeBuoyancy = new BuoyancyComponent(pbfSlime.components.buoyancy);
+  assert.ok(Math.abs(playerBuoyancy.draft - 0.34) < 1e-9);
+  assert.ok(Math.abs(pbfSlimeBuoyancy.draft - 0.4) < 1e-9);
+  assert.ok(playerBuoyancy.draft > raftBuoyancy.draft);
+  assert.ok(pbfSlimeBuoyancy.draft > raftBuoyancy.draft);
   assert.deepEqual(pbfSlime.components.slimeSurfaceDrag, {
     maximumDistance: 0.62,
     pullForce: 72,
@@ -93,6 +110,13 @@ test('ActorCatalog 加载并净化木筏原型', async () => {
   assert.equal(hay.components.temperature.initialTemperature, 20);
   assert.equal(hay.components.combustible.ignitionTemperature, 75);
   assert.equal(hay.components.render.model, 'line-art-dry-hay');
+
+  const guidePath = catalog.require('guide-path');
+  assert.equal(guidePath.components.render, undefined);
+  assert.equal(guidePath.components.guidePath.points.length, 4);
+  assert.equal(guidePath.components.guidePath.autoAdvance, true);
+  assert.equal(guidePath.components.guidePath.currentPointIndex, 0);
+  assert.deepEqual(guidePath.components.replicationPolicy, { mode: 'aoi', radiusChunks: 2 });
 
   const wood = catalog.require('wood-pile');
   assert.equal(wood.components.itemStack.itemType, 'wood');

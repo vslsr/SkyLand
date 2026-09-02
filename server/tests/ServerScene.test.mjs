@@ -3,11 +3,13 @@ import assert from 'node:assert/strict';
 import { ServerScene } from '../scene/ServerScene.mjs';
 import {
   PLAYER_BOUNDS,
+  PLAYER_COLLISION_RADIUS,
   PLAYER_MAXIMUM_SPEED,
   PLAYER_MOVE_SPEED,
   createSpawnPoint,
 } from '../../shared/playerMovement.mjs';
 import {
+  INPUT_STEP_BUDGET_CATCH_UP_RATE,
   INPUT_TIME_BUDGET_SECONDS,
   MAXIMUM_INPUT_STEPS_PER_PACKET,
   SIMULATION_STEP_SECONDS,
@@ -78,16 +80,16 @@ test('重放或乱序到达的旧输入被丢弃', () => {
 });
 
 test('放大方向向量无法提高速度', () => {
-  const clock = createClock();
-  const scene = new ServerScene('grassland', { now: clock.now });
-  scene.addPlayer({ id: 'honest', name: '诚实', slot: 0 });
-  scene.addPlayer({ id: 'cheater', name: '作弊', slot: 0 });
+  // 玩家彼此实心，同一个房间里两个人不可能站在同一个坐标上比较位移；把同一份
+  // 出生点放进两个独立房间，让诚实输入与放大输入走完全相同的碰撞环境。
+  const walk = (move) => {
+    const scene = new ServerScene('grassland', { now: createClock().now });
+    scene.addPlayer({ id: 'player', name: '玩家', slot: 0 });
+    scene.applyInput('player', inputSteps(1, 3, { move }));
+    return scene.createSnapshot().players[0].x;
+  };
 
-  scene.applyInput('honest', inputSteps(1, 3, { move: { x: 1, z: 0 } }));
-  scene.applyInput('cheater', inputSteps(1, 3, { move: { x: 999, z: 0 } }));
-
-  const players = new Map(scene.createSnapshot().players.map((player) => [player.id, player]));
-  assert.equal(players.get('cheater').x, players.get('honest').x);
+  assert.equal(walk({ x: 999, z: 0 }), walk({ x: 1, z: 0 }));
 });
 
 test('单包输入步数被钳制在上限内', () => {
@@ -128,6 +130,31 @@ test('时间预算限制了不推进时钟时能走出的总距离', () => {
   scene.update();
   scene.applyInput('cheater', inputSteps(200, 3, { move: { x: 1, z: 0 } }));
   assert.ok(scene.createSnapshot().players[0].x - spawn.x > moved);
+});
+
+test('预算补充快于客户端产出，卡顿堆起来的积压排得完', () => {
+  assert.ok(INPUT_STEP_BUDGET_CATCH_UP_RATE > 1, '补充速率必须留出追赶余量');
+
+  const clock = createClock();
+  const scene = new ServerScene('grassland', { now: clock.now });
+  scene.addPlayer({ id: 'laggy', name: '卡顿', slot: 0 });
+  const player = scene.players.get('laggy');
+  player.stepBudget = 0;
+
+  // 一个房间 tick 的真实时间对应 SERVER_TICK_RATE 分之一秒的客户端产出。
+  const tickSeconds = 1 / 20;
+  clock.advance(tickSeconds);
+  scene.update();
+
+  const produced = tickSeconds / SIMULATION_STEP_SECONDS;
+  assert.ok(
+    player.stepBudget > produced,
+    `补充 ${player.stepBudget} 步没有超过同期产出的 ${produced} 步`,
+  );
+  assert.ok(
+    player.stepBudget <= Math.floor(INPUT_TIME_BUDGET_SECONDS / SIMULATION_STEP_SECONDS),
+    '预算上限失效',
+  );
 });
 
 test('玩家无法走出玩法平面的活动范围', () => {
@@ -297,3 +324,24 @@ test('场景 JSON 的边界与出生配置参与权威模拟', () => {
   assert.ok(player.z <= 3);
 });
 import './initRapier.mjs';
+
+test('出生点会避开已经在场的玩家，即使座位号重复', () => {
+  const scene = new ServerScene('grassland');
+  scene.addPlayer({ id: 'first', name: '先到', slot: 0 });
+  scene.addPlayer({ id: 'second', name: '同座位', slot: 0 });
+  scene.addPlayer({ id: 'third', name: '还是同座位', slot: 0 });
+
+  const players = scene.createSnapshot().players;
+  for (let index = 0; index < players.length; index += 1) {
+    for (let other = index + 1; other < players.length; other += 1) {
+      const distance = Math.hypot(
+        players[index].x - players[other].x,
+        players[index].z - players[other].z,
+      );
+      assert.ok(
+        distance >= PLAYER_COLLISION_RADIUS * 2 - 0.001,
+        `${players[index].id} 与 ${players[other].id} 出生就重叠：${distance}`,
+      );
+    }
+  }
+});

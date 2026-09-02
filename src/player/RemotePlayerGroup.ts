@@ -1,18 +1,25 @@
 import * as THREE from 'three';
 import type { GrassInteractionTarget } from '../grass';
 import type { InterpolatedPlayerState } from '../network/protocol';
+import type { PhysicsWorld } from '../../shared/physics/PhysicsWorld.mjs';
 import type { ActorArchetypeDefinition } from '../scenes/data/SceneDefinition';
 import { RemotePlayer } from './RemotePlayer';
+import {
+  RemotePlayerColliders,
+  type RemotePlayerColliderState,
+} from './RemotePlayerColliders';
 
 /** 远端玩家集合：按快照增删改，本地玩家由 PlayerEntity 单独负责。 */
 export class RemotePlayerGroup {
   public readonly root = new THREE.Group();
   private readonly players = new Map<string, RemotePlayer>();
   private archetype?: ActorArchetypeDefinition;
+  private colliders?: RemotePlayerColliders;
 
   public constructor(private readonly grassInteraction: GrassInteractionTarget & {
     sampleGroundHeight?(x: number, z: number): number;
     samplePlayerHeight?(x: number, z: number, buoyancyDraft?: number): number;
+    getPhysicsWorld?(): PhysicsWorld | undefined;
   }) {
     this.root.name = 'remote-players';
   }
@@ -49,6 +56,24 @@ export class RemotePlayerGroup {
       player.dispose();
       this.players.delete(id);
     }
+
+    // 本地预测要撞得到别人，否则贴身时每份快照都会把玩家拉回来一次。
+    this.syncColliders();
+  }
+
+  /** 代理尺寸取自当前原型，所以第一名远端玩家出现之后才建得起来。 */
+  private syncColliders(): void {
+    const first: RemotePlayer | undefined = this.players.values().next().value;
+    if (!this.colliders) {
+      if (!first) return;
+      this.colliders = new RemotePlayerColliders(
+        this.grassInteraction.getPhysicsWorld?.(),
+        first.collisionShape,
+      );
+    }
+    const states: RemotePlayerColliderState[] = [];
+    for (const [id, player] of this.players) states.push({ id, ...player.feetPosition });
+    this.colliders.sync(states);
   }
 
   public update(deltaSeconds: number, elapsedSeconds: number): void {
@@ -58,5 +83,8 @@ export class RemotePlayerGroup {
   public clear(): void {
     for (const player of this.players.values()) player.dispose();
     this.players.clear();
+    this.colliders?.clear();
+    // 换原型会换碰撞尺寸，代理连同它缓存的形状一起重建。
+    this.colliders = undefined;
   }
 }

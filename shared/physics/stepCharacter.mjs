@@ -1,5 +1,11 @@
 import { sanitizeMoveInput, toFiniteNumber } from '../playerMovement.mjs';
-import { GROUND_SNAP_PROBE } from './characterParams.mjs';
+import {
+  BUOYANCY_DAMPING,
+  BUOYANCY_SPRING_STIFFNESS,
+  BUOYANCY_SUPPORT_DISTANCE,
+  BUOYANCY_SUPPORT_SPEED,
+  GROUND_SNAP_PROBE,
+} from './characterParams.mjs';
 
 const EPSILON = 1e-6;
 
@@ -24,11 +30,6 @@ export function stepCharacter(state, input, deltaSeconds, physics, params) {
   const buoyancyHeight = Number(params.buoyancyHeight);
   const buoyant = Number.isFinite(buoyancyHeight);
   physics.setCharacterSnapToGround?.(params.characterId, !buoyant);
-  if (buoyant && state.grounded) {
-    state.y = buoyancyHeight;
-    state.vy = 0;
-    physics.setCharacterTranslation(params.characterId, state);
-  }
   const inputLength = Math.hypot(move.x, move.z);
   const walkSpeed = Math.max(0, toFiniteNumber(params.walkSpeed));
   const speed = walkSpeed * (move.sprint ? Math.max(1, toFiniteNumber(params.sprintMultiplier, 1)) : 1);
@@ -48,13 +49,27 @@ export function stepCharacter(state, input, deltaSeconds, physics, params) {
   state.vz = horizontal.z;
 
   const jumpPressed = input?.jump === true;
-  const jumpStarted = jumpPressed && !state.jumpPressed && state.grounded;
+  const buoyancyJumpSupported = buoyant
+    && state.y <= buoyancyHeight + BUOYANCY_SUPPORT_DISTANCE;
+  const jumpStarted = jumpPressed
+    && !state.jumpPressed
+    && (state.grounded || buoyancyJumpSupported);
   state.jumpPressed = jumpPressed;
   if (jumpStarted) {
     state.vy = Math.max(0, toFiniteNumber(params.jumpImpulse));
     state.grounded = false;
+  } else if (buoyant && state.y <= buoyancyHeight) {
+    // 水面不是瞬移平面。浸入目标吃水线后用弹簧/阻尼改变垂直速度，位置仍由
+    // KCC 位移和 Rapier 碰撞结果推进；从岸上进入水域时先按重力自然下落。
+    const buoyancyAcceleration = (buoyancyHeight - state.y) * BUOYANCY_SPRING_STIFFNESS
+      - state.vy * BUOYANCY_DAMPING;
+    state.vy = clamp(
+      state.vy + buoyancyAcceleration * dt,
+      -Math.max(0, toFiniteNumber(params.maximumFallSpeed)),
+      Math.max(0, toFiniteNumber(params.jumpImpulse)),
+    );
   } else if (state.grounded) {
-    state.vy = buoyant ? 0 : -GROUND_SNAP_PROBE;
+    state.vy = -GROUND_SNAP_PROBE;
   } else {
     state.vy = Math.max(
       -Math.max(0, toFiniteNumber(params.maximumFallSpeed)),
@@ -88,15 +103,11 @@ export function stepCharacter(state, input, deltaSeconds, physics, params) {
   const position = physics.getCharacterTranslation(params.characterId);
   state.x = position.x;
   state.z = position.z;
-  if (buoyant && !jumpStarted && state.vy <= 0 && (state.grounded || position.y <= buoyancyHeight)) {
-    state.y = buoyancyHeight;
-    state.vy = 0;
-    state.grounded = true;
-    physics.setCharacterTranslation(params.characterId, state);
-  } else {
-    state.y = position.y;
-    state.grounded = state.vy > 0 ? false : result.grounded;
-  }
+  state.y = position.y;
+  const buoyancySupported = buoyant
+    && Math.abs(state.y - buoyancyHeight) <= BUOYANCY_SUPPORT_DISTANCE
+    && Math.abs(state.vy) <= BUOYANCY_SUPPORT_SPEED;
+  state.grounded = state.vy > 0 ? false : (result.grounded || buoyancySupported);
   if (state.grounded && state.vy < 0) state.vy = 0;
   return state;
 }

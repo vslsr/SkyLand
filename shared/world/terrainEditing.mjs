@@ -149,6 +149,18 @@ export class TerrainEditor {
       }
     }
 
+    // WATER 表示当前格确实承载水面，而不是不可逆的生成来源标签。抬高海床后
+    // 若整格已露出海面，必须同步恢复为普通地面；否则移动系统仍会对高台启用
+    // 浮力支持，把角色 Y 锁在水面高度并强制标记 grounded。
+    if (
+      !hasExplicitSurface
+      && surface === TERRAIN_SURFACE.WATER
+      && heightLevel > previousHeight
+      && !terrainCellHasWater(encodeTerrainCell(heightLevel, surface, shape), this.seaLevel)
+    ) {
+      surface = TERRAIN_SURFACE.GROUND;
+    }
+
     return this.patches.setCellCode(
       globalCellX,
       globalCellZ,

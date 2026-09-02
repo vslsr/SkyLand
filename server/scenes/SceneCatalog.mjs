@@ -151,8 +151,9 @@ function validateSceneComponents(rawComponents, filename) {
           'id',
           'preset',
           'position',
+          'worldGeneration',
           'particleCount',
-          'radius',
+          'clusterRadius',
           'seed',
           'fillColor',
           'accentColor',
@@ -179,20 +180,48 @@ function validateSceneComponents(rawComponents, filename) {
       if (component.preset !== 'line-art-leaves') {
         throw new TypeError(`${path}.preset 暂只支持 line-art-leaves`);
       }
-      if (!Array.isArray(component.position) || component.position.length !== 3) {
-        throw new TypeError(`${path}.position 必须包含 3 个数字`);
+      const hasPosition = component.position !== undefined;
+      const hasWorldGeneration = component.worldGeneration !== undefined;
+      if (hasPosition === hasWorldGeneration) {
+        throw new TypeError(`${path} 必须且只能配置 position 或 worldGeneration`);
       }
-      const position = component.position.map((value, axis) => (
-        requireNumber(value, `${path}.position[${axis}]`)
-      ));
+      let position;
+      let worldGeneration;
+      if (hasPosition) {
+        if (!Array.isArray(component.position) || component.position.length !== 3) {
+          throw new TypeError(`${path}.position 必须包含 3 个数字`);
+        }
+        position = component.position.map((value, axis) => (
+          requireNumber(value, `${path}.position[${axis}]`)
+        ));
+      } else {
+        const generation = requireObject(component.worldGeneration, `${path}.worldGeneration`);
+        const generationUnknownKeys = Object.keys(generation)
+          .filter((key) => key !== 'spawnChance');
+        if (generationUnknownKeys.length > 0) {
+          throw new TypeError(
+            `${path}.worldGeneration 包含未知字段：${generationUnknownKeys.join(', ')}`,
+          );
+        }
+        const spawnChance = requireNumber(
+          generation.spawnChance,
+          `${path}.worldGeneration.spawnChance`,
+        );
+        if (spawnChance <= 0 || spawnChance > 1) {
+          throw new TypeError(`${path}.worldGeneration.spawnChance 必须大于 0 且不超过 1`);
+        }
+        worldGeneration = { spawnChance };
+      }
       const particleCount = requireInteger(
         component.particleCount,
         `${path}.particleCount`,
         16,
         512,
       );
-      const radius = requireNumber(component.radius, `${path}.radius`);
-      if (radius < 1 || radius > 32) throw new TypeError(`${path}.radius 必须是 1-32`);
+      const clusterRadius = requireNumber(component.clusterRadius, `${path}.clusterRadius`);
+      if (clusterRadius < 1 || clusterRadius > 12) {
+        throw new TypeError(`${path}.clusterRadius 必须是 1-12`);
+      }
       const seed = requireInteger(component.seed, `${path}.seed`, 0, 0xffffffff);
       const interactionRadius = requireNumber(
         component.interactionRadius,
@@ -212,9 +241,9 @@ function validateSceneComponents(rawComponents, filename) {
         type,
         id,
         preset: component.preset,
-        position,
+        ...(position ? { position } : { worldGeneration }),
         particleCount,
-        radius,
+        clusterRadius,
         seed,
         fillColor: requireColor(component.fillColor, `${path}.fillColor`),
         accentColor: requireColor(component.accentColor, `${path}.accentColor`),
@@ -528,7 +557,6 @@ function validateSceneDefinition(raw, filename, actorCatalog) {
       );
     }
   }
-
   const gameplay = requireObject(scene.gameplay, `${filename}.gameplay`);
   const playerActor = requireObject(gameplay.playerActor, `${filename}.gameplay.playerActor`);
   const playerActorArchetypeId = requireString(
@@ -566,6 +594,17 @@ function validateSceneDefinition(raw, filename, actorCatalog) {
     throw new TypeError(`${filename}.gameplay.runtimeActorArchetypes 不能重复`);
   }
   const worldProps = validateWorldProps(gameplay, filename, actorCatalog, world, content);
+  if (
+    sceneComponents.some((component) => (
+      component.type === 'interactive-particle-effect' && component.worldGeneration
+    ))
+    && !world
+  ) {
+    throw new TypeError(
+      `${filename}.sceneComponents 的 interactive-particle-effect.worldGeneration `
+        + '需要 renderer.world',
+    );
+  }
   const bounds = requireObject(gameplay.bounds, `${filename}.gameplay.bounds`);
   const spawn = requireObject(gameplay.spawn, `${filename}.gameplay.spawn`);
   const minimumX = requireNumber(bounds.minimumX, `${filename}.gameplay.bounds.minimumX`);

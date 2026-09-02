@@ -6,9 +6,11 @@ import {
   createSpawnPoint,
   normalizeAngle,
   sanitizeMoveInput,
+  separateSpawnFromPlayers,
   toFiniteNumber,
 } from '../../shared/playerMovement.mjs';
 import {
+  INPUT_STEP_BUDGET_CATCH_UP_RATE,
   INPUT_TIME_BUDGET_SECONDS,
   MAXIMUM_INPUT_STEPS_PER_PACKET,
   MOVEMENT_IDLE_TIMEOUT_MS,
@@ -45,6 +47,7 @@ import {
   grabElasticTether,
   releaseElasticTether,
 } from '../actors/ElasticTetherMutations.mjs';
+import { PlayerIdleSimulation } from './PlayerIdleSimulation.mjs';
 import { ServerChunkColliders } from './ServerChunkColliders.mjs';
 import { ServerTerrainColliders } from './ServerTerrainColliders.mjs';
 import { PhysicsWorld, getRapier } from '../../shared/physics/index.mjs';
@@ -208,6 +211,17 @@ export class ServerScene {
       enabled: Boolean(definition.renderer?.world),
       now: () => this.now() / 1000,
     });
+    // 输入停了权威模拟不能跟着停：重力、坠落与落水由这里按房间时钟补步。
+    this.idleSimulation = new PlayerIdleSimulation({
+      stepPlayer: (player, input) => this.stepPlayerOnce(player, input),
+      preparePlayer: (player) => {
+        this.chunkColliders.ensureAround(player.x, player.z);
+        this.terrainColliders.ensureAround(player.x, player.z);
+        this.generatedProps.ensureAround(player.x, player.z);
+        this.actorWorld.context.refreshActorColliders?.();
+        this.physics.setCharacterTranslation(player.id, player.characterState);
+      },
+    });
     this.tick = 0;
     this.lastRefillAt = this.now();
   }
@@ -224,6 +238,7 @@ export class ServerScene {
     this.chunkColliders.ensureAround(spawn.x, spawn.z);
     this.terrainColliders.ensureAround(spawn.x, spawn.z);
     this.generatedProps.ensureAround(spawn.x, spawn.z);
+    this.actorWorld.context.refreshActorColliders?.();
     const spawnGroundY = this.terrainEnabled
       ? terrainMovementHeight(
           sampleTerrain(this.worldSeed, spawn.x, spawn.z, {}, this.terrainCellCodeAt),
@@ -231,7 +246,9 @@ export class ServerScene {
           buoyancy?.draft,
         )
       : 0;
-    const collisionPlaced = this.collision.resolveCircle(spawn, radius, {
+    // 玩家彼此实心，出生点也必须避开已经在场的人，否则新玩家一进来就卡在别人身体里。
+    const playerPlaced = separateSpawnFromPlayers(spawn, radius, this.players.values());
+    const collisionPlaced = this.collision.resolveCircle(playerPlaced, radius, {
       verticalProfile: {
         minimumY: spawnGroundY,
         maximumY: spawnGroundY + radius * 2,
@@ -649,6 +666,7 @@ export class ServerScene {
     this.chunkColliders.ensureAround(player.x, player.z);
     this.terrainColliders.ensureAround(player.x, player.z);
     this.generatedProps.ensureAround(player.x, player.z);
+    this.actorWorld.context.refreshActorColliders?.();
     // 传送、出生修正或玩法系统可能直接更新 Transform；每包开始先把角色刚体
     // 对齐到同一份 characterState，避免视觉/服务端坐标走了而 Rapier 留在旧处。
     this.physics.setCharacterTranslation(player.id, player.characterState);
@@ -656,36 +674,7 @@ export class ServerScene {
     for (const input of inputs) {
       if (input.tick <= player.ackTick || player.stepBudget < 1) continue;
       const before = debugEnabled ? capturePlayerTransformDebugState(player) : undefined;
-      player.stepBudget -= 1;
-      player.yaw = normalizeAngle(toFiniteNumber(input.yaw, player.yaw));
-      const move = sanitizeMoveInput({ ...input.move, sprint: input.sprint === true });
-      player.syncWaterMovementEffect(
-        player.characterState.grounded && this.isWaterAt(player.x, player.z),
-      );
-      player.characterParams.walkSpeed = player.waterMovementEffect.moveSpeed;
-      player.characterParams.buoyancyHeight = this.isWaterAt(player.x, player.z)
-        ? this.playerSupportHeightAt(player, player.x, player.z, this.now() / 1000)
-        : undefined;
-      stepCharacter(
-        player.characterState,
-        { move, sprint: input.sprint === true, jump: input.jump === true },
-        SIMULATION_STEP_SECONDS,
-        this.physics,
-        player.characterParams,
-      );
-      player.setPosition(
-        player.characterState.x,
-        player.characterState.z,
-        player.characterState.y,
-      );
-      player.jump.applyAuthoritativeState(
-        player.characterState.vy,
-        player.characterState.grounded,
-      );
-      player.syncWaterMovementEffect(
-        player.characterState.grounded && this.isWaterAt(player.x, player.z),
-      );
-      player.speed = Math.hypot(player.characterState.vx, player.characterState.vz);
+      const move = this.stepPlayerOnce(player, input);
       player.ackTick = input.tick;
       player.sequence = input.tick;
       processed += 1;
@@ -701,11 +690,55 @@ export class ServerScene {
         after: capturePlayerTransformDebugState(player),
       });
     }
-    if (processed > 0) player.lastInputAt = this.now();
+    if (processed > 0) {
+      player.lastInputAt = this.now();
+      // 真实输入回来了，之前替客户端补的空闲步余量作废，不能再叠加。
+      this.idleSimulation.reset(player);
+    }
     if (debugEnabled) this.emitPlayerTransformDebug(playerId, 'server.input_packet_completed', {
       processed,
       state: capturePlayerTransformDebugState(player),
     });
+  }
+
+  /**
+   * 推进一名玩家的一个固定步。客户端上行的输入与服务端替它补的空闲步走的
+   * 是同一条路径，权威状态只有这一个改动入口。调用方负责扣掉 ackTick 之类
+   * 的协议字段；这里只消耗 stepBudget 并返回归一化后的移动输入。
+   */
+  stepPlayerOnce(player, input) {
+    player.stepBudget -= 1;
+    player.yaw = normalizeAngle(toFiniteNumber(input.yaw, player.yaw));
+    const move = sanitizeMoveInput({ ...input.move, sprint: input.sprint === true });
+    player.syncWaterMovementEffect(this.isWaterAt(player.x, player.z));
+    player.characterParams.walkSpeed = player.waterMovementEffect.moveSpeed;
+    player.characterParams.buoyancyHeight = this.isWaterAt(player.x, player.z)
+      ? this.playerBuoyancyHeightAt(
+          player,
+          player.x,
+          player.z,
+          toFiniteNumber(input.tick) * SIMULATION_STEP_SECONDS,
+        )
+      : undefined;
+    stepCharacter(
+      player.characterState,
+      { move, sprint: input.sprint === true, jump: input.jump === true },
+      SIMULATION_STEP_SECONDS,
+      this.physics,
+      player.characterParams,
+    );
+    player.setPosition(
+      player.characterState.x,
+      player.characterState.z,
+      player.characterState.y,
+    );
+    player.jump.applyAuthoritativeState(
+      player.characterState.vy,
+      player.characterState.grounded,
+    );
+    player.syncWaterMovementEffect(this.isWaterAt(player.x, player.z));
+    player.speed = Math.hypot(player.characterState.vx, player.characterState.vz);
+    return move;
   }
 
   emitPlayerTransformDebug(playerId, event, data) {
@@ -750,10 +783,7 @@ export class ServerScene {
         === TERRAIN_SURFACE.WATER;
   }
 
-  /**
-   * 玩家权威 Y：地面/海床支撑先由共享地形决定，水中再叠加有界解析浮动。
-   * 每名玩家每 tick 只采样一次，成本与在线玩家数成正比，不扫描水面或 chunk。
-   */
+  /** 出生定位使用的初始支撑高度；运行后的 Y 只由共享固定物理步推进。 */
   playerVerticalHeightAt(player, x, z, timeSeconds) {
     if (player.characterState?.grounded === false) return player.y;
     return this.playerSupportHeightAt(player, x, z, timeSeconds);
@@ -770,37 +800,25 @@ export class ServerScene {
         buoyancy?.draft,
       );
       if (!water || !buoyancy) return support;
-      return Math.max(
-        terrain.groundY,
-        support + sampleBuoyancyBobOffset(
-          player.id,
-          timeSeconds,
-          buoyancy.bobAmplitude,
-          buoyancy.bobFrequency,
-        ),
-      );
+      return Math.max(terrain.groundY, support);
     }
     if (!water || !buoyancy) return 0;
-    return this.actorWorld.context.seaLevel
-      - buoyancy.draft
-      + sampleBuoyancyBobOffset(
-        player.id,
-        timeSeconds,
-        buoyancy.bobAmplitude,
-        buoyancy.bobFrequency,
-      );
+    return this.actorWorld.context.seaLevel - buoyancy.draft;
   }
 
-  playerBuoyancyOffsetAt(player, timeSeconds) {
+  playerBuoyancyHeightAt(player, x, z, timeSeconds) {
     const buoyancy = player.getComponent(BUOYANCY_COMPONENT);
-    return buoyancy && this.isWaterAt(player.x, player.z)
-      ? sampleBuoyancyBobOffset(
-          player.id,
-          timeSeconds,
-          buoyancy.bobAmplitude,
-          buoyancy.bobFrequency,
-        )
-      : 0;
+    const supportY = this.playerSupportHeightAt(player, x, z, timeSeconds);
+    if (!buoyancy || !this.isWaterAt(x, z)) return supportY;
+    const targetY = supportY + sampleBuoyancyBobOffset(
+      player.id,
+      timeSeconds,
+      buoyancy.bobAmplitude,
+      buoyancy.bobFrequency,
+    );
+    if (!this.terrainEnabled) return targetY;
+    const terrain = sampleTerrain(this.worldSeed, x, z, {}, this.terrainCellCodeAt);
+    return Math.max(terrain.groundY, targetY);
   }
 
   /** 按服务端时钟补充固定模拟步预算。 */
@@ -814,19 +832,11 @@ export class ServerScene {
     for (const player of this.players.values()) {
       player.stepBudget = Math.min(
         Math.floor(INPUT_TIME_BUDGET_SECONDS / SIMULATION_STEP_SECONDS),
-        player.stepBudget + elapsedSeconds / SIMULATION_STEP_SECONDS,
+        // 补充速率略高于客户端产出速率，卡顿后的积压才排得干净。
+        player.stepBudget
+          + (elapsedSeconds / SIMULATION_STEP_SECONDS) * INPUT_STEP_BUDGET_CATCH_UP_RATE,
       );
       if (now - player.lastInputAt > MOVEMENT_IDLE_TIMEOUT_MS) player.speed = 0;
-      if (
-        player.characterState.grounded
-        && this.isWaterAt(player.x, player.z)
-        && player.getComponent(BUOYANCY_COMPONENT)
-      ) {
-        const supportY = this.playerSupportHeightAt(player, player.x, player.z, now / 1000);
-        player.setPosition(player.x, player.z, supportY);
-        player.characterState.vy = 0;
-        this.physics.setCharacterTranslation(player.id, player.characterState);
-      }
     }
     // Actor 的碰撞盒由 ActorColliderIndex 在 tick 内同步，这里不用再管。
     this.actorWorld.update(elapsedSeconds, now / 1000);
@@ -834,9 +844,14 @@ export class ServerScene {
     this.chunkColliders.sync(this.players.values());
     this.terrainColliders.sync(this.players.values());
     this.generatedProps.sync(this.players.values());
+    // 输入包是权威模拟的主驱动，但它可能整段消失。补步只覆盖「静默超时且仍在
+    // 运动」的玩家，站着不动的一步都不跑，成本上界是房间人数而非世界面积。
+    this.idleSimulation.advance(this.players.values(), elapsedSeconds, now);
     // Rapier refreshes its query pipeline during step; newly streamed trimeshes
     // are intentionally not query-visible before this point.
     this.physics.step();
+    // Rapier 动态 Actor 在物理步之后立刻回写权威 Transform，当前快照即可看到弹出。
+    this.actorWorld.context.syncDetachedPhysics?.();
   }
 
   /** 树木、矿脉或战利品系统调用这一入口生成一个可自动合并的物品堆。 */

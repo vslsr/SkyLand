@@ -122,6 +122,7 @@
         { "id": "Sprint.Gamepad.Button", "deviceKind": "gamepad", "control": "Gamepad.LeftStickButton", "actionId": "IA_Player_Sprint" },
 
         { "id": "Jump.Keyboard.Primary", "deviceKind": "keyboardMouse", "control": "Keyboard.Space", "actionId": "IA_Player_Jump" },
+        { "id": "Jump.Touch.Button", "deviceKind": "touch", "control": "Virtual.JumpButton", "actionId": "IA_Player_Jump" },
 
         { "id": "Primary.Mouse.Button", "deviceKind": "keyboardMouse", "control": "Mouse.Button0", "actionId": "IA_Player_Primary" },
         { "id": "Primary.Gamepad.Button", "deviceKind": "gamepad", "control": "Gamepad.ButtonSouth", "actionId": "IA_Player_Primary" },
@@ -173,6 +174,7 @@
       "Mouse.Button0": "鼠标左键",
       "Virtual.MoveStick": "触摸摇杆",
       "Virtual.SprintButton": "RUN",
+      "Virtual.JumpButton": "JUMP",
       "Virtual.WorldInteractButton": "ACT",
       "Gamepad.LeftStick": "左摇杆",
       "Gamepad.LeftStickButton": "L3",
@@ -197,7 +199,8 @@
         "deviceKind": "keyboardMouse",
         "entries": [
           { "label": "移动", "mappingIds": ["Move.Keyboard.Up", "Move.Keyboard.Left", "Move.Keyboard.Down", "Move.Keyboard.Right"], "joinWith": "/" },
-          { "label": "朝向", "text": "鼠标" },
+          { "label": "镜头", "text": "左键拖动" },
+          { "label": "朝向", "text": "点击地面" },
           { "label": "加速", "mappingIds": ["Sprint.Keyboard.Primary"] },
           { "label": "跳跃", "mappingIds": ["Jump.Keyboard.Primary"] }
         ]
@@ -207,7 +210,9 @@
         "deviceKind": "touch",
         "entries": [
           { "label": "移动", "mappingIds": ["Move.Touch.Stick"] },
-          { "label": "加速", "mappingIds": ["Sprint.Touch.Button"] }
+          { "label": "镜头", "text": "拖动屏幕" },
+          { "label": "加速", "mappingIds": ["Sprint.Touch.Button"] },
+          { "label": "跳跃", "mappingIds": ["Jump.Touch.Button"] }
         ]
       },
       {
@@ -259,6 +264,15 @@
         "label": "2×",
         "ariaLabel": "双击闪避",
         "sizePx": 58,
+        "gridColumn": 2,
+        "gridRow": 3
+      },
+      {
+        "id": "jump",
+        "control": "Virtual.JumpButton",
+        "label": "JUMP",
+        "ariaLabel": "跳跃",
+        "sizePx": 64,
         "gridColumn": 2,
         "gridRow": 2
       },

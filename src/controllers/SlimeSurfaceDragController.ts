@@ -26,7 +26,6 @@ export class SlimeSurfaceDragController {
     pressAvailable: false,
   };
   private primaryDown = false;
-  private pendingBegin = false;
 
   public constructor(
     private readonly canvas: HTMLCanvasElement,
@@ -50,19 +49,6 @@ export class SlimeSurfaceDragController {
 
   public update(): void {
     if (!this.primaryDown || !this.pointer.available) return;
-    if (this.pendingBegin) {
-      this.pendingBegin = false;
-      const pressRay = this.pointer.pressAvailable
-        ? this.createPointerRay(this.pointer.pressX, this.pointer.pressY)
-        : this.createPointerRay(this.pointer.x, this.pointer.y);
-      if (pressRay && this.component.beginDrag(pressRay)) {
-        this.onDragActiveChanged?.(true);
-        this.capturePointer();
-        const currentRay = this.createPointerRay(this.pointer.x, this.pointer.y);
-        if (currentRay) this.component.updateDrag(currentRay);
-      }
-      return;
-    }
     const ray = this.createPointerRay(this.pointer.x, this.pointer.y);
     if (!ray) return;
     if (this.component.isDragging) this.component.updateDrag(ray);
@@ -148,7 +134,16 @@ export class SlimeSurfaceDragController {
     if (!isMousePrimary) return;
     if (event.value !== true || this.primaryDown) return;
     this.primaryDown = true;
-    this.pendingBegin = true;
+    // 在 InputSubsystem 派发按下语义时立即完成拾取，让表面拖拽能在
+    // 同一帧的 TopDown 更新前取消屏幕轨道旋转，一次手势只有一个所有者。
+    const pressRay = this.pointer.pressAvailable
+      ? this.createPointerRay(this.pointer.pressX, this.pointer.pressY)
+      : this.createPointerRay(this.pointer.x, this.pointer.y);
+    if (!pressRay || !this.component.beginDrag(pressRay)) return;
+    this.onDragActiveChanged?.(true);
+    this.capturePointer();
+    const currentRay = this.createPointerRay(this.pointer.x, this.pointer.y);
+    if (currentRay) this.component.updateDrag(currentRay);
   }
 
   private capturePointer(): void {
@@ -162,7 +157,6 @@ export class SlimeSurfaceDragController {
 
   private releaseDrag(): void {
     this.primaryDown = false;
-    this.pendingBegin = false;
     this.pointer.pressAvailable = false;
     this.component.endDrag();
     this.onDragActiveChanged?.(false);

@@ -98,11 +98,18 @@ const BUBBLE_LAYOUT = [
 
 function createFace(radius: number, palette: SlimePalette): THREE.Group {
   const face = new THREE.Group();
-  const ink = new THREE.MeshBasicMaterial({ color: palette.ink });
+  // 眼睛是角色识别层，不参与昼夜光照、雾或色调映射；夜晚也必须保持原始墨色。
+  const ink = new THREE.MeshBasicMaterial({
+    color: palette.ink,
+    depthWrite: false,
+    fog: false,
+    toneMapped: false,
+  });
   const eyeGeometry = new THREE.SphereGeometry(radius * 0.075, 10, 8);
 
-  for (const x of [-radius * 0.27, radius * 0.27]) {
+  for (const [index, x] of [-radius * 0.27, radius * 0.27].entries()) {
     const eye = new THREE.Mesh(eyeGeometry, ink);
+    eye.name = `player-slime-eye-${index === 0 ? 'left' : 'right'}`;
     eye.position.set(x, radius * 0.08, radius * 0.92);
     eye.scale.y = 1.25;
     eye.renderOrder = 5;

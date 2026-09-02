@@ -308,10 +308,15 @@ JS 两个后端之间必须逐位一致，所以它不接受任何逐场景的�
 草簇坐标、朝向和缩放，每簇仍保持三片叶子，因此替换不会改变位置或密度；所有已加载
 chunk 共用一张跟随玩家焦点、按固定步长滑动的 32 米局部弯曲纹理。玩家踩踏始终可写入
 当前场景的草地交互目标，鼠标输入则由场景级 `mouse-grass-interaction` Component 独立提供；
-`open-world.scene.json` 的 `sceneComponents` 为空，因此不会注册鼠标压草。窗口移动时会按世界坐标
+`open-world.scene.json` 不注册鼠标压草。窗口移动时会按世界坐标
 重投影仍在重叠区内的草痕，快速传送到不重叠区域则
 自动回到中性状态；纹理成本因此不随世界尺寸增长。两条路的叶片形状都取自
 `createGrassBladeGeometry`，观感保持一致。
+
+大世界的 `interactive-particle-effect` 通过 `worldGeneration.spawnChance` 为每个 chunk
+确定性生成至多一个落叶团候选点；房间世界种子、组件 `seed` 与 chunk 坐标共同决定位置。
+`clusterRadius` 配置的是每个点周围的圆形落叶团半径，不会缩放单片落叶。组件复用世界的
+`loadRadius` / `keepRadius` 流送 Actor，并限制每帧创建一个 chunk，资源上界不随世界面积增长。
 
 顶点已经是世界坐标，承载它们的对象留在原点，Three.js 自动算出的包围球就落在
 正确位置上，视锥剔除按 chunk 生效。
@@ -627,8 +632,9 @@ Actor 简易碰撞边框、温度标签、房间权威天气，并显示房间�
 日月位置与星空亮度，`src/weather/WeatherSystem.ts` 再在同一帧把云量压灰、雾浓度和
 雷闪叠上去，一次性写进 `scene.background`、`scene.fog` 与场景共享 uniform；两套系统
 各写一遍就会在同一帧互相覆盖。日轮、月轮、星空与流星是无限远元素，每帧跟着相机平移；
-雨雪仍按本地玩家周围的 3×3 chunk 激活，粒子保持世界坐标固定。纸面地表、地面网格与
-草叶不混入距离雾色。
+雨雪仍按本地玩家周围的 3×3 chunk 激活，粒子保持世界坐标固定。和参考项目一致，普通
+物体填充、纸面地表、地面网格与草叶不混入距离雾色；流式世界的合批物件仅在雾效最远端
+12 米内渐隐，用来遮住 chunk 流送边缘而不牺牲近中景清晰度。
 
 时刻在两帧快照之间由 `DayNightClock` 用与服务端相同的共享数学继续推进，收到快照时
 小偏差平滑追赶、大偏差（重连、调试跳时段）直接跳过去，所以时间不会随快照频率跳动。
@@ -693,6 +699,16 @@ Replica。Actor 使用服务端校验的 `parentActorId + localTransform` 构成
 移动后由 `AttachmentSystem` 按拓扑解算子 Actor 的最终世界坐标。客户端只对最终世界
 Transform 回退 120 ms 插值；父子关系不插值，海浪造成的上下浮动仍只作用于视觉子节点，
 不改写权威 Transform。
+
+`guide-path.actor.json` 是无服务端 Mesh 的展示型 Actor：`GuidePathComponent` 权威保存
+局部路径点、启用态和当前节点，并提供 `setPath()`、`setEnabled()`、
+`setCurrentPointIndex()`、`advance()` 与 `reset()`。这些离散状态随 Actor 快照复制；客户端
+`GuidePathVisualSystem` 才按 Wayfinder 参考创建流动白色虚线与 additive 发光 Billboard，
+不叠加线稿描边或暗色底线。删除服务器 Actor 就会让所有
+客户端移除对应 Replica，并释放该路径独占的几何、材质和贴图。
+大世界中该原型使用 2 Chunk AOI 复制，AOI 外不会创建客户端 Replica；服务端命中检查
+固定为 10 Hz。单条路径最多 32 个局部路点（坐标绝对值不超过 64 米）和 256 个渲染采样，
+始终只创建一个当前节点 Sprite；所有 GuidePath 共同复用一张 64×64 光晕纹理。
 
 每个受支持的 Actor 模型在创建时会从 `render` 的 authoring 尺寸自动生成一个简易有向盒，
 无需再维护重复碰撞配置。玩家圆形碰撞、可控 Actor 推出和客户端预测共用
@@ -763,9 +779,11 @@ DS 初始化 ServerScene、边界、出生规则并回复 room:ready
 - 玩家实体不存在：使用原有 `FlyController` 自由飞行镜头。
 - 玩家加入房间并生成实体：`SceneControlRouter` 自动切换到 `TopDownController`。
 - TopDown 把玩法 Scene 的完整 `camera.position` 作为相对角色焦点的偏移；焦点通过阻尼追踪角色，不会改写 Scene 定义的距离与构图。当前玩法场景统一使用 `[5.5, 7.5, 8.5]`，从地面 XZ 斜方向俯视角色。
+- 在画面上左键或单指拖动可旋转 TopDown 镜头；水平旋转和有界俯仰都使用参考项目的惯性阻尼。
 - 玩家模型、步行速度、冲刺倍率和最大可跨越高度来自场景引用的玩家 Actor 原型；默认
   `player-slime` 的 `maximumStepHeight` 为 0.2 米。
 - W / A / S / D：按俯视镜头的屏幕方向移动。
+- 镜头旋转后，WASD、虚拟摇杆和手柄移动会立即改用新的相机前/右轴，不会沿旋转前的世界方向继续移动。
 - Shift：加速移动。
 - 鼠标：通过透视射线投影到玩法 XY 平面，并让史莱姆面向投影点。玩法坐标的 Y 在 Three.js 世界中映射为地面的 Z 轴。
 - 玩法 TopDown 默认保持 Scene 配置的完整距离和高度，不因树冠、岩石或建筑遮挡自动推近；需要避障镜头的独立控制器仍可显式启用 `CameraBoom`。

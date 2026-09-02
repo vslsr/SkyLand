@@ -1,8 +1,11 @@
 import {
+  DROP_MOTION_COMPONENT,
+  ELASTIC_DETACH_COMPONENT,
   GENERATED_PROP_COMPONENT,
   INTERACTABLE_COMPONENT,
   REPLICATED_COMPONENT,
   ReplicatedComponent,
+  TRANSFORM_COMPONENT,
 } from '../../shared/actor/index.mjs';
 import {
   PROP_BUFFER_LENGTH,
@@ -187,19 +190,17 @@ export class ServerGeneratedPropActors {
       // 同一个 chunk 不会装两次，这里只防御 ensureAround 与 sync 的竞争。
       if (this.world.getActor(id)) continue;
       const generatedProp = archetype.components.generatedProp;
-      // 只有可采集生成物有偏离态；完整复制的蘑菇始终从原型默认状态装载。
-      const deviation = generatedProp
-        ? this.takeLiveDeviation(id, elapsedSeconds)
-        : undefined;
+      const deviation = this.takeLiveDeviation(id, elapsedSeconds);
+      const generatedPosition = [
+        this.propBuffer[offset + PROP_FIELD.X_MM] / 1000,
+        this.propBuffer[offset + PROP_FIELD.Y_MM] / 1000,
+        this.propBuffer[offset + PROP_FIELD.Z_MM] / 1000,
+      ];
       const actor = createServerActor({
         id,
         archetypeId: archetype.id,
         localTransform: {
-          position: [
-            this.propBuffer[offset + PROP_FIELD.X_MM] / 1000,
-            this.propBuffer[offset + PROP_FIELD.Y_MM] / 1000,
-            this.propBuffer[offset + PROP_FIELD.Z_MM] / 1000,
-          ],
+          position: deviation?.transform?.position ?? generatedPosition,
           yaw: this.propBuffer[offset + PROP_FIELD.ROTATION_MRAD] / 1000,
         },
       }, archetype, generatedProp
@@ -218,12 +219,20 @@ export class ServerGeneratedPropActors {
         : {
             // 蘑菇的交互状态会变化，必须走带 archetype/transform 的完整 Actor 快照。
             replicated: true,
+            elasticDetach: deviation?.elasticDetach,
+            dropMotion: deviation?.dropMotion,
           });
       if (deviation) {
         // 偏离态必须立刻可复制：AOI 里的客户端要靠这一条把物件从世界里抹掉，
         // 否则重新走回这一片时它会原地长回来。
-        actor.addComponent(new ReplicatedComponent());
+        if (!actor.hasComponents(REPLICATED_COMPONENT)) {
+          actor.addComponent(new ReplicatedComponent());
+        }
         if (deviation.removed) {
+          const interactable = actor.getComponent(INTERACTABLE_COMPONENT);
+          if (interactable) interactable.enabled = false;
+        }
+        if (deviation.elasticDetach?.detached) {
           const interactable = actor.getComponent(INTERACTABLE_COMPONENT);
           if (interactable) interactable.enabled = false;
         }
@@ -254,6 +263,19 @@ export class ServerGeneratedPropActors {
    */
   captureDeviation(actor) {
     const prop = actor.getComponent(GENERATED_PROP_COMPONENT);
+    const detachable = actor.getComponent(ELASTIC_DETACH_COMPONENT);
+    if (detachable?.detached) {
+      const transform = actor.requireComponent(TRANSFORM_COMPONENT);
+      const motion = actor.requireComponent(DROP_MOTION_COMPONENT);
+      this.deviations.set(actor.id, {
+        transform: { position: [transform.x, transform.y, transform.z] },
+        elasticDetach: { detached: true },
+        dropMotion: {
+          velocity: [motion.velocityX, motion.velocityY, motion.velocityZ],
+        },
+      });
+      return;
+    }
     if (!prop) return;
     if (prop.isPristine(this.now())) {
       this.deviations.delete(actor.id);
