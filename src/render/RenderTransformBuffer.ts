@@ -1,5 +1,6 @@
 import { allocateSharedBytes, isSharedBytes } from '../platform/index';
 import { NULL_PROXY_ID, type ProxyId } from './RenderScene';
+import { RENDER_VISUAL_PARAM_COUNT } from './RenderVisualParams';
 
 /**
  * 坐在 Game World 与 Render World 之间的 transform 双缓冲（路线图 §2 / 第 1 步）。
@@ -17,9 +18,12 @@ import { NULL_PROXY_ID, type ProxyId } from './RenderScene';
  * 布局是一整段字节，一次 `postMessage` 就能交给 worker：
  *
  * ```text
- * [ Int32 header ×4 ][ Float32 transforms 2×capacity×4 ][ Int32 parents 2×capacity ]
- *   readBank frameId   x y z yaw ...                      parentSlot ...
+ * [ Int32 header ×4 ][ Float32 transforms 2×cap×4 ][ Int32 parents 2×cap ][ Float32 params 2×cap×N ]
+ *   readBank frameId   x y z yaw ...                 parentSlot ...         见 RenderVisualParams
  * ```
+ *
+ * 表现参数和 transform 同段、同一次 `publish()`：分开两个缓冲会撕裂——
+ * 强度来自第 N 帧、位置来自第 N+1 帧。
  *
  * 三条约定：
  *
@@ -54,7 +58,8 @@ export interface RenderTransform {
 function bytesFor(capacity: number): number {
   return HEADER_BYTES
     + 2 * capacity * RENDER_TRANSFORM_STRIDE * Float32Array.BYTES_PER_ELEMENT
-    + 2 * capacity * Int32Array.BYTES_PER_ELEMENT;
+    + 2 * capacity * Int32Array.BYTES_PER_ELEMENT
+    + 2 * capacity * RENDER_VISUAL_PARAM_COUNT * Float32Array.BYTES_PER_ELEMENT;
 }
 
 export class RenderTransformBuffer {
@@ -63,6 +68,7 @@ export class RenderTransformBuffer {
   #header: Int32Array<ArrayBufferLike> = new Int32Array(0);
   #transforms: Float32Array<ArrayBufferLike> = new Float32Array(0);
   #parents: Int32Array<ArrayBufferLike> = new Int32Array(0);
+  #params: Float32Array<ArrayBufferLike> = new Float32Array(0);
 
   public constructor(capacity = DEFAULT_CAPACITY) {
     this.#adopt(allocateSharedBytes(bytesFor(Math.max(1, capacity))), Math.max(1, capacity));
@@ -123,6 +129,8 @@ export class RenderTransformBuffer {
       const base = this.#transformBase(bank, id);
       this.#transforms.fill(0, base, base + RENDER_TRANSFORM_STRIDE);
       this.#parents[this.#parentBase(bank, id)] = NULL_PROXY_ID;
+      const paramBase = this.#paramBase(bank, id);
+      this.#params.fill(0, paramBase, paramBase + RENDER_VISUAL_PARAM_COUNT);
     }
   }
 
@@ -142,6 +150,8 @@ export class RenderTransformBuffer {
       published * this.#capacity,
       (published + 1) * this.#capacity,
     );
+    const paramStride = this.#capacity * RENDER_VISUAL_PARAM_COUNT;
+    this.#params.copyWithin(next * paramStride, published * paramStride, (published + 1) * paramStride);
   }
 
   public readTransform(id: ProxyId, out: RenderTransform): RenderTransform {
@@ -152,6 +162,17 @@ export class RenderTransformBuffer {
     out.z = this.#transforms[base + 2];
     out.yaw = this.#transforms[base + 3];
     return out;
+  }
+
+  /** 写这一帧的表现参数。下标见 `RenderVisualParams`。 */
+  public writeParam(id: ProxyId, param: number, value: number): void {
+    this.ensureSlot(id);
+    this.#params[this.#paramBase(this.#writeBank, id) + param] = value;
+  }
+
+  public readParam(id: ProxyId, param: number): number {
+    if (id < 0 || id >= this.#capacity) return 0;
+    return this.#params[this.#paramBase(this.#readBank, id) + param];
   }
 
   public readParent(id: ProxyId): ProxyId {
@@ -175,10 +196,15 @@ export class RenderTransformBuffer {
     return bank * this.#capacity + slot;
   }
 
+  #paramBase(bank: number, slot: number): number {
+    return (bank * this.#capacity + slot) * RENDER_VISUAL_PARAM_COUNT;
+  }
+
   #grow(capacity: number): void {
     const previousCapacity = this.#capacity;
     const previousTransforms = this.#transforms;
     const previousParents = this.#parents;
+    const previousParams = this.#params;
     const readBank = this.#readBank;
     const frameId = this.frameId;
 
@@ -201,6 +227,14 @@ export class RenderTransformBuffer {
         previousParents.subarray(sourceParent, sourceParent + previousCapacity),
         bank * capacity,
       );
+      const sourceParam = bank * previousCapacity * RENDER_VISUAL_PARAM_COUNT;
+      this.#params.set(
+        previousParams.subarray(
+          sourceParam,
+          sourceParam + previousCapacity * RENDER_VISUAL_PARAM_COUNT,
+        ),
+        bank * capacity * RENDER_VISUAL_PARAM_COUNT,
+      );
     }
   }
 
@@ -212,10 +246,12 @@ export class RenderTransformBuffer {
     const transformOffset = HEADER_BYTES;
     const transformCount = 2 * capacity * RENDER_TRANSFORM_STRIDE;
     this.#transforms = new Float32Array(bytes, transformOffset, transformCount);
-    this.#parents = new Int32Array(
+    const parentOffset = transformOffset + transformCount * Float32Array.BYTES_PER_ELEMENT;
+    this.#parents = new Int32Array(bytes, parentOffset, 2 * capacity);
+    this.#params = new Float32Array(
       bytes,
-      transformOffset + transformCount * Float32Array.BYTES_PER_ELEMENT,
-      2 * capacity,
+      parentOffset + 2 * capacity * Int32Array.BYTES_PER_ELEMENT,
+      2 * capacity * RENDER_VISUAL_PARAM_COUNT,
     );
   }
 }

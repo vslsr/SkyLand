@@ -718,19 +718,27 @@ test('客户端按权威燃烧状态显示参考 LineLoop 火焰，稳定篝火�
   system.syncSnapshots([campfire, coldHay], 1_000, 1_000);
   system.update(1 / 60, 0.5);
 
-  const campfireFire = system.getActor(campfire.id)!
-    .requireComponent(FIRE_VISUAL_COMPONENT) as FireVisualComponent;
+  // rig 住在渲染世界里；Actor 上的 FireVisualComponent 只剩一个目标强度。
+  const campfireRig = system.getActorRenderProxy(campfire.id)!.fireVisualRig!;
   const hayActor = system.getActor(coldHay.id)!;
+  const hayRig = system.getActorRenderProxy(hayActor.id)!.fireVisualRig!;
   const hayFire = hayActor.requireComponent(FIRE_VISUAL_COMPONENT) as FireVisualComponent;
+  assert.equal(
+    (system.getActor(campfire.id)!
+      .requireComponent(FIRE_VISUAL_COMPONENT) as FireVisualComponent).targetIntensity,
+    1,
+    '静态热源的目标强度应当在 spawn 时就是 1',
+  );
+  assert.equal(hayFire.targetIntensity, 0, '没烧起来时目标强度是 0');
   const temperatureMarker = hayActor.requireComponent(
     TEMPERATURE_MARKER_COMPONENT,
   ) as TemperatureMarkerComponent;
-  assert.equal(campfireFire.rig.root.visible, true);
-  assert.equal(hayFire.rig.root.visible, false);
+  assert.equal(campfireRig.root.visible, true);
+  assert.equal(hayRig.root.visible, false);
   assert.equal(temperatureMarker.visible, false);
   assert.equal(temperatureMarker.label, '');
-  assert.equal(campfireFire.rig.flames.length, 5);
-  assert.equal(campfireFire.rig.sparks.length, 6);
+  assert.equal(campfireRig.flames.length, 5);
+  assert.equal(campfireRig.sparks.length, 6);
 
   system.setTemperatureVisible(true);
   assert.equal(temperatureMarker.visible, true);
@@ -753,16 +761,17 @@ test('客户端按权威燃烧状态显示参考 LineLoop 火焰，稳定篝火�
 
   const combustible = hayActor.requireComponent(COMBUSTIBLE_COMPONENT) as CombustibleComponent;
   assert.equal(combustible.burning, true);
-  assert.equal(hayFire.rig.root.visible, true);
+  assert.equal(hayFire.targetIntensity, 1, '燃烧快照必须把目标强度推到 1');
+  assert.equal(hayRig.root.visible, true);
   assert.equal(temperatureMarker.label, '78.4 °C');
-  assert.equal(hayFire.rig.flames.length, 4);
-  assert.equal(hayFire.rig.sparks.length, 4);
-  const flameTop = Math.max(...hayFire.rig.flames.map((flame) => (
-    hayFire.rig.root.position.y
-      + (flame.y + flame.height) * hayFire.rig.root.scale.y
+  assert.equal(hayRig.flames.length, 4);
+  assert.equal(hayRig.sparks.length, 4);
+  const flameTop = Math.max(...hayRig.flames.map((flame) => (
+    hayRig.root.position.y
+      + (flame.y + flame.height) * hayRig.root.scale.y
   )));
   assert.ok(flameTop > dryHayArchetype.components.render.height);
-  const flameOrigins = hayFire.rig.flames.map((flame) => (
+  const flameOrigins = hayRig.flames.map((flame) => (
     new THREE.Vector3(flame.x, flame.y, flame.z)
   ));
   let minimumOriginDistance = Number.POSITIVE_INFINITY;
@@ -775,7 +784,7 @@ test('客户端按权威燃烧状态显示参考 LineLoop 火焰，稳定篝火�
     }
   }
   assert.ok(minimumOriginDistance > dryHayArchetype.components.render.radius * 0.22);
-  const positions = hayFire.rig.flames[0].position.array as Float32Array;
+  const positions = hayRig.flames[0].position.array as Float32Array;
   assert.ok(positions.some((value) => Math.abs(value) > 1e-5));
   system.setTemperatureVisible(false);
   assert.equal(temperatureMarker.visible, false);

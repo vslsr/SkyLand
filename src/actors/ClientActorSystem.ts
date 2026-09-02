@@ -82,6 +82,7 @@ import {
   InteractionMarkerComponent,
 } from './components/InteractionMarkerComponent';
 import { ActorTransformSystem } from './systems/ActorTransformSystem';
+import { ActorVisualParamSystem } from './systems/ActorVisualParamSystem';
 import { RenderTransformSyncSystem } from './systems/RenderTransformSyncSystem';
 import { AttachmentVisualSystem } from './systems/AttachmentVisualSystem';
 import { CargoVisualSystem } from './systems/CargoVisualSystem';
@@ -92,7 +93,6 @@ import {
   FIRE_VISUAL_COMPONENT,
   FireVisualComponent,
 } from './components/FireVisualComponent';
-import { FireVisualSystem } from './systems/FireVisualSystem';
 import { GeneratedPropFruitSystem } from './systems/GeneratedPropFruitSystem';
 import { HighCountActorBatchSystem } from './systems/HighCountActorBatchSystem';
 import { HybridSlimeVisualComponent } from './components/HybridSlimeVisualComponent';
@@ -219,6 +219,8 @@ export class ClientActorSystem implements SceneVisualSystem {
     // RenderTransformSyncSystem 翻面并交给渲染世界。后面所有表现 System 读的都是
     // 已经摆好位置的 matrixWorld，所以这两个必须排在最前且相邻。
     this.world.addSystem(new ActorTransformSystem(this.transforms));
+    // 参数要和 transform 同一次翻面，所以必须夹在写入与 publish 之间。
+    this.world.addSystem(new ActorVisualParamSystem(this.transforms));
     this.world.addSystem(new RenderTransformSyncSystem(this.transforms, this.renderScene));
     this.world.addSystem(new GuidePathVisualSystem());
     this.world.addSystem(new HybridSlimeVisualSystem(this.renderScene));
@@ -230,7 +232,6 @@ export class ClientActorSystem implements SceneVisualSystem {
     this.world.addSystem(new ElasticTetherVisualSystem(this.renderScene));
     // 必须排在弹性拉伸之后：脱落物件的姿态由这一步覆盖成刚体朝向。
     this.world.addSystem(new ActorDropRollSystem(this.renderScene));
-    this.world.addSystem(new FireVisualSystem());
   }
 
   public syncSnapshots(
@@ -310,6 +311,9 @@ export class ClientActorSystem implements SceneVisualSystem {
     if (this.highCountBatches.root.children.length > 0 && !this.highCountBatches.root.parent) {
       this.root.add(this.highCountBatches.root);
     }
+    // 渲染世界自己的表现系统。它们读的是刚翻面的参数段，所以排在 world.update 之后。
+    // deltaSeconds 目前仍来自模拟侧——第 3 步渲染进 worker 后换成渲染线程的时钟。
+    this.renderScene.updateVisuals(this.transforms, deltaSeconds, elapsedSeconds);
     this.publishColliders();
     this.hoverHelper?.update();
   }
@@ -793,7 +797,7 @@ export class ClientActorSystem implements SceneVisualSystem {
       }
       if (render.fireVisualRig) {
         const emitter = actor.getComponent(HEAT_EMITTER_COMPONENT) as HeatEmitterComponent | undefined;
-        actor.addComponent(new FireVisualComponent(render.fireVisualRig, emitter?.enabled ? 1 : 0));
+        actor.addComponent(new FireVisualComponent(emitter?.enabled ? 1 : 0));
       }
       if (archetype.components.interactable) {
         actor.addComponent(new InteractionMarkerComponent(render.root, info.interactionAnchorY));

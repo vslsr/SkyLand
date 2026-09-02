@@ -10,6 +10,7 @@ import {
   toProxyId,
 } from '../RenderScene';
 import type { RenderTransform, RenderTransformBuffer } from '../RenderTransformBuffer';
+import { ThreeFireVisual } from './ThreeFireVisual';
 import { ThreeMeshProxy } from './ThreeMeshProxy';
 
 /**
@@ -62,6 +63,8 @@ export class ThreeRenderScene implements RenderScene {
   private readonly world: RenderTransform = { x: 0, y: 0, z: 0, yaw: 0 };
   private readonly parentWorld: RenderTransform = { x: 0, y: 0, z: 0, yaw: 0 };
   private simpleCollisionVisible = false;
+  /** 渲染世界自己的表现系统。它们只认识 ProxyId，不认识 Actor。 */
+  private readonly fireVisual = new ThreeFireVisual();
 
   public constructor(
     public readonly root: THREE.Group,
@@ -95,6 +98,7 @@ export class ThreeRenderScene implements RenderScene {
     if (!proxy) return;
     this.proxies[id] = undefined;
     this.freeSlots.push(id);
+    this.fireVisual.forget(id);
     proxy.dispose();
   }
 
@@ -140,6 +144,18 @@ export class ThreeRenderScene implements RenderScene {
       );
       proxy.root.rotation.y = normalizeAngle(this.world.yaw - this.parentWorld.yaw);
     }
+  }
+
+  /**
+   * 驱动渲染世界自己的表现动画。读的是刚翻面的参数段，写的是自己持有的 rig，
+   * 全程不经过任何 Actor。
+   */
+  public updateVisuals(
+    transforms: RenderTransformBuffer,
+    deltaSeconds: number,
+    elapsedSeconds: number,
+  ): void {
+    this.fireVisual.update(this.liveProxies(), transforms, deltaSeconds, elapsedSeconds);
   }
 
   /** 简易碰撞盒的可视化开关。是渲染世界自己的状态，遍历不经过任何 Actor。 */
