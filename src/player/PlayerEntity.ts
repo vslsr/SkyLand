@@ -43,6 +43,7 @@ import {
   MAXIMUM_PENDING_INPUT_STEPS,
   SIMULATION_STEP_SECONDS,
 } from '../../shared/networkTuning.mjs';
+import { createObjectPositionSampler } from './objectPositionSampler';
 
 export interface PlayerTransformDebugState {
   logic: { x: number; y: number; z: number };
@@ -196,7 +197,7 @@ export class PlayerEntity extends Actor {
         )
       : undefined;
     this.grassDisplacement = this.addComponent(new GrassDisplacementComponent(
-      this.model.root,
+      createObjectPositionSampler(this.model.root),
       grassInteraction,
       { radius: this.visual.radius * 1.65 },
     )) as GrassDisplacementComponent;

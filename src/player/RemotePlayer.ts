@@ -15,6 +15,7 @@ import {
   isPlayerActorRenderDefinition,
   type PlayerActorVisual,
 } from './PlayerActorVisual';
+import { createObjectPositionSampler } from './objectPositionSampler';
 
 /** 同房间的另一名玩家：位置来自快照插值；混合软体只做不回写状态的客户端表现。 */
 export class RemotePlayer extends Actor {
@@ -66,7 +67,7 @@ export class RemotePlayer extends Actor {
     this.verticalVelocity = state.verticalVelocity ?? 0;
     this.grounded = state.grounded ?? true;
     this.grassDisplacement = this.addComponent(new GrassDisplacementComponent(
-      this.model.root,
+      createObjectPositionSampler(this.model.root),
       grassInteraction,
       { radius: this.visual.radius * 1.65 },
     )) as GrassDisplacementComponent;

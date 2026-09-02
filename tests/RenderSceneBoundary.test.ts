@@ -167,7 +167,6 @@ test('Game→Render 的写入点不再 import three', () => {
  */
 const COMPONENTS_STILL_IMPORTING_RENDER_MODULES = [
   'FireVisualComponent.ts',
-  'GrassDisplacementComponent.ts',
   'GuidePathVisualComponent.ts',
   'HybridSlimeVisualComponent.ts',
   'InteractionMarkerComponent.ts',
