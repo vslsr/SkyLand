@@ -335,6 +335,8 @@ DOM + CSS 布局 + 层叠 + 文本排版是三个巨型子系统，做出来只�
 
 落地形态（H5 编辑器怎么和 C++ 运行时接、为什么不内嵌 webview、编辑器如何复用现有的客户端协议）单独写在 **`tool-layer-implementation.md`**。
 
+引擎支持多个项目时 Config / TS / Asset 各自的归属，写在 **`multi-project-architecture.md`**。
+
 ---
 
 ## 8. ResourceLayer 与资源生命周期
