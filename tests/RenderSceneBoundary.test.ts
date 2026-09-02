@@ -161,14 +161,11 @@ test('Game→Render 的写入点不再 import three', () => {
  * 对象过不了线程边界。
  *
  * 规则很简单：**Actor Component 不得 import 渲染侧模块**（three、models、
- * guidance、slime、grass）。下面这份是尚未搬完的豁免清单，**只能变短**：
- * 搬完一个就把它划掉；清单空了，第 2 步的前置条件就满足了。多出一项则说明
- * 有人又在 Actor 上挂了渲染对象。
+ * guidance、slime、grass）。下面这份豁免清单**只能变短**，现在它空了：
+ * 八项全部搬完，第 2 步的前置条件已经满足。多出一项就说明有人又在 Actor 上
+ * 挂了渲染对象。
  */
-const COMPONENTS_STILL_IMPORTING_RENDER_MODULES = [
-  'HybridSlimeVisualComponent.ts',
-  'SlimeSurfaceDragComponent.ts',
-];
+const COMPONENTS_STILL_IMPORTING_RENDER_MODULES: string[] = [];
 
 // 不含 render/：`RenderProxyComponent` 引的是边界本身的类型（ProxyId 与命令口），
 // 那正是它该引的。这条规则针对的是渲染**实现**。

@@ -1,10 +1,16 @@
 import * as THREE from 'three';
-import { PLAYER_MOVE_SPEED } from '../../shared/playerMovement.mjs';
-import type { PlayerSlimeModel } from '../models/playerSlime';
+import { PLAYER_MOVE_SPEED } from '../../../shared/playerMovement.mjs';
+import type { PlayerSlimeModel } from '../../models/playerSlime';
 
 const BASE_SQUASH = 0.78;
 
-export class SlimeAnimator {
+/**
+ * `line-art-player-slime` 的挤压/摇摆动画（实现路径文档 §1.5）。
+ *
+ * 从 `src/player/` 搬进渲染世界：它每帧改的是模型各节点的 scale 与 rotation，
+ * 玩法侧只需要给一个速度标量。
+ */
+export class ThreeSlimeAnimator {
   private readonly model: PlayerSlimeModel;
   private squash = BASE_SQUASH;
   private squashVelocity = 0;

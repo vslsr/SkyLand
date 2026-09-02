@@ -2,20 +2,35 @@ import * as THREE from 'three';
 import type { FillMaterialEnvironment } from '../../materials/createFillMaterial';
 import { createActorVisualModel } from '../../models/actors/createActorVisualModel';
 import type { ActorVisualModel } from '../../models/actors/ActorVisualModel';
+import { createPbfSlimeModel } from '../../models/actors/createPbfSlimeModel';
+import { createPlayerSlimeModel, createSlimePalette } from '../../models/playerSlime';
 import {
   NULL_PROXY_ID,
   type GuidePathStyle,
   type MeshProxyDesc,
   type MeshProxyInfo,
+  type PlayerProxyDesc,
   type ProxyId,
   type RenderScene,
+  type SlimeSurfaceDragRay,
   toProxyId,
 } from '../RenderScene';
+import {
+  readSlimeMotionParams,
+  SLIME_MOTION_AT_REST,
+  type SlimeMotionParams,
+} from '../RenderSlimeMotion';
 import type { RenderTransform, RenderTransformBuffer } from '../RenderTransformBuffer';
-import { PARAM_TEMPERATURE } from '../RenderVisualParams';
+import { PARAM_SLIME_SPEED, PARAM_TEMPERATURE } from '../RenderVisualParams';
 import { ThreeFireVisual } from './ThreeFireVisual';
 import { ThreeGuidePathVisual, type GuidePathState } from './ThreeGuidePathVisual';
+import { ThreeHybridSlimeVisual } from './ThreeHybridSlimeVisual';
 import { ThreeMeshProxy } from './ThreeMeshProxy';
+import { ThreeSlimeAnimator } from './ThreeSlimeAnimator';
+import {
+  createDefaultSlimeSurfaceDragDefinition,
+  ThreeSlimeSurfaceDrag,
+} from './ThreeSlimeSurfaceDrag';
 
 /**
  * `RenderScene` 的 Three.js 后端（路线图 第 1 步）。
@@ -53,6 +68,16 @@ function createEmptyModel(name: string): ActorVisualModel {
   };
 }
 
+function describeProxy(proxy: ThreeMeshProxy): MeshProxyInfo {
+  return {
+    id: proxy.id,
+    length: proxy.length,
+    width: proxy.width,
+    interactionAnchorY: proxy.interactionAnchorY,
+    simpleCollision: proxy.simpleCollision,
+  };
+}
+
 function normalizeAngle(value: number): number {
   let angle = value;
   while (angle > Math.PI) angle -= Math.PI * 2;
@@ -76,6 +101,14 @@ export class ThreeRenderScene implements RenderScene {
   private readonly guidePaths = new Map<ProxyId, ThreeGuidePathVisual>();
   /** 样式在 spawn 时给定，实体等第一条带路点的命令到了再建——GuidePath 至少要 2 个路点。 */
   private readonly guidePathStyles = new Map<ProxyId, GuidePathStyle>();
+  /** proxyId → 软体蒙皮表现。只有 PBF 史莱姆有，所以用 Map 而不是按槽位的数组。 */
+  private readonly slimeVisuals = new Map<ProxyId, ThreeHybridSlimeVisual>();
+  /** proxyId → 老式挤压动画。`line-art-player-slime` 那条路径用。 */
+  private readonly slimeAnimators = new Map<ProxyId, ThreeSlimeAnimator>();
+  /** proxyId → 蒙皮拖拽。只有玩家 proxy 会建。 */
+  private readonly slimeDrags = new Map<ProxyId, ThreeSlimeSurfaceDrag>();
+  /** 逐帧复用的参数读出缓冲，避免每个史莱姆每帧分配一个对象。 */
+  private readonly slimeMotion: SlimeMotionParams = { ...SLIME_MOTION_AT_REST };
 
   public constructor(
     public readonly root: THREE.Group,
@@ -90,24 +123,62 @@ export class ThreeRenderScene implements RenderScene {
       model.root.name = `${desc.name}-root`;
       model.visualRoot.name = `${desc.name}-visual`;
     }
-    const slot = this.freeSlots.pop() ?? this.proxies.length;
-    const proxy = new ThreeMeshProxy(toProxyId(slot), model);
-    this.proxies[slot] = proxy;
-    proxy.setSimpleCollisionVisible(this.simpleCollisionVisible);
+    const proxy = this.#adopt(model);
     if (desc.interactionMarker) proxy.markers.attachInteraction(proxy.interactionAnchorY);
     if (desc.temperatureMarker) {
       proxy.markers.attachTemperature(proxy.temperatureAnchorX, proxy.interactionAnchorY, 0);
       proxy.markers.setTemperatureVisible(this.temperatureMarkersVisible);
     }
     if (desc.guidePath) this.guidePathStyles.set(proxy.id, desc.guidePath);
+    if (desc.render?.model === 'line-art-pbf-slime' && model.pbfSlimeVisualRig) {
+      this.slimeVisuals.set(
+        proxy.id,
+        new ThreeHybridSlimeVisual(model.pbfSlimeVisualRig, desc.render),
+      );
+    }
+    return describeProxy(proxy);
+  }
+
+  /**
+   * 玩家史莱姆（本地与远端）。
+   *
+   * 玩家不是 Replica，但它的 proxy 必须和 Actor 的 proxy 落在同一张槽位表、
+   * 同一段 SoA 里——`ProxyId` 是边界上唯一的标识，两套编号就没有边界可言了。
+   */
+  public createPlayerProxy(desc: PlayerProxyDesc): MeshProxyInfo {
+    if (desc.render.model === 'line-art-player-slime') {
+      const model = createPlayerSlimeModel(
+        desc.render,
+        desc.paletteSeed === undefined ? undefined : createSlimePalette(desc.paletteSeed),
+      );
+      model.root.name = desc.name;
+      const proxy = this.#adopt(model);
+      this.slimeAnimators.set(proxy.id, new ThreeSlimeAnimator(model, desc.walkSpeed));
+      return describeProxy(proxy);
+    }
+    const model = createPbfSlimeModel(desc.render);
+    const rig = model.pbfSlimeVisualRig;
+    if (!rig) throw new Error(`混合软体玩家史莱姆缺少 VisualRig：${desc.name}`);
+    model.root.name = desc.name;
+    const proxy = this.#adopt(model);
+    const slime = new ThreeHybridSlimeVisual(rig, desc.render);
+    this.slimeVisuals.set(proxy.id, slime);
+    this.slimeDrags.set(proxy.id, new ThreeSlimeSurfaceDrag(
+      rig,
+      slime.simulation,
+      desc.surfaceDrag ?? createDefaultSlimeSurfaceDragDefinition(desc.render.radius),
+    ));
+    return describeProxy(proxy);
+  }
+
+  /** 分槽位、登记、挂进场景图。两个入口共用同一张槽位表。 */
+  #adopt(model: ActorVisualModel): ThreeMeshProxy {
+    const slot = this.freeSlots.pop() ?? this.proxies.length;
+    const proxy = new ThreeMeshProxy(toProxyId(slot), model);
+    this.proxies[slot] = proxy;
+    proxy.setSimpleCollisionVisible(this.simpleCollisionVisible);
     this.root.add(proxy.root);
-    return {
-      id: proxy.id,
-      length: proxy.length,
-      width: proxy.width,
-      interactionAnchorY: proxy.interactionAnchorY,
-      simpleCollision: proxy.simpleCollision,
-    };
+    return proxy;
   }
 
   public destroyMeshProxy(id: ProxyId): void {
@@ -122,6 +193,10 @@ export class ThreeRenderScene implements RenderScene {
     this.guidePaths.get(id)?.dispose();
     this.guidePaths.delete(id);
     this.guidePathStyles.delete(id);
+    this.slimeDrags.get(id)?.dispose();
+    this.slimeDrags.delete(id);
+    this.slimeVisuals.delete(id);
+    this.slimeAnimators.delete(id);
     proxy.dispose();
   }
 
@@ -189,6 +264,46 @@ export class ThreeRenderScene implements RenderScene {
       proxy.markers.setTemperature(transforms.readParam(proxy.id, PARAM_TEMPERATURE));
     }
     for (const guide of this.guidePaths.values()) guide.update(deltaSeconds);
+    // 权威 yaw 取的是 submitTransforms 刚摆好的 root 角度：外壳要抵消的正是
+    // 「root 这一级实际被转了多少」，父子情况下那已经是相对 yaw。
+    for (const [id, slime] of this.slimeVisuals) {
+      const proxy = this.resolve(id);
+      if (!proxy) continue;
+      slime.update(
+        deltaSeconds,
+        elapsedSeconds,
+        proxy.root.rotation.y,
+        readSlimeMotionParams(transforms, id, this.slimeMotion),
+      );
+    }
+    for (const [id, animator] of this.slimeAnimators) {
+      animator.update(deltaSeconds, elapsedSeconds, transforms.readParam(id, PARAM_SLIME_SPEED));
+    }
+  }
+
+  /**
+   * 蒙皮拖拽。指针、相机和外壳全在渲染这一侧，所以这三个方法是渲染世界内部调用，
+   * 不是边界；玩法侧只会经由控制器收到「拖拽开始/结束」一个布尔。
+   */
+  public beginSlimeSurfaceDrag(id: ProxyId, ray: SlimeSurfaceDragRay): boolean {
+    return this.slimeDrags.get(id)?.beginDrag(ray) ?? false;
+  }
+
+  public updateSlimeSurfaceDrag(id: ProxyId, ray: SlimeSurfaceDragRay): boolean {
+    return this.slimeDrags.get(id)?.updateDrag(ray) ?? false;
+  }
+
+  public endSlimeSurfaceDrag(id: ProxyId): void {
+    this.slimeDrags.get(id)?.endDrag();
+  }
+
+  public isSlimeSurfaceDragging(id: ProxyId): boolean {
+    return this.slimeDrags.get(id)?.isDragging ?? false;
+  }
+
+  /** 渲染侧查找软体表现（能力实验室与测试用）。 */
+  public resolveSlimeVisual(id: ProxyId): ThreeHybridSlimeVisual | undefined {
+    return this.slimeVisuals.get(id);
   }
 
   /**
@@ -260,6 +375,10 @@ export class ThreeRenderScene implements RenderScene {
     for (const guide of this.guidePaths.values()) guide.dispose();
     this.guidePaths.clear();
     this.guidePathStyles.clear();
+    for (const drag of this.slimeDrags.values()) drag.dispose();
+    this.slimeDrags.clear();
+    this.slimeVisuals.clear();
+    this.slimeAnimators.clear();
     for (const proxy of this.proxies) proxy?.dispose();
     this.proxies.length = 0;
     this.freeSlots.length = 0;

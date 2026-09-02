@@ -57,8 +57,8 @@ export class SceneRenderer implements GrassInteractionTarget {
   private visualSystems: SceneVisualSystem[] = [];
   private grassInteraction?: GrassInteractionTarget;
   private actorSnapshotTarget?: ActorSnapshotTarget;
-  private renderScene?: ThreeRenderScene;
-  private renderTransforms?: RenderTransformBuffer;
+  /** 当前地图的渲染世界。整张对象随场景一起换掉，所以引用可以直接比身份。 */
+  private renderWorldHandle?: { scene: ThreeRenderScene; transforms: RenderTransformBuffer };
   private weatherTarget?: WeatherVisualTarget;
   private dayNightTarget?: DayNightVisualTarget;
   private sceneEnvironmentRuntime?: SceneEnvironmentRuntime;
@@ -109,9 +109,11 @@ export class SceneRenderer implements GrassInteractionTarget {
    * 当前地图的渲染世界。玩家实体（本地与远端）经由它建自己的 proxy——
    * 它们不是 Replica，但必须和 Actor 共用同一个渲染世界和同一段边界字节。
    */
-  public get renderWorld(): { scene: ThreeRenderScene; transforms: RenderTransformBuffer } | undefined {
-    if (!this.renderScene || !this.renderTransforms) return undefined;
-    return { scene: this.renderScene, transforms: this.renderTransforms };
+  public get renderWorld(): {
+    scene: ThreeRenderScene;
+    transforms: RenderTransformBuffer;
+  } | undefined {
+    return this.renderWorldHandle;
   }
 
   public addWorldObject(object: THREE.Object3D): void {
@@ -372,8 +374,9 @@ export class SceneRenderer implements GrassInteractionTarget {
     this.sceneEnvironmentRuntime = composition.environmentRuntime;
     this.grassInteraction = composition.grassInteraction;
     this.actorSnapshotTarget = composition.actorSnapshotTarget;
-    this.renderScene = composition.renderScene;
-    this.renderTransforms = composition.renderTransforms;
+    this.renderWorldHandle = composition.renderScene && composition.renderTransforms
+      ? { scene: composition.renderScene, transforms: composition.renderTransforms }
+      : undefined;
     this.collisionWorld = composition.collisionWorld;
     this.terrainWorld = composition.terrainWorld;
     this.physicsWorld = composition.physicsWorld;

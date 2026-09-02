@@ -20,6 +20,7 @@ import { RoomClient, type JoinedRoom, type RoomSummary } from '../network/RoomCl
 import { SnapshotBuffer } from '../network/SnapshotBuffer';
 import type { RoomSnapshot } from '../network/protocol';
 import { PlayerEntity } from '../player/PlayerEntity';
+import { SlimeSurfaceDragController } from '../controllers/SlimeSurfaceDragController';
 import { RemotePlayerGroup } from '../player/RemotePlayerGroup';
 import { SceneRenderer } from '../rendering/SceneRenderer';
 import { createSceneRuntimeComponent, SceneComponentHost } from '../scene/components';
@@ -71,6 +72,7 @@ export class GrasslandScene extends Scene {
   private joinedRoom?: JoinedRoom;
   private availableScenes: SceneSummary[] = [];
   private player?: PlayerEntity;
+  private slimeSurfaceDrag?: SlimeSurfaceDragController;
   private timeSinceInputSent = 0;
 
   /** 暴露当前场景的实时绑定方案，供设置页或调试面板调用 rebind/reset。 */
@@ -234,13 +236,23 @@ export class GrasslandScene extends Scene {
       this.playerTransformLog?.handleDisconnect();
       this.handleDisconnect();
     });
-    this.renderer.addWorldObject(this.remotePlayers.root);
   }
 
   public update(deltaSeconds: number, elapsedSeconds: number): void {
     this.input.update();
     this.vesselControls.update(deltaSeconds);
     this.controls.update(deltaSeconds, elapsedSeconds);
+    // 玩家（本地与远端）排在 renderer.update 之前：它们把自己这一帧的 transform
+    // 与运动参数写进边界那段 SoA，而翻面发生在 renderer.update 里的 Actor 世界中。
+    // 写在翻面之后就会晚一帧——软体读到的速度和它被摆到的位置对不上。
+    this.slimeSurfaceDrag?.update();
+    this.player?.update(deltaSeconds);
+    if (this.joinedRoom?.scene.camera.mode === 'topdown') {
+      this.remotePlayers.sync(this.snapshots.sample(), this.joinedRoom.player.id);
+      this.remotePlayers.update(deltaSeconds);
+    } else {
+      this.remotePlayers.clear();
+    }
     this.renderer.update(deltaSeconds, elapsedSeconds, this.currentFocus());
     if (this.terrainEdits.active) {
       // 编辑模式独占 WorldInteract：同一次点击不能既改地形又去交互 Actor。
@@ -252,15 +264,8 @@ export class GrasslandScene extends Scene {
     }
     const playerId = this.joinedRoom?.player.id;
     this.hud.setVesselStatus(playerId ? this.renderer.getVesselHudState(playerId) : undefined);
-    this.player?.update(deltaSeconds, elapsedSeconds);
     this.sceneComponents.update(deltaSeconds, elapsedSeconds);
     this.sendPlayerInput(deltaSeconds);
-    if (this.joinedRoom?.scene.camera.mode === 'topdown') {
-      this.remotePlayers.sync(this.snapshots.sample(), this.joinedRoom.player.id);
-      this.remotePlayers.update(deltaSeconds, elapsedSeconds);
-    } else {
-      this.remotePlayers.clear();
-    }
   }
 
   public render(): void {
@@ -276,7 +281,7 @@ export class GrasslandScene extends Scene {
     if (player) {
       return {
         focusX: player.x,
-        focusY: this.player?.object3D.position.y ?? 0,
+        focusY: this.player?.renderPosition.y ?? 0,
         focusZ: player.z,
       };
     }
@@ -547,6 +552,9 @@ export class GrasslandScene extends Scene {
     topDownCameraOffset: JoinedRoom['scene']['camera']['position'],
   ): void {
     if (this.player) return;
+    const renderWorld = this.renderer.renderWorld;
+    if (!renderWorld) throw new Error('当前场景没有渲染世界，无法建立玩家 proxy');
+    this.remotePlayers.setRenderWorld(renderWorld);
     this.player = new PlayerEntity(
       playerId,
       this.canvas,
@@ -555,9 +563,19 @@ export class GrasslandScene extends Scene {
       bounds,
       this.renderer,
       archetype,
+      renderWorld,
       topDownCameraOffset,
     );
-    this.renderer.addWorldObject(this.player.object3D);
+    // 蒙皮拖拽属于渲染侧：指针、相机和外壳都在这一边，玩家实体只经由
+    // setMouseFacingSuppressed 收到「一次手势归谁」那一个布尔。
+    this.slimeSurfaceDrag = new SlimeSurfaceDragController(
+      this.canvas,
+      this.input,
+      renderWorld.scene,
+      this.player.renderProxyId,
+      () => this.controls.frame,
+      (active) => this.player?.controller.setMouseFacingSuppressed(active),
+    );
     this.controls.setPlayerController(this.player.controller);
     this.timeSinceInputSent = 0;
   }
@@ -568,10 +586,11 @@ export class GrasslandScene extends Scene {
     this.snapshots.clear();
     this.vesselControls.reset();
     this.actorInteractions.reset();
-    this.remotePlayers.clear();
+    this.remotePlayers.setRenderWorld(undefined);
+    this.slimeSurfaceDrag?.dispose();
+    this.slimeSurfaceDrag = undefined;
     if (this.player) {
       this.controls.setPlayerController(undefined);
-      this.renderer.removeWorldObject(this.player.object3D);
       this.player.dispose();
       this.player = undefined;
     }

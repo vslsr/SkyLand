@@ -1,5 +1,8 @@
 import type { ActorSimpleCollision } from '../models/actors/ActorVisualModel';
-import type { ActorRenderDefinition } from '../scenes/data/SceneDefinition';
+import type {
+  ActorArchetypeDefinition,
+  ActorRenderDefinition,
+} from '../scenes/data/SceneDefinition';
 import type { RenderTransformBuffer } from './RenderTransformBuffer';
 
 /**
@@ -76,6 +79,47 @@ export interface GuidePathStyle {
 }
 
 /**
+ * 玩家史莱姆的渲染定义。本地玩家与远端玩家都用它，普通 Actor 也可以。
+ */
+export type PlayerRenderDefinition = Extract<
+  ActorRenderDefinition,
+  { model: 'line-art-player-slime' | 'line-art-pbf-slime' }
+>;
+
+export type SlimeSurfaceDragDefinition = NonNullable<
+  ActorArchetypeDefinition['components']['slimeSurfaceDrag']
+>;
+
+/**
+ * 玩家 proxy 的 spawn 期事实。
+ *
+ * 玩家有自己的入口而不是复用 `createMeshProxy`，是 §4.5 那条取向的直接应用：
+ * 玩家是另一类内容（自带配色、走路动画与蒙皮拖拽），新增一类内容就新增一个
+ * 具名入口，而不是往 `MeshProxyDesc` 上挂几个只有玩家会用的可选字段。
+ */
+export interface PlayerProxyDesc {
+  readonly name: string;
+  readonly render: PlayerRenderDefinition;
+  /**
+   * 配色种子。给了就按它取一套区分色（远端玩家用自己的 id），
+   * 不给就是本地玩家那套默认配色。
+   *
+   * 过边界的是**身份**不是颜色：哪种身份配哪套颜色是渲染侧的决定。
+   */
+  readonly paletteSeed?: string;
+  /** `line-art-player-slime` 的走路动画参考速度。 */
+  readonly walkSpeed: number;
+  /** 蒙皮拖拽参数；省略时渲染侧按半径推一套等价默认值。 */
+  readonly surfaceDrag?: SlimeSurfaceDragDefinition;
+}
+
+/** 一条世界射线。指针与相机都在渲染这一侧，所以它不跨边界，只在渲染世界内部走。 */
+export interface SlimeSurfaceDragRay {
+  readonly origin: readonly [number, number, number];
+  readonly direction: readonly [number, number, number];
+}
+
+/**
  * `createMeshProxy` 回给 Game World 的东西：**全是数值，没有一个 Object3D**。
  * 这些量本身是玩法数据（碰撞盒、船体长宽），只是恰好和模型 authoring 同时产出。
  */
@@ -99,6 +143,8 @@ export interface RenderCommandSink {
 
 export interface RenderScene extends RenderCommandSink {
   createMeshProxy(desc: MeshProxyDesc): MeshProxyInfo;
+  /** 玩家史莱姆。见 `PlayerProxyDesc`：另一类内容，另一个具名入口。 */
+  createPlayerProxy(desc: PlayerProxyDesc): MeshProxyInfo;
   /**
    * 把这一帧的 transform SoA 兑现到渲染世界。
    *

@@ -1,4 +1,3 @@
-import type * as THREE from 'three';
 import {
   Actor,
   BuoyancyComponent,
@@ -6,22 +5,31 @@ import {
 } from '../../shared/actor/index.mjs';
 import { GrassDisplacementComponent } from '../actors/components/GrassDisplacementComponent';
 import type { GrassInteractionTarget } from '../grass';
-import type { ActorVisualModel } from '../models/actors/ActorVisualModel';
-import { createSlimePalette } from '../models/playerSlime';
 import type { InterpolatedPlayerState } from '../network/protocol';
 import type { ActorArchetypeDefinition } from '../scenes/data/SceneDefinition';
+import type { MeshProxyInfo, RenderScene } from '../render/RenderScene';
+import type { RenderTransformBuffer } from '../render/RenderTransformBuffer';
 import {
-  createPlayerActorVisual,
-  isPlayerActorRenderDefinition,
-  type PlayerActorVisual,
-} from './PlayerActorVisual';
-import { createObjectPositionSampler } from './objectPositionSampler';
+  SLIME_MOTION_AT_REST,
+  writeSlimeMotionParams,
+  type SlimeMotionParams,
+} from '../render/RenderSlimeMotion';
+import {
+  isPlayerRenderDefinition,
+  resolvePlayerVisualShape,
+  type PlayerVisualShape,
+} from './playerVisualShape';
 
 /** 同房间的另一名玩家：位置来自快照插值；混合软体只做不回写状态的客户端表现。 */
 export class RemotePlayer extends Actor {
   public name: string;
-  private readonly model: ActorVisualModel;
-  private readonly visual: PlayerActorVisual;
+  private readonly renderProxy: MeshProxyInfo;
+  private readonly renderScene: RenderScene;
+  private readonly transforms: RenderTransformBuffer;
+  /** 玩法侧的 f64 权威副本；渲染侧那份是镜像。和本地玩家同一套结构。 */
+  private readonly transform = { x: 0, y: 0, z: 0, yaw: 0 };
+  private readonly motion: SlimeMotionParams = { ...SLIME_MOTION_AT_REST };
+  private readonly visual: PlayerVisualShape;
   private readonly buoyancy?: BuoyancyComponent;
   private speed = 0;
   private verticalVelocity = 0;
@@ -36,10 +44,11 @@ export class RemotePlayer extends Actor {
       samplePlayerHeight?(x: number, z: number, buoyancyDraft?: number): number;
     },
     archetype: ActorArchetypeDefinition,
+    renderWorld: { scene: RenderScene; transforms: RenderTransformBuffer },
   ) {
     super(state.id, archetype.id);
     const render = archetype.components.render;
-    if (!archetype.components.playerMovement || !isPlayerActorRenderDefinition(render)) {
+    if (!archetype.components.playerMovement || !isPlayerRenderDefinition(render)) {
       throw new Error(`玩家 Actor 原型无效：${archetype.id}`);
     }
     const movement = this.addComponent(new PlayerMovementComponent(
@@ -49,32 +58,33 @@ export class RemotePlayer extends Actor {
       ? this.addComponent(new BuoyancyComponent(archetype.components.buoyancy)) as BuoyancyComponent
       : undefined;
     this.name = state.name;
-    this.visual = createPlayerActorVisual(
-      state.id,
+    this.visual = resolvePlayerVisualShape(render);
+    this.renderScene = renderWorld.scene;
+    this.transforms = renderWorld.transforms;
+    // 配色种子就是玩家 id：过边界的是身份，不是六个颜色值——哪种身份配哪套颜色
+    // 是渲染侧的决定。
+    this.renderProxy = this.renderScene.createPlayerProxy({
+      name: `remote-player-${state.id}`,
       render,
-      movement.walkSpeed,
-      render.model === 'line-art-player-slime' ? createSlimePalette(state.id) : undefined,
-    );
-    this.model = this.visual.model;
-    if (this.visual.component) this.addComponent(this.visual.component);
-    this.model.root.name = `remote-player-${state.id}`;
-    this.model.root.position.set(
-      state.x,
-      state.y ?? this.sampleHeight(state.x, state.z),
-      state.z,
-    );
-    this.model.root.rotation.y = state.yaw;
+      paletteSeed: state.id,
+      walkSpeed: movement.walkSpeed,
+    });
+    this.transform.x = state.x;
+    this.transform.y = state.y ?? this.sampleHeight(state.x, state.z);
+    this.transform.z = state.z;
+    this.transform.yaw = state.yaw;
     this.verticalVelocity = state.verticalVelocity ?? 0;
     this.grounded = state.grounded ?? true;
+    this.publishRenderState();
     this.grassDisplacement = this.addComponent(new GrassDisplacementComponent(
-      createObjectPositionSampler(this.model.root),
+      (out) => {
+        out.x = this.transform.x;
+        out.y = this.transform.y;
+        out.z = this.transform.z;
+      },
       grassInteraction,
       { radius: this.visual.radius * 1.65 },
     )) as GrassDisplacementComponent;
-  }
-
-  public get object3D(): THREE.Object3D {
-    return this.model.root;
   }
 
   /** 本地物理世界里给这名远端玩家建代理时用的圆柱尺寸。 */
@@ -84,39 +94,42 @@ export class RemotePlayer extends Actor {
 
   /** 快照插值后的脚底位置，供碰撞代理跟随。 */
   public get feetPosition(): { x: number, y: number, z: number } {
-    const position = this.model.root.position;
-    return { x: position.x, y: position.y, z: position.z };
+    return { x: this.transform.x, y: this.transform.y, z: this.transform.z };
   }
 
   public applyState(state: InterpolatedPlayerState): void {
     this.name = state.name;
-    // 位置与朝向都已经在 SnapshotBuffer 里按渲染时间插值过，这里直接落到模型上。
-    this.model.root.position.set(
-      state.x,
-      this.model.root.position.y,
-      state.z,
-    );
-    this.model.root.position.y = state.y ?? this.sampleHeight(state.x, state.z);
-    this.model.root.rotation.y = state.yaw;
+    // 位置与朝向都已经在 SnapshotBuffer 里按渲染时间插值过，这里直接落到 transform 上。
+    this.transform.x = state.x;
+    this.transform.y = state.y ?? this.sampleHeight(state.x, state.z);
+    this.transform.z = state.z;
+    this.transform.yaw = state.yaw;
     this.speed = state.speed;
     this.verticalVelocity = state.verticalVelocity ?? 0;
     this.grounded = state.grounded ?? (state.y === undefined);
   }
 
-  public update(deltaSeconds: number, elapsedSeconds: number): void {
-    this.visual.update(
-      deltaSeconds,
-      elapsedSeconds,
-      this.speed,
-      this.model.root.rotation.y,
-      {
-        velocityX: Math.sin(this.model.root.rotation.y) * this.speed,
-        velocityZ: Math.cos(this.model.root.rotation.y) * this.speed,
-        verticalVelocity: this.verticalVelocity,
-        grounded: this.grounded,
-      },
-    );
+  public update(deltaSeconds: number): void {
+    // 远端玩家没有本地预测的速度向量，方向由插值出来的朝向推出来——
+    // 和搬迁前那条 sin/cos 一样。
+    this.motion.movementSpeed = this.speed;
+    this.motion.movementVelocityX = Math.sin(this.transform.yaw) * this.speed;
+    this.motion.movementVelocityZ = Math.cos(this.transform.yaw) * this.speed;
+    this.motion.verticalVelocity = this.verticalVelocity;
+    this.motion.airborne = this.grounded ? 0 : 1;
+    this.publishRenderState();
     this.grassDisplacement.update(deltaSeconds);
+  }
+
+  private publishRenderState(): void {
+    this.transforms.write(
+      this.renderProxy.id,
+      this.transform.x,
+      this.transform.y,
+      this.transform.z,
+      this.transform.yaw,
+    );
+    writeSlimeMotionParams(this.transforms, this.renderProxy.id, this.motion);
   }
 
   private sampleHeight(x: number, z: number): number {
@@ -128,7 +141,6 @@ export class RemotePlayer extends Actor {
 
   public override dispose(): void {
     super.dispose();
-    this.model.root.parent?.remove(this.model.root);
-    this.visual.dispose();
+    this.renderScene.destroyMeshProxy(this.renderProxy.id);
   }
 }

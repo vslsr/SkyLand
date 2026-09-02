@@ -1,25 +1,10 @@
-import { ActorComponent } from '../../../shared/actor/ActorComponent.mjs';
 import type { PbfSlimeRenderDefinition } from '../../models/actors/createPbfSlimeModel';
 import type { PbfSlimeVisualRig } from '../../models/actors/ActorVisualModel';
 import { HybridSlimeSimulation } from '../../slime/hybrid/HybridSlimeSimulation';
+import type { SlimeMotionParams } from '../RenderSlimeMotion';
 
-export const HYBRID_SLIME_VISUAL_COMPONENT = 'hybrid-slime-visual';
 const REFERENCE_FACE_TURN_RESPONSE = 5.27;
 const COLLISION_CONTACT_GRACE_SECONDS = 0.1;
-
-export interface HybridSlimeMotionPresentation {
-  /** Actor 根节点上的权威/预测 yaw；外壳抵消它，脸部单独柔和转向。 */
-  authorityYaw: number;
-  movementSpeed: number;
-  movementVelocityX?: number;
-  movementVelocityZ?: number;
-  /** 跳跃表现输入；由同一运动演示对象携带，当前软体驱动可按需消费。 */
-  verticalVelocity?: number;
-  grounded?: boolean;
-  /** 控制器被环境圆柱碰撞阻挡的位移，只在新接触时注入蒙皮。 */
-  collisionDisplacementX?: number;
-  collisionDisplacementZ?: number;
-}
 
 function normalizeAngle(angle: number): number {
   let value = angle;
@@ -33,10 +18,16 @@ function lerpAngle(from: number, to: number, amount: number): number {
 }
 
 /**
- * 单球核心 + 胡克弹簧蒙皮。所有状态仅存在于客户端 visualRoot，
- * 不改写 Actor 权威 Transform，也不进入网络快照。
+ * 单球核心 + 胡克弹簧蒙皮，住在渲染世界里（实现路径文档 §1.5）。
+ *
+ * 这里以前是 `HybridSlimeVisualComponent`——一个握着 `BufferAttribute` 的
+ * Actor Component。求解器每帧直写几百个顶点，那是彻头彻尾的渲染侧工作，
+ * 挂在 Actor 上只是历史；对象也过不了线程边界。
+ *
+ * 现在玩法侧只写七个 f32（`SlimeMotionParams`），权威 yaw 连边界都不过：
+ * 它就是 `submitTransforms` 刚摆好的 `proxy.root.rotation.y`。
  */
-export class HybridSlimeVisualComponent extends ActorComponent {
+export class ThreeHybridSlimeVisual {
   public readonly simulation: HybridSlimeSimulation;
   private collisionContactSeconds = 0;
   private fluidFacingYaw = 0;
@@ -46,7 +37,6 @@ export class HybridSlimeVisualComponent extends ActorComponent {
     public readonly rig: PbfSlimeVisualRig,
     private readonly definition: PbfSlimeRenderDefinition,
   ) {
-    super(HYBRID_SLIME_VISUAL_COMPONENT);
     this.simulation = new HybridSlimeSimulation({
       radius: definition.radius,
       surfaceDirections: rig.surfaceDirections,
@@ -61,41 +51,35 @@ export class HybridSlimeVisualComponent extends ActorComponent {
     this.updateDebugState();
   }
 
+  /**
+   * `authorityYaw` 就是这个 proxy 的 root 这一帧实际被转到的角度。外壳抵消它，
+   * 脸部单独柔和转向。调用方从渲染世界里取，不再让玩法侧回读一个自己刚写出去的值。
+   */
   public update(
     deltaSeconds: number,
     elapsedSeconds: number,
-    motion?: HybridSlimeMotionPresentation,
+    authorityYaw: number,
+    motion: SlimeMotionParams,
   ): void {
     const frameSeconds = Math.max(0, Math.min(deltaSeconds, 0.1));
     this.collisionContactSeconds = Math.max(0, this.collisionContactSeconds - frameSeconds);
-    if (motion) this.updateMotionPresentation(frameSeconds, motion);
-    else {
-      this.simulation.setDriveVelocity(0, 0);
-      this.simulation.setAirborneMotion(0, true);
-    }
+    this.updateMotionPresentation(frameSeconds, authorityYaw, motion);
     if (this.simulation.update(frameSeconds)) this.applySimulationSurface();
-    this.updateContents(elapsedSeconds, motion?.authorityYaw ?? 0);
+    this.updateContents(elapsedSeconds, authorityYaw);
     this.updateDebugState();
   }
 
   private updateMotionPresentation(
     deltaSeconds: number,
-    motion: HybridSlimeMotionPresentation,
+    rawAuthorityYaw: number,
+    motion: SlimeMotionParams,
   ): void {
-    if (!Number.isFinite(motion.authorityYaw) || !Number.isFinite(motion.movementSpeed)) return;
-    const authorityYaw = normalizeAngle(motion.authorityYaw);
-    const speed = Math.max(0, motion.movementSpeed);
-    const driveVelocityX = Number.isFinite(motion.movementVelocityX)
-      ? motion.movementVelocityX as number
-      : Math.sin(authorityYaw) * speed;
-    const driveVelocityZ = Number.isFinite(motion.movementVelocityZ)
-      ? motion.movementVelocityZ as number
-      : Math.cos(authorityYaw) * speed;
-    this.simulation.setDriveVelocity(driveVelocityX, driveVelocityZ);
-    this.simulation.setAirborneMotion(
-      Number.isFinite(motion.verticalVelocity) ? motion.verticalVelocity as number : 0,
-      motion.grounded !== false,
-    );
+    // 参数段是 f32，正常路径下永远有限；NaN 进来会一次性污染整张弹簧网，
+    // 之后每一帧都是 NaN，所以这一帧直接不驱动。
+    if (!Number.isFinite(rawAuthorityYaw)) return;
+    const authorityYaw = normalizeAngle(rawAuthorityYaw);
+    this.simulation.setDriveVelocity(motion.movementVelocityX, motion.movementVelocityZ);
+    this.simulation.setAirborneMotion(motion.verticalVelocity, motion.airborne === 0);
 
     if (!this.hasMotionPresentation) {
       this.fluidFacingYaw = authorityYaw;
@@ -105,12 +89,8 @@ export class HybridSlimeVisualComponent extends ActorComponent {
       this.fluidFacingYaw = lerpAngle(this.fluidFacingYaw, authorityYaw, turnAmount);
     }
 
-    const collisionX = Number.isFinite(motion.collisionDisplacementX)
-      ? motion.collisionDisplacementX as number
-      : 0;
-    const collisionZ = Number.isFinite(motion.collisionDisplacementZ)
-      ? motion.collisionDisplacementZ as number
-      : 0;
+    const collisionX = motion.collisionDisplacementX;
+    const collisionZ = motion.collisionDisplacementZ;
     if (Math.hypot(collisionX, collisionZ) > 1e-6) {
       const isNewContact = this.collisionContactSeconds <= 0;
       this.collisionContactSeconds = COLLISION_CONTACT_GRACE_SECONDS;

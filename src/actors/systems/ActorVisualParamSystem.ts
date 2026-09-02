@@ -1,6 +1,10 @@
 import type { Actor, ActorWorld } from '../../../shared/actor/index.mjs';
 import type { RenderTransformBuffer } from '../../render/RenderTransformBuffer';
 import {
+  SLIME_MOTION_AT_REST,
+  writeSlimeMotionParams,
+} from '../../render/RenderSlimeMotion';
+import {
   PARAM_FIRE_TARGET_INTENSITY,
   PARAM_TEMPERATURE,
   RENDER_VISUAL_PARAM_COUNT,
@@ -51,6 +55,11 @@ export class ActorVisualParamSystem {
         PARAM_TEMPERATURE,
         temperature ? temperature.temperature : 0,
       );
+      // Replica 的史莱姆不自己走路——服务端不复制运动演示，它们静止在原地
+      // 摆动。运动参数由玩家实体自己写（它们不是 Replica，不经过这个 System），
+      // 所以这里写的是静止值，而不是「跳过不写」：槽位会被复用，上一个玩家
+      // 留下的速度会让新 proxy 一出生就在滑行。
+      writeSlimeMotionParams(this.transforms, proxy.proxyId, SLIME_MOTION_AT_REST);
     }
   }
 }

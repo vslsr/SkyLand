@@ -92,8 +92,6 @@ import {
 } from './components/FireVisualComponent';
 import { GeneratedPropFruitSystem } from './systems/GeneratedPropFruitSystem';
 import { HighCountActorBatchSystem } from './systems/HighCountActorBatchSystem';
-import { HybridSlimeVisualComponent } from './components/HybridSlimeVisualComponent';
-import { HybridSlimeVisualSystem } from './systems/HybridSlimeVisualSystem';
 import {
   LOCAL_DERIVED_ACTOR_COMPONENT,
   LocalDerivedActorComponent,
@@ -193,9 +191,6 @@ export class ClientActorSystem implements SceneVisualSystem {
    */
   private readonly transforms: RenderTransformBuffer;
   private readonly renderScene: ThreeRenderScene;
-  /** 渲染世界是不是外面给的。是的话就不该由这个 System 释放它。 */
-  private readonly ownsRenderScene: boolean;
-
   /**
    * 这个 System 往场景图里挂东西的那个节点，就是渲染世界的根。
    *
@@ -270,7 +265,6 @@ export class ClientActorSystem implements SceneVisualSystem {
     this.highCountBatches = new HighCountActorBatchSystem(options.environment, this.archetypes);
     this.fruit = new GeneratedPropFruitSystem(options.environment, this.archetypes);
     this.transforms = options.transforms ?? new RenderTransformBuffer();
-    this.ownsRenderScene = options.renderScene === undefined;
     this.renderScene = options.renderScene
       ?? new ThreeRenderScene(createActorWorldRoot(), options.environment);
     // 客户端不运行 AttachmentSystem：最终世界坐标来自快照插值，不能被
@@ -284,7 +278,6 @@ export class ClientActorSystem implements SceneVisualSystem {
     this.world.addSystem(new ActorVisualParamSystem(this.transforms));
     this.world.addSystem(new RenderTransformSyncSystem(this.transforms, this.renderScene));
     this.world.addSystem(new ActorGuidePathSyncSystem(this.renderScene));
-    this.world.addSystem(new HybridSlimeVisualSystem());
     if (options.definition.renderer.ocean) {
       this.world.addSystem(new WaterBobVisualSystem(this.renderScene, options.definition.renderer.ocean));
       this.world.addSystem(new CargoVisualSystem(this.renderScene, options.definition.renderer.ocean));
@@ -439,12 +432,13 @@ export class ClientActorSystem implements SceneVisualSystem {
     }
   }
 
-  public beforeRender(_renderer: THREE.WebGLRenderer, camera: THREE.Camera): void {
+  public beforeRender(renderer: THREE.WebGLRenderer, camera: THREE.Camera): void {
+    // 线宽是像素单位，要 resize 之后的真实画布尺寸；世界 UI 的朝向也只有到这里
+    // 才拿得到相机。两件都是渲染世界自己的事，这里只负责把参数递过去。
     this.renderScene.setGuidePathResolution(
-      _renderer.domElement.width,
-      _renderer.domElement.height,
+      renderer.domElement.width,
+      renderer.domElement.height,
     );
-    // 世界 UI 的朝向是渲染世界自己的事；这里只负责把相机递过去。
     this.renderScene.faceCameras(camera);
   }
 
@@ -463,8 +457,12 @@ export class ClientActorSystem implements SceneVisualSystem {
     // world.dispose() 逐个跑 endPlay，正常路径下每个 RenderProxyComponent 都会
     // 还掉自己的槽位。这一句兜住不正常的路径：渲染世界的资源不该依赖「每个 proxy
     // 都恰好有一个活着的 Actor 持有它」这条不变量才能释放。
-    // 场景注入的渲染世界由场景释放——本地玩家的 proxy 也在里面。
-    if (this.ownsRenderScene) this.renderScene.dispose();
+    //
+    // 渲染世界**归场景所有**（玩家的 proxy 也在里面），但这一帧的驱动和释放都
+    // 托管给 Actor 世界：翻面（`RenderTransformSyncSystem`）必须夹在写 SoA 与
+    // 依赖翻面结果的 Actor 表现 System 之间，拆不出来。第 2 步要拆的正是这个
+    // 夹心结构；在那之前，「谁驱动谁就负责释放」比多一个只管析构的系统更清楚。
+    this.renderScene.dispose();
   }
 
   public getActor(actorId: string): Actor | undefined {
@@ -864,16 +862,9 @@ export class ClientActorSystem implements SceneVisualSystem {
       // RenderProxyComponent 必须先于所有表现 Component 加入：Actor.endPlay 是插入
       // 顺序的逆序，marker 要先释放自己的子树，proxy 的 disposeSubtree 才能最后跑。
       actor.addComponent(new RenderProxyComponent(info.id, this.renderScene));
+      // 软体蒙皮不再挂在 Actor 上：createMeshProxy 认出 PBF 史莱姆就在渲染世界里
+      // 自己建一份表现，玩法侧只写 SlimeMotionParams 那几个 f32（§1.5）。
       const render = this.renderScene.resolve(info.id) as ThreeMeshProxy;
-      if (
-        archetype.components.render.model === 'line-art-pbf-slime'
-        && render.pbfSlimeVisualRig
-      ) {
-        actor.addComponent(new HybridSlimeVisualComponent(
-          render.pbfSlimeVisualRig,
-          archetype.components.render,
-        ));
-      }
       if (render.fireVisualRig) {
         const emitter = actor.getComponent(HEAT_EMITTER_COMPONENT) as HeatEmitterComponent | undefined;
         actor.addComponent(new FireVisualComponent(emitter?.enabled ? 1 : 0));

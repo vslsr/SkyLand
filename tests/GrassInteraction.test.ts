@@ -5,9 +5,22 @@ import { Actor } from '../shared/actor/Actor.mjs';
 import {
   GRASS_DISPLACEMENT_COMPONENT,
   GrassDisplacementComponent,
+  type WorldPositionSampler,
 } from '../src/actors/components/GrassDisplacementComponent';
 import { GrassInteractionQueue } from '../src/grass/GrassInteraction';
-import { createObjectPositionSampler } from '../src/player/objectPositionSampler';
+
+/**
+ * 位置采样器。搬迁之前这是 `createObjectPositionSampler`——一个把 Object3D 挡在
+ * Actor Component 之外的过渡适配器。玩家已经改成从自己的 transform 记录里读，
+ * 那个文件因此没了；这里仍然用 Object3D 摆位置，所以就地写一个等价的。
+ */
+function samplePosition(object: THREE.Object3D): WorldPositionSampler {
+  return (out) => {
+    out.x = object.position.x;
+    out.y = object.position.y;
+    out.z = object.position.z;
+  };
+}
 
 test('grass interaction normalizes direction and clamps public input', () => {
   const queue = new GrassInteractionQueue();
@@ -80,7 +93,7 @@ test('grass displacement component keeps pressing while its actor remains statio
   const root = new THREE.Group();
   root.position.set(3, 0, -4);
   const actor = new Actor('slime-test', 'player-slime');
-  const component = actor.addComponent(new GrassDisplacementComponent(createObjectPositionSampler(root), queue, {
+  const component = actor.addComponent(new GrassDisplacementComponent(samplePosition(root), queue, {
     radius: 0.72,
     pressurePerSecond: 3,
   })) as GrassDisplacementComponent;
@@ -104,7 +117,7 @@ test('grass displacement component keeps pressing while its actor remains statio
 test('grass displacement component emits one continuous capsule along movement', () => {
   const queue = new GrassInteractionQueue();
   const root = new THREE.Group();
-  const component = new GrassDisplacementComponent(createObjectPositionSampler(root), queue, {
+  const component = new GrassDisplacementComponent(samplePosition(root), queue, {
     radius: 0.72,
     pressurePerSecond: 3,
   });
@@ -147,7 +160,7 @@ test('纯竖直位移：方向退化成零向量而不是 NaN', () => {
   const probe = createProbe();
   const root = new THREE.Group();
   const component = new GrassDisplacementComponent(
-    createObjectPositionSampler(root),
+    samplePosition(root),
     probe.target as never,
     { radius: 0.72, pressurePerSecond: 3 },
   );
@@ -176,7 +189,7 @@ test('y 参与移动距离：同样的水平位移，带高度差的压强更大
     const probe = createProbe();
     const root = new THREE.Group();
     const component = new GrassDisplacementComponent(
-      createObjectPositionSampler(root),
+      samplePosition(root),
       probe.target as never,
       { radius: 0.72, pressurePerSecond: 3 },
     );

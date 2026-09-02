@@ -1,17 +1,10 @@
 import * as THREE from 'three';
-import { ActorComponent } from '../../../shared/actor/ActorComponent.mjs';
 import type { PbfSlimeVisualRig } from '../../models/actors/ActorVisualModel';
-import type { ActorArchetypeDefinition } from '../../scenes/data/SceneDefinition';
 import type { HybridSlimeSimulation } from '../../slime/hybrid/HybridSlimeSimulation';
-
-export const SLIME_SURFACE_DRAG_COMPONENT = 'slime-surface-drag';
-
-export type SlimeSurfaceDragDefinition = NonNullable<
-  ActorArchetypeDefinition['components']['slimeSurfaceDrag']
->;
+import type { SlimeSurfaceDragDefinition, SlimeSurfaceDragRay } from '../RenderScene';
 
 /**
- * 客户端兼容默认值：房间可能在配置更新前已经启动并缓存了旧的玩家原型。
+ * 缺省拖拽参数：房间可能在配置更新前已经启动并缓存了旧的玩家原型。
  * 比例与 pbf-slime.actor.json 一致，避免仅因旧房间缺少新字段就完全不装配交互。
  */
 export function createDefaultSlimeSurfaceDragDefinition(
@@ -26,16 +19,18 @@ export function createDefaultSlimeSurfaceDragDefinition(
   };
 }
 
-export interface SlimeSurfaceDragRay {
-  readonly origin: readonly [number, number, number];
-  readonly direction: readonly [number, number, number];
-}
-
 /**
- * 客户端蒙皮拖拽组件。它只向 HybridSlimeSimulation 写局部外力，
- * 不移动 Actor 根节点，也不接触权威碰撞或网络状态。
+ * 蒙皮拖拽：把一条世界射线打到软体外壳上，然后往求解器写局部外力
+ * （实现路径文档 §1.5）。
+ *
+ * 这里以前是 `SlimeSurfaceDragComponent`——一个握着 `Raycaster` 和一打
+ * `Vector3` 的 Actor Component。它从来就不是玩法：拾取的是动态 `BufferGeometry`，
+ * 写的是纯客户端的弹簧力，既不移动 Actor 根节点，也不碰权威碰撞或网络状态。
+ *
+ * 搬进渲染世界之后，`beginDrag` 那个同步 boolean 返回值也不再跨边界：
+ * 指针、相机和外壳都在渲染这一侧，玩法侧只会收到「拖拽开始/结束」一个布尔。
  */
-export class SlimeSurfaceDragComponent extends ActorComponent {
+export class ThreeSlimeSurfaceDrag {
   private readonly raycaster = new THREE.Raycaster();
   private readonly dragPlane = new THREE.Plane();
   private readonly rayOrigin = new THREE.Vector3();
@@ -52,9 +47,7 @@ export class SlimeSurfaceDragComponent extends ActorComponent {
     public readonly rig: PbfSlimeVisualRig,
     public readonly simulation: HybridSlimeSimulation,
     private readonly definition: SlimeSurfaceDragDefinition,
-  ) {
-    super(SLIME_SURFACE_DRAG_COMPONENT);
-  }
+  ) {}
 
   public get isDragging(): boolean {
     return this.dragging;
@@ -106,7 +99,7 @@ export class SlimeSurfaceDragComponent extends ActorComponent {
     this.simulation.endSurfaceDrag();
   }
 
-  public override onDetach(): void {
+  public dispose(): void {
     this.endDrag();
   }
 

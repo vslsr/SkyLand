@@ -22,5 +22,30 @@ export const PARAM_FIRE_TARGET_INTENSITY = 0;
 /** 权威温度。只有带温度牌的 proxy 会用到，其余槽位每帧写 0。 */
 export const PARAM_TEMPERATURE = 1;
 
+/**
+ * 史莱姆软体表现的运动输入（第 1.5 步）。
+ *
+ * **权威 yaw 不在这里。** 渲染侧要抵消的是「root 这一级实际被转了多少」，
+ * 而那个角度正是 `submitTransforms` 刚写进 `proxy.root.rotation.y` 的值——
+ * 在渲染世界内部读它是 Render→Render，不需要再过一次边界。
+ */
+export const PARAM_SLIME_SPEED = 2;
+export const PARAM_SLIME_VELOCITY_X = 3;
+export const PARAM_SLIME_VELOCITY_Z = 4;
+export const PARAM_SLIME_VERTICAL_VELOCITY = 5;
+
+/**
+ * 离地标记：**0 表示贴地**。
+ *
+ * 取反不是随手写的：「没有这项表现的槽位每帧写 0」是参数段的通用规则，
+ * 而软体求解器的默认态是 grounded=true。存 `grounded` 的话，0 就成了「浮空」，
+ * 所有不驱动这项参数的史莱姆都会被当成在空中。
+ */
+export const PARAM_SLIME_AIRBORNE = 6;
+
+/** 被环境圆柱挡住的位移，只在新接触那一帧非零；渲染侧自己做接触去抖。 */
+export const PARAM_SLIME_COLLISION_DISPLACEMENT_X = 7;
+export const PARAM_SLIME_COLLISION_DISPLACEMENT_Z = 8;
+
 /** 每个 proxy 槽位的参数个数。新增参数就在上面加常量并把这里加一。 */
-export const RENDER_VISUAL_PARAM_COUNT = 2;
+export const RENDER_VISUAL_PARAM_COUNT = 9;

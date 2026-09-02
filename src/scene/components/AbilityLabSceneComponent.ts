@@ -63,7 +63,7 @@ export class AbilityLabSceneComponent implements SceneRuntimeComponent {
     }
     const player = this.context.player;
     if (!player) return;
-    this.controller.activate(player, player.object3D, target, render);
+    this.controller.activate(player, player.renderPosition, target, render);
     this.boundTarget = target;
   }
 }

@@ -25,7 +25,7 @@ export class AbilityLabController {
   private readonly addWorldObject: (object: THREE.Object3D) => void;
   private readonly removeWorldObject: (object: THREE.Object3D) => void;
   private simulation?: AbilityLabSimulation;
-  private casterObject?: THREE.Object3D;
+  private casterPosition?: { readonly x: number; readonly y: number; readonly z: number };
 
   public constructor(options: AbilityLabControllerOptions) {
     this.addWorldObject = options.addWorldObject;
@@ -46,16 +46,20 @@ export class AbilityLabController {
     return Boolean(this.simulation);
   }
 
+  /**
+   * `casterPosition` 是一个活引用，不是 Object3D：施法者的位置在玩法侧是几个数，
+   * 这里只需要每帧读它，不需要认识渲染世界里的任何节点。
+   */
   public activate(
     casterActor: Actor,
-    casterObject: THREE.Object3D,
+    casterPosition: { readonly x: number; readonly y: number; readonly z: number },
     targetActor: Actor,
     targetRender: ThreeMeshProxy,
   ): void {
     this.deactivate();
     this.visuals.bindTarget(targetRender);
     try {
-      this.casterObject = casterObject;
+      this.casterPosition = casterPosition;
       this.simulation = new AbilityLabSimulation(casterActor, targetActor);
       this.visuals.reset();
       this.addWorldObject(this.visuals.root);
@@ -63,7 +67,7 @@ export class AbilityLabController {
       this.panel.setState(this.simulation.createViewState());
     } catch (error) {
       this.visuals.unbindTarget();
-      this.casterObject = undefined;
+      this.casterPosition = undefined;
       throw error;
     }
   }
@@ -71,7 +75,7 @@ export class AbilityLabController {
   public deactivate(): void {
     this.simulation?.dispose();
     this.simulation = undefined;
-    this.casterObject = undefined;
+    this.casterPosition = undefined;
     this.visuals.reset();
     this.visuals.unbindTarget();
     this.removeWorldObject(this.visuals.root);
@@ -79,10 +83,10 @@ export class AbilityLabController {
   }
 
   public update(deltaSeconds: number, elapsedSeconds: number): void {
-    if (!this.simulation || !this.casterObject) return;
+    if (!this.simulation || !this.casterPosition) return;
     this.simulation.update(deltaSeconds);
     const state = this.simulation.createViewState();
-    this.casterObject.getWorldPosition(this.sourcePosition);
+    this.sourcePosition.set(this.casterPosition.x, this.casterPosition.y, this.casterPosition.z);
     this.visuals.update(deltaSeconds, elapsedSeconds, state, this.sourcePosition);
     this.panel.setState(state);
   }
@@ -95,7 +99,7 @@ export class AbilityLabController {
   }
 
   private handleAction(action: AbilityLabAction): void {
-    if (!this.simulation || !this.casterObject) return;
+    if (!this.simulation || !this.casterPosition) return;
     if (action === 'reset') {
       this.simulation.reset();
       this.visuals.reset();
@@ -103,7 +107,7 @@ export class AbilityLabController {
       return;
     }
     const succeeded = this.simulation.activate(action);
-    this.casterObject.getWorldPosition(this.sourcePosition);
+    this.sourcePosition.set(this.casterPosition.x, this.casterPosition.y, this.casterPosition.z);
     this.visuals.play(action, this.sourcePosition, succeeded);
     this.panel.setState(this.simulation.createViewState());
   }

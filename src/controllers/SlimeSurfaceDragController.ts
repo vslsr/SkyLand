@@ -1,8 +1,5 @@
 import type { CameraFrame } from '../camera/CameraTransform';
-import type {
-  SlimeSurfaceDragComponent,
-  SlimeSurfaceDragRay,
-} from '../actors/components/SlimeSurfaceDragComponent';
+import type { ProxyId, SlimeSurfaceDragRay } from '../render/RenderScene';
 import {
   PlayerInputTags,
   type InputActionEvent,
@@ -12,7 +9,21 @@ import {
 const CAMERA_FIELD_OF_VIEW_RADIANS = 50 * Math.PI / 180;
 
 /**
- * 把语义化 Primary 输入与光标坐标适配成世界射线。Component 本身不依赖 DOM 输入。
+ * 渲染世界里能被拖拽蒙皮的那一面。`ThreeRenderScene` 结构上满足它，
+ * 所以这个文件不 import 任何渲染实现，只认识 `ProxyId`。
+ */
+export interface SlimeSurfaceDragSurface {
+  isSlimeSurfaceDragging(id: ProxyId): boolean;
+  beginSlimeSurfaceDrag(id: ProxyId, ray: SlimeSurfaceDragRay): boolean;
+  updateSlimeSurfaceDrag(id: ProxyId, ray: SlimeSurfaceDragRay): boolean;
+  endSlimeSurfaceDrag(id: ProxyId): void;
+}
+
+/**
+ * 把语义化 Primary 输入与光标坐标适配成世界射线。
+ *
+ * 指针、相机和外壳都在渲染这一侧，所以这个控制器整体属于渲染侧；
+ * 它往玩法侧只发一个布尔（`onDragActiveChanged`），用来让一次手势只有一个所有者。
  */
 export class SlimeSurfaceDragController {
   private readonly inputDisposer: () => void;
@@ -30,7 +41,8 @@ export class SlimeSurfaceDragController {
   public constructor(
     private readonly canvas: HTMLCanvasElement,
     input: InputSubsystem,
-    private readonly component: SlimeSurfaceDragComponent,
+    private readonly surface: SlimeSurfaceDragSurface,
+    private readonly proxyId: ProxyId,
     private readonly getCameraFrame: () => CameraFrame,
     private readonly onDragActiveChanged?: (active: boolean) => void,
   ) {
@@ -47,11 +59,15 @@ export class SlimeSurfaceDragController {
     this.canvas.addEventListener('pointerleave', this.handlePointerLeave);
   }
 
+  private get isDragging(): boolean {
+    return this.surface.isSlimeSurfaceDragging(this.proxyId);
+  }
+
   public update(): void {
     if (!this.primaryDown || !this.pointer.available) return;
     const ray = this.createPointerRay(this.pointer.x, this.pointer.y);
     if (!ray) return;
-    if (this.component.isDragging) this.component.updateDrag(ray);
+    if (this.isDragging) this.surface.updateSlimeSurfaceDrag(this.proxyId, ray);
   }
 
   public dispose(): void {
@@ -107,16 +123,16 @@ export class SlimeSurfaceDragController {
       this.pointer.pressY = event.clientY;
       this.pointer.pressAvailable = true;
     }
-    // DOM 指针移动可能发生在下一次 PlayerEntity.update 之前。拖拽已经建立后
-    // 立即刷新目标，既减少一帧输入延迟，也不再依赖其他控制器的更新顺序。
-    if (this.component.isDragging) {
+    // DOM 指针移动可能发生在下一次 update 之前。拖拽已经建立后立即刷新目标，
+    // 既减少一帧输入延迟，也不再依赖其他控制器的更新顺序。
+    if (this.isDragging) {
       const ray = this.createPointerRay(event.clientX, event.clientY);
-      if (ray) this.component.updateDrag(ray);
+      if (ray) this.surface.updateSlimeSurfaceDrag(this.proxyId, ray);
     }
   };
 
   private readonly handlePointerLeave = (): void => {
-    if (!this.component.isDragging) this.pointer.available = false;
+    if (!this.isDragging) this.pointer.available = false;
   };
 
   private handlePrimaryInput(event: InputActionEvent): void {
@@ -126,7 +142,7 @@ export class SlimeSurfaceDragController {
     );
     if (event.phase === 'completed' || event.phase === 'canceled') {
       if (event.deviceKind !== undefined && !isMousePrimary) return;
-      if (this.primaryDown || this.component.isDragging) this.releaseDrag();
+      if (this.primaryDown || this.isDragging) this.releaseDrag();
       return;
     }
     // 同一个语义标签也映射了手柄。非鼠标来源与表面指针拖拽无关，应忽略，
@@ -139,11 +155,11 @@ export class SlimeSurfaceDragController {
     const pressRay = this.pointer.pressAvailable
       ? this.createPointerRay(this.pointer.pressX, this.pointer.pressY)
       : this.createPointerRay(this.pointer.x, this.pointer.y);
-    if (!pressRay || !this.component.beginDrag(pressRay)) return;
+    if (!pressRay || !this.surface.beginSlimeSurfaceDrag(this.proxyId, pressRay)) return;
     this.onDragActiveChanged?.(true);
     this.capturePointer();
     const currentRay = this.createPointerRay(this.pointer.x, this.pointer.y);
-    if (currentRay) this.component.updateDrag(currentRay);
+    if (currentRay) this.surface.updateSlimeSurfaceDrag(this.proxyId, currentRay);
   }
 
   private capturePointer(): void {
@@ -158,7 +174,7 @@ export class SlimeSurfaceDragController {
   private releaseDrag(): void {
     this.primaryDown = false;
     this.pointer.pressAvailable = false;
-    this.component.endDrag();
+    this.surface.endSlimeSurfaceDrag(this.proxyId);
     this.onDragActiveChanged?.(false);
     if (
       this.pointer.id < 0

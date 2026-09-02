@@ -167,6 +167,8 @@ export function createLineArtScene(
   }
   // 渲染世界的根总是挂进场景：本地玩家的 proxy 也在它下面，与有没有 Replica 无关。
   scene.add(renderWorldRoot);
+  // Actor 世界这一项同时驱动渲染世界的那一帧（翻面、兑现、表现动画）——
+  // 见 `ClientActorSystem.dispose` 上的注释。
   visualSystems.push(actorSnapshotTarget);
   return {
     scene,

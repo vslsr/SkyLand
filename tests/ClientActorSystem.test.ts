@@ -38,13 +38,16 @@ import {
   FIRE_VISUAL_COMPONENT,
   type FireVisualComponent,
 } from '../src/actors/components/FireVisualComponent';
-import {
-  HYBRID_SLIME_VISUAL_COMPONENT,
-  type HybridSlimeVisualComponent,
-} from '../src/actors/components/HybridSlimeVisualComponent';
-import { SlimeSurfaceDragComponent } from '../src/actors/components/SlimeSurfaceDragComponent';
 import type { SnapshotActor } from '../src/network/protocol';
-import { createPlayerActorVisual } from '../src/player/PlayerActorVisual';
+import { RenderTransformBuffer } from '../src/render/RenderTransformBuffer';
+import { resolvePlayerVisualShape } from '../src/player/playerVisualShape';
+import { ThreeRenderScene } from '../src/render/three/ThreeRenderScene';
+import type { ThreeHybridSlimeVisual } from '../src/render/three/ThreeHybridSlimeVisual';
+import type {
+  PlayerRenderDefinition,
+  ProxyId,
+  SlimeSurfaceDragDefinition,
+} from '../src/render/RenderScene';
 import type { SceneDefinition } from '../src/scenes/data/SceneDefinition';
 
 const ocean = {
@@ -406,20 +409,85 @@ const FAKE_RENDERER = {
   domElement: { width: 1280, height: 720 },
 } as unknown as THREE.WebGLRenderer;
 
+const RENDER_ENVIRONMENT = { fogColor: '#ffffff', fogNear: 20, fogFar: 60 };
+
+/**
+ * 玩家史莱姆的表现现在住在渲染世界里，所以测试也从渲染世界这一侧取。
+ *
+ * `update` 保留搬迁前 `createPlayerActorVisual().update()` 的参数顺序，另外
+ * 先把 yaw 写到 proxy 的 root 上——真实链路里那一步由 `submitTransforms` 做，
+ * 软体读的正是它。
+ */
+function createPlayerVisualHarness(
+  name: string,
+  render: PlayerRenderDefinition,
+  walkSpeed: number,
+  surfaceDrag?: SlimeSurfaceDragDefinition,
+) {
+  const scene = new ThreeRenderScene(new THREE.Group(), RENDER_ENVIRONMENT);
+  const info = scene.createPlayerProxy({ name, render, walkSpeed, surfaceDrag });
+  const proxy = scene.resolve(info.id)!;
+  const slime = scene.resolveSlimeVisual(info.id) as ThreeHybridSlimeVisual;
+  return {
+    scene,
+    proxyId: info.id as ProxyId,
+    root: proxy.root,
+    get rig() {
+      return slime.rig;
+    },
+    get slime() {
+      return slime;
+    },
+    update(
+      deltaSeconds: number,
+      elapsedSeconds: number,
+      movementSpeed: number,
+      authorityYaw: number,
+      motion?: {
+        velocityX: number;
+        velocityZ: number;
+        verticalVelocity?: number;
+        grounded?: boolean;
+        collisionDisplacement?: { x: number; z: number };
+      },
+    ): void {
+      proxy.root.rotation.y = authorityYaw;
+      slime.update(deltaSeconds, elapsedSeconds, proxy.root.rotation.y, {
+        movementSpeed,
+        movementVelocityX: motion?.velocityX ?? 0,
+        movementVelocityZ: motion?.velocityZ ?? 0,
+        verticalVelocity: motion?.verticalVelocity ?? 0,
+        airborne: motion?.grounded === false ? 1 : 0,
+        collisionDisplacementX: motion?.collisionDisplacement?.x ?? 0,
+        collisionDisplacementZ: motion?.collisionDisplacement?.z ?? 0,
+      });
+    },
+    dispose(): void {
+      scene.dispose();
+    },
+  };
+}
+
 test('普通玩家眼睛使用独立的无光照、无雾渲染层', () => {
-  const visual = createPlayerActorVisual('unlit-eye-player', {
-    model: 'line-art-player-slime',
-    radius: 0.42,
-    membraneColor: '#4fd695',
-    middleColor: '#8ce8b6',
-    coreColor: '#2fbb7c',
-    bubbleColor: '#eafff2',
-    inkColor: '#173a2b',
-    shadowColor: '#1e5a40',
-  }, 3.2);
+  const scene = new ThreeRenderScene(new THREE.Group(), RENDER_ENVIRONMENT);
+  const info = scene.createPlayerProxy({
+    name: 'unlit-eye-player',
+    walkSpeed: 3.2,
+    render: {
+      model: 'line-art-player-slime',
+      radius: 0.42,
+      membraneColor: '#4fd695',
+      middleColor: '#8ce8b6',
+      coreColor: '#2fbb7c',
+      bubbleColor: '#eafff2',
+      inkColor: '#173a2b',
+      shadowColor: '#1e5a40',
+    },
+  });
+  const root = scene.resolve(info.id)!.root;
   const eyes = [
-    visual.model.root.getObjectByName('player-slime-eye-left'),
-    visual.model.root.getObjectByName('player-slime-eye-right'),
+    root.getObjectByName('player-slime-eye-left'),
+    root.getObjectByName('player-slime-eye-right'),
   ] as THREE.Mesh<THREE.SphereGeometry, THREE.MeshBasicMaterial>[];
 
   for (const eye of eyes) {
@@ -429,7 +497,7 @@ test('普通玩家眼睛使用独立的无光照、无雾渲染层', () => {
     assert.equal(eye.material.fog, false);
     assert.equal(eye.material.toneMapped, false);
   }
-  visual.dispose();
+  scene.dispose();
 });
 
 const snapshot: SnapshotActor = {
@@ -803,9 +871,7 @@ test('混合史莱姆用单球核心与休眠弹簧蒙皮，且不会改写权�
 
   const actor = system.getActor(pbfSlime.id)!;
   const render = system.getActorRenderProxy(actor.id)!;
-  const visual = actor.requireComponent(
-    HYBRID_SLIME_VISUAL_COMPONENT,
-  ) as HybridSlimeVisualComponent;
+  const visual = system.getRenderScene().resolveSlimeVisual(render.id)!;
   const initialSurface = Float32Array.from(
     visual.rig.surfacePosition.array as ArrayLike<number>,
   );
@@ -1050,28 +1116,22 @@ test('史莱姆表面拖拽带动整团软体，命中处最强，接近上限�
   const dragDefinition = pbfSlimeArchetype.components.slimeSurfaceDrag;
   assert.ok(render?.model === 'line-art-pbf-slime');
   assert.ok(dragDefinition);
-  const visual = createPlayerActorVisual('surface-drag-player', render, 3.2);
-  const hybrid = visual.component!;
-  const drag = new SlimeSurfaceDragComponent(
-    hybrid.rig,
-    hybrid.simulation,
-    dragDefinition,
-  );
-  const initialSurface = Float32Array.from(hybrid.simulation.positions);
+  const visual = createPlayerVisualHarness('surface-drag-player', render, 3.2, dragDefinition);
+  const initialSurface = Float32Array.from(visual.slime.simulation.positions);
   let topOffset = 0;
   for (let offset = 3; offset < initialSurface.length; offset += 3) {
     if (initialSurface[offset + 1] > initialSurface[topOffset + 1]) topOffset = offset;
   }
 
   // 动态几何的标准三角拾取短暂漏报时，窄范围顶点容错仍应命中肉眼可见表面。
-  const surfaceRaycast = hybrid.rig.surface.raycast;
-  hybrid.rig.surface.raycast = () => undefined;
-  assert.equal(drag.beginDrag({
+  const surfaceRaycast = visual.rig.surface.raycast;
+  visual.rig.surface.raycast = () => undefined;
+  assert.equal(visual.scene.beginSlimeSurfaceDrag(visual.proxyId, {
     origin: [0, 3, 0],
     direction: [0, -1, 0],
   }), true);
-  hybrid.rig.surface.raycast = surfaceRaycast;
-  assert.equal(drag.updateDrag({
+  visual.rig.surface.raycast = surfaceRaycast;
+  assert.equal(visual.scene.updateSlimeSurfaceDrag(visual.proxyId, {
     origin: [3, 3, 0],
     direction: [0, -1, 0],
   }), true);
@@ -1079,9 +1139,9 @@ test('史莱姆表面拖拽带动整团软体，命中处最强，接近上限�
     visual.update(1 / 60, frame / 60, 0, 0, { velocityX: 0, velocityZ: 0 });
   }
 
-  const pulledSurface = hybrid.simulation.positions;
+  const pulledSurface = visual.slime.simulation.positions;
   const selectedExtension = pulledSurface[topOffset] - initialSurface[topOffset];
-  const statsWhileDragging = hybrid.simulation.stats();
+  const statsWhileDragging = visual.slime.simulation.stats();
   assert.ok(selectedExtension > render.radius * 0.08, '命中表面应产生可见的局部拉伸');
   assert.ok(
     selectedExtension <= dragDefinition.maximumDistance + 1e-5,
@@ -1098,10 +1158,10 @@ test('史莱姆表面拖拽带动整团软体，命中处最强，接近上限�
   let equatorMaximumDelta = 0;
   for (let offset = 0; offset < pulledSurface.length; offset += 3) {
     const delta = Math.abs(pulledSurface[offset] - initialSurface[offset]);
-    if (Math.abs(hybrid.rig.surfaceDirections[offset + 1]) < 0.25) {
+    if (Math.abs(visual.rig.surfaceDirections[offset + 1]) < 0.25) {
       equatorMaximumDelta = Math.max(equatorMaximumDelta, delta);
     }
-    if (hybrid.rig.surfaceDirections[offset + 1] > -0.65) continue;
+    if (visual.rig.surfaceDirections[offset + 1] > -0.65) continue;
     farSideMaximumDelta = Math.max(farSideMaximumDelta, delta);
   }
   assert.ok(
@@ -1117,14 +1177,14 @@ test('史莱姆表面拖拽带动整团软体，命中处最强，接近上限�
     '底面仍被地面黏住，不能把整团史莱姆当作刚体平移',
   );
 
-  drag.endDrag();
+  visual.scene.endSlimeSurfaceDrag(visual.proxyId);
   for (let frame = 150; frame < 510; frame += 1) {
     visual.update(1 / 60, frame / 60, 0, 0, { velocityX: 0, velocityZ: 0 });
   }
   const releasedExtension = Math.abs(
-    hybrid.simulation.positions[topOffset] - initialSurface[topOffset],
+    visual.slime.simulation.positions[topOffset] - initialSurface[topOffset],
   );
-  assert.equal(hybrid.simulation.stats().surfaceDragActive, false);
+  assert.equal(visual.slime.simulation.stats().surfaceDragActive, false);
   assert.ok(releasedExtension < selectedExtension * 0.2, '松开后应由原有胡克弹簧平滑回弹');
   visual.dispose();
 });
@@ -1132,15 +1192,15 @@ test('史莱姆表面拖拽带动整团软体，命中处最强，接近上限�
 test('混合史莱姆的软核心产生黏地拖后，内部圆柱碰撞令接触侧蒙皮凹陷', () => {
   const render = pbfSlimeArchetype.components.render;
   assert.ok(render?.model === 'line-art-pbf-slime');
-  const visual = createPlayerActorVisual('pbf-player', render, 3.2);
-  const rig = visual.model.pbfSlimeVisualRig!;
+  const visual = createPlayerVisualHarness('pbf-player', render, 3.2);
+  const rig = visual.rig;
 
-  visual.model.root.rotation.y = 0;
+  visual.root.rotation.y = 0;
   for (let frame = 0; frame < 120; frame += 1) {
     visual.update(1 / 60, frame / 60, 0, 0, { velocityX: 0, velocityZ: 0 });
   }
   assert.equal(rig.root.userData.hybridSimulationActive, false);
-  const settledSurface = Float32Array.from(visual.component!.simulation.positions);
+  const settledSurface = Float32Array.from(visual.slime.simulation.positions);
   const averageSideRadius = (surface: ArrayLike<number>): number => {
     let radiusSum = 0;
     let count = 0;
@@ -1157,7 +1217,7 @@ test('混合史莱姆的软核心产生黏地拖后，内部圆柱碰撞令接�
 
   visual.update(1 / 60, 120 / 60, 3.2, 0, { velocityX: 0, velocityZ: 3.2 });
   const firstMovingForceBias = (
-    visual.component!.simulation.forceCenter[2] - visual.component!.simulation.center[2]
+    visual.slime.simulation.forceCenter[2] - visual.slime.simulation.center[2]
   );
   assert.ok(
     firstMovingForceBias > render.radius * 0.005
@@ -1168,27 +1228,27 @@ test('混合史莱姆的软核心产生黏地拖后，内部圆柱碰撞令接�
     visual.update(1 / 60, frame / 60, 3.2, 0, { velocityX: 0, velocityZ: 3.2 });
   }
   assert.ok(settledSurface.some((value, index) => (
-    Math.abs(value - visual.component!.simulation.positions[index]) > render.radius * 0.02
+    Math.abs(value - visual.slime.simulation.positions[index]) > render.radius * 0.02
   )), '移动锚点应通过胡克弹簧带动蒙皮，而不是整团刚体平移');
   assert.ok(
-    visual.component!.simulation.center[2] < -render.radius * 0.1,
+    visual.slime.simulation.center[2] < -render.radius * 0.1,
     '内部质量中心应平滑拖在 Actor 根节点后方',
   );
   assert.ok(
-    visual.component!.simulation.forceCenter[2]
-      > visual.component!.simulation.center[2] + render.radius * 0.12,
+    visual.slime.simulation.forceCenter[2]
+      > visual.slime.simulation.center[2] + render.radius * 0.12,
     '蒙皮的中心力应向 +Z 移动方向偏移，同时允许质量中心留在后方',
   );
   assert.ok(
     Math.hypot(
-      rig.core.position.x - visual.component!.simulation.forceCenter[0],
-      rig.core.position.y - visual.component!.simulation.forceCenter[1],
-      rig.core.position.z - visual.component!.simulation.forceCenter[2],
+      rig.core.position.x - visual.slime.simulation.forceCenter[0],
+      rig.core.position.y - visual.slime.simulation.forceCenter[1],
+      rig.core.position.z - visual.slime.simulation.forceCenter[2],
     ) < 1e-7,
     '移动时可见核心必须持续跟随向心力中心，而不是滞后的质量中心',
   );
   assert.ok(
-    averageSideRadius(visual.component!.simulation.positions) < settledSideRadius * 0.92,
+    averageSideRadius(visual.slime.simulation.positions) < settledSideRadius * 0.92,
     '移动时中上层蒙皮应受到随速度增强的向心弹簧力',
   );
 
@@ -1245,35 +1305,35 @@ test('混合史莱姆的软核心产生黏地拖后，内部圆柱碰撞令接�
     );
   }
 
-  const movingLag = Math.abs(visual.component!.simulation.center[2]);
+  const movingLag = Math.abs(visual.slime.simulation.center[2]);
   visual.update(1 / 60, 210 / 60, 0, 0, { velocityX: 0, velocityZ: 0 });
   assert.ok(
-    Math.abs(visual.component!.simulation.center[2]) > movingLag * 0.85,
+    Math.abs(visual.slime.simulation.center[2]) > movingLag * 0.85,
     '停止首帧仍应保留大部分拖后量，而不是瞬间弹回',
   );
 
-  visual.model.root.rotation.y = Math.PI / 2;
-  const forceCenterBeforeTurn = Float32Array.from(visual.component!.simulation.forceCenter);
+  visual.root.rotation.y = Math.PI / 2;
+  const forceCenterBeforeTurn = Float32Array.from(visual.slime.simulation.forceCenter);
   visual.update(1 / 60, 211 / 60, 3.2, Math.PI / 2, {
     velocityX: 3.2,
     velocityZ: 0,
   });
   assert.ok(
     Math.hypot(
-      visual.component!.simulation.forceCenter[0] - forceCenterBeforeTurn[0],
-      visual.component!.simulation.forceCenter[2] - forceCenterBeforeTurn[2],
+      visual.slime.simulation.forceCenter[0] - forceCenterBeforeTurn[0],
+      visual.slime.simulation.forceCenter[2] - forceCenterBeforeTurn[2],
     ) < render.radius * 0.05,
     '转向首帧核心只能逐步补间，不能从旧方向闪到新方向',
   );
   assert.ok(
-    visual.component!.simulation.forceCenter[0] > forceCenterBeforeTurn[0]
-      && visual.component!.simulation.forceCenter[2] < forceCenterBeforeTurn[2],
+    visual.slime.simulation.forceCenter[0] > forceCenterBeforeTurn[0]
+      && visual.slime.simulation.forceCenter[2] < forceCenterBeforeTurn[2],
     '核心补间位移必须沿旧向心力中心指向新向心力中心的方向',
   );
 
   const firstTurnFaceYaw = rig.faceRoot.rotation.y;
   assert.ok(firstTurnFaceYaw > 0 && firstTurnFaceYaw < Math.PI / 2);
-  assert.ok(Math.abs(visual.model.root.rotation.y + rig.root.rotation.y) < 1e-9);
+  assert.ok(Math.abs(visual.root.rotation.y + rig.root.rotation.y) < 1e-9);
 
   for (let frame = 212; frame <= 330; frame += 1) {
     visual.update(1 / 60, frame / 60, 3.2, Math.PI / 2, {
@@ -1281,8 +1341,8 @@ test('混合史莱姆的软核心产生黏地拖后，内部圆柱碰撞令接�
       velocityZ: 0,
     });
   }
-  assert.equal(visual.component?.type, HYBRID_SLIME_VISUAL_COMPONENT);
-  assert.ok(visual.model.root.getObjectByName('pbf-slime-surface'));
+  assert.ok(visual.scene.resolveSlimeVisual(visual.proxyId), 'PBF 玩家的软体表现应由渲染世界持有');
+  assert.ok(visual.root.getObjectByName('pbf-slime-surface'));
   assert.ok(Math.abs(rig.faceRoot.rotation.y - Math.PI / 2) < 0.001);
 
   const beforeCollisionSurface = Float32Array.from(rig.surfacePosition.array);
@@ -1316,7 +1376,7 @@ test('混合史莱姆的软核心产生黏地拖后，内部圆柱碰撞令接�
   assert.ok(beforeCollisionSurface.some((value, index) => (
     Math.abs(value - rig.surfacePosition.array[index]) > render.radius * 0.02
   )), '真实碰撞必须让可见弹簧蒙皮发生适应性形变');
-  const adaptingError = visual.component!.simulation.stats().maximumSkinError;
+  const adaptingError = visual.slime.simulation.stats().maximumSkinError;
 
   for (let frame = 345; frame <= 392; frame += 1) {
     visual.update(1 / 60, frame / 60, 0, Math.PI / 2, {
@@ -1326,7 +1386,7 @@ test('混合史莱姆的软核心产生黏地拖后，内部圆柱碰撞令接�
     });
   }
   assert.ok(
-    visual.component!.simulation.stats().maximumSkinError < adaptingError * 0.6,
+    visual.slime.simulation.stats().maximumSkinError < adaptingError * 0.6,
     '持续顶住同一碰撞面时只允许平滑恢复，不应每帧重复注入冲击',
   );
   for (let frame = 393; frame <= 512; frame += 1) {
@@ -1342,27 +1402,28 @@ test('混合史莱姆的软核心产生黏地拖后，内部圆柱碰撞令接�
   );
   assert.ok(
     Math.hypot(
-      visual.component!.simulation.center[0],
-      visual.component!.simulation.center[2],
+      visual.slime.simulation.center[0],
+      visual.slime.simulation.center[2],
     ) < render.radius * 0.001,
   );
   assert.ok(
     Math.hypot(
-      visual.component!.simulation.forceCenter[0] - visual.component!.simulation.center[0],
-      visual.component!.simulation.forceCenter[2] - visual.component!.simulation.center[2],
+      visual.slime.simulation.forceCenter[0] - visual.slime.simulation.center[0],
+      visual.slime.simulation.forceCenter[2] - visual.slime.simulation.center[2],
     ) < render.radius * 1e-6,
     '停止后偏心吸引点应回到球形核心，水滴形平滑恢复',
   );
-  assert.equal(visual.collisionRadius, 0.52);
-  assert.ok(visual.collisionRadius < render.radius * 0.6, '权威圆柱必须留在可变形蒙皮内部');
+  const shape = resolvePlayerVisualShape(render);
+  assert.equal(shape.collisionRadius, 0.52);
+  assert.ok(shape.collisionRadius < render.radius * 0.6, '权威圆柱必须留在可变形蒙皮内部');
   visual.dispose();
 });
 
 test('混合史莱姆用移动与跳跃速度合成三维水滴轴，并让质量核心反向塌陷', () => {
   const render = pbfSlimeArchetype.components.render;
   assert.ok(render?.model === 'line-art-pbf-slime');
-  const visual = createPlayerActorVisual('jump-visual-player', render, 3.2);
-  const simulation = visual.component!.simulation;
+  const visual = createPlayerVisualHarness('jump-visual-player', render, 3.2);
+  const simulation = visual.slime.simulation;
   const minimumSurfaceY = (): number => {
     let minimum = Number.POSITIVE_INFINITY;
     for (let offset = 1; offset < simulation.positions.length; offset += 3) {
@@ -1391,7 +1452,7 @@ test('混合史莱姆用移动与跳跃速度合成三维水滴轴，并让质�
     minimumAlignment: number,
     maximumAlignment: number,
   ): number => {
-    const directions = visual.component!.rig.surfaceDirections;
+    const directions = visual.rig.surfaceDirections;
     let sum = 0;
     let count = 0;
     for (let offset = 0; offset < simulation.positions.length; offset += 3) {
@@ -1510,8 +1571,8 @@ test('混合史莱姆用移动与跳跃速度合成三维水滴轴，并让质�
 test('混合史莱姆起跳首帧移除平底，并让水滴圆头向上、尖尾向下', () => {
   const render = pbfSlimeArchetype.components.render;
   assert.ok(render?.model === 'line-art-pbf-slime');
-  const visual = createPlayerActorVisual('jump-silhouette-player', render, 3.2);
-  const component = visual.component!;
+  const visual = createPlayerVisualHarness('jump-silhouette-player', render, 3.2);
+  const component = visual.slime;
   const simulation = component.simulation;
   const directions = component.rig.surfaceDirections;
   const verticalExtent = (): number => {

@@ -1,11 +1,10 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { Object3D } from 'three';
+import { Group, Object3D } from 'three';
 import { TopDownCameraOrbit } from '../src/camera/TopDownCameraOrbit';
-import {
-  SLIME_SURFACE_DRAG_COMPONENT,
-  type SlimeSurfaceDragComponent,
-} from '../src/actors/components/SlimeSurfaceDragComponent';
+import { SlimeSurfaceDragController } from '../src/controllers/SlimeSurfaceDragController';
+import { RenderTransformBuffer } from '../src/render/RenderTransformBuffer';
+import { ThreeRenderScene } from '../src/render/three/ThreeRenderScene';
 import { TopDownController } from '../src/controllers/TopDownController';
 import {
   createPlayerInputScheme,
@@ -526,7 +525,7 @@ test('本地玩家和解只纠正逻辑误差，并保留固定步相位与可�
   input.dispose();
 });
 
-test('旧房间缺少拖拽配置时 PBF 玩家仍自动装配 Component，并只通过 Primary 语义输入启停', () => {
+test('旧房间缺少拖拽配置时渲染侧仍自动装配蒙皮拖拽，并只通过 Primary 语义输入启停', () => {
   let now = 0;
   const device = new TestKeyboardMouseDevice(() => now);
   const scheme = createPlayerInputScheme({ storage: null });
@@ -568,6 +567,11 @@ test('旧房间缺少拖拽配置时 PBF 玩家仍自动装配 Component，并�
       },
     },
   };
+  // 蒙皮拖拽整条链路都在渲染侧：玩家只贡献一个 ProxyId。
+  const renderWorld = {
+    scene: new ThreeRenderScene(new Group(), { fogColor: '#ffffff', fogNear: 20, fogFar: 60 }),
+    transforms: new RenderTransformBuffer(),
+  };
   const player = new PlayerEntity(
     'surface-drag-player',
     canvas,
@@ -576,11 +580,19 @@ test('旧房间缺少拖拽配置时 PBF 玩家仍自动装配 Component，并�
     { minimumX: -10, maximumX: 10, minimumZ: -10, maximumZ: 10 },
     { applyImpulse: () => undefined },
     archetype,
+    renderWorld,
   );
-  const drag = player.requireComponent(
-    SLIME_SURFACE_DRAG_COMPONENT,
-  ) as SlimeSurfaceDragComponent;
-  assert.equal(drag.isDragging, false);
+  const proxyId = player.renderProxyId;
+  const drag = new SlimeSurfaceDragController(
+    canvas,
+    input,
+    renderWorld.scene,
+    proxyId,
+    () => player.controller.frame,
+    (active) => player.controller.setMouseFacingSuppressed(active),
+  );
+  const simulation = renderWorld.scene.resolveSlimeVisual(proxyId)!.simulation;
+  assert.equal(renderWorld.scene.isSlimeSurfaceDragging(proxyId), false);
   player.controller.setInputEnabled(true);
   const cameraBeforeSurfaceDrag = [...player.controller.frame.position];
 
@@ -591,28 +603,36 @@ test('旧房间缺少拖拽配置时 PBF 玩家仍自动装配 Component，并�
   device.emit('Mouse.Button0', true);
   now = 16;
   input.update(now);
-  assert.equal(drag.isDragging, true, '表面拖拽应在 TopDown 更新前抢占这次手势');
+  assert.equal(
+    renderWorld.scene.isSlimeSurfaceDragging(proxyId),
+    true,
+    '表面拖拽应在 TopDown 更新前抢占这次手势',
+  );
   player.controller.update(1 / 60);
   assert.deepEqual(
     player.controller.frame.position,
     cameraBeforeSurfaceDrag,
     '拖动史莱姆表面时不能同时旋转镜头',
   );
-  player.update(1 / 60, 1 / 60);
-  assert.equal(drag.isDragging, true);
+  drag.update();
+  player.update(1 / 60);
+  assert.equal(renderWorld.scene.isSlimeSurfaceDragging(proxyId), true);
 
   dispatchPointer('pointermove', 650, 500);
   now = 32;
   input.update(now);
-  player.update(1 / 60, 2 / 60);
-  assert.equal(drag.simulation.stats().surfaceDragActive, true);
+  drag.update();
+  player.update(1 / 60);
+  assert.equal(simulation.stats().surfaceDragActive, true);
 
   device.emit('Mouse.Button0', false);
   now = 48;
   input.update(now);
-  assert.equal(drag.isDragging, false);
-  assert.equal(drag.simulation.stats().surfaceDragActive, false);
+  assert.equal(renderWorld.scene.isSlimeSurfaceDragging(proxyId), false);
+  assert.equal(simulation.stats().surfaceDragActive, false);
 
+  drag.dispose();
   player.dispose();
+  renderWorld.scene.dispose();
   input.dispose();
 });
