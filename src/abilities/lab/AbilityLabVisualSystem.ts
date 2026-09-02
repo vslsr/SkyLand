@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import type { ThreeMeshProxy } from '../../render/three/ThreeMeshProxy';
+import { releaseOwnResources } from '../../render/renderAssets';
 import { createAbilityLabModel } from '../../models/abilityLab';
 import type { AbilityLabAction, AbilityLabViewState } from './AbilityLabSimulation';
 
@@ -12,15 +13,7 @@ interface AbilityProjectile {
 }
 
 function disposeObject(root: THREE.Object3D): void {
-  root.traverse((object) => {
-    const renderable = object as THREE.Mesh & { material?: THREE.Material | THREE.Material[] };
-    renderable.geometry?.dispose();
-    if (Array.isArray(renderable.material)) {
-      for (const material of renderable.material) material.dispose();
-    } else {
-      renderable.material?.dispose();
-    }
-  });
+  root.traverse(releaseOwnResources);
 }
 
 export class AbilityLabVisualSystem {

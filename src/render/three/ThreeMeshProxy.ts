@@ -8,6 +8,7 @@ import type {
   PbfSlimeVisualRig,
 } from '../../models/actors/ActorVisualModel';
 import { createSimpleCollisionHelper } from '../../models/actors/createSimpleCollisionHelper';
+import { releaseOwnResources } from '../renderAssets';
 import type { ProxyId } from '../RenderScene';
 
 /**
@@ -23,13 +24,9 @@ function disposeSubtree(object: THREE.Object3D, ownerRoot: THREE.Object3D): void
   // 父 proxy 销毁但子 proxy 还活着时，子 root 可能尚未被 submitTransforms 重挂到
   // 世界根；此处必须剪枝，不能顺带释放另一个 proxy 的资源。
   if (object !== ownerRoot && object.userData[PROXY_ROOT_MARKER]) return;
-  const renderable = object as THREE.Mesh & { material?: THREE.Material | THREE.Material[] };
-  renderable.geometry?.dispose();
-  if (Array.isArray(renderable.material)) {
-    for (const material of renderable.material) material.dispose();
-  } else {
-    renderable.material?.dispose();
-  }
+  // 轮廓线材质是全进程共享的：删一个 Actor 就把它 dispose 掉，会让每次拾取、
+  // 每次物件消失都触发一次着色器重编译（路线图 §8.2）。
+  releaseOwnResources(object);
   for (const child of object.children) disposeSubtree(child, ownerRoot);
 }
 

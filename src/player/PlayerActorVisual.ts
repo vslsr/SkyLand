@@ -8,6 +8,7 @@ import {
 } from '../models/playerSlime';
 import type { ActorRenderDefinition } from '../scenes/data/SceneDefinition';
 import { SlimeAnimator } from './SlimeAnimator';
+import { releaseOwnResources } from '../render/renderAssets';
 
 export type PlayerActorRenderDefinition = Extract<
   ActorRenderDefinition,
@@ -45,13 +46,7 @@ export function isPlayerActorRenderDefinition(
 }
 
 function disposeSubtree(root: THREE.Object3D): void {
-  root.traverse((object) => {
-    const renderable = object as Partial<THREE.Mesh>;
-    renderable.geometry?.dispose();
-    const material = renderable.material;
-    if (Array.isArray(material)) material.forEach((entry) => entry.dispose());
-    else material?.dispose();
-  });
+  root.traverse(releaseOwnResources);
 }
 
 /** 为本地预测玩家和远端插值玩家创建同一种可配置史莱姆表现。 */

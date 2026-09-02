@@ -7,6 +7,7 @@ import {
   type GrassBendImpulse,
   type GrassInteractionTarget,
 } from '../grass';
+import { releaseOwnResources } from '../render/renderAssets';
 import { createLineArtScene } from '../scene/createLineArtScene';
 import type { DayNightVisualTarget } from '../environment/EnvironmentTypes';
 import type { SceneEnvironmentRuntime } from '../materials/createFillMaterial';
@@ -36,16 +37,15 @@ function createEmptyScene(): THREE.Scene {
   return scene;
 }
 
+/**
+ * 换场景时释放上一张地图的 GPU 资源。
+ *
+ * 遍历式释放是路线图 §8.2 里那条要被替换掉的规则——它会无差别 dispose 每一个
+ * geometry 与 material，包括别人共享的那些。在全部资源转成句柄之前，先让它
+ * 避让所有权表管着的东西。
+ */
 function disposeScene(scene: THREE.Scene): void {
-  scene.traverse((object) => {
-    const renderable = object as THREE.Mesh & { material?: THREE.Material | THREE.Material[] };
-    renderable.geometry?.dispose();
-    if (Array.isArray(renderable.material)) {
-      for (const material of renderable.material) material.dispose();
-    } else {
-      renderable.material?.dispose();
-    }
-  });
+  scene.traverse(releaseOwnResources);
 }
 
 export class SceneRenderer implements GrassInteractionTarget {
