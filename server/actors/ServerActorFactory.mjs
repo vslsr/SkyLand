@@ -209,6 +209,11 @@ export function createServerActorWorld(sceneDefinition, options = {}) {
   return world;
 }
 
+/** 四元数量化到千分之一：视觉上看不出差别，包里少一半字节。 */
+function roundRotation(value) {
+  return Math.round((Number(value) || 0) * 1000) / 1000;
+}
+
 export function createActorSnapshots(world, options = {}) {
   const viewer = options.viewer;
   return world.query(TRANSFORM_COMPONENT, REPLICATED_COMPONENT)
@@ -232,6 +237,7 @@ export function createActorSnapshots(world, options = {}) {
     const cargo = actor.getComponent(CARGO_COMPONENT);
     const elasticTether = actor.getComponent(ELASTIC_TETHER_COMPONENT);
     const elasticDetach = actor.getComponent(ELASTIC_DETACH_COMPONENT);
+    const dropMotion = actor.getComponent(DROP_MOTION_COMPONENT);
     const hazard = actor.getComponent(HAZARD_COMPONENT);
     const temperature = actor.getComponent(TEMPERATURE_COMPONENT);
     const combustible = actor.getComponent(COMBUSTIBLE_COMPONENT);
@@ -371,6 +377,16 @@ export function createActorSnapshots(world, options = {}) {
         elasticDetach: {
           detached: elasticDetach.detached,
           revision: elasticDetach.revision,
+          // 脱落后 Transform 的 yaw 不再描述姿态：躺在地上还是立着，由刚体
+          // 解算出的四元数决定，所以只有脱落的物件才带这一项。
+          ...(elasticDetach.detached && dropMotion ? {
+            rotation: [
+              roundRotation(dropMotion.rotationX),
+              roundRotation(dropMotion.rotationY),
+              roundRotation(dropMotion.rotationZ),
+              roundRotation(dropMotion.rotationW),
+            ],
+          } : {}),
         },
       } : {}),
       ...(guidePath ? { guidePath: guidePath.snapshot() } : {}),

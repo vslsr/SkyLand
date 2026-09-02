@@ -25,6 +25,8 @@ export interface ActorVisualModel {
   readonly interactionAnchorY?: number;
   /** 仅弹性模型提供；Actor 视觉 System 通过它驱动局部软体表现。 */
   readonly elasticTetherRig?: ElasticTetherVisualRig;
+  /** 脱落成自由物体后绕刚体球心翻滚的枢轴；影子等贴地元素不挂在下面。 */
+  readonly dropRollRig?: DropRollVisualRig;
   /** 仅训练假人提供；能力表现只修改这些 VisualRoot 下的展示节点。 */
   readonly abilityTargetRig?: AbilityTargetVisualRig;
   /** 热状态只控制强度；所有顶点与火星对象都位于该 Actor 的 visualRoot 下。 */
@@ -84,6 +86,16 @@ export interface LineArtFireVisualRig {
     z: number;
     rise: number;
   }[];
+}
+
+/**
+ * 翻滚枢轴。刚体是一颗球心在 Actor 原点上方 radius 处的球，模型却是以脚底
+ * 为原点建的：pivotRoot 抬到球心、bodyRoot 再压回去，旋转就发生在球心上，
+ * 而不是把整株蘑菇绕着菌柄根部甩出去。
+ */
+export interface DropRollVisualRig {
+  readonly pivotRoot: THREE.Group;
+  readonly bodyRoot: THREE.Group;
 }
 
 export interface ElasticTetherVisualRig {

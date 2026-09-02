@@ -270,6 +270,8 @@ export interface ActorArchetypeDefinition {
     mushroomPop?: {
       forwardImpulse: number;
       upwardImpulse: number;
+      /** 拔断瞬间绕水平轴的翻滚冲量；缺省则只弹出、落地仍立着。 */
+      spinImpulse?: number;
     };
     hazard?: {
       radius: number;
@@ -314,6 +316,8 @@ export interface ActorArchetypeDefinition {
       groundDrag?: number;
       restitution?: number;
       radius?: number;
+      /** 掉落刚体的角阻尼：越小翻得越久。 */
+      angularDamping?: number;
       settleSpeed: number;
     };
     lifetime?: { lifetimeSeconds: number };

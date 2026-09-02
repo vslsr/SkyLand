@@ -4,6 +4,7 @@ import type {
   AbilityTargetVisualRig,
   ActorSimpleCollision,
   ActorVisualModel,
+  DropRollVisualRig,
   ElasticTetherVisualRig,
   LineArtFireVisualRig,
   PbfSlimeVisualRig,
@@ -36,6 +37,7 @@ export class ThreeObjectComponent extends ActorComponent {
   public readonly simpleCollision: ActorSimpleCollision;
   public readonly interactionAnchorY: number;
   public readonly elasticTetherRig?: ElasticTetherVisualRig;
+  public readonly dropRollRig?: DropRollVisualRig;
   public readonly abilityTargetRig?: AbilityTargetVisualRig;
   public readonly fireVisualRig?: LineArtFireVisualRig;
   public readonly pbfSlimeVisualRig?: PbfSlimeVisualRig;
@@ -50,6 +52,7 @@ export class ThreeObjectComponent extends ActorComponent {
     this.simpleCollision = model.simpleCollision;
     this.interactionAnchorY = model.interactionAnchorY ?? 1.25;
     this.elasticTetherRig = model.elasticTetherRig;
+    this.dropRollRig = model.dropRollRig;
     this.abilityTargetRig = model.abilityTargetRig;
     this.fireVisualRig = model.fireVisualRig;
     this.pbfSlimeVisualRig = model.pbfSlimeVisualRig;

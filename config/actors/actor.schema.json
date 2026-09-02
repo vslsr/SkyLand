@@ -189,7 +189,8 @@
           "required": ["forwardImpulse", "upwardImpulse"],
           "properties": {
             "forwardImpulse": { "type": "number", "minimum": 0, "maximum": 20 },
-            "upwardImpulse": { "type": "number", "minimum": 0, "maximum": 20 }
+            "upwardImpulse": { "type": "number", "minimum": 0, "maximum": 20 },
+            "spinImpulse": { "type": "number", "minimum": 0, "maximum": 20 }
           }
         },
         "hazard": {
@@ -276,6 +277,7 @@
             "groundDrag": { "type": "number", "minimum": 0, "maximum": 50 },
             "restitution": { "type": "number", "minimum": 0, "maximum": 1 },
             "radius": { "type": "number", "minimum": 0, "maximum": 3 },
+            "angularDamping": { "type": "number", "minimum": 0, "maximum": 50 },
             "settleSpeed": { "type": "number", "exclusiveMinimum": 0, "maximum": 10 }
           }
         },
