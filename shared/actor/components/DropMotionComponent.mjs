@@ -25,6 +25,12 @@ export class DropMotionComponent extends ActorComponent {
     this.rotationY = 0;
     this.rotationZ = 0;
     this.rotationW = 1;
+    const rotation = Array.isArray(definition.rotation) ? definition.rotation : undefined;
+    if (rotation) {
+      this.setRotation({
+        x: rotation[0], y: rotation[1], z: rotation[2], w: rotation[3],
+      });
+    }
   }
 
   setRotation(rotation) {

@@ -833,6 +833,7 @@ export class ClientActorSystem implements SceneVisualSystem {
       tether.targetX = snapshot.elasticTether.targetX;
       tether.targetY = snapshot.elasticTether.targetY;
       tether.targetZ = snapshot.elasticTether.targetZ;
+      tether.grabLength = snapshot.elasticTether.grabLength ?? tether.grabLength;
       tether.releaseRevision = snapshot.elasticTether.releaseRevision;
       tether.revision = snapshot.elasticTether.revision;
     }

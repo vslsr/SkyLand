@@ -170,6 +170,9 @@ function validateElasticTether(raw, filename) {
   return {
     restLength,
     breakLength,
+    ...(definition.pullDistance !== undefined ? {
+      pullDistance: requireNumber(definition.pullDistance, `${path}.pullDistance`, 0, 12),
+    } : {}),
     mouthHeight: requireNumber(definition.mouthHeight, `${path}.mouthHeight`, 0, 3),
     mouthForwardOffset: requireNumber(
       definition.mouthForwardOffset,

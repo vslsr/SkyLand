@@ -80,6 +80,8 @@ export interface SnapshotActor {
     targetX: number;
     targetY: number;
     targetZ: number;
+    /** 叼住那一刻的弹性长度；拔断阈值以它为起点。 */
+    grabLength?: number;
     releaseRevision: number;
     revision: number;
   };

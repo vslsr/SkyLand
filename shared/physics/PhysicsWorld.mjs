@@ -229,12 +229,23 @@ export class PhysicsWorld {
     this.#assertAlive();
     this.removeActorCollider(id);
     this.removeDynamicActor(id);
-    const body = this.#world.createRigidBody(
-      this.#rapier.RigidBodyDesc.dynamic()
-        .setTranslation(finite(options.x), finite(options.y), finite(options.z))
-        .setLinearDamping(Math.max(0, finite(options.linearDamping, 1.8)))
-        .setAngularDamping(Math.max(0, finite(options.angularDamping, 2))),
-    );
+    const descriptor = this.#rapier.RigidBodyDesc.dynamic()
+      .setTranslation(finite(options.x), finite(options.y), finite(options.z))
+      .setLinearDamping(Math.max(0, finite(options.linearDamping, 1.8)))
+      .setAngularDamping(Math.max(0, finite(options.angularDamping, 2)));
+    // 重建一个已经躺在地上的物件时必须带回它的朝向，否则它会当场站起来。
+    const rotation = options.rotation;
+    if (rotation && Math.abs(Math.hypot(
+      finite(rotation.x), finite(rotation.y), finite(rotation.z), finite(rotation.w),
+    ) - 1) < 1e-3) {
+      descriptor.setRotation({
+        x: finite(rotation.x),
+        y: finite(rotation.y),
+        z: finite(rotation.z),
+        w: finite(rotation.w, 1),
+      });
+    }
+    const body = this.#world.createRigidBody(descriptor);
     const collider = this.#world.createCollider(
       this.#rapier.ColliderDesc.ball(positive(options.radius, 0.28))
         // 让玩法层配置的 impulse 数值可直接按约 1kg 物体理解，避免球体体积

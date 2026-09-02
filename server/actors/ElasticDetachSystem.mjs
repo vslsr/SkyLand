@@ -30,7 +30,7 @@ export class ElasticDetachSystem {
         const dy = tether.targetY - transform.y;
         const dz = tether.targetZ - transform.z;
         const length = Math.hypot(dx, dy, dz);
-        if (length >= tether.breakLength) {
+        if (length >= tether.detachLength) {
           const inverseLength = length > 1e-6 ? 1 / length : 0;
           const direction = {
             x: dx * inverseLength,
@@ -103,6 +103,10 @@ export class ElasticDetachSystem {
       angularDamping: motion.angularDamping,
       restitution: motion.restitution,
       friction: motion.groundDrag,
+      // chunk 卸载后重建时，物件已经躺在地上了，朝向必须跟着回来。
+      rotation: {
+        x: motion.rotationX, y: motion.rotationY, z: motion.rotationZ, w: motion.rotationW,
+      },
     });
   }
 
