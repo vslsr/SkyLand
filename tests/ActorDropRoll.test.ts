@@ -391,6 +391,9 @@ test('端到端：快照说我叼着它，按一次交互键就发出放下请�
     definition,
     environment: ENVIRONMENT,
     now: () => now,
+    // 这些用例不测建模节流：一帧建完，断言才好写。分帧建模由
+    // ClientActorSystem.spawn.test.ts 单独覆盖。
+    spawnBudgetMilliseconds: Number.POSITIVE_INFINITY,
   } as never);
 
   const sent: string[] = [];

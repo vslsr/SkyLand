@@ -566,6 +566,9 @@ test('客户端收到快照后才创建 Actor Replica 并应用权威 Component 
     definition,
     environment: { fogColor: '#ffffff', fogNear: 20, fogFar: 60 },
     now: () => now,
+    // 这些用例不测建模节流：一帧建完，断言才好写。分帧建模由
+    // ClientActorSystem.spawn.test.ts 单独覆盖。
+    spawnBudgetMilliseconds: Number.POSITIVE_INFINITY,
   });
   assert.equal(system.getActor(snapshot.id), undefined);
 
@@ -609,6 +612,9 @@ test('视觉波动只作用于 VisualRoot，且快照移除会销毁 Replica', (
     definition,
     environment: { fogColor: '#ffffff', fogNear: 20, fogFar: 60 },
     now: () => now,
+    // 这些用例不测建模节流：一帧建完，断言才好写。分帧建模由
+    // ClientActorSystem.spawn.test.ts 单独覆盖。
+    spawnBudgetMilliseconds: Number.POSITIVE_INFINITY,
   });
   system.syncSnapshots([snapshot], 1_000);
   system.update(1 / 60, 1.25);
@@ -635,6 +641,9 @@ test('Actor Transform 在两份服务端快照之间插值而不做客户端外�
     definition,
     environment: { fogColor: '#ffffff', fogNear: 20, fogFar: 60 },
     now: () => now,
+    // 这些用例不测建模节流：一帧建完，断言才好写。分帧建模由
+    // ClientActorSystem.spawn.test.ts 单独覆盖。
+    spawnBudgetMilliseconds: Number.POSITIVE_INFINITY,
   });
   const from = { ...snapshot, transform: { x: 0, y: 0, z: 0, yaw: 0 } };
   const to = {
@@ -660,6 +669,9 @@ test('能力实验室对象由 Actor 快照创建，训练假人暴露 visualRoo
     definition,
     environment: { fogColor: '#ffffff', fogNear: 20, fogFar: 60 },
     now: () => 1_000,
+    // 这些用例不测建模节流：一帧建完，断言才好写。分帧建模由
+    // ClientActorSystem.spawn.test.ts 单独覆盖。
+    spawnBudgetMilliseconds: Number.POSITIVE_INFINITY,
   });
   system.syncSnapshots([
     trainingDummySnapshot,
@@ -690,6 +702,9 @@ test('客户端离散恢复父子关系，并只插值子 Actor 的权威世界�
     definition,
     environment: { fogColor: '#ffffff', fogNear: 20, fogFar: 60 },
     now: () => now,
+    // 这些用例不测建模节流：一帧建完，断言才好写。分帧建模由
+    // ClientActorSystem.spawn.test.ts 单独覆盖。
+    spawnBudgetMilliseconds: Number.POSITIVE_INFINITY,
   });
   const childFrom = createDeckPropSnapshot(0.72);
 
@@ -766,6 +781,9 @@ test('客户端按权威燃烧状态显示参考 LineLoop 火焰，稳定篝火�
     definition,
     environment: { fogColor: '#ffffff', fogNear: 20, fogFar: 60 },
     now: () => now,
+    // 这些用例不测建模节流：一帧建完，断言才好写。分帧建模由
+    // ClientActorSystem.spawn.test.ts 单独覆盖。
+    spawnBudgetMilliseconds: Number.POSITIVE_INFINITY,
   });
   const campfire: SnapshotActor = {
     id: 'campfire-01',
@@ -859,6 +877,9 @@ test('混合史莱姆用单球核心与休眠弹簧蒙皮，且不会改写权�
     definition,
     environment: { fogColor: '#ffffff', fogNear: 20, fogFar: 60 },
     now: () => 1_000,
+    // 这些用例不测建模节流：一帧建完，断言才好写。分帧建模由
+    // ClientActorSystem.spawn.test.ts 单独覆盖。
+    spawnBudgetMilliseconds: Number.POSITIVE_INFINITY,
   });
   const pbfSlime: SnapshotActor = {
     id: 'pbf-slime-01',
@@ -1070,6 +1091,9 @@ test('无模型 GuidePath Actor 只在快照存在时创建客户端 Three.js �
     definition,
     environment: { fogColor: '#ffffff', fogNear: 20, fogFar: 60 },
     now: () => now,
+    // 这些用例不测建模节流：一帧建完，断言才好写。分帧建模由
+    // ClientActorSystem.spawn.test.ts 单独覆盖。
+    spawnBudgetMilliseconds: Number.POSITIVE_INFINITY,
   });
   const guideSnapshot: SnapshotActor = {
     id: 'guide-path-01',
@@ -1691,6 +1715,9 @@ test('高数量物品 Actor 保留交互与碰撞身份，但用批次绘制而�
     definition,
     environment: { fogColor: '#ffffff', fogNear: 20, fogFar: 60 },
     now: () => 1_000,
+    // 这些用例不测建模节流：一帧建完，断言才好写。分帧建模由
+    // ClientActorSystem.spawn.test.ts 单独覆盖。
+    spawnBudgetMilliseconds: Number.POSITIVE_INFINITY,
   });
   const wood: SnapshotActor = {
     id: 'drop-1',
@@ -1729,6 +1756,9 @@ test('木堆与石堆各自成批：合批系统按渲染模型分派模板，�
     definition,
     environment: { fogColor: '#ffffff', fogNear: 20, fogFar: 60 },
     now: () => 1_000,
+    // 这些用例不测建模节流：一帧建完，断言才好写。分帧建模由
+    // ClientActorSystem.spawn.test.ts 单独覆盖。
+    spawnBudgetMilliseconds: Number.POSITIVE_INFINITY,
   });
   const wood: SnapshotActor = {
     id: 'drop-wood',
@@ -1778,6 +1808,9 @@ test('圆木使用参考项目的八边形单根模型，并按权威位移滚�
     definition,
     environment: { fogColor: '#ffffff', fogNear: 20, fogFar: 60 },
     now: () => now,
+    // 这些用例不测建模节流：一帧建完，断言才好写。分帧建模由
+    // ClientActorSystem.spawn.test.ts 单独覆盖。
+    spawnBudgetMilliseconds: Number.POSITIVE_INFINITY,
   });
   const snapshot = (x: number): SnapshotActor => ({
     id: 'drop-wood-log-roll',
@@ -1876,6 +1909,9 @@ test('单颗果实按权威位移旋转，sleeping 后不再累积滚动角', ()
     definition: orchardDefinition,
     environment: { fogColor: '#ffffff', fogNear: 20, fogFar: 60 },
     now: () => now,
+    // 这些用例不测建模节流：一帧建完，断言才好写。分帧建模由
+    // ClientActorSystem.spawn.test.ts 单独覆盖。
+    spawnBudgetMilliseconds: Number.POSITIVE_INFINITY,
   });
   const snapshot = (x: number, state: 'active' | 'sleeping'): SnapshotActor => ({
     id: 'drop-fruit-roll',
@@ -1947,6 +1983,9 @@ test('客户端用同一世界种子为每棵树选择确定的普通树或果�
     definition: mixedForestDefinition,
     environment: { fogColor: '#ffffff', fogNear: 20, fogFar: 60 },
     worldSeed,
+    // 这些用例不测建模节流：一帧建完，断言才好写。分帧建模由
+    // ClientActorSystem.spawn.test.ts 单独覆盖。
+    spawnBudgetMilliseconds: Number.POSITIVE_INFINITY,
   });
   const props = new Int32Array(PROP_BUFFER_LENGTH);
   const propCount = generateChunkProps(worldSeed, -1, 0, props);
@@ -1995,6 +2034,9 @@ test('果子按服务端时钟自己熟：冷却中不画也不能交互，到�
     definition: orchardDefinition,
     environment: { fogColor: '#ffffff', fogNear: 20, fogFar: 60 },
     now: () => now,
+    // 这些用例不测建模节流：一帧建完，断言才好写。分帧建模由
+    // ClientActorSystem.spawn.test.ts 单独覆盖。
+    spawnBudgetMilliseconds: Number.POSITIVE_INFINITY,
   });
 
   const props = new Int32Array(PROP_BUFFER_LENGTH);
@@ -2058,6 +2100,9 @@ test('流式树按 Chunk 构造无网格 Actor，偏离态可在无 Transform �
     environment: { fogColor: '#ffffff', fogNear: 20, fogFar: 60 },
     collision,
     now: () => now,
+    // 这些用例不测建模节流：一帧建完，断言才好写。分帧建模由
+    // ClientActorSystem.spawn.test.ts 单独覆盖。
+    spawnBudgetMilliseconds: Number.POSITIVE_INFINITY,
   });
   system.setGeneratedPropOverrideTarget((chunkX, chunkZ, propIndex, removed) => {
     overrides.push({ chunkX, chunkZ, propIndex, removed });

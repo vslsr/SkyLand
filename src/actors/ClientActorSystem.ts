@@ -94,6 +94,20 @@ import {
 } from './components/LocalDerivedActorComponent';
 import { ActorGuidePathSyncSystem } from './systems/ActorGuidePathSyncSystem';
 
+/**
+ * 一帧最多花在「建 Replica」上的毫秒数（实现路径文档 §2 的第 1 项）。
+ *
+ * 打点量到的问题：进房间那一帧 `render-spawn` 是 31–146 ms——服务端第一份快照里
+ * 视野内的 Actor 会在同一帧里被一次性建出来，而每个 Replica 的 `createMeshProxy`
+ * 都要程序化地生成一整棵模型。这是全程最大的一次卡顿，而且它**在渲染侧**，
+ * 把模拟搬进 worker 一点都帮不上。
+ *
+ * 用时间预算而不是个数预算，是因为要压的就是「一帧的墙钟时间」：不同原型的建模
+ * 成本差一个数量级，按个数配额压不住最贵的那几个。`CHUNK_BUILD_BUDGET_PER_FRAME`
+ * 那条按个数的预算在这里不适用，理由同上。
+ */
+const REPLICA_SPAWN_BUDGET_MILLISECONDS = 4;
+
 export interface ClientActorSystemOptions {
   definition: SceneDefinition;
   environment: FillMaterialEnvironment;
@@ -116,6 +130,13 @@ export interface ClientActorSystemOptions {
    */
   renderScene?: ThreeRenderScene;
   transforms?: RenderTransformBuffer;
+  /**
+   * 一帧的建模预算，毫秒。测试传 `Infinity` 就回到「一帧建完」的旧行为，
+   * 传 0 则每帧只建一个——预算再紧也保证有进度。
+   */
+  spawnBudgetMilliseconds?: number;
+  /** 单调时钟。和 `now` 分开：`now` 是快照用的时间轴，测试里不会在一帧内推进。 */
+  spawnClock?: () => number;
 }
 
 type PropStateSnapshot = {
@@ -238,6 +259,8 @@ export class ClientActorSystem implements SceneVisualSystem {
     }>
   >();
   private readonly worldSeed: number;
+  private readonly spawnBudgetMilliseconds: number;
+  private readonly spawnClock: () => number;
 
   public constructor(options: ClientActorSystemOptions) {
     this.archetypes = new Map(
@@ -260,6 +283,9 @@ export class ClientActorSystem implements SceneVisualSystem {
     this.physics = options.physics;
     this.highCountBatches = new HighCountActorBatchSystem(options.environment, this.archetypes);
     this.fruit = new GeneratedPropFruitSystem(options.environment, this.archetypes);
+    this.spawnBudgetMilliseconds = options.spawnBudgetMilliseconds ?? REPLICA_SPAWN_BUDGET_MILLISECONDS;
+    this.spawnClock = options.spawnClock
+      ?? (() => (globalThis.performance ?? Date).now());
     this.transforms = options.transforms ?? new RenderTransformBuffer();
     this.renderScene = options.renderScene
       ?? new ThreeRenderScene(
@@ -312,23 +338,63 @@ export class ClientActorSystem implements SceneVisualSystem {
       applicableSnapshots.push(snapshot);
     }
 
-    // Pass 1：先创建完整集合，确保父节点可以出现在快照的任意位置。
+    // Pass 1a：原型换了的先删掉，让它走下面的新建路径。
     for (const snapshot of applicableSnapshots) {
-      let actor = this.world.getActor(snapshot.id) as Actor | undefined;
-      const archetypeId = this.resolveSnapshotArchetypeId(snapshot);
-      if (actor && actor.archetypeId !== archetypeId) {
+      const actor = this.world.getActor(snapshot.id) as Actor | undefined;
+      if (actor && actor.archetypeId !== this.resolveSnapshotArchetypeId(snapshot)) {
         this.world.removeActor(actor.id);
-        actor = undefined;
       }
-      actor ??= this.createReplica(snapshot);
-      if (!actor.hasComponents(REPLICATION_COMPONENT)) {
+    }
+
+    // Pass 1b：按预算创建。没轮到的这一帧就不存在，而下一帧的快照集合里它还在——
+    // 所以不需要维护待建队列，也就不会有「排着队的 Actor 已经离开视野」这种脏状态。
+    const pending = new Map<string, SnapshotActor>();
+    for (const snapshot of applicableSnapshots) {
+      if (!this.world.getActor(snapshot.id)) pending.set(snapshot.id, snapshot);
+    }
+    const spawnDeadline = this.spawnClock() + this.spawnBudgetMilliseconds;
+    let spawned = 0;
+    /**
+     * 建一个 Replica，父节点优先。
+     *
+     * 「父节点可以出现在快照的任意位置」是这一遍原本就保证的性质，分帧之后更要保住：
+     * 孩子先于父节点被建出来的话，Pass 2 会把它当成「挂在外部 Actor 上」——那条路径
+     * 是给玩家用的，一个本该跟着船走的货箱会被当成玩家嘴里叼着的东西。
+     */
+    const spawn = (snapshot: SnapshotActor, chain: Set<string>): Actor | undefined => {
+      const existing = this.world.getActor(snapshot.id) as Actor | undefined;
+      if (existing) return existing;
+      // 脏数据里的环形父子关系不该把客户端拖进死循环。
+      if (chain.has(snapshot.id)) return undefined;
+      chain.add(snapshot.id);
+      const parentActorId = snapshot.parentActorId ?? undefined;
+      // 只有「父节点也在这一批待建里」才需要递归；已经在世界里、或根本不是 Replica
+      // （玩家）的父节点都走不到这里。
+      const parentSnapshot = parentActorId === undefined
+        ? undefined
+        : pending.get(parentActorId);
+      // 父节点建不出来（预算用完或脏数据）就连孩子一起推到下一帧。
+      if (parentSnapshot && !spawn(parentSnapshot, chain)) return undefined;
+      // 预算再紧也要建一个：否则视野里新出现的 Actor 可能永远排不上。
+      if (spawned > 0 && this.spawnClock() >= spawnDeadline) return undefined;
+      const actor = this.createReplica(snapshot);
+      spawned += 1;
+      return actor;
+    };
+    for (const snapshot of applicableSnapshots) spawn(snapshot, new Set());
+
+    // Pass 1c：这一帧已经存在的都要带上复制标记。
+    for (const snapshot of applicableSnapshots) {
+      const actor = this.world.getActor(snapshot.id) as Actor | undefined;
+      if (actor && !actor.hasComponents(REPLICATION_COMPONENT)) {
         actor.addComponent(new ReplicationComponent());
       }
     }
 
     // Pass 2：父子关系是离散状态，直接采用当前采样快照的目标值。
     for (const snapshot of applicableSnapshots) {
-      const actor = this.world.getActor(snapshot.id) as Actor;
+      const actor = this.world.getActor(snapshot.id) as Actor | undefined;
+      if (!actor) continue;
       const parentActorId = snapshot.parentActorId ?? undefined;
       // 玩家等外部 Actor 不在 Replica ActorWorld 中；它们的姿态已在快照入缓冲前合成。
       if (parentActorId && !this.world.getActor(parentActorId)) {
@@ -343,7 +409,8 @@ export class ClientActorSystem implements SceneVisualSystem {
 
     // Pass 3：Component 脚本读取到的 Transform 同时包含局部坐标和世界坐标。
     for (const snapshot of applicableSnapshots) {
-      this.applySnapshot(this.world.getActor(snapshot.id) as Actor, snapshot);
+      const actor = this.world.getActor(snapshot.id) as Actor | undefined;
+      if (actor) this.applySnapshot(actor, snapshot);
     }
 
     for (const actor of this.world.actors() as Actor[]) {

@@ -155,6 +155,9 @@ test('异构 Actor 创建线稿模型，准星选中货箱并提供木筏 HUD �
     definition,
     environment: { fogColor: '#ffffff', fogNear: 20, fogFar: 60 },
     now: () => now,
+    // 这些用例不测建模节流：一帧建完，断言才好写。分帧建模由
+    // ClientActorSystem.spawn.test.ts 单独覆盖。
+    spawnBudgetMilliseconds: Number.POSITIVE_INFINITY,
   });
   system.syncSnapshots([raftSnapshot, cargoSnapshot, reefSnapshot], 1_000);
   system.update(0, 0);
@@ -368,6 +371,9 @@ test('弹性蘑菇 Replica 拉长并在释放后回弹，标记组件始终可�
     definition,
     environment: { fogColor: '#ffffff', fogNear: 20, fogFar: 60 },
     now: () => now,
+    // 这些用例不测建模节流：一帧建完，断言才好写。分帧建模由
+    // ClientActorSystem.spawn.test.ts 单独覆盖。
+    spawnBudgetMilliseconds: Number.POSITIVE_INFINITY,
   });
   system.syncSnapshots([mushroomSnapshot], 1_000);
   system.update(0, 0);
