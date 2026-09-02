@@ -4,6 +4,7 @@ import { createActorVisualModel } from '../../models/actors/createActorVisualMod
 import type { ActorVisualModel } from '../../models/actors/ActorVisualModel';
 import {
   NULL_PROXY_ID,
+  type GuidePathStyle,
   type MeshProxyDesc,
   type MeshProxyInfo,
   type ProxyId,
@@ -13,6 +14,7 @@ import {
 import type { RenderTransform, RenderTransformBuffer } from '../RenderTransformBuffer';
 import { PARAM_TEMPERATURE } from '../RenderVisualParams';
 import { ThreeFireVisual } from './ThreeFireVisual';
+import { ThreeGuidePathVisual, type GuidePathState } from './ThreeGuidePathVisual';
 import { ThreeMeshProxy } from './ThreeMeshProxy';
 
 /**
@@ -70,6 +72,10 @@ export class ThreeRenderScene implements RenderScene {
   private selectedInteractionProxy: ProxyId = NULL_PROXY_ID;
   /** 渲染世界自己的表现系统。它们只认识 ProxyId，不认识 Actor。 */
   private readonly fireVisual = new ThreeFireVisual();
+  /** proxyId → 引导路径表现。只有引导 Actor 有，所以用 Map 而不是按槽位的数组。 */
+  private readonly guidePaths = new Map<ProxyId, ThreeGuidePathVisual>();
+  /** 样式在 spawn 时给定，实体等第一条带路点的命令到了再建——GuidePath 至少要 2 个路点。 */
+  private readonly guidePathStyles = new Map<ProxyId, GuidePathStyle>();
 
   public constructor(
     public readonly root: THREE.Group,
@@ -93,6 +99,7 @@ export class ThreeRenderScene implements RenderScene {
       proxy.markers.attachTemperature(proxy.temperatureAnchorX, proxy.interactionAnchorY, 0);
       proxy.markers.setTemperatureVisible(this.temperatureMarkersVisible);
     }
+    if (desc.guidePath) this.guidePathStyles.set(proxy.id, desc.guidePath);
     this.root.add(proxy.root);
     return {
       id: proxy.id,
@@ -110,7 +117,17 @@ export class ThreeRenderScene implements RenderScene {
     this.freeSlots.push(id);
     this.fireVisual.forget(id);
     if (this.selectedInteractionProxy === id) this.selectedInteractionProxy = NULL_PROXY_ID;
+    // 引导路径先摘：它的子树挂在 visualRoot 下，要赶在 disposeSubtree 之前
+    // 自己收走（GuidePath 还持有一份共享光晕纹理的引用计数）。
+    this.guidePaths.get(id)?.dispose();
+    this.guidePaths.delete(id);
+    this.guidePathStyles.delete(id);
     proxy.dispose();
+  }
+
+  /** 渲染侧查找引导路径表现。 */
+  public resolveGuidePath(id: ProxyId): ThreeGuidePathVisual | undefined {
+    return this.guidePaths.get(id);
   }
 
   /** 渲染侧查找。只有渲染世界内部（表现 System、拾取、调试可视化）能调。 */
@@ -171,6 +188,38 @@ export class ThreeRenderScene implements RenderScene {
     for (const proxy of live) {
       proxy.markers.setTemperature(transforms.readParam(proxy.id, PARAM_TEMPERATURE));
     }
+    for (const guide of this.guidePaths.values()) guide.update(deltaSeconds);
+  }
+
+  /**
+   * 应用一次引导路径状态。`pathChanged` 由玩法侧按 pathRevision 判断——
+   * 路径与索引必须在同一次调用里落地，拆开会让引导线闪回起点。
+   */
+  public setGuidePath(id: ProxyId, state: GuidePathState, pathChanged: boolean): void {
+    let visual = this.guidePaths.get(id);
+    if (!visual) {
+      const style = this.guidePathStyles.get(id);
+      const proxy = this.resolve(id);
+      // GuidePath 至少要 2 个路点，所以实体等第一条带路点的命令才建。
+      // 顺带避开了「出生先建一次几何、首次 sync 又重建一次」的浪费。
+      if (!style || !proxy || state.points.length < 2) return;
+      visual = new ThreeGuidePathVisual(`${proxy.root.name}-guide-path`, {
+        points: state.points,
+        curve: state.curve,
+        ...style,
+      });
+      this.guidePaths.set(id, visual);
+      // 挂 visualRoot 是有意的：船上的引导线要跟着船体波动一起摇。
+      proxy.visualRoot.add(visual.guide.root);
+      visual.apply(state, false);
+      return;
+    }
+    visual.apply(state, pathChanged);
+  }
+
+  /** 线宽是像素单位；必须在 beforeRender 拿 resize 之后的真实画布尺寸。 */
+  public setGuidePathResolution(width: number, height: number): void {
+    for (const guide of this.guidePaths.values()) guide.setResolution(width, height);
   }
 
   /**
@@ -208,6 +257,9 @@ export class ThreeRenderScene implements RenderScene {
   }
 
   public dispose(): void {
+    for (const guide of this.guidePaths.values()) guide.dispose();
+    this.guidePaths.clear();
+    this.guidePathStyles.clear();
     for (const proxy of this.proxies) proxy?.dispose();
     this.proxies.length = 0;
     this.freeSlots.length = 0;

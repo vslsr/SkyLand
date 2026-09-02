@@ -57,6 +57,22 @@ export interface MeshProxyDesc {
    */
   readonly interactionMarker?: boolean;
   readonly temperatureMarker?: boolean;
+  /**
+   * 引导路径的样式。**样式不在快照里**——它来自已净化的 Actor 原型
+   * （见 `GuidePathComponent.mjs` 的注释），所以照 `render` 的先例在这里一次性
+   * 给定；每帧过边界的只有路点、当前节点与开关。
+   */
+  readonly guidePath?: GuidePathStyle;
+}
+
+export interface GuidePathStyle {
+  readonly lineColor: string;
+  readonly markerColor: string;
+  readonly lineWidth: number;
+  readonly dashLength: number;
+  readonly gapLength: number;
+  readonly dashSpeed: number;
+  readonly markerSize: number;
 }
 
 /**

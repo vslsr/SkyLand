@@ -98,11 +98,7 @@ import {
   LOCAL_DERIVED_ACTOR_COMPONENT,
   LocalDerivedActorComponent,
 } from './components/LocalDerivedActorComponent';
-import {
-  GUIDE_PATH_VISUAL_COMPONENT,
-  GuidePathVisualComponent,
-} from './components/GuidePathVisualComponent';
-import { GuidePathVisualSystem } from './systems/GuidePathVisualSystem';
+import { ActorGuidePathSyncSystem } from './systems/ActorGuidePathSyncSystem';
 
 export interface ClientActorSystemOptions {
   definition: SceneDefinition;
@@ -265,7 +261,7 @@ export class ClientActorSystem implements SceneVisualSystem {
     // 参数要和 transform 同一次翻面，所以必须夹在写入与 publish 之间。
     this.world.addSystem(new ActorVisualParamSystem(this.transforms));
     this.world.addSystem(new RenderTransformSyncSystem(this.transforms, this.renderScene));
-    this.world.addSystem(new GuidePathVisualSystem());
+    this.world.addSystem(new ActorGuidePathSyncSystem(this.renderScene));
     this.world.addSystem(new HybridSlimeVisualSystem(this.renderScene));
     if (options.definition.renderer.ocean) {
       this.world.addSystem(new WaterBobVisualSystem(this.renderScene, options.definition.renderer.ocean));
@@ -422,12 +418,10 @@ export class ClientActorSystem implements SceneVisualSystem {
   }
 
   public beforeRender(_renderer: THREE.WebGLRenderer, camera: THREE.Camera): void {
-    for (const actor of this.world.query(GUIDE_PATH_VISUAL_COMPONENT) as Actor[]) {
-      const visual = actor.requireComponent(
-        GUIDE_PATH_VISUAL_COMPONENT,
-      ) as GuidePathVisualComponent;
-      visual.setResolution(_renderer.domElement.width, _renderer.domElement.height);
-    }
+    this.renderScene.setGuidePathResolution(
+      _renderer.domElement.width,
+      _renderer.domElement.height,
+    );
     // 世界 UI 的朝向是渲染世界自己的事；这里只负责把相机递过去。
     this.renderScene.faceCameras(camera);
   }
@@ -452,6 +446,11 @@ export class ClientActorSystem implements SceneVisualSystem {
 
   public getActor(actorId: string): Actor | undefined {
     return this.world.getActor(actorId) as Actor | undefined;
+  }
+
+  /** 渲染世界本身。表现搬过去之后，测试与调试代码经由它查渲染侧状态。 */
+  public getRenderScene(): ThreeRenderScene {
+    return this.renderScene;
   }
 
   public getActorRenderProxy(actorId: string): ThreeMeshProxy | undefined {
@@ -799,10 +798,26 @@ export class ClientActorSystem implements SceneVisualSystem {
       return actor;
     }
 
+    // 样式来自已净化的原型、不在快照里，所以随 spawn 一次性给定；
+    // 每帧过边界的只有路点、当前节点与开关（见 ActorGuidePathSyncSystem）。
+    const guidePathStyle = archetype.components.guidePath
+      ? {
+        lineColor: archetype.components.guidePath.lineColor ?? '#fffdf4',
+        markerColor: archetype.components.guidePath.markerColor ?? '#fffdf4',
+        lineWidth: archetype.components.guidePath.lineWidth ?? 5,
+        dashLength: archetype.components.guidePath.dashLength ?? 0.8,
+        gapLength: archetype.components.guidePath.gapLength ?? 0.55,
+        dashSpeed: archetype.components.guidePath.dashSpeed ?? 0.5,
+        markerSize: archetype.components.guidePath.markerSize ?? 0.55,
+      }
+      : undefined;
+
     if (!archetype.components.render && archetype.components.guidePath) {
-      const info = this.renderScene.createMeshProxy({ name: `actor-${snapshot.id}` });
+      const info = this.renderScene.createMeshProxy({
+        name: `actor-${snapshot.id}`,
+        guidePath: guidePathStyle,
+      });
       actor.addComponent(new RenderProxyComponent(info.id, this.renderScene));
-      this.attachGuidePathVisual(actor);
       this.world.addActor(actor);
       return actor;
     }
@@ -814,6 +829,7 @@ export class ClientActorSystem implements SceneVisualSystem {
       // 「要不要标记」是 spawn 时的一次性事实；锚点本来就产在渲染侧，不必回送。
       interactionMarker: Boolean(archetype.components.interactable),
       temperatureMarker: Boolean(archetype.components.temperature),
+      guidePath: guidePathStyle,
     });
     // proxy 已经占了一个槽位，但要到 addActor 之后才由 RenderProxyComponent 的
     // 生命周期负责回收。这中间任何一步抛出（例如原型声明了 temperature 却没装上
@@ -826,7 +842,6 @@ export class ClientActorSystem implements SceneVisualSystem {
       // 顺序的逆序，marker 要先释放自己的子树，proxy 的 disposeSubtree 才能最后跑。
       actor.addComponent(new RenderProxyComponent(info.id, this.renderScene));
       const render = this.renderScene.resolve(info.id) as ThreeMeshProxy;
-      this.attachGuidePathVisual(actor);
       if (
         archetype.components.render.model === 'line-art-pbf-slime'
         && render.pbfSlimeVisualRig
@@ -1048,17 +1063,6 @@ export class ClientActorSystem implements SceneVisualSystem {
       : undefined;
     if (archetype) return archetype.id;
     throw new Error(`Actor ${snapshot.id} 的快照缺少 archetypeId`);
-  }
-
-  private attachGuidePathVisual(actor: Actor): void {
-    const state = actor.getComponent(GUIDE_PATH_COMPONENT) as GuidePathComponent | undefined;
-    if (!state) return;
-    const render = this.resolveRender(actor);
-    if (!render) return;
-    const visual = new GuidePathVisualComponent(state);
-    visual.guide.root.name = `actor-${actor.id}-guide-path`;
-    render.visualRoot.add(visual.guide.root);
-    actor.addComponent(visual);
   }
 
   private archetypeForGeneratedProp(

@@ -43,10 +43,6 @@ import {
   type HybridSlimeVisualComponent,
 } from '../src/actors/components/HybridSlimeVisualComponent';
 import { SlimeSurfaceDragComponent } from '../src/actors/components/SlimeSurfaceDragComponent';
-import {
-  GUIDE_PATH_VISUAL_COMPONENT,
-  type GuidePathVisualComponent,
-} from '../src/actors/components/GuidePathVisualComponent';
 import type { SnapshotActor } from '../src/network/protocol';
 import { createPlayerActorVisual } from '../src/player/PlayerActorVisual';
 import type { SceneDefinition } from '../src/scenes/data/SceneDefinition';
@@ -405,6 +401,11 @@ const definition = {
   camera: { mode: 'fly', position: [0, 5, 10], yaw: 0, pitch: 0, moveSpeed: 8 },
 } satisfies SceneDefinition;
 
+/** beforeRender 会读画布尺寸给引导线算像素线宽；测试只需要这一个字段。 */
+const FAKE_RENDERER = {
+  domElement: { width: 1280, height: 720 },
+} as unknown as THREE.WebGLRenderer;
+
 test('普通玩家眼睛使用独立的无光照、无雾渲染层', () => {
   const visual = createPlayerActorVisual('unlit-eye-player', {
     model: 'line-art-player-slime',
@@ -741,7 +742,7 @@ test('客户端按权威燃烧状态显示参考 LineLoop 火焰，稳定篝火�
     .root.getObjectByName('actor-temperature-marker'));
   const camera = new THREE.PerspectiveCamera();
   camera.position.set(3, 4, 7);
-  system.beforeRender({} as THREE.WebGLRenderer, camera);
+  system.beforeRender(FAKE_RENDERER, camera);
 
   const burningHay: SnapshotActor = {
     ...coldHay,
@@ -1021,15 +1022,16 @@ test('无模型 GuidePath Actor 只在快照存在时创建客户端 Three.js �
 
   const actor = system.getActor(guideSnapshot.id)!;
   const state = actor.requireComponent(GUIDE_PATH_COMPONENT) as GuidePathComponent;
-  const visual = actor.requireComponent(GUIDE_PATH_VISUAL_COMPONENT) as GuidePathVisualComponent;
   const render = system.getActorRenderProxy(actor.id)!;
+  // 表现住在渲染世界里；Actor 上只剩 shared/ 的权威 GuidePathComponent。
+  const guide = system.getRenderScene().resolveGuidePath(render.id)!.guide;
   assert.equal(actor.hasComponents(SIMPLE_COLLISION_COMPONENT), false);
   assert.equal(state.currentPointIndex, 1);
   assert.equal(state.curve, 'linear');
-  assert.equal(visual.guide.currentMarkerIndex, 1);
+  assert.equal(guide.currentMarkerIndex, 1);
   assert.equal(render.root.position.x, 6);
   assert.equal(render.root.position.z, -4);
-  assert.ok(render.visualRoot.children.includes(visual.guide.root));
+  assert.ok(render.visualRoot.children.includes(guide.root));
 
   now = 1_100;
   system.syncSnapshots([], 1_100);

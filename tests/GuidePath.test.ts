@@ -7,7 +7,11 @@ import {
   MAX_GUIDE_WAYPOINTS,
 } from '../src/guidance/index';
 import { GuidePathComponent } from '../shared/actor/components/GuidePathComponent.mjs';
-import { GuidePathVisualComponent } from '../src/actors/components/GuidePathVisualComponent';
+import { Actor } from '../shared/actor/Actor.mjs';
+import { ActorWorld } from '../shared/actor/ActorWorld.mjs';
+import { RenderProxyComponent } from '../src/actors/components/RenderProxyComponent';
+import { ActorGuidePathSyncSystem } from '../src/actors/systems/ActorGuidePathSyncSystem';
+import { ThreeRenderScene } from '../src/render/three/ThreeRenderScene';
 
 test('GuidePathGeometry 为每个采样点创建屏幕空间线带所需的成对顶点', () => {
   const geometry = new GuidePathGeometry();
@@ -100,18 +104,52 @@ test('客户端视觉只应用服务器 GuidePathComponent 的离散状态', () 
     points: [[0, 0, 0], [2, 0, 0], [4, 0, 0]],
     curve: 'linear',
   });
-  const visual = new GuidePathVisualComponent(state);
-  visual.sync();
-  assert.equal(visual.guide.currentMarkerIndex, 0);
+  // 表现住在渲染世界里；玩法侧只在 revision 变了时推一条命令过去。
+  const scene = new ThreeRenderScene(new THREE.Group(), {
+    fogColor: '#ffffff', fogNear: 20, fogFar: 60,
+  });
+  const info = scene.createMeshProxy({
+    name: 'actor-guide',
+    guidePath: {
+      lineColor: '#fffdf4',
+      markerColor: '#fffdf4',
+      lineWidth: 5,
+      dashLength: 0.8,
+      gapLength: 0.55,
+      dashSpeed: 0.5,
+      markerSize: 0.55,
+    },
+  });
+  const world = new ActorWorld();
+  const actor = new Actor('guide-1', 'guide-path');
+  actor.addComponent(state);
+  actor.addComponent(new RenderProxyComponent(info.id, scene));
+  world.addActor(actor);
+  const sync = new ActorGuidePathSyncSystem(scene);
+  // 实体等第一条带路点的命令才建，所以先 sync 再取。
+  assert.equal(scene.resolveGuidePath(info.id), undefined);
+  sync.update(world, 0, 0);
+  const guide = scene.resolveGuidePath(info.id)!.guide;
+  assert.equal(guide.currentMarkerIndex, 0);
 
   state.advance();
-  visual.sync();
-  assert.equal(visual.guide.currentMarkerIndex, 1);
+  sync.update(world, 0, 0);
+  assert.equal(guide.currentMarkerIndex, 1);
 
+  // 换路径与设索引必须在同一条命令里落地：setPath 内部会 reset()，
+  // 拆开发送会让引导线闪回起点。
   state.setPath([[1, 0, 1], [3, 0, 1]], { curve: 'catmull-rom' });
   state.setCurrentPointIndex(2);
-  visual.sync();
-  assert.equal(visual.guide.markerCount, 2);
-  assert.equal(visual.guide.isComplete, true);
-  visual.onEndPlay();
+  sync.update(world, 0, 0);
+  assert.equal(guide.markerCount, 2);
+  assert.equal(guide.isComplete, true);
+
+  // revision 没变就不再发命令——这条是 on-change 通道的核心。
+  const before = guide.currentMarkerIndex;
+  state.setCurrentPointIndex(0);
+  assert.equal(guide.currentMarkerIndex, before, 'sync 之前渲染侧不该被改到');
+  sync.update(world, 0, 0);
+  assert.equal(guide.currentMarkerIndex, 0);
+
+  scene.dispose();
 });

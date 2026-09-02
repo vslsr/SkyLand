@@ -144,6 +144,11 @@ const mushroomSnapshot: SnapshotActor = {
   },
 };
 
+/** beforeRender 会读画布尺寸给引导线算像素线宽；测试只需要这一个字段。 */
+const FAKE_RENDERER = {
+  domElement: { width: 1280, height: 720 },
+} as unknown as THREE.WebGLRenderer;
+
 test('异构 Actor 创建线稿模型，准星选中货箱并提供木筏 HUD 状态', () => {
   let now = 1_000;
   const system = new ClientActorSystem({
@@ -376,7 +381,7 @@ test('弹性蘑菇 Replica 拉长并在释放后回弹，标记组件始终可�
   assert.equal(markers.interactionLabel, 'E');
   const camera = new THREE.PerspectiveCamera();
   camera.position.set(4, 6, 8);
-  system.beforeRender({} as THREE.WebGLRenderer, camera);
+  system.beforeRender(FAKE_RENDERER, camera);
   const markerRoot = system.root.getObjectByName('actor-interaction-marker');
   assert.ok(markerRoot);
   assert.equal(markerRoot.userData.controlLabel, 'E');
