@@ -4,6 +4,7 @@ import { parseChunkKey, toChunkCoordinate, toChunkKey } from '../../shared/world
 import { planChunkStream } from '../../shared/world/chunkStream.mjs';
 import { TerrainPatchStore } from '../../shared/world/terrainPatches.mjs';
 import { TerrainEditor } from '../../shared/world/terrainEditing.mjs';
+import { frameTimeline } from '../platform/index';
 import {
   CHUNK_BUILD_BUDGET_PER_FRAME,
   DEFAULT_WORLD_SEED,
@@ -295,61 +296,86 @@ export class ChunkStreamer implements SceneVisualSystem {
     if (!this.generator) return false;
     try {
       const skipMask = this.skipMasks.get(chunk.key);
-      const data = this.generator.buildChunk(chunk.chunkX, chunk.chunkZ, skipMask);
-      const view = new ChunkView(
-        chunk.key,
-        chunk.chunkX,
-        chunk.chunkZ,
-        data,
-        {
-          fill: this.fillMaterial,
-          groundFill: this.groundFillMaterial,
-          outline: OUTLINE_MATERIAL,
-          grid: GROUND_GRID_MATERIAL,
-          water: this.waterMaterials,
-          waterShore: this.waterShoreMaterial,
-          waterSplash: this.waterSplashMaterial,
-        },
-        {
-          worldSeed: this.worldSeed,
-          groundColor: this.templates.palette.ground,
-          showGround: this.templates.content.ground,
-          oceanDefinition: this.ocean,
-          seaLevel: this.terrainEditor.seaLevel,
-          cellCodeAt: this.cellCodeAt,
-        },
+      // 这两个阶段分开打点是有目的的：`chunk-gen` 是纯计算，可以整个搬进 worker；
+      // `chunk-view` 建的是 Three 几何，第 3 步之前只能留在主线程。
+      // 「每帧最多建一个 chunk」这条预算到底是被哪一半逼出来的，看这两行的数。
+      const data = frameTimeline.measure(
+        'chunk-gen',
+        () => this.generator!.buildChunk(chunk.chunkX, chunk.chunkZ, skipMask),
       );
-      this.grass?.mountChunk(chunk.key, data);
-      // 碰撞体由同一批放置记录派生，和几何体同生共死，不会出现「看得见但撞不到」。
-      const chunkColliders = readChunkColliders(data.props, data.propCount, [], {
-          skipMask,
-          chunkX: chunk.chunkX,
-          chunkZ: chunk.chunkZ,
-        });
-      this.collision?.setStaticGroup(chunk.key, chunkColliders);
-      this.physics?.setStaticColliderGroup(
-        `props:${chunk.key}`,
-        simpleCollisionGroupToPhysicsDefinitions(chunkColliders),
-      );
-      this.physics?.setChunkCollider(
-        chunk.key,
-        buildTerrainCollisionMesh(chunk.chunkX, chunk.chunkZ, this.cellCodeAt),
-      );
-      this.views.set(chunk.key, view);
-      this.root.add(view.root);
-      this.onChunkMounted?.(
-        chunk.key,
-        chunk.chunkX,
-        chunk.chunkZ,
-        data.props,
-        data.propCount,
-      );
-      return true;
+      return this.mountView(chunk, data, skipMask);
     } catch (error) {
       // 单个 chunk 建不出来不该拖垮整个场景，跳过它，下次重新规划时再试。
       console.error(`[world] chunk ${chunk.key} 构建失败`, error);
       return false;
     }
+  }
+
+  /** `mount` 的后一半：把生成结果变成 Three 几何、碰撞体与草地。 */
+  private mountView(
+    chunk: PendingChunk,
+    data: ReturnType<NonNullable<ChunkStreamer['generator']>['buildChunk']>,
+    skipMask: ReturnType<ChunkStreamer['skipMasks']['get']>,
+  ): boolean {
+    // 三段分开打点：几何体只能留在主线程（Three 对象），碰撞体与草地实例是
+    // 纯计算，能不能挪走要先看它们各自值多少。
+    const view = frameTimeline.measure('chunk-geometry', () => new ChunkView(
+      chunk.key,
+      chunk.chunkX,
+      chunk.chunkZ,
+      data,
+      {
+        fill: this.fillMaterial,
+        groundFill: this.groundFillMaterial,
+        outline: OUTLINE_MATERIAL,
+        grid: GROUND_GRID_MATERIAL,
+        water: this.waterMaterials,
+        waterShore: this.waterShoreMaterial,
+        waterSplash: this.waterSplashMaterial,
+      },
+      {
+        worldSeed: this.worldSeed,
+        groundColor: this.templates.palette.ground,
+        showGround: this.templates.content.ground,
+        oceanDefinition: this.ocean,
+        seaLevel: this.terrainEditor.seaLevel,
+        cellCodeAt: this.cellCodeAt,
+      },
+    ));
+    frameTimeline.measure('chunk-grass', () => this.grass?.mountChunk(chunk.key, data));
+    // 再分一层：`*-build` 是纯计算（能挪走），`*-register` 是往 Rapier 的 WASM 堆里
+    // 塞碰撞体（必须和物理世界同线程）。这两个数决定第 2 步该搬什么。
+    frameTimeline.measure('chunk-props-collide', () => {
+      // 碰撞体由同一批放置记录派生，和几何体同生共死，不会出现「看得见但撞不到」。
+      const chunkColliders = readChunkColliders(data.props, data.propCount, [], {
+        skipMask,
+        chunkX: chunk.chunkX,
+        chunkZ: chunk.chunkZ,
+      });
+      this.collision?.setStaticGroup(chunk.key, chunkColliders);
+      this.physics?.setStaticColliderGroup(
+        `props:${chunk.key}`,
+        simpleCollisionGroupToPhysicsDefinitions(chunkColliders),
+      );
+    });
+    const terrainMesh = frameTimeline.measure(
+      'chunk-terrain-build',
+      () => buildTerrainCollisionMesh(chunk.chunkX, chunk.chunkZ, this.cellCodeAt),
+    );
+    frameTimeline.measure(
+      'chunk-terrain-register',
+      () => this.physics?.setChunkCollider(chunk.key, terrainMesh),
+    );
+    this.views.set(chunk.key, view);
+    this.root.add(view.root);
+    this.onChunkMounted?.(
+      chunk.key,
+      chunk.chunkX,
+      chunk.chunkZ,
+      data.props,
+      data.propCount,
+    );
+    return true;
   }
 
   private unmount(key: string): void {

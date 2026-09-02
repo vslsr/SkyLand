@@ -19,6 +19,7 @@ import { VesselControlController } from '../controllers/VesselControlController'
 import { RoomClient, type JoinedRoom, type RoomSummary } from '../network/RoomClient';
 import { SnapshotBuffer } from '../network/SnapshotBuffer';
 import type { RoomSnapshot } from '../network/protocol';
+import { frameTimeline } from '../platform/index';
 import { PlayerEntity } from '../player/PlayerEntity';
 import { SlimeSurfaceDragController } from '../controllers/SlimeSurfaceDragController';
 import { RemotePlayerGroup } from '../player/RemotePlayerGroup';
@@ -246,13 +247,16 @@ export class GrasslandScene extends Scene {
     // 与运动参数写进边界那段 SoA，而翻面发生在 renderer.update 里的 Actor 世界中。
     // 写在翻面之后就会晚一帧——软体读到的速度和它被摆到的位置对不上。
     this.slimeSurfaceDrag?.update();
-    this.player?.update(deltaSeconds);
-    if (this.joinedRoom?.scene.camera.mode === 'topdown') {
-      this.remotePlayers.sync(this.snapshots.sample(), this.joinedRoom.player.id);
-      this.remotePlayers.update(deltaSeconds);
-    } else {
-      this.remotePlayers.clear();
-    }
+    // 「sim」= 第 2 步要搬进 Sim Worker 的那一半：本地预测与远端插值。
+    frameTimeline.measure('sim-player', () => {
+      this.player?.update(deltaSeconds);
+      if (this.joinedRoom?.scene.camera.mode === 'topdown') {
+        this.remotePlayers.sync(this.snapshots.sample(), this.joinedRoom.player.id);
+        this.remotePlayers.update(deltaSeconds);
+      } else {
+        this.remotePlayers.clear();
+      }
+    });
     this.renderer.update(deltaSeconds, elapsedSeconds, this.currentFocus());
     if (this.terrainEdits.active) {
       // 编辑模式独占 WorldInteract：同一次点击不能既改地形又去交互 Actor。
@@ -269,7 +273,7 @@ export class GrasslandScene extends Scene {
   }
 
   public render(): void {
-    this.renderer.render(this.controls.frame);
+    frameTimeline.measure('draw', () => this.renderer.render(this.controls.frame));
   }
 
   /**

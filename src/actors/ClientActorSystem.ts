@@ -59,6 +59,7 @@ import { toWorldSeed } from '../../shared/world/worldConfig.mjs';
 import { selectWorldPropVariant } from '../../shared/world/worldPropVariants.mjs';
 import type { FillMaterialEnvironment } from '../materials/createFillMaterial';
 import { NULL_PROXY_ID } from '../render/RenderScene';
+import { frameTimeline } from '../platform/index';
 import { RenderTransformBuffer } from '../render/RenderTransformBuffer';
 import type { ThreeMeshProxy } from '../render/three/ThreeMeshProxy';
 import { ThreeRenderScene } from '../render/three/ThreeRenderScene';
@@ -361,23 +362,37 @@ export class ClientActorSystem implements SceneVisualSystem {
   }
 
   public update(deltaSeconds: number, elapsedSeconds: number): void {
-    this.applySnapshotSet(this.snapshots.sample(this.now()));
-    this.world.update(deltaSeconds, elapsedSeconds);
-    this.highCountBatches.sync(this.world);
-    // 果子的熟没熟由绝对服务端时间决定，所以这里用换算过的服务端时钟，
-    // 而不是本地 Date.now()。
-    const serverTime = this.snapshots.serverTimeAt(this.now());
-    this.fruit.sync(this.world, serverTime === undefined ? undefined : serverTime / 1000);
-    // 和高数量批次一样按需挂进场景：没有果树的地图不会多出一层空节点。
-    if (this.fruit.instanceCount > 0 && !this.fruit.root.parent) this.root.add(this.fruit.root);
-    if (this.highCountBatches.root.children.length > 0 && !this.highCountBatches.root.parent) {
-      this.root.add(this.highCountBatches.root);
-    }
+    // 打点按「第 2 步之后这段代码会在哪个线程上」分：
+    // `sim-actors` 进 Sim Worker，`render-batches` / `render-visuals` 留在主线程。
+    // `sim-actors` 只包玩法：快照应用与 Actor 世界的 System。
+    // Replica 的装配单独打点——`createMeshProxy` 会在渲染世界里建一整棵模型，
+    // 那是渲染成本，混进 sim 会把「搬进 worker 能省多少」算高。
+    frameTimeline.measure('sim-actors', () => {
+      this.applySnapshotSet(this.snapshots.sample(this.now()));
+      this.world.update(deltaSeconds, elapsedSeconds);
+    });
+    frameTimeline.measure('render-batches', () => {
+      this.highCountBatches.sync(this.world);
+      // 果子的熟没熟由绝对服务端时间决定，所以这里用换算过的服务端时钟，
+      // 而不是本地 Date.now()。
+      const serverTime = this.snapshots.serverTimeAt(this.now());
+      this.fruit.sync(this.world, serverTime === undefined ? undefined : serverTime / 1000);
+      // 和高数量批次一样按需挂进场景：没有果树的地图不会多出一层空节点。
+      if (this.fruit.instanceCount > 0 && !this.fruit.root.parent) this.root.add(this.fruit.root);
+      if (this.highCountBatches.root.children.length > 0 && !this.highCountBatches.root.parent) {
+        this.root.add(this.highCountBatches.root);
+      }
+    });
     // 渲染世界自己的表现系统。它们读的是刚翻面的参数段，所以排在 world.update 之后。
     // deltaSeconds 目前仍来自模拟侧——第 3 步渲染进 worker 后换成渲染线程的时钟。
-    this.renderScene.updateVisuals(this.transforms, deltaSeconds, elapsedSeconds);
-    this.publishColliders();
-    this.hoverHelper?.update();
+    frameTimeline.measure(
+      'render-visuals',
+      () => this.renderScene.updateVisuals(this.transforms, deltaSeconds, elapsedSeconds),
+    );
+    frameTimeline.measure('sim-colliders', () => {
+      this.publishColliders();
+      this.hoverHelper?.update();
+    });
   }
 
   /**
@@ -838,7 +853,7 @@ export class ClientActorSystem implements SceneVisualSystem {
     }
     if (!archetype.components.render) throw new Error(`可视 Actor ${archetype.id} 缺少 render`);
     // 几何由渲染世界自己从配置生成；Game World 只拿回 proxyId 与几个数值。
-    const info = this.renderScene.createMeshProxy({
+    const info = frameTimeline.measure('render-spawn', () => this.renderScene.createMeshProxy({
       name: `actor-${snapshot.id}`,
       render: archetype.components.render,
       // 「要不要标记」是 spawn 时的一次性事实；锚点本来就产在渲染侧，不必回送。
@@ -850,7 +865,7 @@ export class ClientActorSystem implements SceneVisualSystem {
       waterMotion: archetype.components.buoyancy
         ? 'hull'
         : (archetype.components.cargo ? 'cargo' : undefined),
-    });
+    }));
     // proxy 已经占了一个槽位，但要到 addActor 之后才由 RenderProxyComponent 的
     // 生命周期负责回收。这中间任何一步抛出（例如原型声明了 temperature 却没装上
     // 对应 Component），槽位既不在 freeSlots 里也没有 Actor 持有它——泄漏一个

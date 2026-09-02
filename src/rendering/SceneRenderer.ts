@@ -7,6 +7,7 @@ import {
   type GrassBendImpulse,
   type GrassInteractionTarget,
 } from '../grass';
+import { frameTimeline } from '../platform/index';
 import { releaseOwnResources } from '../render/renderAssets';
 import { createLineArtScene } from '../scene/createLineArtScene';
 import type { DayNightVisualTarget } from '../environment/EnvironmentTypes';
@@ -143,7 +144,18 @@ export class SceneRenderer implements GrassInteractionTarget {
     elapsedSeconds: number,
     context?: SceneUpdateContext,
   ): void {
-    for (const system of this.visualSystems) system.update(deltaSeconds, elapsedSeconds, context);
+    // 逐个系统打点太碎；这里只分「Actor 世界那一支（自己再细分）」与「其余场景系统」，
+    // 后者是草地、天气、昼夜、海面、chunk 流送这一批。
+    for (const system of this.visualSystems) {
+      if (system === (this.actorSnapshotTarget as unknown)) {
+        system.update(deltaSeconds, elapsedSeconds, context);
+        continue;
+      }
+      frameTimeline.measure(
+        'scene-systems',
+        () => system.update(deltaSeconds, elapsedSeconds, context),
+      );
+    }
     this.updatePhysicsDebug();
   }
 
