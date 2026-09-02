@@ -19,10 +19,10 @@ export function createDefaultSlimeSurfaceDragDefinition(
 ): SlimeSurfaceDragDefinition {
   const safeRadius = Number.isFinite(radius) && radius > 0 ? radius : 0.95;
   return {
-    maximumDistance: safeRadius * 0.65,
-    pullForce: 72,
-    falloffExponent: 2.2,
-    influenceRadius: safeRadius * 0.55,
+    maximumDistance: safeRadius * 1.1,
+    pullForce: 120,
+    falloffExponent: 1.35,
+    influenceRadius: safeRadius * 1.2,
   };
 }
 
