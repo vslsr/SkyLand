@@ -171,7 +171,6 @@ const COMPONENTS_STILL_IMPORTING_RENDER_MODULES = [
   'GuidePathVisualComponent.ts',
   'HybridSlimeVisualComponent.ts',
   'InteractionMarkerComponent.ts',
-  'PbfSlimeVisualComponent.ts',
   'SlimeSurfaceDragComponent.ts',
   'TemperatureMarkerComponent.ts',
 ];
@@ -192,4 +191,33 @@ test('还在 import 渲染侧模块的 Actor Component 只有已知的那几个'
     COMPONENTS_STILL_IMPORTING_RENDER_MODULES,
     '这份清单只能变短：搬完一个表现 Component 就把它划掉，多出一项说明边界又被打穿了',
   );
+});
+
+test('装配中途抛出不会泄漏 proxy 槽位', () => {
+  // createMeshProxy 占了槽位，但要到 addActor 之后才由 RenderProxyComponent 的
+  // 生命周期负责回收。中间任何一步抛出，槽位既不在 freeSlots 里也没有 Actor 持有
+  // 它——泄漏一个挂在场景图上的模型。这里直接对着渲染世界复现那个窗口。
+  const { root, scene } = createWorld();
+  const first = scene.createMeshProxy({ name: 'actor-a', render: CRATE });
+  assert.equal(root.children.length, 1);
+
+  // 模拟装配失败：立刻把 proxy 还回去。
+  scene.destroyMeshProxy(first.id);
+  assert.equal(scene.resolve(first.id), undefined);
+  assert.equal(root.children.length, 0, '失败路径必须把模型从场景图上摘下来');
+
+  // 槽位回到自由表，下一个 Actor 拿到同一个下标，不会一路涨上去。
+  const second = scene.createMeshProxy({ name: 'actor-b', render: CRATE });
+  assert.equal(second.id, first.id);
+});
+
+test('渲染世界的释放不依赖「每个 proxy 都有活着的 Actor」这条不变量', () => {
+  const { root, scene } = createWorld();
+  scene.createMeshProxy({ name: 'actor-a', render: CRATE });
+  scene.createMeshProxy({ name: 'actor-b', render: CRATE });
+  assert.equal(root.children.length, 2);
+
+  scene.dispose();
+  assert.equal(root.children.length, 0, 'dispose 之后场景图上不该留下任何 proxy 的模型');
+  assert.deepEqual(scene.liveProxies(), []);
 });

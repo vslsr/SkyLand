@@ -390,6 +390,10 @@ export class ClientActorSystem implements SceneVisualSystem {
     this.highCountBatches.dispose();
     this.fruit.dispose();
     this.world.dispose();
+    // world.dispose() 逐个跑 endPlay，正常路径下每个 RenderProxyComponent 都会
+    // 还掉自己的槽位。这一句兜住不正常的路径：渲染世界的资源不该依赖「每个 proxy
+    // 都恰好有一个活着的 Actor 持有它」这条不变量才能释放。
+    this.renderScene.dispose();
   }
 
   public getActor(actorId: string): Actor | undefined {
@@ -766,38 +770,51 @@ export class ClientActorSystem implements SceneVisualSystem {
       name: `actor-${snapshot.id}`,
       render: archetype.components.render,
     });
-    actor.addComponent(new SimpleCollisionComponent(info.simpleCollision));
-    actor.addComponent(new RenderProxyComponent(info.id, this.renderScene));
-    const render = this.renderScene.resolve(info.id) as ThreeMeshProxy;
-    this.attachGuidePathVisual(actor);
-    if (
-      archetype.components.render.model === 'line-art-pbf-slime'
-      && render.pbfSlimeVisualRig
-    ) {
-      actor.addComponent(new HybridSlimeVisualComponent(
-        render.pbfSlimeVisualRig,
-        archetype.components.render,
-      ));
+    // proxy 已经占了一个槽位，但要到 addActor 之后才由 RenderProxyComponent 的
+    // 生命周期负责回收。这中间任何一步抛出（例如原型声明了 temperature 却没装上
+    // 对应 Component），槽位既不在 freeSlots 里也没有 Actor 持有它——泄漏一个
+    // 挂在场景图上的模型。所以整段装配包在 try 里，失败就把 proxy 还回去。
+    let assembled = false;
+    try {
+      actor.addComponent(new SimpleCollisionComponent(info.simpleCollision));
+      // RenderProxyComponent 必须先于所有表现 Component 加入：Actor.endPlay 是插入
+      // 顺序的逆序，marker 要先释放自己的子树，proxy 的 disposeSubtree 才能最后跑。
+      actor.addComponent(new RenderProxyComponent(info.id, this.renderScene));
+      const render = this.renderScene.resolve(info.id) as ThreeMeshProxy;
+      this.attachGuidePathVisual(actor);
+      if (
+        archetype.components.render.model === 'line-art-pbf-slime'
+        && render.pbfSlimeVisualRig
+      ) {
+        actor.addComponent(new HybridSlimeVisualComponent(
+          render.pbfSlimeVisualRig,
+          archetype.components.render,
+        ));
+      }
+      if (render.fireVisualRig) {
+        const emitter = actor.getComponent(HEAT_EMITTER_COMPONENT) as HeatEmitterComponent | undefined;
+        actor.addComponent(new FireVisualComponent(render.fireVisualRig, emitter?.enabled ? 1 : 0));
+      }
+      if (archetype.components.interactable) {
+        actor.addComponent(new InteractionMarkerComponent(render.root, info.interactionAnchorY));
+      }
+      if (archetype.components.temperature) {
+        const temperature = actor.requireComponent(TEMPERATURE_COMPONENT) as TemperatureComponent;
+        const marker = new TemperatureMarkerComponent(
+          render.root,
+          info.simpleCollision.centerX + info.simpleCollision.halfWidth + 0.42,
+          info.interactionAnchorY,
+          temperature.temperature,
+        );
+        marker.setVisible(this.temperatureVisible);
+        actor.addComponent(marker);
+      }
+      this.world.addActor(actor);
+      assembled = true;
+    } finally {
+      // addActor 成功之后 proxy 归 Actor 管；在那之前失败就由这里回收。
+      if (!assembled) this.renderScene.destroyMeshProxy(info.id);
     }
-    if (render.fireVisualRig) {
-      const emitter = actor.getComponent(HEAT_EMITTER_COMPONENT) as HeatEmitterComponent | undefined;
-      actor.addComponent(new FireVisualComponent(render.fireVisualRig, emitter?.enabled ? 1 : 0));
-    }
-    if (archetype.components.interactable) {
-      actor.addComponent(new InteractionMarkerComponent(render.root, info.interactionAnchorY));
-    }
-    if (archetype.components.temperature) {
-      const temperature = actor.requireComponent(TEMPERATURE_COMPONENT) as TemperatureComponent;
-      const marker = new TemperatureMarkerComponent(
-        render.root,
-        info.simpleCollision.centerX + info.simpleCollision.halfWidth + 0.42,
-        info.interactionAnchorY,
-        temperature.temperature,
-      );
-      marker.setVisible(this.temperatureVisible);
-      actor.addComponent(marker);
-    }
-    this.world.addActor(actor);
     return actor;
   }
 
