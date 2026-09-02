@@ -22,7 +22,6 @@ import {
 } from '../../shared/playerMovement.mjs';
 import type { PlayerInputFrame, PlayerInputStep } from '../network/protocol';
 import type { SceneBounds } from '../scenes/data/SceneDefinition';
-import type * as THREE from 'three';
 import {
   type PlayerJumpComponent,
 } from '../../shared/actor/index.mjs';
@@ -112,9 +111,22 @@ export interface TopDownControllerOptions {
 const CAMERA_PIVOT_HEIGHT = 0.25;
 export const DEFAULT_TOP_DOWN_CAMERA_OFFSET: Vec3 = [5.5, 7.5, 8.5];
 
+/**
+ * 控制器需要玩家对象提供的全部能力：一个可读写的 transform。
+ *
+ * 它**不必是 `THREE.Object3D`**——控制器只碰 `.position.{x,y,z}` 与
+ * `.rotation.y`。写成结构类型之后，`Object3D` 仍然满足它（现有调用方不受影响），
+ * 同时也允许把玩家的位置换成一条普通记录、由 transform SoA 过边界。
+ * 这是本地玩家接到渲染边界上的前置（实现路径文档 §1.5 的第 1 条注意）。
+ */
+export interface PlayerTransformTarget {
+  readonly position: { x: number; y: number; z: number };
+  readonly rotation: { y: number };
+}
+
 export class TopDownController {
   private readonly canvas: HTMLCanvasElement;
-  private readonly player: THREE.Object3D;
+  private readonly player: PlayerTransformTarget;
   private readonly inputDisposers: Array<() => void> = [];
   private readonly cameraOffset: Vec3;
   private readonly cameraDragEnabled: boolean;
@@ -172,7 +184,7 @@ export class TopDownController {
 
   public constructor(
     canvas: HTMLCanvasElement,
-    player: THREE.Object3D,
+    player: PlayerTransformTarget,
     input: InputSubsystem,
     options: TopDownControllerOptions = {},
   ) {
@@ -698,17 +710,15 @@ export class TopDownController {
   private refreshRenderPosition(alpha: number): void {
     if (!this.characterState) return;
     const mix = Math.max(0, Math.min(1, alpha));
-    this.player.position.set(
-      this.previousSimulationPosition.x
-        + (this.characterState.x - this.previousSimulationPosition.x) * mix
-        + this.renderOffsetX,
-      this.previousSimulationPosition.y
-        + (this.characterState.y - this.previousSimulationPosition.y) * mix
-        + this.renderOffsetY,
-      this.previousSimulationPosition.z
-        + (this.characterState.z - this.previousSimulationPosition.z) * mix
-        + this.renderOffsetZ,
-    );
+    this.player.position.x = this.previousSimulationPosition.x
+      + (this.characterState.x - this.previousSimulationPosition.x) * mix
+      + this.renderOffsetX;
+    this.player.position.y = this.previousSimulationPosition.y
+      + (this.characterState.y - this.previousSimulationPosition.y) * mix
+      + this.renderOffsetY;
+    this.player.position.z = this.previousSimulationPosition.z
+      + (this.characterState.z - this.previousSimulationPosition.z) * mix
+      + this.renderOffsetZ;
   }
 
   private updateVerticalMotion(deltaSeconds: number): void {
