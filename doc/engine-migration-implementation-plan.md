@@ -19,11 +19,11 @@
 | 第 1 步 · 剥出 Render World 边界 | **已完成** | `src/render/`、`RenderProxyComponent`、`ActorTransformSystem` |
 | §8.2 · GPU 资源所有权表 | **已完成（最小核心）** | `src/core/assets/AssetOwner.ts`、`src/render/renderAssets.ts` |
 | 第 1.5 步 · 表现 Component 脱离 THREE | **已完成** · 棘轮 8 → 0 | 见 §1.5；玩家实体也接到了边界上 |
-| 第 1.75 步 · 拆掉表现 System 的夹心 | **已完成** | 见 §1.75；Actor 世界只剩四个不认识 three 的 System |
+| 第 1.75 步 · 拆掉表现 System 的夹心 | **已完成** | 见 §1.75；Actor 世界只剩五个不认识 three 的 System |
 | 第 2 步 · Sim Worker | **前提被测量推翻** · 已打点、已量、结论见 §2 | 搬进 worker 只能省约 1.2 ms／帧 |
 | §2 第 1 项 · 摊平 `render-spawn` | **已完成** | 进房间那一帧 146 ms → 15 ms，见 §2「已经做了的」 |
 | §2 第 2 项 · 地形碰撞网格进 worker | **已完成** | PlatformLayer 第二块 + chunk 挂载 4.2 → 2.45 ms |
-| 第 3 步 · OffscreenCanvas | **进行中** · 可行性已验证、前置已拆一件 | 见 §3 |
+| 第 3 步 · OffscreenCanvas | **进行中** · 可行性已验证、前置已拆两件 | 见 §3；`SceneWorld` + 合批实例通道 |
 | 第 4 步 · 换掉 Three.js | 可无限期推迟 | 见 §4 |
 
 依赖关系没变，仍然是路线图里那条：`0 → 0.5 → 1 → 2 → 3 → 4`，§8.1 / §8.2 与 ToolLayer 可并行。
@@ -321,8 +321,8 @@ Component 的棘轮空了，但 Actor 世界里跑的 **System** 还有五个握
 
 `tests/RenderSceneBoundary.test.ts` 里多了两条：
 
-1. `ActorTransformSystem` / `ActorVisualParamSystem` / `ActorGuidePathSyncSystem` /
-   `RenderTransformSyncSystem` 都不得 import 渲染实现；
+1. `ActorTransformSystem` / `ActorVisualParamSystem` / `ActorInstanceSystem` /
+   `ActorGuidePathSyncSystem` / `RenderTransformSyncSystem` 都不得 import 渲染实现；
 2. **这份名单必须等于 `ClientActorSystem` 里 `world.addSystem(...)` 的实际列表**。
    少了第二条，新增一个 System 就会被第一条悄悄放过。
 
@@ -332,7 +332,8 @@ Component 的棘轮空了，但 Actor 世界里跑的 **System** 还有五个握
 ### 下一步
 
 Actor 世界这一侧干净了。剩下的耦合在**上一层**：`ClientActorSystem` 自己仍然是
-render 与 game 混在一起的（合批、果实实例化、悬停高亮、`root` getter 都在里面），
+render 与 game 混在一起的（果实实例化、悬停高亮、`root` getter 都在里面；
+合批已经在第 3 步里靠实例通道拆开了），
 `src/scenes/GrasslandScene.ts` 也同时握着输入、相机、玩家实体和渲染器。
 第 2 步要划的缝就在这两处，见 §2。
 
@@ -582,11 +583,46 @@ Actor 查询、草地脉冲入口。`SceneRenderer` 只剩渲染核心、表现�
 `SceneWorld`；canvas 真搬走的时候装配会跟着走，那条依赖会反过来——现在先把
 **接口**拆干净，不动装配的归属。
 
+### 已经做了的：合批内容的实例通道 ✅
+
+`HighCountActorBatchSystem` 是**一个渲染系统直接扫 `ActorWorld`**：每帧
+`world.query(TRANSFORM, ITEM_STACK)`，再逐个 Actor 掏 `ActorResidencyComponent`、
+`CombustibleComponent`、`DropMotionComponent`。canvas 一旦进线程，这条就断了。
+
+掉落堆过不了已有的两条通道：它们**没有单独的 proxy**——`createReplica` 见到
+`itemStack` 就提前返回，整批由合批器一次实例化画掉，所以 `ProxyId` + transform SoA
+对它们不适用。这是路线图 §4.5 说的第四种形状（`PropInstances`）：
+
+新增 `src/render/RenderInstanceBuffer.ts`——**每帧重建的定长记录数组**，
+离散字段（原型下标、驻留态、燃烧、单个还是一堆、实例号）走 `Int32Array`，
+连续量（位置、朝向、数量、刚体半径）走 `Float32Array`。分两段而不是把整数塞进 f32，
+是因为那种事早晚会在某个边界上咬人一次。
+
+不做增量（「谁变了就发谁」）：掉落堆的数量随捡拾/掉落每帧都可能变，记账成本高于重铺；
+定长也意味着上 worker 之后这两段可以直接是 `SharedArrayBuffer` 视图。
+
+写入方是 `src/actors/systems/ActorInstanceSystem.ts`，和 `ActorTransformSystem`
+同一类东西：**只写字节，不 import three**。「哪些原型走合批」「数量为 1 时换单个模板」
+是玩法事实，留在这一侧；那些下标怎么变成几何与材质是渲染侧的事。
+
+渲染侧因此**不再认识 Actor，只认识实例号**。滚动姿态是从位移累积出来的，要能把
+这一帧的实例认成上一帧那一个——Actor id 是字符串过不了字节边界，所以玩法侧发一个
+`InstanceIdTable` 分配的槽位号，离开视野就还回去复用，和 `ProxyId` 一个套路。
+
+**这一项不省帧时间**：`render-batches` p50 只有 0.06–0.17 ms。它是结构前提，
+不是性能改动。
+
+踩到的一个坑值得记：我按印象把驻留态写成了 `['active', 'dormant', 'despawning']`，
+而 `ActorResidencyComponent.setState` 只认 `active` 与 `sleeping`——dormant 表示
+Actor **已经离开 ActorWorld**，也就不会有实例记录。`residencyCode('sleeping')`
+于是落回 0，休眠的堆被并进 active 批，合批的对象名对不上。已在
+`tests/RenderInstanceBuffer.test.ts` 里钉住这一点。
+
 ### 还没做的
 
 | | 说明 |
 | --- | --- |
-| 拆 `ClientActorSystem` | 它同时跑 Actor 世界（玩法）和持有渲染世界、合批、悬停高亮 |
+| 拆 `ClientActorSystem` | 它同时跑 Actor 世界（玩法）和持有渲染世界、悬停高亮；合批已经拆开，`GeneratedPropFruitSystem` 还在直接读 `ActorWorld` |
 | 拆 `ChunkStreamer` | 流送规划（玩法）+ 几何（渲染）+ 碰撞体注册（物理）三合一 |
 | 相机每帧过边界 | `CameraFrame` 在主线程按输入算出来，要送到渲染线程 |
 | 两处 `document.createElement('canvas')` | 换 `OffscreenCanvas` |

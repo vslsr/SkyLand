@@ -198,6 +198,7 @@ test('还在 import 渲染侧模块的 Actor Component 只有已知的那几个'
 const ACTOR_WORLD_SYSTEMS = [
   'ActorTransformSystem.ts',
   'ActorVisualParamSystem.ts',
+  'ActorInstanceSystem.ts',
   'ActorGuidePathSyncSystem.ts',
   'RenderTransformSyncSystem.ts',
 ];

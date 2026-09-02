@@ -93,6 +93,11 @@ import {
   LocalDerivedActorComponent,
 } from './components/LocalDerivedActorComponent';
 import { ActorGuidePathSyncSystem } from './systems/ActorGuidePathSyncSystem';
+import {
+  ActorInstanceSystem,
+  type ActorInstanceCatalog,
+} from './systems/ActorInstanceSystem';
+import { RenderInstanceBuffer } from '../render/RenderInstanceBuffer';
 
 /**
  * 一帧最多花在「建 Replica」上的毫秒数（实现路径文档 §2 的第 1 项）。
@@ -230,6 +235,9 @@ export class ClientActorSystem implements SceneVisualSystem {
   private readonly collision: CollisionWorld;
   private readonly physics?: PhysicsWorld;
   private readonly highCountBatches: HighCountActorBatchSystem;
+  /** 合批内容的实例通道，以及渲染侧反查原型用的那张顺序表。 */
+  private readonly instances = new RenderInstanceBuffer();
+  private readonly archetypeOrder: string[];
   private readonly fruit: GeneratedPropFruitSystem;
   /** actorId → 登记进碰撞世界的实例，逐帧复用，避免每帧产生一批临时对象。 */
   private readonly colliderInstances = new Map<string, {
@@ -282,6 +290,8 @@ export class ClientActorSystem implements SceneVisualSystem {
     this.collision = options.collision ?? new CollisionWorld();
     this.physics = options.physics;
     this.highCountBatches = new HighCountActorBatchSystem(options.environment, this.archetypes);
+    // 两侧共用的原型顺序：玩法侧写下标，渲染侧按同一份表反查 render 定义。
+    this.archetypeOrder = [...this.archetypes.keys()];
     this.fruit = new GeneratedPropFruitSystem(options.environment, this.archetypes);
     this.spawnBudgetMilliseconds = options.spawnBudgetMilliseconds ?? REPLICA_SPAWN_BUDGET_MILLISECONDS;
     this.spawnClock = options.spawnClock
@@ -302,10 +312,14 @@ export class ClientActorSystem implements SceneVisualSystem {
     this.world.addSystem(new ActorTransformSystem(this.transforms));
     // 参数要和 transform 同一次翻面，所以必须夹在写入与 publish 之间。
     this.world.addSystem(new ActorVisualParamSystem(this.transforms));
+    // 合批内容走自己那条通道，但同样是「写字节」，所以和 SoA 写入排在一起、
+    // 都在 publish 之前。这条现在还没有双缓冲（同一帧写完就读），排在这里是为了
+    // 等它也跨线程时不用再挪一次。
+    this.world.addSystem(new ActorInstanceSystem(this.instances, this.createInstanceCatalog()));
     this.world.addSystem(new RenderTransformSyncSystem(this.transforms, this.renderScene));
     this.world.addSystem(new ActorGuidePathSyncSystem(this.renderScene));
-    // 到这里 Actor 世界里就只剩四个 System 了，而且**一个都不 import three**：
-    // 两个写 SoA、一个发命令、一个翻面。船体波动、货箱浮沉、附着继承、弹性拉伸
+    // 到这里 Actor 世界里就只剩五个 System 了，而且**一个都不 import three**：
+    // 三个写字节、一个发命令、一个翻面。船体波动、货箱浮沉、附着继承、弹性拉伸
     // 与脱落翻滚全部搬进了渲染世界（实现路径文档 §1.75）。
   }
 
@@ -439,7 +453,7 @@ export class ClientActorSystem implements SceneVisualSystem {
       this.world.update(deltaSeconds, elapsedSeconds);
     });
     frameTimeline.measure('render-batches', () => {
-      this.highCountBatches.sync(this.world);
+      this.highCountBatches.sync(this.instances, this.archetypeOrder);
       // 果子的熟没熟由绝对服务端时间决定，所以这里用换算过的服务端时钟，
       // 而不是本地 Date.now()。
       const serverTime = this.snapshots.serverTimeAt(this.now());
@@ -808,6 +822,26 @@ export class ClientActorSystem implements SceneVisualSystem {
       floatState: buoyancy.state as VesselHudState['floatState'],
       eventRevision: buoyancy.eventRevision,
       lastEvent: buoyancy.lastEvent ?? null,
+    };
+  }
+
+  /**
+   * 「哪些原型走合批、什么时候换单个模板」是玩法事实，所以由这一侧给出。
+   * 判据就是原型有没有 `itemStack`——`createReplica` 正是照它提前返回、不建 proxy 的。
+   */
+  private createInstanceCatalog(): ActorInstanceCatalog {
+    const archetypeIndex = new Map<string, number>();
+    this.archetypeOrder.forEach((id, index) => archetypeIndex.set(id, index));
+    const singleModels = new Set(['line-art-fruit-pile', 'line-art-wood-log']);
+    return {
+      archetypeIndex,
+      isBatched: (archetypeId) => (
+        this.archetypes.get(archetypeId)?.components.itemStack !== undefined
+      ),
+      supportsSingle: (archetypeId) => {
+        const model = this.archetypes.get(archetypeId)?.components.render?.model;
+        return model !== undefined && singleModels.has(model);
+      },
     };
   }
 
