@@ -233,6 +233,16 @@ RenderTransformSyncSystem publish + submit                （帧一致，不会�
 
 - **不能拆网络与模拟**：紧耦合链「快照到达 → 和解 → 回放未确认固定步」是突发尖峰，
   拆两个线程只会凭空多一跳。`WebSocket` 在 Worker 里可用，整个搬进去。
+- **别把 `GameTransport` 的双通道当成已有能力**（路线图 §6.1 已修正）：
+  `unreliable-sequenced` 从未被任何实现使用过，`WebSocketTransport` 的 `realtime`
+  声明的是 `reliable-ordered`，两条通道走同一个 socket。这一层描述的是**目标形态**，
+  不是现状。搬进 worker 不改变这一点——它只是把同一个 WebSocket 换个线程。
+- **换传输不在第 2 步的范围内**，而且前置成本在服务端（§6.4：客户端约 10%、
+  服务端约 90%）。`server/network/WebSocketGateway.mjs` 写死了 WebSocket，
+  服务端根本没有对应的传输抽象——这层不对称本身该补，但与线程拆分无关。
+  在快照率提到 30–60 Hz、压低插值延迟、或面对高丢包移动网络之前，换传输
+  属于没有证据支撑的优化（§6.3：120 ms 插值缓冲正好吃掉一次 TCP 重传，
+  而快照是全量状态，丢一帧只靠外推撑过去）。
 - **`native/chunkgen` 单独一个 worker**。`ChunkStreamer.drainBuildBudget()` 的「每帧最多建一个
   chunk」本身就是「生成在主线程会卡帧」的补丁，挪走后可以并行建、放开视距。
 - 做完可以删掉 `MAXIMUM_SIMULATION_CATCH_UP_STEPS = 5`——那个常量只是「模拟被绑在渲染帧上」的补丁。
