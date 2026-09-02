@@ -86,16 +86,38 @@ export class ElasticDetachSystem {
         });
       }
       physics.applyDynamicActorGravity(actor.id, motion.gravity, delta);
-      const state = physics.getDynamicActorState(actor.id);
-      if (!state) continue;
-      motion.velocityX = state.velocity.x;
-      motion.velocityY = state.velocity.y;
-      motion.velocityZ = state.velocity.z;
-      transform.setWorldTransform([
-        state.position.x,
-        state.position.y - motion.radius,
-        state.position.z,
-      ], transform.yaw);
+      this.syncActor(physics, actor, motion, transform);
     }
+  }
+
+  syncTransforms(world) {
+    const physics = world.context.physics;
+    if (!physics) return;
+    for (const actor of world.query(
+      ELASTIC_DETACH_COMPONENT,
+      DROP_MOTION_COMPONENT,
+      TRANSFORM_COMPONENT,
+    )) {
+      if (!actor.requireComponent(ELASTIC_DETACH_COMPONENT).detached) continue;
+      this.syncActor(
+        physics,
+        actor,
+        actor.requireComponent(DROP_MOTION_COMPONENT),
+        actor.requireComponent(TRANSFORM_COMPONENT),
+      );
+    }
+  }
+
+  syncActor(physics, actor, motion, transform) {
+    const state = physics.getDynamicActorState(actor.id);
+    if (!state) return;
+    motion.velocityX = state.velocity.x;
+    motion.velocityY = state.velocity.y;
+    motion.velocityZ = state.velocity.z;
+    transform.setWorldTransform([
+      state.position.x,
+      state.position.y - motion.radius,
+      state.position.z,
+    ], transform.yaw);
   }
 }

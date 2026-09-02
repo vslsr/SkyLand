@@ -237,6 +237,9 @@ export class PhysicsWorld {
     );
     const collider = this.#world.createCollider(
       this.#rapier.ColliderDesc.ball(positive(options.radius, 0.28))
+        // 让玩法层配置的 impulse 数值可直接按约 1kg 物体理解，避免球体体积
+        // 改变时同一份蘑菇弹出配置得到完全不同的初速度。
+        .setMass(positive(options.mass, 1))
         .setRestitution(Math.max(0, Math.min(1, finite(options.restitution, 0.28))))
         .setFriction(Math.max(0, finite(options.friction, 0.8)))
         .setCollisionGroups(SOLID_COLLIDER_GROUPS),

@@ -170,7 +170,9 @@ export function createServerActorWorld(sceneDefinition, options = {}) {
   world.addSystem(colliderIndex);
   world.addSystem(new ActorSimpleCollisionSystem());
   world.addSystem(new ElasticTetherSystem());
-  world.addSystem(new ElasticDetachSystem());
+  const elasticDetachSystem = new ElasticDetachSystem();
+  world.context.syncDetachedPhysics = () => elasticDetachSystem.syncTransforms(world);
+  world.addSystem(elasticDetachSystem);
   // 父 Actor 的玩法移动先完成，再统一按拓扑解算所有子 Actor。
   world.addSystem(new AttachmentSystem());
   world.addSystem(new TemperatureSystem());

@@ -850,6 +850,8 @@ export class ServerScene {
     // Rapier refreshes its query pipeline during step; newly streamed trimeshes
     // are intentionally not query-visible before this point.
     this.physics.step();
+    // Rapier 动态 Actor 在物理步之后立刻回写权威 Transform，当前快照即可看到弹出。
+    this.actorWorld.context.syncDetachedPhysics?.();
   }
 
   /** 树木、矿脉或战利品系统调用这一入口生成一个可自动合并的物品堆。 */
