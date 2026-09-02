@@ -22,6 +22,7 @@
 | 第 1.75 步 · 拆掉表现 System 的夹心 | **已完成** | 见 §1.75；Actor 世界只剩四个不认识 three 的 System |
 | 第 2 步 · Sim Worker | **前提被测量推翻** · 已打点、已量、结论见 §2 | 搬进 worker 只能省约 1.2 ms／帧 |
 | §2 第 1 项 · 摊平 `render-spawn` | **已完成** | 进房间那一帧 146 ms → 15 ms，见 §2「已经做了的」 |
+| §2 第 2 项 · 地形碰撞网格进 worker | **已完成** | PlatformLayer 第二块 + chunk 挂载 4.2 → 2.45 ms |
 | 第 3 步 · OffscreenCanvas | 未开始 | 见 §3 |
 | 第 4 步 · 换掉 Three.js | 可无限期推迟 | 见 §4 |
 
@@ -412,9 +413,12 @@ offscreen-canvas`。
 | 顺序 | 做什么 | 依据 | 状态 |
 | --- | --- | --- | --- |
 | 1 | **摊平 `render-spawn`**：Replica 建模按帧预算分摊 | 单帧 31–146 ms，是全程最大的一次卡顿 | **已完成** |
-| 2 | **`chunk-terrain-build` + `chunk-props-collide` 进 worker**（不是 `chunk-gen`） | 两项合计约 1.6 ms，是 chunk 尖峰里唯一挪得走的部分 | 未开始 |
+| 2 | **`chunk-terrain-build` 进 worker**（不是 `chunk-gen`） | 约 1.3 ms，是 chunk 尖峰里最大的那块纯计算 | **已完成** |
 | 3 | 第 3 步 · OffscreenCanvas | `chunk-geometry` 与 `render-visuals` 只有到那时才挪得走 | 未开始 |
 | 4 | 第 2 步 · Sim Worker | 收益是决定论与解耦，不是帧时间 | 未开始 |
+
+`chunk-props-collide` 最后**没搬**：它 p50 只有 0.2–0.3 ms，而它依赖生成器的输出
+（`props` 数组），要搬就得在生成之后再来一趟往返——为 0.3 ms 加一次往返不划算。
 
 ### 已经做了的：第 1 项 · 摊平 `render-spawn` ✅
 
@@ -444,6 +448,41 @@ offscreen-canvas`。
 超出 4 ms 的那一点是「已经开工的模型要建完」，上限就是最贵的那一个模型。
 真要再压下去，得让 `createMeshProxy` 本身可分段——那属于第 3 步的范围。
 
+### 已经做了的：第 2 项 · 地形碰撞网格进 worker ✅
+
+**PlatformLayer 的第二块**：`src/platform/WorkerJobRunner.ts`。
+
+做成**一次请求一次响应的纯函数调用**，不是通用消息总线。要搬的活本来就是纯函数，
+而通用总线会诱使调用方把状态也搬过去——那是第 2 步真正难的部分，不该被一个工具类
+顺手带进来。拿不到 worker（或构造失败、或 worker 崩了）就地跑同一份实现，
+而且保持同样的 `Promise` 形状：调用方只有一条代码路径。这和
+`loadChunkGenerator` 里「WASM 加载失败就降级到 JS」是同一个取向。
+
+**过边界的是种子和编辑覆盖，不是算好的格子码。** 第一版是主线程先把那 289 格采样好
+再送过去——打点立刻照出问题：`chunk-terrain-sample` p50 **1.09 ms**。算格子码本身就
+不便宜（每格五次程序化底图评估 + 一次哈希 + 一次带字符串键的 Map 查询），主线程先算
+一遍等于把要搬走的活留了一半在原地。改成只送 `worldSeed` 和这一窗里的编辑覆盖之后，
+主线程这一步是 `chunk-terrain-overrides` p50 **0.02 ms**——没被编辑过的 chunk
+（绝大多数）更是零成本。
+
+**挂载改成两段，而且顺序不能反。** 先请求地形网格，回来了才建视图：那张 trimesh
+就是玩家脚下的地面（Rapier 的角色控制器直接踩它），先挂视图再等网格，流送边缘会
+出现「看得见但踩不到」的一格，玩家会掉下去。同时在途 4 个，一趟往返的延迟正好被
+「每帧最多挂一个」的预算掩掉。
+
+**地形编辑仍然走同步重建。** 编辑是一次用户动作，等一趟往返笔刷会有延迟；流送是
+后台行为，等得起。这条分界也让「异步」只影响一条路径。
+
+| | 之前 | 之后 |
+| --- | --- | --- |
+| `chunk-terrain-build` | p50 1.2–1.4 ms | 主线程报表里**消失**（只剩编辑路径） |
+| 主线程收集输入 | — | `chunk-terrain-overrides` p50 0.02 ms |
+| 单个 chunk 的主线程成本 | 约 4.2 ms | 约 **2.45 ms** |
+
+安全绳是一组等价性用例：工作线程「按种子推 + 打覆盖」得到的格子码，必须和权威
+`TerrainPatchStore` **逐格相同**，包括落在东、北那多出来的一行一列上的编辑——
+推错一格就是穿地，不是画面瑕疵。
+
 ### 原改动清单（保留，但 1–4 项的依据已经不成立）
 
 - **不能拆网络与模拟**：紧耦合链「快照到达 → 和解 → 回放未确认固定步」是突发尖峰，
@@ -461,7 +500,8 @@ offscreen-canvas`。
 - 做完可以删掉 `MAXIMUM_SIMULATION_CATCH_UP_STEPS = 5`——那个常量只是「模拟被绑在
   渲染帧上」的补丁。**这条仍然成立，而且是第 2 步剩下的主要理由。**
 
-1. `src/platform/` 加 worker 生成与消息通道（PlatformLayer 的第二块）；
+1. ~~`src/platform/` 加 worker 生成与消息通道（PlatformLayer 的第二块）~~ **已完成**：
+   `WorkerJobRunner.ts`，第一个用户是地形碰撞网格（见上）；
 2. 输入按 tick 号序列化进一个 SAB 环形缓冲（主线程退化成 IO 线程）；
 3. `ClientActorSystem` 先按 game / render 一分为二：`ActorWorld` 与快照插值这一半进 worker，
    合批、果实实例化、悬停高亮与 `root` 留在主线程（§1.75 已经把它的 System 列表清干净了，
