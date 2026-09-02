@@ -1,0 +1,86 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "SkyLand: Vite 开发服务器",
+      "type": "npm",
+      "script": "dev",
+      "isBackground": true,
+      "problemMatcher": {
+        "owner": "vite",
+        "pattern": {
+          "regexp": "^(.*):(\\d+):(\\d+):\\s+(.*)$",
+          "file": 1,
+          "line": 2,
+          "column": 3,
+          "message": 4
+        },
+        "background": {
+          "activeOnStart": true,
+          "beginsPattern": "^.*VITE.*ready in.*$",
+          "endsPattern": "^.*Local:\\s+http://.*$"
+        }
+      },
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "group": "skyland-client"
+      }
+    },
+    {
+      "label": "SkyLand: 服务端（不调试）",
+      "type": "npm",
+      "script": "server:dev",
+      "isBackground": true,
+      "problemMatcher": {
+        "owner": "skyland-server",
+        "pattern": {
+          "regexp": "^(.*)$",
+          "message": 1
+        },
+        "background": {
+          "activeOnStart": true,
+          "beginsPattern": "^.*$",
+          "endsPattern": "^SkyLand web \\+ DS server listening on .*$"
+        }
+      },
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "group": "skyland-server"
+      }
+    },
+    {
+      "label": "SkyLand: 启动开发环境（不调试）",
+      "dependsOrder": "parallel",
+      "dependsOn": [
+        "SkyLand: 服务端（不调试）",
+        "SkyLand: Vite 开发服务器"
+      ],
+      "problemMatcher": []
+    },
+    {
+      "label": "SkyLand: 全部测试",
+      "type": "npm",
+      "script": "test",
+      "group": "test",
+      "problemMatcher": []
+    },
+    {
+      "label": "SkyLand: 生产构建",
+      "type": "npm",
+      "script": "build",
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      },
+      "problemMatcher": "$tsc"
+    },
+    {
+      "label": "SkyLand: 重建 Rust/WASM",
+      "type": "npm",
+      "script": "build:wasm",
+      "problemMatcher": "$rustc"
+    }
+  ]
+}
