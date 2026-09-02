@@ -29,6 +29,17 @@ export const MAXIMUM_INPUT_STEPS_PER_PACKET = 6;
 /** 每名玩家的模拟时间预算上限（秒），用来吸收网络抖动的突发。 */
 export const INPUT_TIME_BUDGET_SECONDS = 0.25;
 
+/**
+ * 预算补充速率相对真实时间的倍率。
+ *
+ * 客户端每真实秒稳定产出 1 / SIMULATION_STEP_SECONDS 个固定步。补充速率如果正好
+ * 等于产出速率，一次卡顿堆起来的积压就永远排不掉：服务端排一步、客户端又生一步，
+ * 权威状态会一直落后那一段，直到客户端的未确认队列到顶开始丢最旧的输入。留出
+ * 一点追赶余量，积压才会在几秒内自然收敛；上限仍由 INPUT_TIME_BUDGET_SECONDS 封住，
+ * 所以这不会给作弊客户端额外的加速空间。
+ */
+export const INPUT_STEP_BUDGET_CATCH_UP_RATE = 1.2;
+
 /** 客户端未确认输入队列上限；超过时只保留最新步并等待权威快照兜底。 */
 export const MAXIMUM_PENDING_INPUT_STEPS = 120;
 

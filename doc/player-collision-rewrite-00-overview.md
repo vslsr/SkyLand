@@ -58,7 +58,7 @@
 | --- | --- |
 | `@dimforge/rapier3d-compat@0.20.0` 在 Node 跑通 | 通过，`await RAPIER.init()` |
 | compat 内嵌 wasm vs bundler 版 wasm | **逐字节相同**（2 021 200 bytes，md5 一致）→ 客户端用 `rapier3d`、服务端用 `rapier3d-compat` 无数值差异 |
-| 缺陷 A：跳上 1m 台阶后继续走 | `enableAutostep(1.05, 0.15, false)` → 落到 feetY=1.02 后平顺走过接缝，不卡 |
+| 缺陷 A：跳上 1m 台阶后继续走 | `enableAutostep(1.05, 0.15, false)` → 落到 feetY=1.02 后平顺走过接缝，不卡（**1.05 已在 `07-followups.md` 改为 0.35**：接缝其实靠 trimesh 共面与 snapToGround 解决，用不着这么高的 autostep） |
 | 缺陷 B：走出悬崖 | `enableSnapToGround(0.25)` → 越过边缘后 `computedGrounded()` 变 false，水平速度保留，抛物线下落 |
 | 缺陷 C：跳上石头顶面（顶 y=0.6） | 站在 feetY=0.62，沿顶面行走，走到边缘再自然落下 |
 | collider 插入顺序不同的最大偏差 | **0** —— 客户端 chunk 流式加载顺序与服务端不同也不影响结果 |
@@ -122,6 +122,7 @@ autostep / snapToGround / maxSlopeClimbAngle 一次配好，三个缺陷全在 R
 | 4 | `player-collision-rewrite-04-netcode.md` | 固定步长 + 批量输入 + rewind & replay | 预测抖动与瞬移残余 |
 | 5 | `player-collision-rewrite-05-polish.md` | 相机悬臂、authoring 补齐、真实速度上报 | 穿树冠、动画抖 |
 | 6 | `player-collision-rewrite-06-tests.md` | 回归与一致性测试 | — |
+| 后续 | `player-collision-rewrite-07-followups.md` | 上线后的四项修正 | 悬停、免费台阶、预算追赶、客户端玩家碰撞 |
 
 **Phase 3 结束时三个已上报缺陷即全部修复**，Phase 4–5 是质量与手感收尾。
 

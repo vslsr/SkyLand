@@ -12,6 +12,7 @@ import {
   SOLID_COLLIDER_GROUPS,
   colliderInteractionGroups,
 } from './collisionGroups.mjs';
+import { COLLISION_LAYER } from '../collision/collisionLayers.mjs';
 
 const DEFAULT_TIMESTEP = 1 / 20;
 
@@ -38,7 +39,7 @@ export class PhysicsWorld {
   #staticGroups = new Map();
   #actors = new Map();
   #characters = new Map();
-  #characterColliderHandles = new Set();
+  #proxies = new Map();
   #disposed = false;
   #queriesDirty = false;
 
@@ -72,7 +73,7 @@ export class PhysicsWorld {
     const collider = this.#world.createCollider(
       this.#rapier.ColliderDesc.cylinder(halfHeight, radius)
         .setFriction(0)
-        .setCollisionGroups(colliderInteractionGroups(1)),
+        .setCollisionGroups(colliderInteractionGroups(COLLISION_LAYER.MOVEMENT)),
       body,
     );
     const controller = this.#world.createCharacterController(CHARACTER_OFFSET);
@@ -84,7 +85,6 @@ export class PhysicsWorld {
     controller.setMinSlopeSlideAngle(MIN_SLOPE_SLIDE_ANGLE);
     const character = { body, collider, controller, radius, halfHeight };
     this.#characters.set(id, character);
-    this.#characterColliderHandles.add(collider.handle);
     this.#queriesDirty = true;
     return character;
   }
@@ -93,9 +93,53 @@ export class PhysicsWorld {
     const character = this.#characters.get(id);
     if (!character) return false;
     character.controller.free();
-    this.#characterColliderHandles.delete(character.collider.handle);
     if (character.body.isValid()) this.#world.removeRigidBody(character.body);
     this.#characters.delete(id);
+    this.#queriesDirty = true;
+    return true;
+  }
+
+  /**
+   * 远端玩家的碰撞代理。
+   *
+   * 房间进程里每名玩家都是一具角色刚体，所以权威模拟中玩家本来就互相阻挡；
+   * 浏览器里却只有本地玩家有角色控制器。少了别人的形体，本地预测会直接从
+   * 对方身上穿过去，再被每份快照拉回来——贴身时就是持续的橡皮筋。
+   *
+   * 代理用运动学刚体承载与角色同形的圆柱：位置由快照插值直接写入，移动它
+   * 不需要销毁重建 collider，宽相也就不必每帧重排。代理位置比权威落后一个
+   * 插值延迟，所以贴身接触的预测只是近似，残差仍由和解收敛。
+   *
+   * @param {string} id
+   * @param {{ x: number, y: number, z: number, radius: number, halfHeight: number }} options
+   */
+  setCharacterProxy(id, options) {
+    this.#assertAlive();
+    const radius = positive(options?.radius, 0.42);
+    const halfHeight = positive(options?.halfHeight, radius);
+    const existing = this.#proxies.get(id);
+    // 半径或高度换了原型就重建，其余情况只挪位置。
+    if (existing && (existing.radius !== radius || existing.halfHeight !== halfHeight)) {
+      this.removeCharacterProxy(id);
+    }
+    const center = {
+      x: finite(options?.x),
+      y: finite(options?.y) + halfHeight + CHARACTER_OFFSET,
+      z: finite(options?.z),
+    };
+    const proxy = this.#proxies.get(id) ?? this.#createCharacterProxy(id, radius, halfHeight);
+    proxy.body.setTranslation(center, true);
+    proxy.body.setNextKinematicTranslation(center);
+    this.#world.propagateModifiedBodyPositionsToColliders();
+    this.#queriesDirty = true;
+    return proxy;
+  }
+
+  removeCharacterProxy(id) {
+    const proxy = this.#proxies.get(id);
+    if (!proxy) return false;
+    if (proxy.body.isValid()) this.#world.removeRigidBody(proxy.body);
+    this.#proxies.delete(id);
     this.#queriesDirty = true;
     return true;
   }
@@ -210,6 +254,13 @@ export class PhysicsWorld {
     else character.controller.disableSnapToGround();
   }
 
+  /**
+   * 角色之间互相阻挡：这里不再排除其它角色的 collider。
+   *
+   * Rapier 的角色控制器在内部就排除了正在移动的那一个 collider，所以不需要
+   * 自定义谓词来避免自撞；而排除**别的**角色会让玩家互相穿过去，客户端预测
+   * 与服务端权威也就没法对齐。过滤只靠 MOVEMENT 层的 InteractionGroups。
+   */
   computeCharacterMovement(id, desired) {
     const character = this.#requireCharacter(id);
     character.controller.computeColliderMovement(
@@ -221,7 +272,6 @@ export class PhysicsWorld {
       },
       undefined,
       MOVEMENT_QUERY_GROUPS,
-      (collider) => !this.#characterColliderHandles.has(collider.handle),
     );
     const movement = character.controller.computedMovement();
     const center = character.body.translation();
@@ -302,7 +352,7 @@ export class PhysicsWorld {
     if (this.#disposed) return;
     for (const character of this.#characters.values()) character.controller.free();
     this.#characters.clear();
-    this.#characterColliderHandles.clear();
+    this.#proxies.clear();
     this.#chunks.clear();
     this.#staticGroups.clear();
     this.#actors.clear();
@@ -315,6 +365,20 @@ export class PhysicsWorld {
     const character = this.#characters.get(id);
     if (!character) throw new Error(`Unknown physics character: ${id}`);
     return character;
+  }
+
+  #createCharacterProxy(id, radius, halfHeight) {
+    const body = this.#world.createRigidBody(this.#rapier.RigidBodyDesc.kinematicPositionBased());
+    const collider = this.#world.createCollider(
+      this.#rapier.ColliderDesc.cylinder(halfHeight, radius)
+        .setFriction(0)
+        // 与 createCharacter 同层：只挡移动，不参与相机遮挡。
+        .setCollisionGroups(colliderInteractionGroups(COLLISION_LAYER.MOVEMENT)),
+      body,
+    );
+    const proxy = { body, collider, radius, halfHeight };
+    this.#proxies.set(id, proxy);
+    return proxy;
   }
 
   #createActorDescriptor(definition) {
