@@ -24,6 +24,7 @@ import { RemotePlayerGroup } from '../player/RemotePlayerGroup';
 import { SceneRenderer } from '../rendering/SceneRenderer';
 import { createSceneRuntimeComponent, SceneComponentHost } from '../scene/components';
 import { INPUT_SEND_INTERVAL_SECONDS } from '../../shared/networkTuning.mjs';
+import { PICKUP_DROP_COMPONENT, type PickupDropComponent } from '../../shared/actor/index.mjs';
 import { HudController } from '../ui/HudController';
 import { TerrainEditorPanel } from '../ui/TerrainEditorPanel';
 import { CreateRoomPage, type CreateRoomFormValue } from '../ui/pages/CreateRoomPage';
@@ -453,7 +454,7 @@ export class GrasslandScene extends Scene {
     this.renderer.setTimeOfDay(snapshot.timeOfDay, snapshot.dayLength);
     this.debugMenuPage?.setWeather(snapshot.weather);
     this.debugMenuPage?.setTimeOfDay(snapshot.timeOfDay, snapshot.dayLength);
-    this.renderer.syncActors(snapshot.actors, snapshot.serverTime);
+    this.renderer.syncActors(snapshot.actors, snapshot.players, snapshot.serverTime);
     this.snapshots.push(snapshot);
 
     // 自己的那条不走插值：直接交给和解，把预测拉回服务器的结论。
@@ -466,6 +467,11 @@ export class GrasslandScene extends Scene {
         snapshotPlayerIds: snapshot.players.map((entry) => entry.id),
       });
       return;
+    }
+    const pickupDrop = player.getComponent(PICKUP_DROP_COMPONENT) as PickupDropComponent | undefined;
+    if (pickupDrop) {
+      pickupDrop.heldActorId = own.heldActorId ?? null;
+      pickupDrop.revision = own.pickupDropRevision ?? pickupDrop.revision;
     }
     const before = player.captureTransformDebugState();
     const authority = {

@@ -35,6 +35,8 @@ import {
   PLAYER_MOVEMENT_COMPONENT,
   PlayerMovementComponent,
   PlayerJumpComponent,
+  PICKUP_DROP_COMPONENT,
+  PickupDropComponent,
   REPLICATION_POLICY_COMPONENT,
   ReplicationPolicyComponent,
   REPLICATED_COMPONENT,
@@ -78,6 +80,12 @@ export function createServerActor(spawn, archetype, runtime = {}) {
     const detachable = actor.addComponent(new ElasticDetachComponent({
       ...archetype.components.elasticDetach,
       ...runtime.elasticDetach,
+    }));
+  }
+  if (archetype.components.pickupDrop) {
+    actor.addComponent(new PickupDropComponent({
+      ...archetype.components.pickupDrop,
+      ...runtime.pickupDrop,
     }));
   }
   if (archetype.components.hazard) actor.addComponent(new HazardComponent(archetype.components.hazard));
@@ -232,6 +240,8 @@ export function createActorSnapshots(world, options = {}) {
     const cargo = actor.getComponent(CARGO_COMPONENT);
     const elasticTether = actor.getComponent(ELASTIC_TETHER_COMPONENT);
     const elasticDetach = actor.getComponent(ELASTIC_DETACH_COMPONENT);
+    const holderPickupDrop = actor.parent?.getComponent(PICKUP_DROP_COMPONENT);
+    const isPickedUp = holderPickupDrop?.heldActorId === actor.id;
     const dropMotion = actor.getComponent(DROP_MOTION_COMPONENT);
     const hazard = actor.getComponent(HAZARD_COMPONENT);
     const temperature = actor.getComponent(TEMPERATURE_COMPONENT);
@@ -269,18 +279,21 @@ export function createActorSnapshots(world, options = {}) {
         cargo?.revision ?? 0,
         elasticTether?.revision ?? 0,
         elasticDetach?.revision ?? 0,
+        isPickedUp ? holderPickupDrop.revision : 0,
         temperature?.revision ?? 0,
         combustible?.revision ?? 0,
         itemStack?.revision ?? 0,
         residency?.revision ?? 0,
         guidePath?.revision ?? 0,
       ),
-      transform: {
+      // Attach 状态下客户端由父 Actor 同时刻的坐标与 localTransform 推导位置。
+      // 物品的其余 Component 仍照常复制，只有冗余的世界 Transform 被省略。
+      ...(!isPickedUp ? { transform: {
         x: transform.x,
         y: transform.y,
         z: transform.z,
         yaw: transform.yaw,
-      },
+      } } : {}),
       localTransform: {
         x: transform.localX,
         y: transform.localY,
@@ -373,7 +386,6 @@ export function createActorSnapshots(world, options = {}) {
       ...(elasticDetach ? {
         elasticDetach: {
           detached: elasticDetach.detached,
-          carriedByPlayerId: elasticDetach.carriedByPlayerId,
           revision: elasticDetach.revision,
           // 脱落后 Transform 的 yaw 不再描述姿态：躺在地上还是立着，由刚体
           // 解算出的四元数决定，所以只有脱落的物件才带这一项。

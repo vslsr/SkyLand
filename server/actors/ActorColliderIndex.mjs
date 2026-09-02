@@ -1,4 +1,5 @@
 import {
+  PICKUP_DROP_COMPONENT,
   SIMPLE_COLLISION_COMPONENT,
   TRANSFORM_COMPONENT,
 } from '../../shared/actor/index.mjs';
@@ -29,6 +30,9 @@ export class ActorColliderIndex {
     if (!collision && !physics) return;
     this.live.clear();
     for (const actor of world.query(TRANSFORM_COMPONENT, SIMPLE_COLLISION_COMPONENT)) {
+      // 叼在嘴上的东西不占地方：它的碰撞盒就挂在玩家正前方，登记进去等于让玩家
+      // 顶着自己嘴里那一个走不动。不进 live，下面的回收循环会把它撤掉。
+      if (actor.parent?.getComponent(PICKUP_DROP_COMPONENT)?.heldActorId === actor.id) continue;
       this.live.add(actor.id);
       let instance = this.instances.get(actor.id);
       if (!instance || instance.actor !== actor) {

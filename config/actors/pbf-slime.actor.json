@@ -30,11 +30,17 @@
       "maximumFallSpeed": 20,
       "airControl": 0.85
     },
+    "pickupDrop": {
+      "mouthLocalX": 0,
+      "mouthLocalY": 0.5,
+      "mouthLocalZ": 0.42,
+      "mouthLocalYaw": 0
+    },
     "slimeSurfaceDrag": {
-      "maximumDistance": 0.62,
-      "pullForce": 72,
-      "falloffExponent": 2.2,
-      "influenceRadius": 0.52
+      "maximumDistance": 1.05,
+      "pullForce": 120,
+      "falloffExponent": 1.35,
+      "influenceRadius": 1.15
     },
     "render": {
       "model": "line-art-pbf-slime",

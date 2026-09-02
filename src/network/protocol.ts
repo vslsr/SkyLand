@@ -20,6 +20,9 @@ export interface SnapshotPlayer {
   grounded?: boolean;
   inventory?: Array<{ itemType: string; quantity: number }>;
   inventoryRevision?: number;
+  /** PickupDrop Component 的运行态；口部挂点来自玩家 Actor 原型。 */
+  heldActorId?: string | null;
+  pickupDropRevision?: number;
 }
 
 export type ActorFloatState = 'afloat' | 'overloaded' | 'flooding' | 'sinking';
@@ -107,8 +110,6 @@ export interface SnapshotActor {
   };
   elasticDetach?: {
     detached: boolean;
-    /** 正叼着它的玩家；叼着期间它跟着嘴走，不参与刚体模拟。 */
-    carriedByPlayerId?: string | null;
     revision: number;
     /** 脱落后由刚体解算的朝向四元数 [x, y, z, w]；未脱落时不下发。 */
     rotation?: readonly [number, number, number, number];

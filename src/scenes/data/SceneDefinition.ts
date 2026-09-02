@@ -264,10 +264,14 @@ export interface ActorArchetypeDefinition {
       breakLength: number;
       /** 叼住之后还要再拉出多远才拔断；缺省则沿用 breakLength 的绝对判定。 */
       pullDistance?: number;
-      mouthHeight: number;
-      mouthForwardOffset: number;
     };
     elasticDetach?: {
+    };
+    pickupDrop?: {
+      mouthLocalX: number;
+      mouthLocalY: number;
+      mouthLocalZ: number;
+      mouthLocalYaw: number;
     };
     hazard?: {
       radius: number;

@@ -4,6 +4,7 @@ import {
   BuoyancyComponent,
   PlayerJumpComponent,
   PlayerMovementComponent,
+  PickupDropComponent,
   sampleBuoyancyBobOffset,
 } from '../../shared/actor/index.mjs';
 import {
@@ -111,6 +112,9 @@ export class PlayerEntity extends Actor {
     const movement = this.addComponent(new PlayerMovementComponent(
       archetype.components.playerMovement,
     )) as PlayerMovementComponent;
+    if (archetype.components.pickupDrop) {
+      this.addComponent(new PickupDropComponent(archetype.components.pickupDrop));
+    }
     this.jumpAbility = this.addComponent(new PlayerJumpComponent(
       archetype.components.playerJump,
     )) as PlayerJumpComponent;

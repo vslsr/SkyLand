@@ -41,8 +41,6 @@ function elasticArchetypeFor(id) {
       elasticTether: {
         restLength: 0.72,
         breakLength: 2.65,
-        mouthHeight: 0.3,
-        mouthForwardOffset: 0.36,
       },
       elasticDetach: {},
       dropMotion: {

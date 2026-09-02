@@ -39,6 +39,7 @@ test('ActorCatalog 加载并净化木筏原型', async () => {
   assert.equal(mushroom.components.interactable.action, 'mushroom-bite');
   assert.equal(mushroom.components.elasticTether.breakLength, 1.55);
   assert.equal(mushroom.components.elasticTether.pullDistance, 2.8);
+  assert.equal(mushroom.components.pickupDrop, undefined);
   assert.equal(mushroom.components.dropMotion.restitution, 0.28);
   assert.equal(mushroom.components.render.model, 'line-art-elastic-mushroom');
 
@@ -59,6 +60,18 @@ test('ActorCatalog 加载并净化木筏原型', async () => {
   assert.equal(player.components.render.radius, 0.42);
   assert.equal(player.components.playerMovement.walkSpeed, 3.2);
   assert.equal(player.components.playerMovement.maximumStepHeight, 0.2);
+  assert.deepEqual(player.components.pickupDrop, {
+    mouthLocalX: 0,
+    mouthLocalY: 0.3,
+    mouthLocalZ: 0.36,
+    mouthLocalYaw: 0,
+  });
+  assert.deepEqual(catalog.require('pbf-slime').components.pickupDrop, {
+    mouthLocalX: 0,
+    mouthLocalY: 0.5,
+    mouthLocalZ: 0.42,
+    mouthLocalYaw: 0,
+  });
   assert.deepEqual(player.components.playerJump, {
     impulse: 7,
     gravity: 22,
@@ -96,10 +109,10 @@ test('ActorCatalog 加载并净化木筏原型', async () => {
   assert.ok(playerBuoyancy.draft > raftBuoyancy.draft);
   assert.ok(pbfSlimeBuoyancy.draft > raftBuoyancy.draft);
   assert.deepEqual(pbfSlime.components.slimeSurfaceDrag, {
-    maximumDistance: 0.62,
-    pullForce: 72,
-    falloffExponent: 2.2,
-    influenceRadius: 0.52,
+    maximumDistance: 1.05,
+    pullForce: 120,
+    falloffExponent: 1.35,
+    influenceRadius: 1.15,
   });
 
   const campfire = catalog.require('campfire');
