@@ -263,6 +263,18 @@ export class PhysicsWorld {
     return true;
   }
 
+  /** 角冲量与线冲量分开给：弹出方向决定飞向哪，翻滚决定落地时是躺是立。 */
+  applyDynamicActorTorqueImpulse(id, torqueImpulse) {
+    const entry = this.#dynamicActors.get(id);
+    if (!entry) return false;
+    entry.body.applyTorqueImpulse({
+      x: finite(torqueImpulse?.x),
+      y: finite(torqueImpulse?.y),
+      z: finite(torqueImpulse?.z),
+    }, true);
+    return true;
+  }
+
   setDynamicActorVelocity(id, velocity) {
     const entry = this.#dynamicActors.get(id);
     if (!entry) return false;
@@ -284,12 +296,18 @@ export class PhysicsWorld {
     return true;
   }
 
+  /** 朝向和位置一样是刚体解算出来的：掉在地上的物件要能躺着，而不是永远立着。 */
   getDynamicActorState(id) {
     const entry = this.#dynamicActors.get(id);
     if (!entry) return undefined;
     const position = entry.body.translation();
     const velocity = entry.body.linvel();
-    return { position: { ...position }, velocity: { ...velocity } };
+    const rotation = entry.body.rotation();
+    return {
+      position: { ...position },
+      velocity: { ...velocity },
+      rotation: { ...rotation },
+    };
   }
 
   removeDynamicActor(id) {

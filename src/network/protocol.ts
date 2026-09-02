@@ -106,6 +106,8 @@ export interface SnapshotActor {
   elasticDetach?: {
     detached: boolean;
     revision: number;
+    /** 脱落后由刚体解算的朝向四元数 [x, y, z, w]；未脱落时不下发。 */
+    rotation?: readonly [number, number, number, number];
   };
   guidePath?: {
     points: Array<[number, number, number]>;
