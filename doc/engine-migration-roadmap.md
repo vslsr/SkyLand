@@ -247,18 +247,90 @@ RenderWorld
 
 ---
 
-## 6. 网络层：现状比预期的好
+## 6. 网络层
 
-`src/network/transport/GameTransport.ts:3` 已经按 `'reliable-ordered' | 'unreliable-sequenced'` 双通道抽象好了——这是照着 WebTransport / UDP 画的接口，`WebSocketTransport` 只是当前的一个实现。这一层直接能用。
+### 6.1 现状：客户端有传输抽象，但只有一个实现，且是纯 TCP
 
-线协议现在是 `JSON.stringify` / `JSON.parse`。直觉上该换二进制，但建议**先测再换**：10 Hz 快照加上已有的 AOI／dormant 机制已经把 Actor 数量限住了，JSON 未必是瓶颈。真要换的时候，让它和 SAB 决策绑在一起——快照直接解码进 SAB 上的 SoA 布局，模拟 worker 写、渲染 worker 读，零拷贝。**二进制协议和多线程是同一次改动的两个面**，分开做等于做两遍。
+`src/network/transport/GameTransport.ts:3` 按 `'reliable-ordered' | 'unreliable-sequenced'` 声明了双通道，`TransportChannel` 也分了 `control` / `realtime`。但要看清楚实际跑的是什么：
+
+```ts
+// src/network/transport/WebSocketTransport.ts:19
+public readonly capabilities: TransportCapabilities = {
+  control:  'reliable-ordered',
+  realtime: 'reliable-ordered',   // ← 不是 unreliable
+  binary: true,
+};
+```
+
+- **`unreliable-sequenced` 从未被任何实现使用过。** 它是接口上预留的位置，不是已实现的能力。
+- **`control` / `realtime` 目前只是语义标签**，WebSocket 实现里两条走同一个 socket（代码注释也写明了）。
+- **所以现在是纯 WebSocket over TCP，没有任何 UDP。**
+
+`GameTransport` 这层抽象本身是对的、直接能用，但它描述的是**目标形态**，不是现状。
+
+### 6.2 「UDP」和「不可靠传输」不是一回事
+
+浏览器永远拿不到裸 UDP socket（安全原因：会变成 DDoS 放大器与端口扫描器）。但**不可靠传输是拿得到的**：
+
+| 传输 | 底层 | 不可靠模式 | 现状 |
+| --- | --- | --- | --- |
+| **WebSocket** | TCP | ❌ 只有可靠有序 | **现在用的** |
+| **WebTransport** | HTTP/3 · QUIC over UDP | ✅ `datagrams` 真不可靠 | Chrome / Edge / Firefox 已支持；Safari 较晚，按目标用户确认 |
+| **WebRTC DataChannel** | SCTP over DTLS over UDP | ✅ `ordered:false, maxRetransmits:0` | 平台覆盖最好，但要信令 + ICE/STUN，复杂度高一档 |
+
+`unreliable-sequenced` 是给上面两个预留的，**不是给裸 UDP**。
+
+一个容易走错的推论：*「要 UDP 就得上 Electron」*——不成立。Electron 的渲染进程一样在沙箱里，有 `dgram` 的是主进程，包路径反而变长：
+
+```text
+Electron                                WebTransport
+────────────────────────────────        ──────────────────────────
+UDP socket（主进程 · Node）               QUIC datagram（浏览器网络栈）
+   ↓ IPC 序列化                              ↓
+渲染进程（Chromium）                      Sim Worker 里的 JS / WASM
+   ↓
+Sim Worker
+```
+
+为了省排队延迟而加一道 IPC 边界，净收益不是显然的。裸 UDP 真正免费的场景只有**原生客户端**（自己的进程、自己的 socket）；但 QUIC 在原生侧也有成熟库（quinn / msquic / quiche），**原生端同样走 WebTransport 协议，服务端就只需维护一套**。
+
+### 6.3 TCP 现在为什么够用
+
+关键是这套节奏参数恰好把队头阻塞吸收掉了：
+
+```text
+SNAPSHOT_RATE           10 Hz    → 快照间隔 100 ms
+INTERPOLATION_DELAY_MS  120      → 插值缓冲 120 ms
+```
+
+丢包时 TCP 重传要一个 RTT，而 **120 ms 的插值缓冲正好能吃掉一次重传**。更重要的是：**快照是全量状态而非增量**，丢一个快照不影响正确性，只是那一帧靠外推撑过去。
+
+会开始痛的场景有三个——快照率提到 30–60 Hz（缓冲相对变小）、为竞技手感压低插值延迟、移动网络的高丢包率。**在这三者出现之前，换传输属于没有证据支撑的优化。**
+
+### 6.4 换传输的真实前置成本在服务端
+
+工作量分布是**客户端约 10%，服务端约 90%**：
+
+| 前置 | 说明 |
+| --- | --- |
+| **服务端缺传输抽象** | `GameTransport` 只存在于客户端；`server/network/WebSocketGateway.mjs` 是写死 WebSocket 的。这层不对称本身就该补，与换不换传输无关。 |
+| **需要 HTTP/3 / QUIC 服务端** | 服务端是 Node，其 QUIC / HTTP/3 支持长期实验性（按当时版本确认）。实际选项：前置一个 Rust / Go 的 QUIC 网关转发给现有房间进程，或评估 Node 的 QUIC 库。 |
+| 客户端 | 几乎免费——`GameTransport` 已留好位置，加一个 `WebTransportTransport` 实现即可。 |
+
+### 6.5 线协议：先测再换，且要和 SAB 绑在一起
+
+线协议现在是 `JSON.stringify` / `JSON.parse`。直觉上该换二进制，但建议**先测再换**：10 Hz 快照加上已有的 AOI／dormant 机制已经把 Actor 数量限住了，JSON 未必是瓶颈。
+
+真要换的时候，让它和 SAB 决策绑在一起——快照直接解码进 SAB 上的 SoA 布局，模拟 worker 写、渲染 worker 读，零拷贝。**二进制协议和多线程是同一次改动的两个面**，分开做等于做两遍。
+
+### 6.6 同步节奏
 
 | 同步节奏（现状） | 值 | 迁移后的变化 |
 | --- | --- | --- |
 | 服务端 tick | 20 Hz | 不变 |
 | 快照广播 | 10 Hz | 不变；解码目标改为 SAB 上的 SoA |
 | 预测固定步 | 1/60 s | 不变，但脱离 rAF，由 Sim Worker 自己驱动 |
-| 远端插值回退 | 120 ms | 插值移到渲染线程，按显示器刷新率求值 |
+| 远端插值回退 | 120 ms | 插值移到渲染线程，按显示器刷新率求值；**同时是 TCP 重传的缓冲，见 §6.3** |
 | 单帧补跑上限 | 5 步 | **可删除**——这个常量只是「模拟被绑在渲染帧上」的补丁 |
 | 和解容差 / 瞬移 | 0.06 / 2.5 m | 不变——前提是物理不换（见 §5） |
 
@@ -553,6 +625,7 @@ Render Worker 拿到 `transferControlToOffscreen()` 的 canvas，通过第 1 步
 | 物理引擎 | 保留 Rapier | 换 Jolt 必须**客户端服务端同一次提交内一起换**，并重新标定和解容差。 |
 | `shared/` 7,278 行的归属 | 留在 TS（方案 B） | 方案 A：重写成 C++ 并让 Node 也加载同一份 WASM，彻底消灭「双后端逐位一致」的维护成本——但这是项目量级的分水岭。第 1–3 步在两条路下完全一样，可以推迟到有实测数据后再定。 |
 | 烘焙格式何时做 | 按解耦立项，不按性能 | 按性能立项会发现收益不够（chunk 模板只有 5 个）。但它是第 4 步换掉 Three 的前置——几何不脱离 `THREE.Mesh`，渲染器就换不掉。 |
+| 传输层 | 先不动 WebSocket | 现网是纯 TCP，`unreliable-sequenced` 无实现。要上不可靠传输就走 **WebTransport**（不是裸 UDP，浏览器拿不到；也不需要 Electron）。真实成本在服务端：先补传输抽象，再解决 HTTP/3 服务端。见 §6.2–6.4。 |
 | 线协议 | 先不动 JSON | 要换就和 SAB 布局一起换，别分两次。 |
 | WebGL 还是 WebGPU | 第 4 步再定 | WebGPU 的 compute 对草地／粒子有实质价值，但会把浏览器支持面收窄，需要保留 WebGL 后端。 |
 
@@ -575,7 +648,9 @@ Render Worker 拿到 `transferControlToOffscreen()` 的 canvas，通过第 1 步
 | `shared/physics/PhysicsWorld.mjs:323` | `do not remove this apparently empty tick`——惰性 step 的隐含语义 |
 | `src/actors/systems/ActorTransformSystem.ts:38` | `render.root.position.set(...)`——当前 Game→Render 的直接写入点 |
 | `src/world/ChunkStreamer.ts:255` | `drainBuildBudget()`——每帧最多构建一个 chunk 的预算 |
-| `src/network/transport/GameTransport.ts:3` | `reliable-ordered \| unreliable-sequenced`——传输层已按 WebTransport 抽象 |
+| `src/network/transport/GameTransport.ts:3` | 声明了 `reliable-ordered \| unreliable-sequenced` 双通道 |
+| `src/network/transport/WebSocketTransport.ts:19` | 唯一的实现，`realtime` 也声明为 `reliable-ordered`——**`unreliable-sequenced` 目前无实现，现网是纯 TCP** |
+| `server/network/WebSocketGateway.mjs` | 服务端**没有**对应的传输抽象层，直接写死 WebSocket |
 | `src/ui/` 的形态 | 12 个文件中 8 个使用 `document.createElement`，UI 完全是 DOM + CSS |
 | 资产加载 | **全仓零资产加载**。唯一的 `fetch` 是 `chunkgen.wasm` 与房间目录 API |
 | `config/` 的数据化程度 | 23 个 `*.actor.json` + 6 个 `*.scene.json`，两类各带一份 `.schema.json` |
