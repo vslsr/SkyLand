@@ -821,8 +821,10 @@ test('混合史莱姆用单球核心与休眠弹簧蒙皮，且不会改写权�
   ]) {
     assert.ok(Math.abs(actual - expected) < 1e-6, `权威根节点被改写：${actual} ≠ ${expected}`);
   }
+  // 抵消量现在取自权威 TransformComponent.yaw（f64），而 root.rotation.y 是
+  // 边界上的 f32 镜像，两者差一个 f32 舍入——1 米半径上约 3 纳米。容差按 f32 取。
   assert.ok(
-    Math.abs(render.root.rotation.y + visual.rig.root.rotation.y) < 1e-9,
+    Math.abs(render.root.rotation.y + visual.rig.root.rotation.y) < 1e-6,
     '弹簧外壳应抵消权威 Actor yaw，避免把软体蒙皮整团硬转',
   );
   assert.equal(visual.simulation.vertexCount, visual.rig.surfaceDirections.length / 3);
@@ -979,8 +981,9 @@ test('混合史莱姆用单球核心与休眠弹簧蒙皮，且不会改写权�
       ) < 1e-7,
     );
   }
+  // 与上面同理：抵消量来自 f64 权威 yaw，root.rotation.y 是 f32 镜像。
   assert.ok(
-    Math.abs(render.root.rotation.y + visual.rig.shadowRoot.rotation.y) < 1e-9,
+    Math.abs(render.root.rotation.y + visual.rig.shadowRoot.rotation.y) < 1e-6,
     '阴影应与外壳使用同一世界朝向，不能再独立旋转或拉伸',
   );
   for (const bubble of visual.rig.bubbles) {

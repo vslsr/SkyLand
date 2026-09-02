@@ -262,7 +262,7 @@ export class ClientActorSystem implements SceneVisualSystem {
     this.world.addSystem(new ActorVisualParamSystem(this.transforms));
     this.world.addSystem(new RenderTransformSyncSystem(this.transforms, this.renderScene));
     this.world.addSystem(new ActorGuidePathSyncSystem(this.renderScene));
-    this.world.addSystem(new HybridSlimeVisualSystem(this.renderScene));
+    this.world.addSystem(new HybridSlimeVisualSystem());
     if (options.definition.renderer.ocean) {
       this.world.addSystem(new WaterBobVisualSystem(this.renderScene, options.definition.renderer.ocean));
       this.world.addSystem(new CargoVisualSystem(this.renderScene, options.definition.renderer.ocean));
