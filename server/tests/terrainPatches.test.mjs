@@ -128,6 +128,34 @@ test('显式注水会原子降低过高河床并形成可见水深', () => {
   assert.equal(patches.size, 1, '注水的河床与 surface 应由同一个 patch 原子保存');
 });
 
+test('抬高水格至海面以上会清除 WATER，避免高台继续触发浮力', () => {
+  const seaLevel = 0;
+  const patches = new TerrainPatchStore(DEFAULT_WORLD_SEED);
+  const editor = new TerrainEditor(patches, { seaLevel });
+  const cellX = -60;
+  const cellZ = -60;
+
+  patches.setCellCode(
+    cellX,
+    cellZ,
+    encodeTerrainCell(-1, TERRAIN_SURFACE.WATER, TERRAIN_SHAPE.FLAT),
+  );
+  assert.equal(editor.readCell(cellX, cellZ).surface, TERRAIN_SURFACE.WATER);
+  assert.ok(editor.readCell(cellX, cellZ).waterDepth > 0);
+
+  editor.raise(cellX, cellZ, 1);
+  const raised = editor.readCell(cellX, cellZ);
+  assert.equal(raised.heightLevel, 0);
+  assert.equal(raised.surface, TERRAIN_SURFACE.GROUND);
+  assert.equal(raised.waterDepth, 0);
+
+  editor.raise(cellX, cellZ, 2);
+  const platform = editor.readCell(cellX, cellZ);
+  assert.equal(platform.heightLevel, 2);
+  assert.equal(platform.surface, TERRAIN_SURFACE.GROUND);
+  assert.equal(platform.waterDepth, 0);
+});
+
 test('稀疏编辑器抬高、下挖和四向斜坡都只改目标字段', () => {
   const patches = new TerrainPatchStore(DEFAULT_WORLD_SEED);
   const editor = new TerrainEditor(patches, { seaLevel: -0.4 });

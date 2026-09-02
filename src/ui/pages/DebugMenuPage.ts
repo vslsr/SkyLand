@@ -174,11 +174,13 @@ export class DebugMenuPage extends ModalWindow {
     );
 
     this.bodyElement.append(
+      // 房间环境是最常用的即时调试项，放在首屏，避免被较长的诊断区挤到
+      // 滚动区域底部后看起来像是没有昼夜控制。
+      dayNightSection,
+      weatherSection,
       transformLogSection,
       collisionSection,
       temperatureSection,
-      weatherSection,
-      dayNightSection,
     );
     this.setTransformLogState('inactive');
     this.setTransformLogAvailable(false);

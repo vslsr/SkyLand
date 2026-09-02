@@ -140,7 +140,6 @@ export class PlayerEntity extends Actor {
     this.isWaterAt = grassInteraction.isWaterAt?.bind(grassInteraction);
     this.buoyancyHeight = buoyancy && sampleBasePlayerHeight
       ? new PlayerBuoyancyHeightController(
-          this.model.root,
           sampleBasePlayerHeight,
           buoyancy.bobAmplitude,
         )

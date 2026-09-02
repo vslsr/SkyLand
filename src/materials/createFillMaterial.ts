@@ -100,7 +100,10 @@ const FRAGMENT_SHADER = /* glsl */ `
     vec3 finalColor = shadedColor;
     #ifdef USE_DISTANCE_FOG
       float cameraDistance = distance(cameraPosition, vWorldPosition);
-      float fogFactor = smoothstep(uFogNear, uFogFar, cameraDistance);
+      // 参考项目的主体填充不混入天气雾。只有流式世界会显式打开这里，
+      // 并把雾压到最远 12 米内，既保住近中景颜色，也遮住 chunk 流送边缘。
+      float clearFogNear = max(uFogNear, uFogFar - 12.0);
+      float fogFactor = smoothstep(clearFogNear, uFogFar, cameraDistance);
       finalColor = mix(shadedColor, uFogColor, fogFactor);
     #endif
 
@@ -118,8 +121,8 @@ export interface FillMaterialOptions {
    */
   vertexTint?: boolean;
   /**
-   * 是否把场景距离雾混入填充色。地表按参考项目保持纸面本色，应传 false；
-   * 普通物件默认仍参与远景雾化，用来遮住 chunk 流送边缘。
+   * 是否把场景距离雾混入填充色。参考项目的主体填充不参与 scene.fog，
+   * 因此默认关闭；只有流式世界的合批物件需要显式打开来遮住 chunk 边缘。
    */
   fog?: boolean;
 }
@@ -132,7 +135,7 @@ export function createFillMaterial(
   const runtime = environment.runtime;
   const defines: Record<string, string> = {};
   if (options.vertexTint) defines.USE_VERTEX_TINT = '';
-  if (options.fog !== false) defines.USE_DISTANCE_FOG = '';
+  if (options.fog === true) defines.USE_DISTANCE_FOG = '';
   return new THREE.ShaderMaterial({
     defines,
     vertexShader: VERTEX_SHADER,

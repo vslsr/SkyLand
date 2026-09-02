@@ -55,7 +55,12 @@ function rainPositionArray(system: WeatherSystem): Float32Array {
   return rain.geometry.getAttribute('position').array as Float32Array;
 }
 
-test('雨雪按世界 chunk 激活，同一 chunk 内不会跟玩家平移', () => {
+function snowPositionArray(system: WeatherSystem): Float32Array {
+  const snow = system.root.getObjectByName('chunk-weather-snow') as THREE.LineSegments;
+  return snow.geometry.getAttribute('position').array as Float32Array;
+}
+
+test('雨雪保留 Chunk 激活，并以绝对世界坐标维护玩家附近滑动窗口', () => {
   const { system } = createSystem();
   system.setWeather('storm');
   settle(system, 14, 5, 7);
@@ -71,13 +76,42 @@ test('雨雪按世界 chunk 激活，同一 chunk 内不会跟玩家平移', () 
   );
   assert.ok(system.getParticleCounts().rain > 400);
   assert.ok(system.getParticleCounts().rain <= WEATHER_PARTICLE_LIMITS.rainDrops);
+  const rain = system.root.getObjectByName('chunk-weather-rain') as THREE.LineSegments<
+    THREE.BufferGeometry,
+    THREE.LineBasicMaterial
+  >;
+  assert.equal(rain.material.color.getHexString(), '527fa6');
+  assert.equal(rain.material.fog, false);
+  assert.equal(rain.material.toneMapped, false);
+  assert.ok(rain.material.opacity >= 0.79);
 
   const beforeKeys = system.getActiveChunkKeys();
   const beforePositions = rainPositionArray(system).slice();
-  system.update(0, 15, { focusX: 31.99, focusY: 3, focusZ: 7 });
+  system.update(0, 15, { focusX: 6, focusY: 3, focusZ: 7 });
   assert.deepEqual(system.getActiveChunkKeys(), beforeKeys);
-  assert.deepEqual(rainPositionArray(system), beforePositions);
+  const afterSmallMove = rainPositionArray(system);
+  let unchangedDrops = 0;
+  for (let index = 0; index < system.getParticleCounts().rain; index += 1) {
+    const offset = index * 6;
+    if (
+      afterSmallMove[offset] === beforePositions[offset]
+      && afterSmallMove[offset + 1] === beforePositions[offset + 1]
+      && afterSmallMove[offset + 2] === beforePositions[offset + 2]
+    ) unchangedDrops += 1;
+  }
+  assert.ok(
+    unchangedDrops > system.getParticleCounts().rain * 0.85,
+    '玩家小范围移动时绝大多数雨点应留在原世界坐标，而不是整片跟随平移',
+  );
   assert.deepEqual(system.root.position.toArray(), [0, 0, 0]);
+
+  system.update(0, 15, { focusX: 31.99, focusY: 3, focusZ: 7 });
+  const recenteredRain = rainPositionArray(system);
+  for (let index = 0; index < system.getParticleCounts().rain; index += 1) {
+    const offset = index * 6;
+    assert.ok(Math.abs(recenteredRain[offset] - 31.99) <= 17);
+    assert.ok(Math.abs(recenteredRain[offset + 2] - 7) <= 17);
+  }
 
   system.update(0, 15, { focusX: 32, focusY: 3, focusZ: 7 });
   const afterKeys = new Set(system.getActiveChunkKeys());
@@ -103,6 +137,21 @@ test('负坐标和快速传送直接替换天气 chunk，容量保持有界', ()
   assert.deepEqual(system.root.position.toArray(), [0, 0, 0]);
   assert.ok(system.getParticleCounts().snow > 300);
   assert.ok(system.getParticleCounts().snow <= WEATHER_PARTICLE_LIMITS.snowFlakes);
+  const snow = system.root.getObjectByName('chunk-weather-snow') as THREE.LineSegments<
+    THREE.BufferGeometry,
+    THREE.LineBasicMaterial
+  >;
+  assert.equal(snow.material.color.getHexString(), '91b9df');
+  assert.equal(snow.material.fog, false);
+  assert.equal(snow.material.toneMapped, false);
+  const snowPositions = snowPositionArray(system);
+  for (let index = 0; index < system.getParticleCounts().snow; index += 1) {
+    const offset = index * 18;
+    const centerX = (snowPositions[offset] + snowPositions[offset + 3]) * 0.5;
+    const centerZ = snowPositions[offset + 2];
+    assert.ok(Math.abs(centerX - 160.5) <= 17);
+    assert.ok(Math.abs(centerZ + 160.5) <= 17);
+  }
   assert.ok((scene.fog as THREE.Fog).far < 52);
 
   system.dispose();
@@ -135,11 +184,14 @@ test('晴天与多云共享同一套场景雾和光照 uniform', () => {
   system.dispose();
 });
 
-test('固定地面、流式台地、网格与地面草叶不混入天气距离雾', () => {
+test('普通物体保持清晰，仅流式物件在远端边缘混入天气距离雾', () => {
   const environment = createSceneEnvironment('#fdfbf6', 22, 52);
+  const ordinaryMaterial = createFillMaterial('#c1d7a6', environment);
   const propMaterial = createChunkFillMaterial(environment);
   const terrainMaterial = createChunkGroundFillMaterial(environment);
+  assert.ok(!('USE_DISTANCE_FOG' in ordinaryMaterial.defines));
   assert.ok('USE_DISTANCE_FOG' in propMaterial.defines);
+  assert.ok(propMaterial.fragmentShader.includes('uFogFar - 12.0'));
   assert.ok(!('USE_DISTANCE_FOG' in terrainMaterial.defines));
   assert.ok('USE_VERTEX_TINT' in terrainMaterial.defines);
   assert.equal(GROUND_GRID_MATERIAL.fog, false);
@@ -151,6 +203,7 @@ test('固定地面、流式台地、网格与地面草叶不混入天气距离�
   assert.ok(!GRASS_FILL_FRAGMENT_SHADER.includes('uFogColor'));
   assert.ok(!GRASS_OUTLINE_FRAGMENT_SHADER.includes('uFogColor'));
 
+  ordinaryMaterial.dispose();
   propMaterial.dispose();
   terrainMaterial.dispose();
   fixedGround.traverse((object) => {

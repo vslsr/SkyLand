@@ -381,6 +381,32 @@ const definition = {
   camera: { mode: 'fly', position: [0, 5, 10], yaw: 0, pitch: 0, moveSpeed: 8 },
 } satisfies SceneDefinition;
 
+test('普通玩家眼睛使用独立的无光照、无雾渲染层', () => {
+  const visual = createPlayerActorVisual('unlit-eye-player', {
+    model: 'line-art-player-slime',
+    radius: 0.42,
+    membraneColor: '#4fd695',
+    middleColor: '#8ce8b6',
+    coreColor: '#2fbb7c',
+    bubbleColor: '#eafff2',
+    inkColor: '#173a2b',
+    shadowColor: '#1e5a40',
+  }, 3.2);
+  const eyes = [
+    visual.model.root.getObjectByName('player-slime-eye-left'),
+    visual.model.root.getObjectByName('player-slime-eye-right'),
+  ] as THREE.Mesh<THREE.SphereGeometry, THREE.MeshBasicMaterial>[];
+
+  for (const eye of eyes) {
+    assert.ok(eye);
+    assert.equal(eye.material.type, 'MeshBasicMaterial');
+    assert.equal(eye.material.depthWrite, false);
+    assert.equal(eye.material.fog, false);
+    assert.equal(eye.material.toneMapped, false);
+  }
+  visual.dispose();
+});
+
 const snapshot: SnapshotActor = {
   id: 'demo-raft-01',
   archetypeId: 'raft',
@@ -856,6 +882,11 @@ test('混合史莱姆用单球核心与休眠弹簧蒙皮，且不会改写权�
     THREE.MeshBasicMaterial
   >[]) {
     assert.equal(eye.material.color.getHexString(), '142f2b');
+    assert.equal(eye.material.type, 'MeshBasicMaterial');
+    assert.equal(eye.material.depthTest, false);
+    assert.equal(eye.material.depthWrite, false);
+    assert.equal(eye.material.fog, false);
+    assert.equal(eye.material.toneMapped, false);
   }
   const eyeCenterX = visual.rig.faceRoot.position.x - visual.simulation.center[0];
   const eyeCenterZ = visual.rig.faceRoot.position.z - visual.simulation.center[2];

@@ -3,10 +3,9 @@ import * as THREE from 'three';
 export const WEATHER_VISUAL_CAPACITY = Object.freeze({
   clouds: 14,
   activeChunks: 9,
-  rainDropsPerChunk: 64,
-  snowFlakesPerChunk: 50,
-  rainDrops: 9 * 64,
-  snowFlakes: 9 * 50,
+  // 与参考场景相同的固定雨幕容量；只覆盖玩家附近，不随世界面积增长。
+  rainDrops: 560,
+  snowFlakes: 440,
 });
 
 export interface WeatherCloudVisual {
@@ -112,10 +111,13 @@ export function createWeatherVisuals(): WeatherVisuals {
   rainGeometry.setAttribute('position', new THREE.BufferAttribute(rainPositions, 3));
   rainGeometry.setDrawRange(0, 0);
   const rainMaterial = new THREE.LineBasicMaterial({
-    color: 0x7d93a8,
+    color: 0x527fa6,
     transparent: true,
-    opacity: 0.55,
+    opacity: 0.72,
     depthWrite: false,
+    // 降雨是近景识别层；远景雾不能把一像素雨线直接洗成背景色。
+    fog: false,
+    toneMapped: false,
   });
   const rainLines = new THREE.LineSegments(rainGeometry, rainMaterial);
   rainLines.name = 'chunk-weather-rain';
@@ -129,10 +131,12 @@ export function createWeatherVisuals(): WeatherVisuals {
   snowGeometry.setAttribute('position', new THREE.BufferAttribute(snowPositions, 3));
   snowGeometry.setDrawRange(0, 0);
   const snowMaterial = new THREE.LineBasicMaterial({
-    color: 0xa8c0dc,
+    color: 0x91b9df,
     transparent: true,
-    opacity: 0.85,
+    opacity: 0.95,
     depthWrite: false,
+    fog: false,
+    toneMapped: false,
   });
   const snowLines = new THREE.LineSegments(snowGeometry, snowMaterial);
   snowLines.name = 'chunk-weather-snow';
