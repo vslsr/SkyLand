@@ -122,10 +122,10 @@ const pbfSlimeArchetype: SceneDefinition['actorArchetypes'][number] = {
   id: 'pbf-slime',
   components: {
     slimeSurfaceDrag: {
-      maximumDistance: 0.62,
-      pullForce: 72,
-      falloffExponent: 2.2,
-      influenceRadius: 0.52,
+      maximumDistance: 1.05,
+      pullForce: 120,
+      falloffExponent: 1.35,
+      influenceRadius: 1.15,
     },
     render: {
       model: 'line-art-pbf-slime',
@@ -1031,7 +1031,7 @@ test('无模型 GuidePath Actor 只在快照存在时创建客户端 Three.js �
   system.dispose();
 });
 
-test('史莱姆表面拖拽只拉动命中邻域，接近上限时衰减并在释放后回弹', () => {
+test('史莱姆表面拖拽带动整团软体，命中处最强，接近上限时衰减并在释放后回弹', () => {
   const render = pbfSlimeArchetype.components.render;
   const dragDefinition = pbfSlimeArchetype.components.slimeSurfaceDrag;
   assert.ok(render?.model === 'line-art-pbf-slime');
@@ -1081,16 +1081,26 @@ test('史莱姆表面拖拽只拉动命中邻域，接近上限时衰减并在�
   );
 
   let farSideMaximumDelta = 0;
+  let equatorMaximumDelta = 0;
   for (let offset = 0; offset < pulledSurface.length; offset += 3) {
+    const delta = Math.abs(pulledSurface[offset] - initialSurface[offset]);
+    if (Math.abs(hybrid.rig.surfaceDirections[offset + 1]) < 0.25) {
+      equatorMaximumDelta = Math.max(equatorMaximumDelta, delta);
+    }
     if (hybrid.rig.surfaceDirections[offset + 1] > -0.65) continue;
-    farSideMaximumDelta = Math.max(
-      farSideMaximumDelta,
-      Math.abs(pulledSurface[offset] - initialSurface[offset]),
-    );
+    farSideMaximumDelta = Math.max(farSideMaximumDelta, delta);
   }
   assert.ok(
-    farSideMaximumDelta < selectedExtension * 0.35,
-    '拖拽应集中在命中邻域，不能把整团史莱姆当作刚体平移',
+    equatorMaximumDelta > selectedExtension * 0.3,
+    '拖拽不是只鼓出一个局部的包，腰部同样要被整体带走',
+  );
+  assert.ok(
+    farSideMaximumDelta > selectedExtension * 0.12,
+    '影响圈之外的底面也应跟随，整只史莱姆都受拖拽影响',
+  );
+  assert.ok(
+    farSideMaximumDelta < selectedExtension * 0.8,
+    '底面仍被地面黏住，不能把整团史莱姆当作刚体平移',
   );
 
   drag.endDrag();

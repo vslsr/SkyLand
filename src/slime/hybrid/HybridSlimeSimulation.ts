@@ -69,6 +69,19 @@ const MAX_AIRBORNE_HEAD_BULGE = 0.26;
 const MAX_TAKEOFF_SAG_RADIUS_RATIO = 0.14;
 const MAX_AIRBORNE_FLOOR_RELEASE_RATIO = 1.1;
 const REFERENCE_JUMP_SPEED = 7;
+/**
+ * 拖拽权重的全局下限。命中邻域仍然最强，但影响圈之外的整层蒙皮也会一起跟随，
+ * 于是鼠标拖的是「一整团软体」而不是只在表面鼓出一个孤立的包。
+ */
+const SURFACE_DRAG_BODY_FOLLOW_WEIGHT = 0.45;
+/** 质心跟随拖拽位移的比例：静止形状本身会朝指针方向整体倾斜。 */
+const SURFACE_DRAG_BODY_OFFSET_RATIO = 0.5;
+/** 质心跟随的硬上限，按半径缩放，形变量不随世界尺度增长。 */
+const MAX_SURFACE_DRAG_BODY_OFFSET_RADIUS_RATIO = 0.42;
+/** 约 0.25 秒到达目标的 90%，让整团跟随有黏性延迟而不是硬跟指针。 */
+const SURFACE_DRAG_BODY_FOLLOW_RATE = 14;
+/** 底面被地面黏住，只保留一部分整体跟随，避免拖拽时整只史莱姆像刚体滑走。 */
+const SURFACE_DRAG_BOTTOM_ADHESION = 0.45;
 
 function clamp(value: number, minimum: number, maximum: number): number {
   return Math.max(minimum, Math.min(maximum, value));
@@ -148,6 +161,9 @@ export class HybridSlimeSimulation {
   private surfaceDragPullZ = 0;
   private surfaceDragExtensionRatio = 0;
   private surfaceDragForceScale = 0;
+  private surfaceDragBodyX = 0;
+  private surfaceDragBodyY = 0;
+  private surfaceDragBodyZ = 0;
 
   public constructor(private readonly options: HybridSlimeSimulationOptions) {
     this.vertexCount = options.surfaceDirections.length / 3;
@@ -233,9 +249,18 @@ export class HybridSlimeSimulation {
       );
       const linearWeight = clamp(1 - distance / options.influenceRadius, 0, 1);
       // smoothstep 避免影响圈边缘出现折线，同时保持命中顶点权重为 1。
-      this.surfaceDragWeights[vertex] = (
-        linearWeight * linearWeight * (3 - 2 * linearWeight)
+      const localWeight = linearWeight * linearWeight * (3 - 2 * linearWeight);
+      // 底部离地越近跟随越弱，模拟黏地；其余顶点都保留全局下限，
+      // 因此影响圈之外的背面同样会被带动，只是幅度小于命中邻域。
+      const groundAdhesion = clamp(
+        (this.positions[offset + 1] - this.floorY) / Math.max(1e-6, this.options.radius * 0.55),
+        0,
+        1,
       );
+      const bodyWeight = SURFACE_DRAG_BODY_FOLLOW_WEIGHT * (
+        SURFACE_DRAG_BOTTOM_ADHESION + (1 - SURFACE_DRAG_BOTTOM_ADHESION) * groundAdhesion
+      );
+      this.surfaceDragWeights[vertex] = bodyWeight + (1 - bodyWeight) * localWeight;
     }
     this.surfaceDragActive = true;
     this.isActive = true;
@@ -466,6 +491,7 @@ export class HybridSlimeSimulation {
     this.center[1] = this.centerY + this.coreY;
     this.center[2] = this.coreZ;
 
+    this.updateSurfaceDragBody(deltaSeconds);
     this.rebuildAnchors(deltaSeconds);
     // 局部弹簧只知道自己的锚点。空隙、凹陷和被拉出的凸起都是全局的体积变化，
     // 必须先把材料重新分配到锚点上，蒙皮才会像流体一样下坠填充而不是各自回弹。
@@ -567,6 +593,35 @@ export class HybridSlimeSimulation {
     this.constrainSurfaceDrag();
     this.maximumSkinError = maximumError;
     this.kineticEnergy = energy / this.vertexCount;
+  }
+
+  /**
+   * 拖拽不只推动命中处的蒙皮，还会把静止形状的质心朝指针方向平滑带走。
+   * 锚点整体偏移之后，连没被直接施力的一侧也会跟着变形，而不是原地不动。
+   */
+  private updateSurfaceDragBody(deltaSeconds: number): void {
+    let targetX = 0;
+    let targetY = 0;
+    let targetZ = 0;
+    if (this.surfaceDragActive) {
+      targetX = this.surfaceDragPullX * SURFACE_DRAG_BODY_OFFSET_RATIO;
+      targetY = this.surfaceDragPullY * SURFACE_DRAG_BODY_OFFSET_RATIO;
+      targetZ = this.surfaceDragPullZ * SURFACE_DRAG_BODY_OFFSET_RATIO;
+      const maximumOffset = this.options.radius * MAX_SURFACE_DRAG_BODY_OFFSET_RADIUS_RATIO;
+      const length = Math.hypot(targetX, targetY, targetZ);
+      if (length > maximumOffset && length > 1e-8) {
+        const scale = maximumOffset / length;
+        targetX *= scale;
+        targetY *= scale;
+        targetZ *= scale;
+      }
+    }
+    const followRatio = deltaSeconds > 0
+      ? 1 - Math.exp(-SURFACE_DRAG_BODY_FOLLOW_RATE * deltaSeconds)
+      : 1;
+    this.surfaceDragBodyX += (targetX - this.surfaceDragBodyX) * followRatio;
+    this.surfaceDragBodyY += (targetY - this.surfaceDragBodyY) * followRatio;
+    this.surfaceDragBodyZ += (targetZ - this.surfaceDragBodyZ) * followRatio;
   }
 
   private applySurfaceDragAccelerations(): void {
@@ -711,12 +766,14 @@ export class HybridSlimeSimulation {
     );
     this.targetForceCenterX = this.coreX
       + this.driveDirectionX * groundedForceBias
-      + motionAxisX * airborneForceBias;
+      + motionAxisX * airborneForceBias
+      + this.surfaceDragBodyX;
     this.targetForceCenterY = this.centerY + this.coreY
       + motionAxisY * airborneForceBias;
     this.targetForceCenterZ = this.coreZ
       + this.driveDirectionZ * groundedForceBias
-      + motionAxisZ * airborneForceBias;
+      + motionAxisZ * airborneForceBias
+      + this.surfaceDragBodyZ;
     if (deltaSeconds > 0) {
       const followRatio = 1 - Math.exp(-FORCE_CENTER_FOLLOW_RATE * deltaSeconds);
       this.forceCenter[0] += (this.targetForceCenterX - this.forceCenter[0]) * followRatio;
@@ -731,8 +788,10 @@ export class HybridSlimeSimulation {
     this.coreScale[0] = volumeScale * airbornePlanarScale;
     this.coreScale[1] = volumeScale * (1 + this.airborneAmount * 0.04);
     this.coreScale[2] = parallelScale * airbornePlanarScale;
-    const smoothedForceBiasX = this.forceCenter[0] - this.coreX;
-    const smoothedForceBiasZ = this.forceCenter[2] - this.coreZ;
+    // forceCenter 里已经含有拖拽整体偏移。运动前倾的偏置只允许上半球跟随，
+    // 拖拽跟随却要作用在整团，所以先把拖拽分量剔除，再单独按纬度加权。
+    const smoothedForceBiasX = this.forceCenter[0] - this.coreX - this.surfaceDragBodyX;
+    const smoothedForceBiasZ = this.forceCenter[2] - this.coreZ - this.surfaceDragBodyZ;
     const ascentRatio = clamp(this.shapeVerticalVelocity / REFERENCE_JUMP_SPEED, 0, 1);
 
     for (let offset = 0; offset < directions.length; offset += 3) {
@@ -798,11 +857,19 @@ export class HybridSlimeSimulation {
       const adhesionFactor = 0.35 + (1 - height) * 1.0;
       const forceBiasWeight = 0.2 + height * 0.8;
       const groundedAdhesion = 1 - this.airborneAmount;
+      // 拖拽跟随按纬度加权：顶部几乎完全跟手，底面被地面黏住只跟一部分，
+      // 于是整只史莱姆都会朝指针方向倾倒拉长，而不是只鼓出命中处一个包。
+      const dragBodyWeight = (
+        SURFACE_DRAG_BOTTOM_ADHESION
+        + (1 - SURFACE_DRAG_BOTTOM_ADHESION) * clamp((directionY + 1) * 0.5, 0, 1)
+      );
+      const dragBodyFalloff = (1 - dragBodyWeight) * groundedAdhesion;
       const baseAnchorX = (
         this.forceCenter[0]
         + shapedX
         + this.coreX * (adhesionFactor - 1) * groundedAdhesion
         - smoothedForceBiasX * (1 - forceBiasWeight) * groundedAdhesion
+        - this.surfaceDragBodyX * dragBodyFalloff
       );
       const groundedAnchorY = hybridSlimeRestY(
         this.options.radius,
@@ -817,12 +884,14 @@ export class HybridSlimeSimulation {
           * AIRBORNE_REST_VERTICAL_RADIUS_RATIO
           * volumeScale;
       const baseAnchorY = groundedAnchorY
-        + (airborneAnchorY - groundedAnchorY) * this.airborneAmount;
+        + (airborneAnchorY - groundedAnchorY) * this.airborneAmount
+        + this.surfaceDragBodyY * dragBodyWeight;
       const baseAnchorZ = (
         this.forceCenter[2]
         + shapedZ
         + this.coreZ * (adhesionFactor - 1) * groundedAdhesion
         - smoothedForceBiasZ * (1 - forceBiasWeight) * groundedAdhesion
+        - this.surfaceDragBodyZ * dragBodyFalloff
       );
 
       // 空中水滴头沿三维合成运动方向；反向 tailAxis 拉长并收尖。
@@ -910,9 +979,15 @@ export class HybridSlimeSimulation {
     const verticalShapeError = Math.abs(
       this.verticalVelocity - this.shapeVerticalVelocity,
     );
+    const surfaceDragBodyOffset = Math.hypot(
+      this.surfaceDragBodyX,
+      this.surfaceDragBodyY,
+      this.surfaceDragBodyZ,
+    );
     const stable = (
       this.collisionActiveSeconds <= 0
       && !this.surfaceDragActive
+      && surfaceDragBodyOffset < this.options.radius * 0.002
       && this.maximumSkinError < this.options.radius * 0.0015
       && this.kineticEnergy < this.options.radius * this.options.radius * 0.000025
       && coreError < this.options.radius * 0.001

@@ -96,10 +96,10 @@ test('ActorCatalog 加载并净化木筏原型', async () => {
   assert.ok(playerBuoyancy.draft > raftBuoyancy.draft);
   assert.ok(pbfSlimeBuoyancy.draft > raftBuoyancy.draft);
   assert.deepEqual(pbfSlime.components.slimeSurfaceDrag, {
-    maximumDistance: 0.62,
-    pullForce: 72,
-    falloffExponent: 2.2,
-    influenceRadius: 0.52,
+    maximumDistance: 1.05,
+    pullForce: 120,
+    falloffExponent: 1.35,
+    influenceRadius: 1.15,
   });
 
   const campfire = catalog.require('campfire');

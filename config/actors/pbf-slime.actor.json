@@ -31,10 +31,10 @@
       "airControl": 0.85
     },
     "slimeSurfaceDrag": {
-      "maximumDistance": 0.62,
-      "pullForce": 72,
-      "falloffExponent": 2.2,
-      "influenceRadius": 0.52
+      "maximumDistance": 1.05,
+      "pullForce": 120,
+      "falloffExponent": 1.35,
+      "influenceRadius": 1.15
     },
     "render": {
       "model": "line-art-pbf-slime",
