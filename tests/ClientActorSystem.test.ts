@@ -2030,3 +2030,4 @@ test('流式树按 Chunk 构造无网格 Actor，偏离态可在无 Transform �
   assert.equal(system.getActor(actorId), undefined);
   system.dispose();
 });
+

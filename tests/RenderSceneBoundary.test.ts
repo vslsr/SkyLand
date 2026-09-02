@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import * as THREE from 'three';
 import { Actor } from '../shared/actor/Actor.mjs';
 import { ActorWorld } from '../shared/actor/ActorWorld.mjs';
@@ -151,4 +151,45 @@ test('Game→Render 的写入点不再 import three', () => {
   const code = source.split('\n').filter((line) => !line.trimStart().startsWith('*')).join('\n');
   assert.doesNotMatch(code, /from 'three'/);
   assert.doesNotMatch(code, /\.position\.set\(/);
+});
+
+/**
+ * 第 1.5 步的棘轮（`doc/engine-migration-implementation-plan.md` §1.5）。
+ *
+ * 第 1 步把 `THREE.Group` 从 `ThreeObjectComponent` 搬进了渲染世界，但客户端
+ * 表现 Component 还各自握着自己的 rig。只要还剩一个，Sim Worker 就搬不过去——
+ * 对象过不了线程边界。
+ *
+ * 规则很简单：**Actor Component 不得 import 渲染侧模块**（three、models、
+ * guidance、slime、grass）。下面这份是尚未搬完的豁免清单，**只能变短**：
+ * 搬完一个就把它划掉；清单空了，第 2 步的前置条件就满足了。多出一项则说明
+ * 有人又在 Actor 上挂了渲染对象。
+ */
+const COMPONENTS_STILL_IMPORTING_RENDER_MODULES = [
+  'FireVisualComponent.ts',
+  'GrassDisplacementComponent.ts',
+  'GuidePathVisualComponent.ts',
+  'HybridSlimeVisualComponent.ts',
+  'InteractionMarkerComponent.ts',
+  'PbfSlimeVisualComponent.ts',
+  'SlimeSurfaceDragComponent.ts',
+  'TemperatureMarkerComponent.ts',
+];
+
+// 不含 render/：`RenderProxyComponent` 引的是边界本身的类型（ProxyId 与命令口），
+// 那正是它该引的。这条规则针对的是渲染**实现**。
+const RENDER_SIDE_IMPORT = /from '(three|(\.\.\/)+(models|guidance|slime|grass|materials)\/)/;
+
+test('还在 import 渲染侧模块的 Actor Component 只有已知的那几个', () => {
+  const directory = new URL('../src/actors/components/', import.meta.url);
+  const offenders = readdirSync(directory)
+    .filter((name) => name.endsWith('.ts'))
+    .filter((name) => RENDER_SIDE_IMPORT.test(readFileSync(new URL(name, directory), 'utf8')))
+    .sort();
+
+  assert.deepEqual(
+    offenders,
+    COMPONENTS_STILL_IMPORTING_RENDER_MODULES,
+    '这份清单只能变短：搬完一个表现 Component 就把它划掉，多出一项说明边界又被打穿了',
+  );
 });

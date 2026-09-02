@@ -18,7 +18,7 @@
 | 第 0.5 步 · 合并两套碰撞 | 未开始 | 见 §0.5b——它不是纯清理，需要单独立项 |
 | 第 1 步 · 剥出 Render World 边界 | **已完成** | `src/render/`、`RenderProxyComponent`、`ActorTransformSystem` |
 | §8.2 · GPU 资源所有权表 | **已完成（最小核心）** | `src/core/assets/AssetOwner.ts`、`src/render/renderAssets.ts` |
-| 第 1.5 步 · 表现 Component 脱离 THREE | 未开始 | 见 §1.5 |
+| 第 1.5 步 · 表现 Component 脱离 THREE | 未开始 · **已有棘轮** | 剩 8 个 Component，见 §1.5 |
 | 第 2 步 · Sim Worker | 未开始 | 见 §2 |
 | 第 3 步 · OffscreenCanvas | 未开始 | 见 §3 |
 | 第 4 步 · 换掉 Three.js | 可无限期推迟 | 见 §4 |
@@ -44,7 +44,9 @@
   把「有构造器」当成「能共享」，会让问题留到 worker 上线那天。
 - `src/main.ts` 启动日志打印能力集。
 
-**验收**：`server/tests/crossOriginIsolation.test.mjs`、`tests/PlatformThreading.test.ts`。
+**验收**：`server/tests/crossOriginIsolation.test.mjs`、`tests/PlatformThreading.test.ts`，
+以及真实浏览器里的 `crossOriginIsolated === true`——启动日志现在打的是
+`isolated · shared-memory · workers · offscreen-canvas`，第 2、3 步要的能力全部就位。
 
 **顺带确认**：全仓零外部资源（`src/ui/icons/IconSprite.ts` 里唯一的 `http://` 是 SVG 命名空间），
 所以 `require-corp` 没有挡掉任何东西。以后引入 CDN 字体或图片时，对方必须带 `Cross-Origin-Resource-Policy`。
@@ -120,6 +122,13 @@ ActorTransformSystem       │ f32 x y z yaw        │
 3. **父子关系只以 `parentProxyId` 过边界**。「局部坐标怎么算」是 Three 场景图的需求，
    属于渲染侧；换成别的后端时这段数学可能根本不需要。
 
+### 验收
+
+- `tests/RenderSceneBoundary.test.ts`、`tests/RenderTransformBuffer.test.ts`，全套测试绿。
+- 无头 Chromium 实跑四张地图：能力实验室（Actor + 能力 rig）、无边草原（流式 chunk、
+  生成物件 proxy 的持续增删）、线稿海域（父子 Actor 的木筏与货箱、浮力波动）。
+  持续行走 6 秒，画面与 chunk 流送正常。
+
 ### 唯一的行为变化
 
 渲染世界拿到的是权威 transform 的 **f32 镜像**（SoA 是 `Float32Array`），Actor 上的权威值仍是 f64。
@@ -140,25 +149,37 @@ ActorTransformSystem       │ f32 x y z yaw        │
 
 ## 第 1.5 步 · 表现 Component 脱离 THREE（未开始）
 
-第 1 步只搬了 `ThreeObjectComponent`。仍然握着 THREE 对象的 Actor Component 还有：
+第 1 步只搬了 `ThreeObjectComponent`。**只要还有一个 Actor Component 握着 Object3D，
+Sim Worker 就搬不过去**——对象过不了线程边界。所以这一步是第 2 步的硬前置。
 
-| Component | 持有 |
-| --- | --- |
-| `InteractionMarkerComponent` / `TemperatureMarkerComponent` | 挂在 root 上的自绘标记 |
-| `HybridSlimeVisualComponent` / `PbfSlimeVisualComponent` | 蒙皮 rig（`BufferAttribute` 直写） |
-| `FireVisualComponent` | 火焰 rig |
-| `GrassDisplacementComponent` / `SlimeSurfaceDragComponent` | 局部向量与矩阵 |
-| `GuidePathVisualComponent` | 引导线 |
+规则：**Actor Component 不得 import 渲染侧模块**（`three` / `models` / `guidance` /
+`slime` / `grass` / `materials`；`render/` 里的边界类型不算，那正是它该引的）。
+`tests/RenderSceneBoundary.test.ts` 里有一份豁免清单当棘轮，**只能变短**；
+清单空了，第 2 步的前置条件就满足了。
 
-这些在目标架构里属于**渲染世界自己的 Component 集**（路线图 §7 的表：FunctionLayer 的
-「动画·粒子表现」落在 Render Worker 一列）。做法与第 1 步同构：
+### 剩余清单（8 个）
 
-1. 渲染世界维护一份 `proxyId → 表现状态` 的表，Actor 侧只留「这个 proxy 需要哪种表现」的标志位；
-2. 表现所需的玩法输入（燃烧强度、吃水、拉伸目标点）按 §4.5 的思路加进边界的 SoA，
-   而不是让渲染侧回头去读 Actor。
+| Component | 持有 | 跨边界要送的数据 |
+| --- | --- | --- |
+| `InteractionMarkerComponent` | 自绘标记 + 朝向相机的四元数 | 标签字符串、可见性、锚点高度 |
+| `TemperatureMarkerComponent` | 同上 | 温度值、可见性、锚点 |
+| `FireVisualComponent` | `LineArtFireVisualRig` | 目标强度（一个 f32） |
+| `GuidePathVisualComponent` | `GuidePath` 整条线 | **变长**：路径点 + 两个 revision |
+| `HybridSlimeVisualComponent` / `PbfSlimeVisualComponent` | 蒙皮 rig，`BufferAttribute` 直写 | 权威 yaw、移动速度 |
+| `GrassDisplacementComponent` | 只用 `Vector3` / `Vector2` 当临时量，外加一个 `Object3D` 取世界坐标 | 位置回调即可，改动最小 |
+| `SlimeSurfaceDragComponent` | `Raycaster` + 一堆 `Vector3` | 拾取射线；本质是渲染侧的交互 |
 
-**这一步是第 2 步的硬前置**：只要还有一个表现 Component 握着 Object3D，Sim Worker 就搬不过去。
-建议按 Component 逐个搬，每搬一个补一条边界断言。
+### 两条注意
+
+1. **除了 Replica 这条路，还有本地玩家那条。** `src/player/PlayerEntity.ts` 与
+   `RemotePlayer.ts` 也是 Actor，视觉走 `createPlayerActorVisual()`，**完全没有经过
+   `ThreeRenderScene`**。这一步必须把它们也接到同一条边界上，否则 Sim Worker 里会留一半场景图。
+2. **变长数据需要命令通道，不是 SoA 槽位。** 定长参数（强度、温度、yaw）可以加进
+   `RenderTransformBuffer` 旁边的第二段 SoA；引导路径那种变长的要走
+   `RenderCommandSink`——它现在只有 `destroyMeshProxy` 一个方法，就是为这件事留的口子。
+   单线程下是直接调用，上 worker 之后是往环形缓冲写命令。
+
+建议按 Component 逐个搬，每搬一个从棘轮清单里划掉一个，保持每次提交都是绿的。
 
 ---
 
