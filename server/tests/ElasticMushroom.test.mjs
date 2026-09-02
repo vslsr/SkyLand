@@ -2,10 +2,6 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { ServerScene } from '../scene/ServerScene.mjs';
 import { SceneCatalog } from '../scenes/SceneCatalog.mjs';
-import {
-  ElasticDetachComponent,
-  MushroomPopComponent,
-} from '../../shared/actor/index.mjs';
 
 /**
  * 把玩家拖到「一定拉得断」的距离。
@@ -33,7 +29,7 @@ function createClock(startAt = 1_000_000) {
   };
 }
 
-test('史莱姆把蘑菇拉过断裂长度后，蘑菇脱离、获得冲量并落回地面', async () => {
+test('叼住 → 拖拽 → 拔断进嘴 → 放下落地：一整趟交互', async () => {
   const clock = createClock();
   const catalog = await SceneCatalog.load();
   const scene = new ServerScene(catalog.require('grassland'), { now: clock.now });
@@ -44,52 +40,66 @@ test('史莱姆把蘑菇拉过断裂长度后，蘑菇脱离、获得冲量并�
   assert.ok(initial);
   assert.equal(initial.interactable.action, 'mushroom-bite');
   assert.equal(initial.elasticTether.holderPlayerId, null);
+  const find = () => scene.createSnapshot().actors.find((actor) => actor.id === mushroomId);
 
   const player = scene.players.get('player-a');
   player.x = initial.transform.x - 0.8;
   player.z = initial.transform.z;
   player.yaw = Math.PI / 2;
-  assert.equal(scene.interactWithActor('player-a', {
-    actorId: mushroomId,
-    sequence: 1,
-  }), true);
+  assert.equal(scene.interactWithActor('player-a', { actorId: mushroomId, sequence: 1 }), true);
 
-  let mushroom = scene.createSnapshot().actors.find((actor) => actor.id === mushroomId);
+  let mushroom = find();
   assert.equal(mushroom.elasticTether.holderPlayerId, 'player-a');
   assert.equal(mushroom.interactable.enabled, false);
   assert.ok(Number.isFinite(mushroom.elasticTether.targetX));
-  assert.equal(scene.interactWithActor('player-a', {
-    actorId: mushroomId,
-    sequence: 2,
-  }), false);
 
-  player.z = initial.transform.z;
   assert.equal(
     pullUntilDetached(scene, clock, 'player-a', mushroomId, initial.transform.x),
     true,
   );
-  mushroom = scene.createSnapshot().actors.find((actor) => actor.id === mushroomId);
+  mushroom = find();
   assert.equal(mushroom.elasticTether.holderPlayerId, null);
   assert.equal(mushroom.elasticTether.releaseRevision, 1);
   assert.equal(mushroom.elasticDetach.detached, true);
-  assert.equal(mushroom.interactable.enabled, false);
+  // 拔断之后它在嘴上，不是掉在地上：既没有落回地面，也还不是自由刚体。
+  assert.equal(mushroom.elasticDetach.carriedByPlayerId, 'player-a');
+  assert.equal(scene.physics.hasDynamicActor(mushroomId), false);
   assert.ok(mushroom.transform.y > initial.transform.y);
 
-  player.x = initial.transform.x - 0.7;
-  assert.equal(scene.interactWithActor('player-a', {
-    actorId: mushroomId,
-    sequence: 3,
-  }), false);
+  // 叼着走，蘑菇跟着嘴动。
+  player.x = initial.transform.x + 6;
+  player.z = initial.transform.z + 4;
+  player.yaw = 0;
+  clock.advance(0.05);
+  scene.update();
+  mushroom = find();
+  assert.ok(
+    Math.hypot(mushroom.transform.x - player.x, mushroom.transform.z - player.z) < 1,
+    '叼着的蘑菇没有跟着玩家走',
+  );
+
+  // 再按一次交互键放下：不给冲量，就在离手的位置落下。
+  assert.equal(scene.interactWithActor('player-a', { actorId: mushroomId, sequence: 2 }), true);
+  const dropX = find().transform.x;
+  const dropZ = find().transform.z;
+  assert.equal(find().elasticDetach.carriedByPlayerId, null);
+  assert.equal(scene.physics.hasDynamicActor(mushroomId), true);
+
   for (let index = 0; index < 100; index += 1) {
     clock.advance(0.05);
     scene.update();
   }
-  mushroom = scene.createSnapshot().actors.find((actor) => actor.id === mushroomId);
-  assert.ok(Math.abs(mushroom.transform.y) < 1e-4);
+  mushroom = find();
+  assert.ok(Math.abs(mushroom.transform.y) < 1e-3, `没有落到地面：${mushroom.transform.y}`);
+  // 不弹：落点应当就在离手的位置附近，不会被冲量抛出去。
+  assert.ok(
+    Math.hypot(mushroom.transform.x - dropX, mushroom.transform.z - dropZ) < 0.35,
+    '放下时被抛出去了',
+  );
+
   scene.removePlayer('player-a');
-  mushroom = scene.createSnapshot().actors.find((actor) => actor.id === mushroomId);
+  mushroom = find();
   assert.equal(mushroom.elasticTether.holderPlayerId, null);
-  assert.equal(mushroom.elasticTether.releaseRevision, 1);
   assert.equal(mushroom.interactable.enabled, false);
 });
 import './initRapier.mjs';
@@ -133,27 +143,7 @@ test('蘑菇脱落后翻倒在地，权威朝向随快照下发', async () => {
   assert.ok(tiltDegrees > 60, `蘑菇仍然立着，倾角只有 ${tiltDegrees.toFixed(1)}°`);
 });
 
-test('没有配置翻滚冲量时蘑菇只弹出、不翻滚', () => {
-  const detachable = new ElasticDetachComponent({});
-  new MushroomPopComponent({ forwardImpulse: 0.5, upwardImpulse: 2 }).bind(detachable);
-  const popped = detachable.pop({ x: 1, y: 0, z: 0 });
-  assert.ok(popped.impulse.y > 0);
-  assert.deepEqual(popped.torqueImpulse, { x: 0, y: 0, z: 0 });
-});
 
-test('翻滚冲量绕着垂直于弹出方向的水平轴施加', () => {
-  const detachable = new ElasticDetachComponent({});
-  new MushroomPopComponent({
-    forwardImpulse: 0,
-    upwardImpulse: 0,
-    spinImpulse: 0.08,
-  }).bind(detachable);
-  // 朝 +X 弹出：翻滚轴应当是 -Z，菌盖才会朝弹出方向翻过去。
-  const popped = detachable.pop({ x: 1, y: 0, z: 0 });
-  assert.ok(Math.abs(popped.torqueImpulse.x) < 1e-9);
-  assert.equal(popped.torqueImpulse.y, 0);
-  assert.ok(Math.abs(popped.torqueImpulse.z + 0.08) < 1e-9, JSON.stringify(popped.torqueImpulse));
-});
 
 test('拔出来之前只是长在地上的东西：叼住拖拽都不产生刚体，也不下发朝向', async () => {
   const clock = createClock();
@@ -264,6 +254,10 @@ test('走远让 chunk 卸载再回来，躺在地上的蘑菇不会站起来', a
   );
   tick(60);
 
+  // 放下它，让它成为躺在地上的自由刚体——这条用例问的是「地上那株」的姿态
+  // 能不能扛过 chunk 卸载。
+  assert.equal(scene.interactWithActor('wanderer', { actorId: target.id, sequence: 2 }), true);
+  tick(60);
   const fallenTilt = tiltDegrees(find().elasticDetach.rotation);
   assert.ok(fallenTilt > 60, `蘑菇没有躺下：${fallenTilt?.toFixed(1)}°`);
 
@@ -284,5 +278,160 @@ test('走远让 chunk 卸载再回来，躺在地上的蘑菇不会站起来', a
   assert.ok(
     restoredTilt > 60,
     `重建之后蘑菇站起来了：${restoredTilt?.toFixed(1)}°（躺下时是 ${fallenTilt.toFixed(1)}°）`,
+  );
+});
+
+test('还没拔断时再按一次交互键，取消拖拽并恢复可交互', async () => {
+  const clock = createClock();
+  const catalog = await SceneCatalog.load();
+  const scene = new ServerScene(catalog.require('grassland'), { now: clock.now });
+  scene.addPlayer({ id: 'player-d', name: '半路松口', slot: 0 });
+
+  const mushroomId = 'elastic-mushroom-01';
+  const initial = scene.createSnapshot().actors.find((actor) => actor.id === mushroomId);
+  const find = () => scene.createSnapshot().actors.find((actor) => actor.id === mushroomId);
+  const player = scene.players.get('player-d');
+  player.x = initial.transform.x - 0.8;
+  player.z = initial.transform.z;
+  player.yaw = Math.PI / 2;
+
+  assert.equal(scene.interactWithActor('player-d', { actorId: mushroomId, sequence: 1 }), true);
+  // 拖一段但不拉断。
+  player.x = initial.transform.x - 1.6;
+  clock.advance(0.05);
+  scene.update();
+  assert.equal(find().elasticDetach.detached, false);
+
+  assert.equal(scene.interactWithActor('player-d', { actorId: mushroomId, sequence: 2 }), true);
+  const cancelled = find();
+  assert.equal(cancelled.elasticTether.holderPlayerId, null);
+  assert.equal(cancelled.elasticDetach.detached, false);
+  assert.equal(cancelled.elasticDetach.carriedByPlayerId, null);
+  // 松开之后它还长在原地，而且可以重新叼。
+  assert.equal(cancelled.interactable.enabled, true);
+  assert.equal(cancelled.transform.x, initial.transform.x);
+  assert.equal(cancelled.transform.z, initial.transform.z);
+  player.x = initial.transform.x - 0.8;
+  assert.equal(scene.interactWithActor('player-d', { actorId: mushroomId, sequence: 3 }), true);
+});
+
+test('嘴里已经叼着一株时，不能再叼另一株', async () => {
+  const clock = createClock();
+  const catalog = await SceneCatalog.load();
+  const scene = new ServerScene(catalog.require('open-world'), { now: clock.now });
+  scene.addPlayer({ id: 'greedy', name: '贪心', slot: 0 });
+  const player = scene.players.get('greedy');
+  const tick = (times) => {
+    for (let index = 0; index < times; index += 1) {
+      clock.advance(0.05);
+      scene.update();
+    }
+  };
+  tick(5);
+
+  const [first, second] = scene.createSnapshot().actors
+    .filter((actor) => actor.archetypeId === 'elastic-mushroom');
+  assert.ok(first && second, '这一片没有生成两株蘑菇');
+
+  player.x = first.transform.x - 0.8;
+  player.z = first.transform.z;
+  player.yaw = Math.PI / 2;
+  tick(1);
+  assert.equal(scene.interactWithActor('greedy', { actorId: first.id, sequence: 1 }), true);
+  assert.equal(
+    pullUntilDetached(scene, clock, 'greedy', first.id, first.transform.x),
+    true,
+  );
+  assert.equal(scene.findCarriedActorId('greedy'), first.id);
+
+  player.x = second.transform.x - 0.8;
+  player.z = second.transform.z;
+  tick(1);
+  assert.equal(
+    scene.interactWithActor('greedy', { actorId: second.id, sequence: 2 }),
+    false,
+    '嘴里有东西还能再叼',
+  );
+
+  // 放下手上这株之后才能叼下一株。
+  assert.equal(scene.interactWithActor('greedy', { actorId: first.id, sequence: 3 }), true);
+  tick(1);
+  assert.equal(scene.interactWithActor('greedy', { actorId: second.id, sequence: 4 }), true);
+});
+
+test('玩家离开房间时，叼着的那株原地落下而不是跟着消失', async () => {
+  const clock = createClock();
+  const catalog = await SceneCatalog.load();
+  const scene = new ServerScene(catalog.require('grassland'), { now: clock.now });
+  scene.addPlayer({ id: 'leaver', name: '要走了', slot: 0 });
+
+  const mushroomId = 'elastic-mushroom-01';
+  const initial = scene.createSnapshot().actors.find((actor) => actor.id === mushroomId);
+  const player = scene.players.get('leaver');
+  player.x = initial.transform.x - 0.8;
+  player.z = initial.transform.z;
+  player.yaw = Math.PI / 2;
+  scene.interactWithActor('leaver', { actorId: mushroomId, sequence: 1 });
+  assert.equal(
+    pullUntilDetached(scene, clock, 'leaver', mushroomId, initial.transform.x),
+    true,
+  );
+  assert.equal(scene.findCarriedActorId('leaver'), mushroomId);
+
+  scene.removePlayer('leaver');
+  const left = scene.createSnapshot().actors.find((actor) => actor.id === mushroomId);
+  assert.ok(left, '玩家离开把蘑菇一起带走了');
+  assert.equal(left.elasticDetach.carriedByPlayerId, null);
+  assert.equal(scene.physics.hasDynamicActor(mushroomId), true, '没有变回自由刚体');
+});
+
+test('放进水里的物件停在水底，不会一直往下掉', async () => {
+  const clock = createClock();
+  const catalog = await SceneCatalog.load();
+  const scene = new ServerScene(catalog.require('open-world'), { now: clock.now });
+  scene.addPlayer({ id: 'diver', name: '丢水里', slot: 0 });
+  const player = scene.players.get('diver');
+  const tick = (times) => {
+    for (let index = 0; index < times; index += 1) {
+      clock.advance(0.05);
+      scene.update();
+    }
+  };
+  tick(5);
+
+  const target = scene.createSnapshot().actors
+    .find((actor) => actor.archetypeId === 'elastic-mushroom');
+  assert.ok(target);
+  player.x = target.transform.x - 0.8;
+  player.z = target.transform.z;
+  player.yaw = Math.PI / 2;
+  tick(1);
+  scene.interactWithActor('diver', { actorId: target.id, sequence: 1 });
+  assert.equal(
+    pullUntilDetached(scene, clock, 'diver', target.id, target.transform.x),
+    true,
+  );
+
+  // 找一处水面走过去放下。
+  let water;
+  for (let radius = 4; radius <= 400 && !water; radius += 4) {
+    for (const [dx, dz] of [[1, 0], [0, 1], [-1, 0], [0, -1], [1, 1], [-1, -1]]) {
+      const x = target.transform.x + dx * radius;
+      const z = target.transform.z + dz * radius;
+      if (scene.isWaterAt(x, z)) { water = { x, z }; break; }
+    }
+  }
+  assert.ok(water, '附近找不到水面');
+  player.x = water.x;
+  player.z = water.z;
+  tick(4);
+  assert.equal(scene.interactWithActor('diver', { actorId: target.id, sequence: 2 }), true);
+
+  tick(80);
+  const settled = scene.createSnapshot().actors.find((actor) => actor.id === target.id);
+  const seaFloor = scene.actorWorld.context.groundHeightAt(settled.transform.x, settled.transform.z);
+  assert.ok(
+    Math.abs(settled.transform.y - seaFloor) < 0.05,
+    `没有停在水底：物件在 ${settled.transform.y.toFixed(2)}，水底在 ${seaFloor.toFixed(2)}`,
   );
 });

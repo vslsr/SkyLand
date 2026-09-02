@@ -269,12 +269,6 @@ export interface ActorArchetypeDefinition {
     };
     elasticDetach?: {
     };
-    mushroomPop?: {
-      forwardImpulse: number;
-      upwardImpulse: number;
-      /** 拔断瞬间绕水平轴的翻滚冲量；缺省则只弹出、落地仍立着。 */
-      spinImpulse?: number;
-    };
     hazard?: {
       radius: number;
       damage: number;

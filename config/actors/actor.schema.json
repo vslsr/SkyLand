@@ -184,16 +184,6 @@
           "additionalProperties": false,
           "properties": {}
         },
-        "mushroomPop": {
-          "type": "object",
-          "additionalProperties": false,
-          "required": ["forwardImpulse", "upwardImpulse"],
-          "properties": {
-            "forwardImpulse": { "type": "number", "minimum": 0, "maximum": 20 },
-            "upwardImpulse": { "type": "number", "minimum": 0, "maximum": 20 },
-            "spinImpulse": { "type": "number", "minimum": 0, "maximum": 20 }
-          }
-        },
         "hazard": {
           "type": "object",
           "additionalProperties": false,

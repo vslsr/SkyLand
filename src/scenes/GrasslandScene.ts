@@ -191,6 +191,7 @@ export class GrasslandScene extends Scene {
       findOwnedActorId: (playerId) => this.renderer.findOwnedActorId(playerId),
       pick: (frame) => this.renderer.pickActorInteraction(frame),
       findNearby: (position) => this.renderer.findNearbyActorInteraction(position),
+      findHeld: (playerId) => this.renderer.findHeldActorInteraction(playerId),
       getInputLabel: (tag) => {
         const control = this.input.getMappedControls(tag)[0];
         return control ? this.inputScheme.getControlLabel(control) : undefined;

@@ -45,7 +45,6 @@ function elasticArchetypeFor(id) {
         mouthForwardOffset: 0.36,
       },
       elasticDetach: {},
-      mushroomPop: { forwardImpulse: 0.55, upwardImpulse: 2.2 },
       dropMotion: {
         gravity: 9.8,
         drag: 1.8,

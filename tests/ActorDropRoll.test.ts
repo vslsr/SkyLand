@@ -20,6 +20,9 @@ import { ThreeRenderScene } from '../src/render/three/ThreeRenderScene';
 import { ActorSnapshotBuffer } from '../src/actors/ActorSnapshotBuffer';
 import { INTERPOLATION_DELAY_MS } from '../shared/networkTuning.mjs';
 import type { SnapshotActor } from '../src/network/protocol';
+import { ActorInteractionController } from '../src/controllers/ActorInteractionController';
+import type { InputSubsystem } from '../src/input/index';
+import type { ActorInteractionCandidate } from '../src/scene/SceneVisualSystem';
 
 const ENVIRONMENT = { fogColor: '#ffffff', fogNear: 20, fogFar: 60 } as const;
 const RENDER = {
@@ -248,4 +251,74 @@ test('拉到最长时菌盖仍然长在菌柄顶端，不会脱开', () => {
     stemTop > rig.restLength * 4.2,
     `没有拉到旧上限之外，用例失去意义：${stemTop.toFixed(2)}m`,
   );
+});
+
+test('手上有蘑菇时，交互键指向它并给出放下/松开提示', () => {
+  const sent: string[] = [];
+  let prompt: string | undefined;
+  let held: ActorInteractionCandidate | undefined;
+  let nearby: ActorInteractionCandidate | undefined;
+  const input = {
+    enabled: true,
+    bind: (_tag: unknown, handler: () => void) => {
+      trigger = handler;
+      return () => undefined;
+    },
+  } as unknown as InputSubsystem;
+  let trigger: () => void = () => undefined;
+  const controller = new ActorInteractionController(input, {
+    getPlayerId: () => 'me',
+    getPlayerPosition: () => ({ x: 0, z: 0 }),
+    findOwnedActorId: () => undefined,
+    pick: () => undefined,
+    findNearby: () => nearby,
+    findHeld: () => held,
+    getInputLabel: () => 'E',
+    setHoveredActorId: () => undefined,
+    sendInteraction: (actorId) => sent.push(actorId),
+    setPrompt: (text) => { prompt = text; },
+  });
+  const frame = {} as never;
+  const candidate = (over: Partial<ActorInteractionCandidate>): ActorInteractionCandidate => ({
+    actorId: 'm1',
+    label: '弹弹菇',
+    action: 'mushroom-bite',
+    carrierActorId: null,
+    holderPlayerId: null,
+    carriedByPlayerId: null,
+    ...over,
+  });
+
+  // 叼在嘴上：提示放下，按键指向它自己。
+  held = candidate({ carriedByPlayerId: 'me' });
+  trigger();
+  controller.update(frame);
+  assert.match(prompt ?? '', /放下/);
+  assert.deepEqual(sent, ['m1']);
+
+  // 拉着还没断：提示松开，按键同样指向它，即使它已经被拖出就近搜索半径。
+  sent.length = 0;
+  held = candidate({ holderPlayerId: 'me' });
+  nearby = undefined;
+  trigger();
+  controller.update(frame);
+  assert.match(prompt ?? '', /松开/);
+  assert.deepEqual(sent, ['m1']);
+
+  // 手上没东西时回到就近拾取，别人叼着的那株按不动。
+  sent.length = 0;
+  held = undefined;
+  nearby = candidate({ actorId: 'm2', holderPlayerId: 'someone-else' });
+  trigger();
+  controller.update(frame);
+  assert.deepEqual(sent, []);
+  assert.match(prompt ?? '', /正被叼住/);
+
+  sent.length = 0;
+  nearby = candidate({ actorId: 'm3' });
+  trigger();
+  controller.update(frame);
+  assert.deepEqual(sent, ['m3']);
+  assert.match(prompt ?? '', /叼住/);
+  controller.dispose();
 });

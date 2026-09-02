@@ -38,7 +38,7 @@ test('ActorCatalog 加载并净化木筏原型', async () => {
   const mushroom = catalog.require('elastic-mushroom');
   assert.equal(mushroom.components.interactable.action, 'mushroom-bite');
   assert.equal(mushroom.components.elasticTether.breakLength, 1.55);
-  assert.equal(mushroom.components.mushroomPop.upwardImpulse, 2.2);
+  assert.equal(mushroom.components.elasticTether.pullDistance, 2.8);
   assert.equal(mushroom.components.dropMotion.restitution, 0.28);
   assert.equal(mushroom.components.render.model, 'line-art-elastic-mushroom');
 

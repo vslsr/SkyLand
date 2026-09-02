@@ -17,7 +17,6 @@ import {
   ElasticTetherComponent,
   ELASTIC_DETACH_COMPONENT,
   ElasticDetachComponent,
-  MushroomPopComponent,
   HAZARD_COMPONENT,
   HazardComponent,
   HEAT_EMITTER_COMPONENT,
@@ -80,10 +79,6 @@ export function createServerActor(spawn, archetype, runtime = {}) {
       ...archetype.components.elasticDetach,
       ...runtime.elasticDetach,
     }));
-    if (archetype.components.mushroomPop) {
-      const pop = actor.addComponent(new MushroomPopComponent(archetype.components.mushroomPop));
-      pop.bind(detachable);
-    }
   }
   if (archetype.components.hazard) actor.addComponent(new HazardComponent(archetype.components.hazard));
   if (archetype.components.temperature) actor.addComponent(new TemperatureComponent(archetype.components.temperature));
@@ -378,6 +373,7 @@ export function createActorSnapshots(world, options = {}) {
       ...(elasticDetach ? {
         elasticDetach: {
           detached: elasticDetach.detached,
+          carriedByPlayerId: elasticDetach.carriedByPlayerId,
           revision: elasticDetach.revision,
           // 脱落后 Transform 的 yaw 不再描述姿态：躺在地上还是立着，由刚体
           // 解算出的四元数决定，所以只有脱落的物件才带这一项。

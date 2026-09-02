@@ -166,6 +166,10 @@ export class SceneRenderer implements GrassInteractionTarget {
     return this.actorSnapshotTarget?.findNearbyInteractableActor(position);
   }
 
+  public findHeldActorInteraction(playerId: string): ActorInteractionCandidate | undefined {
+    return this.actorSnapshotTarget?.findHeldInteractableActor(playerId);
+  }
+
   public setHoveredActorId(actorId?: string): void {
     this.actorSnapshotTarget?.setHoveredActorId(actorId);
   }

@@ -55,6 +55,8 @@ export interface ActorSnapshotTarget {
   findNearbyInteractableActor(
     position: { x: number; z: number },
   ): ActorInteractionCandidate | undefined;
+  /** 这名玩家正拉着或叼着的那一株；它不靠就近搜索，交互键要能直接指向它。 */
+  findHeldInteractableActor(playerId: string): ActorInteractionCandidate | undefined;
   setHoveredActorId(actorId?: string): void;
   setInteractionMarkerActorId(actorId?: string, inputLabel?: string): void;
   getVesselHudState(playerId: string): VesselHudState | undefined;
@@ -70,6 +72,7 @@ export interface ActorInteractionCandidate {
   action: 'cargo-toggle' | 'mushroom-bite' | 'pickup-stack' | 'harvest-prop';
   carrierActorId: string | null;
   holderPlayerId: string | null;
+  carriedByPlayerId: string | null;
   quantity?: number;
 }
 

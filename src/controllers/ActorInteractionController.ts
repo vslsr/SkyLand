@@ -10,6 +10,7 @@ export interface ActorInteractionPort {
   findOwnedActorId(playerId: string): string | undefined;
   pick(frame: CameraFrame): ActorInteractionCandidate | undefined;
   findNearby?(position: { x: number; z: number }): ActorInteractionCandidate | undefined;
+  findHeld?(playerId: string): ActorInteractionCandidate | undefined;
   getInputLabel(tag: TagLike): string | undefined;
   setHoveredActorId(actorId?: string): void;
   setInteractionMarkerActorId?(actorId?: string, inputLabel?: string): void;
@@ -39,11 +40,15 @@ export class ActorInteractionController {
       this.clearSelection();
       return;
     }
+    const playerId = this.port.getPlayerId();
     const playerPosition = this.port.getPlayerPosition?.();
     const usesProximity = playerPosition !== undefined;
-    this.candidate = playerPosition
+    // 手上已经有一株时，交互键说的是「放下」或「松开」，指向的永远是它自己：
+    // 拉着的那株可能已经被拖出就近搜索半径，叼着的那株 interactable 是关的。
+    const held = playerId ? this.port.findHeld?.(playerId) : undefined;
+    this.candidate = held ?? (playerPosition
       ? this.port.findNearby?.(playerPosition)
-      : this.port.pick(frame);
+      : this.port.pick(frame));
     this.port.setHoveredActorId(usesProximity ? undefined : this.candidate?.actorId);
     const worldInteractionLabel = this.port.getInputLabel(PlayerInputTags.WorldInteract);
     this.port.setInteractionMarkerActorId?.(
@@ -52,15 +57,16 @@ export class ActorInteractionController {
         : undefined,
       worldInteractionLabel,
     );
-    const playerId = this.port.getPlayerId();
     const vesselId = playerId ? this.port.findOwnedActorId(playerId) : undefined;
-    const prompt = this.resolvePrompt(this.candidate, vesselId);
+    const prompt = this.resolvePrompt(this.candidate, vesselId, playerId);
     this.port.setPrompt(prompt);
     if (this.interactionRequested && this.candidate) {
       if (this.candidate.action === 'pickup-stack' || this.candidate.action === 'harvest-prop') {
         if (playerId) this.port.sendInteraction(this.candidate.actorId);
       } else if (this.candidate.action === 'mushroom-bite') {
-        if (playerId && !this.candidate.holderPlayerId) {
+        // 手上那一株一律放行：服务端按状态分派成放下或取消。别人手上的不行。
+        const mine = this.candidate === held;
+        if (playerId && (mine || !this.candidate.holderPlayerId)) {
           this.port.sendInteraction(this.candidate.actorId);
         }
       } else if (vesselId) {
@@ -86,6 +92,7 @@ export class ActorInteractionController {
   private resolvePrompt(
     candidate: ActorInteractionCandidate | undefined,
     vesselId: string | undefined,
+    playerId: string | undefined,
   ): string | undefined {
     if (!candidate) return undefined;
     if (candidate.action === 'pickup-stack') {
@@ -102,6 +109,18 @@ export class ActorInteractionController {
       );
     }
     if (candidate.action === 'mushroom-bite') {
+      if (playerId && candidate.carriedByPlayerId === playerId) {
+        return this.withInputLabel(
+          this.port.getInputLabel(PlayerInputTags.WorldInteract),
+          `放下「${candidate.label}」`,
+        );
+      }
+      if (playerId && candidate.holderPlayerId === playerId) {
+        return this.withInputLabel(
+          this.port.getInputLabel(PlayerInputTags.WorldInteract),
+          `松开「${candidate.label}」`,
+        );
+      }
       if (!candidate.holderPlayerId) {
         return this.withInputLabel(
           this.port.getInputLabel(PlayerInputTags.WorldInteract),

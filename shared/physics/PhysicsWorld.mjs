@@ -274,15 +274,14 @@ export class PhysicsWorld {
     return true;
   }
 
-  /** 角冲量与线冲量分开给：弹出方向决定飞向哪，翻滚决定落地时是躺是立。 */
-  applyDynamicActorTorqueImpulse(id, torqueImpulse) {
+
+  setDynamicActorTranslation(id, position) {
     const entry = this.#dynamicActors.get(id);
     if (!entry) return false;
-    entry.body.applyTorqueImpulse({
-      x: finite(torqueImpulse?.x),
-      y: finite(torqueImpulse?.y),
-      z: finite(torqueImpulse?.z),
+    entry.body.setTranslation({
+      x: finite(position?.x), y: finite(position?.y), z: finite(position?.z),
     }, true);
+    this.#queriesDirty = true;
     return true;
   }
 
