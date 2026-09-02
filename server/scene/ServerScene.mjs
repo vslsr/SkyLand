@@ -430,6 +430,13 @@ export class ServerScene {
    */
   dropCarriedActor(player, actor, detachable) {
     if (!detachable.release()) return false;
+    const interactable = actor.getComponent(INTERACTABLE_COMPONENT);
+    // 脱落后的蘑菇仍是可拾取物。叼住期间临时关闭交互，放下或玩家离房时
+    // 必须重新打开，否则下一位（包括重进房间的同一玩家）只能看到却捡不起。
+    if (interactable && !interactable.enabled) {
+      interactable.enabled = true;
+      interactable.revision += 1;
+    }
     const motion = actor.getComponent(DROP_MOTION_COMPONENT);
     const transform = actor.getComponent(TRANSFORM_COMPONENT);
     if (!motion || !transform) return true;
@@ -455,6 +462,18 @@ export class ServerScene {
       },
     });
     this.physics.setDynamicActorVelocity(actor.id, { x: 0, y: 0, z: 0 });
+    return true;
+  }
+
+  /** 把已经脱落、落在地上的蘑菇重新叼起。 */
+  carryDetachedActor(playerId, actor, detachable, interactable) {
+    if (!detachable.detached || detachable.carriedByPlayerId) return false;
+    if (!detachable.carry(playerId)) return false;
+    this.physics.removeDynamicActor(actor.id);
+    if (interactable.enabled) {
+      interactable.enabled = false;
+      interactable.revision += 1;
+    }
     return true;
   }
 
@@ -504,6 +523,11 @@ export class ServerScene {
         targetTransform.z - player.z,
       );
       if (distance > interactable.maximumDistance) return false;
+      if (detachable?.detached) {
+        if (!this.carryDetachedActor(playerId, target, detachable, interactable)) return false;
+        player.actorInteractionSequence = sequence;
+        return true;
+      }
       if (!grabElasticTether(tether, interactable, player, targetTransform)) return false;
       player.actorInteractionSequence = sequence;
       return true;

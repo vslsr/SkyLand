@@ -83,6 +83,7 @@ test('叼住 → 拖拽 → 拔断进嘴 → 放下落地：一整趟交互', as
   const dropX = find().transform.x;
   const dropZ = find().transform.z;
   assert.equal(find().elasticDetach.carriedByPlayerId, null);
+  assert.equal(find().interactable.enabled, true);
   assert.equal(scene.physics.hasDynamicActor(mushroomId), true);
 
   for (let index = 0; index < 100; index += 1) {
@@ -100,7 +101,7 @@ test('叼住 → 拖拽 → 拔断进嘴 → 放下落地：一整趟交互', as
   scene.removePlayer('player-a');
   mushroom = find();
   assert.equal(mushroom.elasticTether.holderPlayerId, null);
-  assert.equal(mushroom.interactable.enabled, false);
+  assert.equal(mushroom.interactable.enabled, true);
 });
 import './initRapier.mjs';
 
@@ -359,7 +360,7 @@ test('嘴里已经叼着一株时，不能再叼另一株', async () => {
   assert.equal(scene.interactWithActor('greedy', { actorId: second.id, sequence: 4 }), true);
 });
 
-test('玩家离开房间时，叼着的那株原地落下而不是跟着消失', async () => {
+test('玩家离开房间时，叼着的那株原地落下，重进后仍可再次叼起', async () => {
   const clock = createClock();
   const catalog = await SceneCatalog.load();
   const scene = new ServerScene(catalog.require('grassland'), { now: clock.now });
@@ -382,7 +383,22 @@ test('玩家离开房间时，叼着的那株原地落下而不是跟着消失',
   const left = scene.createSnapshot().actors.find((actor) => actor.id === mushroomId);
   assert.ok(left, '玩家离开把蘑菇一起带走了');
   assert.equal(left.elasticDetach.carriedByPlayerId, null);
+  assert.equal(left.interactable.enabled, true, '离房放下后没有恢复交互');
   assert.equal(scene.physics.hasDynamicActor(mushroomId), true, '没有变回自由刚体');
+
+  scene.addPlayer({ id: 'returner', name: '回来了', slot: 0 });
+  const returner = scene.players.get('returner');
+  returner.x = left.transform.x - 0.5;
+  returner.z = left.transform.z;
+  assert.equal(
+    scene.interactWithActor('returner', { actorId: mushroomId, sequence: 1 }),
+    true,
+    '重进房间后无法重新叼起脱落的蘑菇',
+  );
+  const pickedUpAgain = scene.createSnapshot().actors.find((actor) => actor.id === mushroomId);
+  assert.equal(pickedUpAgain.elasticDetach.carriedByPlayerId, 'returner');
+  assert.equal(pickedUpAgain.interactable.enabled, false);
+  assert.equal(scene.physics.hasDynamicActor(mushroomId), false, '重新叼起后仍残留动态刚体');
 });
 
 test('放进水里的物件停在水底，不会一直往下掉', async () => {
