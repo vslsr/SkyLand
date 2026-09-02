@@ -15,8 +15,8 @@ export function updateElasticTetherTarget(tether, player) {
 /** 叼取与 interactable 禁用必须作为一个原子状态变化。 */
 export function grabElasticTether(tether, interactable, player, transform) {
   if (tether.holderPlayerId || !interactable.enabled) return false;
-  tether.holderPlayerId = player.id;
   if (!updateElasticTetherTarget(tether, player)) return false;
+  tether.holderPlayerId = player.id;
   // 拖拽行程从这里起算，玩家站多远按的 E 就不再决定还能拖多久。
   tether.grabLength = Math.hypot(
     tether.targetX - transform.x,
