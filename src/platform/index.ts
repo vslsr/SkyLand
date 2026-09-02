@@ -1,4 +1,10 @@
 export {
+  createJobRunner,
+  serveJobs,
+  type JobRunner,
+  type JobRunnerOptions,
+} from './WorkerJobRunner';
+export {
   FrameTimeline,
   formatFrameTimingReport,
   frameTimeline,

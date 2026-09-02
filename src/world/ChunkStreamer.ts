@@ -13,6 +13,11 @@ import {
 import type { CollisionWorld } from '../../shared/collision/index.mjs';
 import type { PhysicsWorld } from '../../shared/physics/PhysicsWorld.mjs';
 import { buildTerrainCollisionMesh } from '../../shared/world/terrainCollisionMesh.mjs';
+import { TERRAIN_GRID } from '../../shared/world/terrainConfig.mjs';
+import {
+  createTerrainCollisionRunner,
+  type TerrainCollisionResult,
+} from './terrainCollisionJob';
 import { simpleCollisionGroupToPhysicsDefinitions } from '../../shared/physics/simpleCollisionToPhysics.mjs';
 import { readChunkColliders } from '../../shared/world/chunkColliders.mjs';
 import {
@@ -28,6 +33,14 @@ import {
   createChunkFillMaterial,
   createChunkGroundFillMaterial,
 } from '../models/chunkMesh';
+
+/**
+ * 同时在途的地形网格请求数。
+ *
+ * 挂载预算是每帧一个，所以只要在途的比它多几个，一趟往返的延迟就被排队掩掉了；
+ * 再多只是让工作线程提前算好一堆随时可能被重新规划掉的 chunk。
+ */
+const TERRAIN_REQUESTS_IN_FLIGHT = 4;
 import { registerChunkTemplates, type ChunkTemplateOptions } from '../models/chunkTemplates';
 import type { SceneUpdateContext, SceneVisualSystem } from '../scene/SceneVisualSystem';
 import type {
@@ -105,7 +118,19 @@ export class ChunkStreamer implements SceneVisualSystem {
   private readonly onChunkUnmounted?: ChunkStreamerOptions['onChunkUnmounted'];
   /** 只保存被动过的 chunk，默认世界仍不占状态内存。 */
   private readonly skipMasks = new Map<string, PropSkipMask>();
+  /** 已规划、还没往工作线程送的。 */
   private pending: PendingChunk[] = [];
+  /**
+   * 在途的地形网格请求：key → requestId。
+   *
+   * 记 id 而不是只记「在途」，是因为地形可以在请求飞在半空时被编辑；
+   * 回来的那份就过期了，得能认出来丢掉。
+   */
+  private readonly requestedTerrain = new Map<string, number>();
+  /** 地形网格已经回来、等着建视图的。挂载预算作用在这一队上。 */
+  private readonly readyChunks: { chunk: PendingChunk; mesh: TerrainCollisionResult }[] = [];
+  private nextTerrainRequestId = 1;
+  private readonly terrainRunner = createTerrainCollisionRunner();
   private generator?: ChunkGenerator;
   private readonly worldSeed: number;
   private readonly cellCodeAt: (globalCellX: number, globalCellZ: number) => number;
@@ -253,6 +278,7 @@ export class ChunkStreamer implements SceneVisualSystem {
       this.pending = plan.load;
     }
 
+    this.pumpTerrainRequests();
     this.drainBuildBudget();
   }
 
@@ -270,6 +296,7 @@ export class ChunkStreamer implements SceneVisualSystem {
     this.waterShoreMaterial?.dispose();
     this.waterSplashMaterial?.dispose();
     this.unsubscribeTerrainPatches();
+    this.terrainRunner.dispose();
     this.fillMaterial.dispose();
     this.groundFillMaterial.dispose();
     this.skipMasks.clear();
@@ -282,28 +309,106 @@ export class ChunkStreamer implements SceneVisualSystem {
     this.clearChunks();
   }
 
-  private drainBuildBudget(): void {
-    let budget = CHUNK_BUILD_BUDGET_PER_FRAME;
-    while (budget > 0) {
+  /**
+   * 把规划出来的 chunk 送去工作线程算地形碰撞网格。
+   *
+   * **网格必须先于视图就位**：那张 trimesh 就是玩家脚下的地面（Rapier 的角色
+   * 控制器直接踩它）。先挂视图再等网格回来，流送边缘会出现「看得见但踩不到」
+   * 的一格，玩家会掉下去。所以异步的这一段整个排在挂载之前。
+   *
+   * 同时在途几个：挂载预算本来就是每帧一个，一趟往返的延迟正好被排队掩掉。
+   */
+  private pumpTerrainRequests(): void {
+    while (this.requestedTerrain.size < TERRAIN_REQUESTS_IN_FLIGHT) {
       const next = this.pending.shift();
       if (!next) return;
-      if (this.views.has(next.key)) continue;
-      if (this.mount(next)) budget -= 1;
+      if (this.views.has(next.key) || this.requestedTerrain.has(next.key)) continue;
+      this.requestTerrain(next);
     }
   }
 
-  private mount(chunk: PendingChunk): boolean {
+  private requestTerrain(chunk: PendingChunk): void {
+    const requestId = this.nextTerrainRequestId;
+    this.nextTerrainRequestId += 1;
+    this.requestedTerrain.set(chunk.key, requestId);
+    // 只收编辑覆盖：程序化底图由工作线程按同一个种子自己推。
+    // 主线程这一步对没编辑过的 chunk 是零成本——绝大多数 chunk 都是。
+    const overrides = frameTimeline.measure(
+      'chunk-terrain-overrides',
+      () => this.collectTerrainOverrides(chunk.chunkX, chunk.chunkZ),
+    );
+    this.terrainRunner
+      .run(
+        {
+          chunkX: chunk.chunkX,
+          chunkZ: chunk.chunkZ,
+          worldSeed: this.worldSeed,
+          overrides,
+        },
+        [overrides.buffer],
+      )
+      .then((mesh) => {
+        // 期间地形被编辑过、或者这块已经被卸载：这份结果作废。
+        if (this.requestedTerrain.get(chunk.key) !== requestId) return;
+        this.requestedTerrain.delete(chunk.key);
+        this.readyChunks.push({ chunk, mesh });
+      })
+      .catch((error: unknown) => {
+        if (this.requestedTerrain.get(chunk.key) === requestId) {
+          this.requestedTerrain.delete(chunk.key);
+        }
+        if (this.disposed) return;
+        // 单个 chunk 算不出来不该拖垮整个场景：放回待办，下次重新规划时再试。
+        console.error(`[world] chunk ${chunk.key} 地形碰撞网格构建失败`, error);
+      });
+  }
+
+  /**
+   * 收集这一窗里的编辑覆盖，摊成 `[globalCellX, globalCellZ, code, ...]`。
+   *
+   * 窗口比一个 chunk 多一行一列（东、北的崖面归本格所有），所以最多跨四个 chunk。
+   * 没被编辑过的 chunk `readChunk` 返回空数组，这条路径因此几乎总是零成本。
+   */
+  private collectTerrainOverrides(chunkX: number, chunkZ: number): Int32Array {
+    const triples: number[] = [];
+    for (const [offsetX, offsetZ] of [[0, 0], [1, 0], [0, 1], [1, 1]] as const) {
+      const neighbourX = chunkX + offsetX;
+      const neighbourZ = chunkZ + offsetZ;
+      const patch = this.terrainPatches.readChunk(neighbourX, neighbourZ);
+      for (let index = 0; index + 1 < patch.length; index += 2) {
+        const localIndex = patch[index];
+        triples.push(
+          neighbourX * TERRAIN_GRID + (localIndex % TERRAIN_GRID),
+          neighbourZ * TERRAIN_GRID + Math.floor(localIndex / TERRAIN_GRID),
+          patch[index + 1],
+        );
+      }
+    }
+    return Int32Array.from(triples);
+  }
+
+  private drainBuildBudget(): void {
+    let budget = CHUNK_BUILD_BUDGET_PER_FRAME;
+    while (budget > 0) {
+      const next = this.readyChunks.shift();
+      if (!next) return;
+      if (this.views.has(next.chunk.key)) continue;
+      if (this.mount(next.chunk, next.mesh)) budget -= 1;
+    }
+  }
+
+  /** `terrainMesh` 省略时就地算——编辑路径走这条，见 `rebuild`。 */
+  private mount(chunk: PendingChunk, terrainMesh?: TerrainCollisionResult): boolean {
     if (!this.generator) return false;
     try {
       const skipMask = this.skipMasks.get(chunk.key);
-      // 这两个阶段分开打点是有目的的：`chunk-gen` 是纯计算，可以整个搬进 worker；
+      // 这两个阶段分开打点是有目的的：`chunk-gen` 是纯计算（只是便宜到不值得搬）；
       // `chunk-view` 建的是 Three 几何，第 3 步之前只能留在主线程。
-      // 「每帧最多建一个 chunk」这条预算到底是被哪一半逼出来的，看这两行的数。
       const data = frameTimeline.measure(
         'chunk-gen',
         () => this.generator!.buildChunk(chunk.chunkX, chunk.chunkZ, skipMask),
       );
-      return this.mountView(chunk, data, skipMask);
+      return this.mountView(chunk, data, skipMask, terrainMesh);
     } catch (error) {
       // 单个 chunk 建不出来不该拖垮整个场景，跳过它，下次重新规划时再试。
       console.error(`[world] chunk ${chunk.key} 构建失败`, error);
@@ -316,6 +421,7 @@ export class ChunkStreamer implements SceneVisualSystem {
     chunk: PendingChunk,
     data: ReturnType<NonNullable<ChunkStreamer['generator']>['buildChunk']>,
     skipMask: ReturnType<ChunkStreamer['skipMasks']['get']>,
+    terrainMesh?: TerrainCollisionResult,
   ): boolean {
     // 三段分开打点：几何体只能留在主线程（Three 对象），碰撞体与草地实例是
     // 纯计算，能不能挪走要先看它们各自值多少。
@@ -358,13 +464,13 @@ export class ChunkStreamer implements SceneVisualSystem {
         simpleCollisionGroupToPhysicsDefinitions(chunkColliders),
       );
     });
-    const terrainMesh = frameTimeline.measure(
+    const mesh = terrainMesh ?? frameTimeline.measure(
       'chunk-terrain-build',
       () => buildTerrainCollisionMesh(chunk.chunkX, chunk.chunkZ, this.cellCodeAt),
     );
     frameTimeline.measure(
       'chunk-terrain-register',
-      () => this.physics?.setChunkCollider(chunk.key, terrainMesh),
+      () => this.physics?.setChunkCollider(chunk.key, mesh),
     );
     this.views.set(chunk.key, view);
     this.root.add(view.root);
@@ -379,6 +485,10 @@ export class ChunkStreamer implements SceneVisualSystem {
   }
 
   private unmount(key: string): void {
+    // 在途请求与已就绪结果都要作废：槽位随时可能被重新规划，留着就会挂上旧地形。
+    this.requestedTerrain.delete(key);
+    const readyIndex = this.readyChunks.findIndex((entry) => entry.chunk.key === key);
+    if (readyIndex >= 0) this.readyChunks.splice(readyIndex, 1);
     const view = this.views.get(key);
     if (!view) return;
     this.views.delete(key);
@@ -390,6 +500,12 @@ export class ChunkStreamer implements SceneVisualSystem {
     view.dispose();
   }
 
+  /**
+   * 地形被编辑：就地重建，不走工作线程。
+   *
+   * 编辑是一次用户动作，等一趟往返会让笔刷有延迟；而流送是后台行为，等得起。
+   * 这条分界也让「异步」只影响一条路径，编辑那条仍然是同步的、好推理的。
+   */
   private rebuild(key: string): void {
     const coordinate = parseChunkKey(key);
     if (!coordinate || !this.views.has(key)) return;
@@ -401,6 +517,8 @@ export class ChunkStreamer implements SceneVisualSystem {
   private clearChunks(): void {
     for (const key of Array.from(this.views.keys())) this.unmount(key);
     this.pending = [];
+    this.requestedTerrain.clear();
+    this.readyChunks.length = 0;
     this.centerX = undefined;
     this.centerZ = undefined;
   }
