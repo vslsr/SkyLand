@@ -18,7 +18,7 @@
 | 第 0.5 步 · 合并两套碰撞 | 未开始 | 见 §0.5b——它不是纯清理，需要单独立项 |
 | 第 1 步 · 剥出 Render World 边界 | **已完成** | `src/render/`、`RenderProxyComponent`、`ActorTransformSystem` |
 | §8.2 · GPU 资源所有权表 | **已完成（最小核心）** | `src/core/assets/AssetOwner.ts`、`src/render/renderAssets.ts` |
-| 第 1.5 步 · 表现 Component 脱离 THREE | 未开始 · **已有棘轮** | 剩 8 个 Component，见 §1.5 |
+| 第 1.5 步 · 表现 Component 脱离 THREE | **进行中** · 棘轮 8 → 5 | 已搬火焰与草地压弯，剩 5 个，见 §1.5 |
 | 第 2 步 · Sim Worker | 未开始 | 见 §2 |
 | 第 3 步 · OffscreenCanvas | 未开始 | 见 §3 |
 | 第 4 步 · 换掉 Three.js | 可无限期推迟 | 见 §4 |
@@ -157,17 +157,41 @@ Sim Worker 就搬不过去**——对象过不了线程边界。所以这一步�
 `tests/RenderSceneBoundary.test.ts` 里有一份豁免清单当棘轮，**只能变短**；
 清单空了，第 2 步的前置条件就满足了。
 
-### 剩余清单（8 个）
+### 剩余清单（5 个，起点是 8）
 
 | Component | 持有 | 跨边界要送的数据 |
 | --- | --- | --- |
 | `InteractionMarkerComponent` | 自绘标记 + 朝向相机的四元数 | 标签字符串、可见性、锚点高度 |
 | `TemperatureMarkerComponent` | 同上 | 温度值、可见性、锚点 |
-| `FireVisualComponent` | `LineArtFireVisualRig` | 目标强度（一个 f32） |
 | `GuidePathVisualComponent` | `GuidePath` 整条线 | **变长**：路径点 + 两个 revision |
-| `HybridSlimeVisualComponent` / `PbfSlimeVisualComponent` | 蒙皮 rig，`BufferAttribute` 直写 | 权威 yaw、移动速度 |
-| `GrassDisplacementComponent` | 只用 `Vector3` / `Vector2` 当临时量，外加一个 `Object3D` 取世界坐标 | 位置回调即可，改动最小 |
+| `HybridSlimeVisualComponent` | 蒙皮 rig，`BufferAttribute` 直写 | 权威 yaw、移动速度 |
 | `SlimeSurfaceDragComponent` | `Raycaster` + 一堆 `Vector3` | 拾取射线；本质是渲染侧的交互 |
+
+已经划掉的三项：
+
+- **`PbfSlimeVisualComponent`（删除）**——连同 `PbfSlimeVisualSystem` 整条 PBF 表现路径不可达：
+  那个 System 从未出现在 `addSystem` 列表里，Component 也只被它自己引用。
+  （`src/slime/pbf/PbfSlimeSimulation.ts` 因此没有引用者了；路线图写明「旧 PBF 求解器仍独立保留」，
+  删不删是产品决定。）
+- **`GrassDisplacementComponent`**——`THREE.Object3D` 换成 `WorldPositionSampler` 回调 + 普通数字。
+- **`FireVisualComponent`**——缩成只剩一个目标强度，动画搬进 `ThreeFireVisual`。
+
+### 定长参数通道（已落地）
+
+火焰立起来的这段通道，剩下四项里的定长参数直接复用：
+
+```text
+ActorTransformSystem      写 transform ─┐
+ActorVisualParamSystem    写 params    ─┼─→ 同一段字节 ─→ publish() ─→ 渲染侧读
+RenderTransformSyncSystem publish + submit                （帧一致，不会撕裂）
+```
+
+- `src/render/RenderVisualParams.ts`：具名下标 + `COUNT`。新增参数在这里加常量，不是往表里塞 key。
+- **参数与 transform 必须同段**：分两个缓冲各自 `publish()` 会撕裂——强度来自第 N 帧、位置来自第 N+1 帧。
+- **每帧写满所有存活槽位**（没有该表现的写 0）。槽位销毁后立刻还给 `freeSlots` 供复用；
+  参数段若只在值变化时写，复用槽位的新 proxy 会读到上一个 proxy 的值。逐帧写满是为了沿用
+  transform 段已有的不变量，而不是另立一条「谁负责清零」的规则。
+- **不要量化**。火焰那对阈值（吸附 0.002、可见 0.01）是一对，塞进 u8 或 f16 会让强度永远吸不到 0。
 
 ### 两条注意
 
@@ -179,7 +203,27 @@ Sim Worker 就搬不过去**——对象过不了线程边界。所以这一步�
    `RenderCommandSink`——它现在只有 `destroyMeshProxy` 一个方法，就是为这件事留的口子。
    单线程下是直接调用，上 worker 之后是往环形缓冲写命令。
 
-建议按 Component 逐个搬，每搬一个从棘轮清单里划掉一个，保持每次提交都是绿的。
+### 顺带修掉的两个真实缺陷
+
+现状调查在两个装配枢纽里翻出来的，与搬迁本身无关但同属这条边界：
+
+- `createReplica` 在 `createMeshProxy` 与 `addActor` 之间会抛（原型声明了 `temperature`
+  却没装上 Component 时），抛出后槽位既不在 `freeSlots` 里也没有 Actor 持有它——泄漏一个
+  挂在场景图上的模型。已包进 `try/finally`。
+- `ClientActorSystem.dispose` 不调用 `renderScene.dispose()`，渲染资源的释放完全依赖
+  「每个 proxy 都恰好有一个活着的 Actor 持有它」这条不变量，而上面那条路径正好破坏它。
+
+### 还没解决的两条
+
+- **`HybridSlimeVisualSystem` 有一条 Render→Game 的反向依赖**：`authorityYaw` 取自
+  `render.root.rotation.y`——也就是 SoA 刚兑现出去的 yaw 又被读回来。上 worker 之后读不到。
+  正确的源是 `TransformComponent.yaw`（父子情况下还要减去父 yaw）。搬这一项时必须一起修。
+- **本地玩家那条路径仍然绕开边界**。`src/player/objectPositionSampler.ts` 是过渡形态：
+  它把 Object3D 挡在了 Actor Component 之外，但闭包本身仍捕获渲染世界的对象——
+  **棘轮变短不等于真的能进 Sim Worker**。真正过边界要等 `PlayerEntity` / `RemotePlayer`
+  也走 `createMeshProxy`。
+
+建议继续按 Component 逐个搬，每搬一个从棘轮清单里划掉一个，保持每次提交都是绿的。
 
 ---
 
