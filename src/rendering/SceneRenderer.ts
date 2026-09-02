@@ -1,32 +1,26 @@
 import * as THREE from 'three';
 import { TERRAIN_CELL_SIZE } from '../../shared/world/terrainConfig.mjs';
-import type { Actor } from '../../shared/actor/Actor.mjs';
 import type { CollisionWorld } from '../../shared/collision/index.mjs';
 import type { CameraFrame } from '../camera/CameraTransform';
-import {
-  type GrassBendImpulse,
-  type GrassInteractionTarget,
-} from '../grass';
+import { type GrassInteractionTarget } from '../grass';
 import { frameTimeline } from '../platform/index';
 import { releaseOwnResources } from '../render/renderAssets';
 import { createLineArtScene } from '../scene/createLineArtScene';
 import type { DayNightVisualTarget } from '../environment/EnvironmentTypes';
 import type { SceneEnvironmentRuntime } from '../materials/createFillMaterial';
 import type {
-  ActorInteractionCandidate,
   ActorSnapshotTarget,
   SceneComposition,
   SceneUpdateContext,
   SceneVisualSystem,
-  VesselHudState,
   WeatherVisualTarget,
 } from '../scene/SceneVisualSystem';
-import type { SnapshotActor, SnapshotPlayer } from '../network/protocol';
 import type { ThreeMeshProxy } from '../render/three/ThreeMeshProxy';
 import type { ThreeRenderScene } from '../render/three/ThreeRenderScene';
 import type { RenderTransformBuffer } from '../render/RenderTransformBuffer';
 import type { SceneBeforeRenderListener } from '../scene/components';
 import type { SceneDefinition } from '../scenes/data/SceneDefinition';
+import type { SceneWorld } from '../scene/SceneWorld';
 import type { TerrainWorld } from '../world/TerrainWorld';
 import type { PhysicsWorld } from '../../shared/physics/PhysicsWorld.mjs';
 import { DEFAULT_WEATHER, type WeatherType } from '../weather/index';
@@ -51,7 +45,7 @@ function disposeScene(scene: THREE.Scene): void {
   scene.traverse(releaseOwnResources);
 }
 
-export class SceneRenderer implements GrassInteractionTarget {
+export class SceneRenderer {
   private readonly renderer: THREE.WebGLRenderer;
   private readonly camera = new THREE.PerspectiveCamera(50, 1, 0.1, 100);
   private scene = createEmptyScene();
@@ -77,7 +71,14 @@ export class SceneRenderer implements GrassInteractionTarget {
   private readonly lookTarget = new THREE.Vector3();
   private readonly beforeRenderListeners = new Set<SceneBeforeRenderListener>();
 
-  public constructor(canvas: HTMLCanvasElement) {
+  /**
+   * `world` 是这张地图**不属于渲染**的那一半（地形、物理、Actor 查询）。
+   *
+   * 场景组合仍然由这个类装配（`loadScene` → `createLineArtScene`），所以换场景时
+   * 由它把玩法那一半交给 `SceneWorld`。第 3 步 canvas 交给渲染线程之后，
+   * 装配会跟着一起搬走，那时这条依赖反过来——但现在先把**接口**拆干净。
+   */
+  public constructor(canvas: HTMLCanvasElement, private readonly world: SceneWorld) {
     this.renderer = new THREE.WebGLRenderer({
       canvas,
       antialias: true,
@@ -125,11 +126,6 @@ export class SceneRenderer implements GrassInteractionTarget {
     this.dynamicWorld.remove(object);
   }
 
-  /** 玩家、场景组件或玩法效果写入当前场景草地的统一入口。 */
-  public applyImpulse(impulse: GrassBendImpulse): void {
-    this.grassInteraction?.applyImpulse(impulse);
-  }
-
   public get grassInteractionTarget(): GrassInteractionTarget | undefined {
     return this.grassInteraction;
   }
@@ -159,114 +155,8 @@ export class SceneRenderer implements GrassInteractionTarget {
     this.updatePhysicsDebug();
   }
 
-  public syncActors(
-    snapshots: readonly SnapshotActor[],
-    players: readonly SnapshotPlayer[],
-    serverTime: number,
-  ): void {
-    this.actorSnapshotTarget?.syncSnapshots(snapshots, serverTime, undefined, players);
-  }
-
-  public getActor(actorId: string): Actor | undefined {
-    return this.actorSnapshotTarget?.getActor(actorId);
-  }
-
-  /** Actor 在渲染世界里的 proxy；Actor 自身只持有 proxyId。 */
   public getActorRenderProxy(actorId: string): ThreeMeshProxy | undefined {
     return this.actorSnapshotTarget?.getActorRenderProxy(actorId);
-  }
-
-  public findOwnedActorId(playerId: string): string | undefined {
-    return this.actorSnapshotTarget?.findOwnedActorId(playerId);
-  }
-
-  public findControllableActorId(): string | undefined {
-    return this.actorSnapshotTarget?.findControllableActorId();
-  }
-
-  public pickActorInteraction(frame: CameraFrame): ActorInteractionCandidate | undefined {
-    return this.actorSnapshotTarget?.pickInteractableActor(
-      frame.position,
-      frame.axes.forward,
-    );
-  }
-
-  public findNearbyActorInteraction(
-    position: { x: number; z: number },
-  ): ActorInteractionCandidate | undefined {
-    return this.actorSnapshotTarget?.findNearbyInteractableActor(position);
-  }
-
-  public findHeldActorInteraction(playerId: string): ActorInteractionCandidate | undefined {
-    return this.actorSnapshotTarget?.findHeldInteractableActor(playerId);
-  }
-
-  public setHoveredActorId(actorId?: string): void {
-    this.actorSnapshotTarget?.setHoveredActorId(actorId);
-  }
-
-  public setInteractionMarkerActorId(actorId?: string, inputLabel?: string): void {
-    this.actorSnapshotTarget?.setInteractionMarkerActorId(actorId, inputLabel);
-  }
-
-  public getVesselHudState(playerId: string): VesselHudState | undefined {
-    return this.actorSnapshotTarget?.getVesselHudState(playerId);
-  }
-
-  public sampleGroundHeight(x: number, z: number): number {
-    return this.terrainWorld?.sampleGroundHeight(x, z) ?? 0;
-  }
-
-  /** 当前场景任意来源的地形 patch 通知。 */
-  public onTerrainChanged(listener: () => void): () => void {
-    return this.terrainWorld?.subscribe(listener) ?? (() => undefined);
-  }
-
-  public samplePlayerHeight(x: number, z: number, buoyancyDraft?: number): number {
-    if (this.terrainWorld) return this.terrainWorld.sampleMovementHeight(x, z, buoyancyDraft);
-    return this.fixedWaterWorld && Number.isFinite(buoyancyDraft)
-      ? this.fixedWaterLevel - Math.max(0, Number(buoyancyDraft))
-      : 0;
-  }
-
-  public getPhysicsWorld(): PhysicsWorld | undefined {
-    return this.physicsWorld;
-  }
-
-  public isWaterAt(x: number, z: number): boolean {
-    return this.terrainWorld?.isWaterAt(x, z) ?? this.fixedWaterWorld;
-  }
-
-  public raycastGround(
-    origin: readonly [number, number, number],
-    direction: readonly [number, number, number],
-  ): { x: number; y: number; z: number } | undefined {
-    return this.terrainWorld?.raycast(origin, direction);
-  }
-
-  /** 射线命中的地形格。UI 用它决定高亮哪一格、点下去改哪一格。 */
-  public pickTerrainCell(
-    origin: readonly [number, number, number],
-    direction: readonly [number, number, number],
-  ): { cellX: number; cellZ: number } | undefined {
-    const hit = this.terrainWorld?.raycast(origin, direction);
-    if (!hit) return undefined;
-    return {
-      cellX: Math.floor(hit.x / TERRAIN_CELL_SIZE),
-      cellZ: Math.floor(hit.z / TERRAIN_CELL_SIZE),
-    };
-  }
-
-  /**
-   * 写入服务端确认过的地形覆盖。patch store 的订阅者会据此重建受影响的 chunk。
-   * 客户端不做本地预测，所以这是覆盖层唯一的写入口。
-   */
-  public applyTerrainPatches(
-    cells: readonly { cellX: number; cellZ: number; code: number }[],
-  ): void {
-    const terrain = this.terrainWorld;
-    if (!terrain) return;
-    for (const cell of cells) terrain.setCellCode(cell.cellX, cell.cellZ, cell.code);
   }
 
   /** 高亮一格地形；传 undefined 收起高亮。 */
@@ -288,19 +178,6 @@ export class SceneRenderer implements GrassInteractionTarget {
       centerZ,
     );
     this.terrainHighlight.visible = true;
-  }
-
-  /**
-   * 第三人称相机悬臂的探针：从角色到期望机位扫掠一个球，返回最早的命中位置
-   * （线段参数 0–1，没挡住就是 1）。查询走 CAMERA 层，所以树冠这类
-   * 「不挡走路但挡镜头」的体积也会被算进去。
-   */
-  public sweepCameraProbe(
-    start: readonly [number, number, number],
-    end: readonly [number, number, number],
-    radius: number,
-  ): number {
-    return this.physicsWorld?.castCameraSphere(start, end, radius) ?? 1;
   }
 
   public setSimpleCollisionVisible(visible: boolean): void {
@@ -369,6 +246,7 @@ export class SceneRenderer implements GrassInteractionTarget {
     this.fixedWaterWorld = false;
     this.fixedWaterLevel = 0;
     this.replaceScene({ scene: createEmptyScene(), visualSystems: [] });
+    this.world.clear();
   }
 
   private replaceScene(composition: SceneComposition): void {
@@ -386,6 +264,10 @@ export class SceneRenderer implements GrassInteractionTarget {
     this.sceneEnvironmentRuntime = composition.environmentRuntime;
     this.grassInteraction = composition.grassInteraction;
     this.actorSnapshotTarget = composition.actorSnapshotTarget;
+    this.world.adopt(composition, {
+      fixedWaterWorld: this.fixedWaterWorld,
+      fixedWaterLevel: this.fixedWaterLevel,
+    });
     this.renderWorldHandle = composition.renderScene && composition.renderTransforms
       ? { scene: composition.renderScene, transforms: composition.renderTransforms }
       : undefined;

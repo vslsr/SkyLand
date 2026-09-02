@@ -50,7 +50,7 @@ export class AbilityLabSceneComponent implements SceneRuntimeComponent {
 
   private syncTarget(): void {
     if (!this.active) return;
-    const target = this.context.renderer.getActor(this.definition.targetActorId);
+    const target = this.context.world.getActor(this.definition.targetActorId);
     if (target === this.boundTarget) return;
     this.controller.deactivate();
     this.boundTarget = undefined;

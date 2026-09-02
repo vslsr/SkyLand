@@ -24,6 +24,7 @@ import { PlayerEntity } from '../player/PlayerEntity';
 import { SlimeSurfaceDragController } from '../controllers/SlimeSurfaceDragController';
 import { RemotePlayerGroup } from '../player/RemotePlayerGroup';
 import { SceneRenderer } from '../rendering/SceneRenderer';
+import { SceneWorld } from '../scene/SceneWorld';
 import { createSceneRuntimeComponent, SceneComponentHost } from '../scene/components';
 import { INPUT_SEND_INTERVAL_SECONDS } from '../../shared/networkTuning.mjs';
 import { PICKUP_DROP_COMPONENT, type PickupDropComponent } from '../../shared/actor/index.mjs';
@@ -53,6 +54,7 @@ export class GrasslandScene extends Scene {
   private readonly input: InputSubsystem;
   private readonly virtualControls: VirtualControls;
   private readonly renderer: SceneRenderer;
+  private readonly world: SceneWorld;
   private readonly sceneComponents = new SceneComponentHost(createSceneRuntimeComponent);
   private readonly flyController: FlyController;
   private readonly controls: SceneControlRouter;
@@ -164,8 +166,10 @@ export class GrasslandScene extends Scene {
       this.refreshDebugMenuShortcut();
       this.hud.refreshInputPrompt();
     });
-    this.renderer = new SceneRenderer(options.canvas);
-    this.remotePlayers = new RemotePlayerGroup(this.renderer);
+    // 场景的两半:渲染核心与玩法查询。第 3 步搬 canvas 时只有前者跟着走。
+    this.world = new SceneWorld();
+    this.renderer = new SceneRenderer(options.canvas, this.world);
+    this.remotePlayers = new RemotePlayerGroup(this.world);
     this.flyController = new FlyController(options.canvas, {
       position: [0, 4.2, 13.5],
       yaw: 0,
@@ -176,14 +180,14 @@ export class GrasslandScene extends Scene {
     this.controls = new SceneControlRouter(this.flyController);
     this.vesselControls = new VesselControlController(this.input, {
       getPlayerId: () => this.joinedRoom?.player.id,
-      findOwnedActorId: (playerId) => this.renderer.findOwnedActorId(playerId),
-      findControllableActorId: () => this.renderer.findControllableActorId(),
+      findOwnedActorId: (playerId) => this.world.findOwnedActorId(playerId),
+      findControllableActorId: () => this.world.findControllableActorId(),
       requestControl: (actorId) => this.roomClient.requestActorControl(actorId),
       releaseControl: (actorId) => this.roomClient.releaseActorControl(actorId),
       sendInput: (actorId, input) => { this.roomClient.sendVesselInput(actorId, input); },
     });
     this.terrainEdits = new TerrainEditController(this.input, {
-      pickCell: (frame) => this.renderer.pickTerrainCell(frame.position, frame.axes.forward),
+      pickCell: (frame) => this.world.pickTerrainCell(frame.position, frame.axes.forward),
       highlight: (cell) => this.renderer.setTerrainHighlight(cell),
       sendEdit: (cellX, cellZ, operation) => {
         this.roomClient.editTerrain(cellX, cellZ, operation);
@@ -192,17 +196,17 @@ export class GrasslandScene extends Scene {
     this.actorInteractions = new ActorInteractionController(this.input, {
       getPlayerId: () => this.joinedRoom?.player.id,
       getPlayerPosition: () => this.player?.controller.position,
-      findOwnedActorId: (playerId) => this.renderer.findOwnedActorId(playerId),
-      pick: (frame) => this.renderer.pickActorInteraction(frame),
-      findNearby: (position) => this.renderer.findNearbyActorInteraction(position),
-      findHeld: (playerId) => this.renderer.findHeldActorInteraction(playerId),
+      findOwnedActorId: (playerId) => this.world.findOwnedActorId(playerId),
+      pick: (frame) => this.world.pickActorInteraction(frame),
+      findNearby: (position) => this.world.findNearbyActorInteraction(position),
+      findHeld: (playerId) => this.world.findHeldActorInteraction(playerId),
       getInputLabel: (tag) => {
         const control = this.input.getMappedControls(tag)[0];
         return control ? this.inputScheme.getControlLabel(control) : undefined;
       },
-      setHoveredActorId: (actorId) => this.renderer.setHoveredActorId(actorId),
+      setHoveredActorId: (actorId) => this.world.setHoveredActorId(actorId),
       setInteractionMarkerActorId: (actorId, inputLabel) => {
-        this.renderer.setInteractionMarkerActorId(actorId, inputLabel);
+        this.world.setInteractionMarkerActorId(actorId, inputLabel);
       },
       sendInteraction: (actorId) => { this.roomClient.interactWithActor(actorId); },
       setPrompt: (text) => this.hud.setInteractionPrompt(text),
@@ -232,7 +236,7 @@ export class GrasslandScene extends Scene {
       this.playerTransformLog?.handleStatus(status);
     });
     // 地形覆盖只从服务端来：客户端不做本地预测，避免脚下的世界两端不一致。
-    this.roomClient.onTerrainPatch((cells) => this.renderer.applyTerrainPatches(cells));
+    this.roomClient.onTerrainPatch((cells) => this.world.applyTerrainPatches(cells));
     this.roomClient.onDisconnect(() => {
       this.playerTransformLog?.handleDisconnect();
       this.handleDisconnect();
@@ -267,7 +271,7 @@ export class GrasslandScene extends Scene {
       this.actorInteractions.update(this.controls.frame);
     }
     const playerId = this.joinedRoom?.player.id;
-    this.hud.setVesselStatus(playerId ? this.renderer.getVesselHudState(playerId) : undefined);
+    this.hud.setVesselStatus(playerId ? this.world.getVesselHudState(playerId) : undefined);
     this.sceneComponents.update(deltaSeconds, elapsedSeconds);
     this.sendPlayerInput(deltaSeconds);
   }
@@ -397,6 +401,7 @@ export class GrasslandScene extends Scene {
       uiRoot: this.baseLayer,
       input: this.input,
       renderer: this.renderer,
+      world: this.world,
       player: this.player,
       worldSeed: joined.room.worldSeed,
       getFocus: () => this.currentFocus(),
@@ -463,7 +468,7 @@ export class GrasslandScene extends Scene {
     this.renderer.setTimeOfDay(snapshot.timeOfDay, snapshot.dayLength);
     this.debugMenuPage?.setWeather(snapshot.weather);
     this.debugMenuPage?.setTimeOfDay(snapshot.timeOfDay, snapshot.dayLength);
-    this.renderer.syncActors(snapshot.actors, snapshot.players, snapshot.serverTime);
+    this.world.syncActors(snapshot.actors, snapshot.players, snapshot.serverTime);
     this.snapshots.push(snapshot);
 
     // 自己的那条不走插值：直接交给和解，把预测拉回服务器的结论。
@@ -565,7 +570,7 @@ export class GrasslandScene extends Scene {
       spawn,
       this.input,
       bounds,
-      this.renderer,
+      this.world,
       archetype,
       renderWorld,
       topDownCameraOffset,

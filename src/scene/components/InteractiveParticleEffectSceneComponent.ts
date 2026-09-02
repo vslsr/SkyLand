@@ -137,10 +137,10 @@ export class InteractiveParticleEffectSceneComponent implements SceneRuntimeComp
       spawnChance,
       this.definition.clusterRadius,
     );
-    if (!point || this.context.renderer.isWaterAt(point.x, point.z)) return;
+    if (!point || this.context.world.isWaterAt(point.x, point.z)) return;
     this.mountCluster(
       chunk.key,
-      [point.x, this.context.renderer.sampleGroundHeight(point.x, point.z), point.z],
+      [point.x, this.context.world.sampleGroundHeight(point.x, point.z), point.z],
       point.particleSeed,
     );
   }
