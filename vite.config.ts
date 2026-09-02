@@ -1,6 +1,15 @@
 import { defineConfig } from 'vite';
 import wasm from 'vite-plugin-wasm';
 
+// 跨源隔离（引擎迁移路线图 第 0 步）：SharedArrayBuffer 与 Emscripten pthreads
+// 只在 crossOriginIsolated 的文档里可用。dev 与 preview 必须和 server/http/
+// crossOriginIsolation.mjs 发同一组头，否则本地开发拿不到线上的能力集。
+const CROSS_ORIGIN_ISOLATION_HEADERS = {
+  'Cross-Origin-Opener-Policy': 'same-origin',
+  'Cross-Origin-Embedder-Policy': 'require-corp',
+  'Cross-Origin-Resource-Policy': 'same-origin',
+};
+
 export default defineConfig({
   plugins: [wasm()],
   build: {
@@ -12,6 +21,7 @@ export default defineConfig({
     host: '0.0.0.0',
     port: 5180,
     strictPort: true,
+    headers: CROSS_ORIGIN_ISOLATION_HEADERS,
     proxy: {
       '/api': 'http://127.0.0.1:3090',
       '/ws': {
@@ -24,5 +34,6 @@ export default defineConfig({
     host: '0.0.0.0',
     port: 4180,
     strictPort: true,
+    headers: CROSS_ORIGIN_ISOLATION_HEADERS,
   },
 });

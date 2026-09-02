@@ -1,6 +1,7 @@
 import './style.css';
 import './ui/scrollbars.css';
 import { initRapier } from '../shared/physics/RapierRuntime.mjs';
+import { describeThreadingCapabilities } from './platform/index';
 import { GrasslandScene } from './scenes/GrasslandScene';
 import { SceneManager } from './scenes/SceneManager';
 
@@ -29,6 +30,10 @@ function showStartupError(error: unknown): void {
     : `客户端初始化失败：${errorMessage(error)}`;
   errorPanel.hidden = false;
 }
+
+// 隔离没打开是个静默降级：SharedArrayBuffer 会直接不可用，而不是报错。
+// 把能力集打在启动日志的第一行，线上排查时不必再去猜响应头。
+console.info(`SkyLand platform: ${describeThreadingCapabilities()}`);
 
 try {
   await initRapier(() => import('@dimforge/rapier3d'));
