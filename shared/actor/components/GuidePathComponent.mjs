@@ -2,6 +2,7 @@ import { ActorComponent } from '../ActorComponent.mjs';
 
 export const GUIDE_PATH_COMPONENT = 'guide-path';
 export const MAX_GUIDE_PATH_POINTS = 32;
+export const MAX_GUIDE_LOCAL_COORDINATE = 64;
 
 /**
  * 服务器权威的引导路径状态。点坐标位于 Actor 局部空间；客户端只复制并渲染。
@@ -12,7 +13,6 @@ export class GuidePathComponent extends ActorComponent {
     super(GUIDE_PATH_COMPONENT);
     this.curve = definition.curve ?? 'catmull-rom';
     this.lineColor = definition.lineColor ?? '#fffdf4';
-    this.shadowColor = definition.shadowColor ?? '#544b43';
     this.markerColor = definition.markerColor ?? '#fffdf4';
     this.lineWidth = definition.lineWidth ?? 5;
     this.dashLength = definition.dashLength ?? 0.8;
@@ -122,8 +122,14 @@ function copyPoints(points) {
     throw new RangeError(`GuidePath 需要 2-${MAX_GUIDE_PATH_POINTS} 个路点`);
   }
   return points.map((point, index) => {
-    if (!Array.isArray(point) || point.length !== 3 || !point.every(Number.isFinite)) {
-      throw new TypeError(`GuidePath points[${index}] 必须包含 3 个有限数字`);
+    if (
+      !Array.isArray(point)
+      || point.length !== 3
+      || !point.every((value) => Number.isFinite(value) && Math.abs(value) <= MAX_GUIDE_LOCAL_COORDINATE)
+    ) {
+      throw new TypeError(
+        `GuidePath points[${index}] 必须包含 3 个绝对值不超过 ${MAX_GUIDE_LOCAL_COORDINATE} 的有限数字`,
+      );
     }
     return [point[0], point[1], point[2]];
   });

@@ -137,6 +137,7 @@
 | --- | --- |
 | `mouse-grass-interaction` | 注册当前场景独占的鼠标压草输入和渲染前更新。要求 `renderer.content.grass` 为 `true`；不加载它的场景仍保留玩家脚步、远端玩家和玩法效果对草地的通用交互。 |
 | `ability-lab` | 加载能力实验室输入、模拟、瞬时特效与 UI 流程。要求 `camera.mode` 为 `topdown`，并通过必填的 `targetActorId` 引用同场景内使用 `line-art-training-dummy` 渲染模型的 Actor；训练假人和周边持久道具必须放在 `actors`，不能由场景组件私自创建。 |
+| `interactive-particle-effect` | 客户端本地交互粒子效果。固定场景配置 `position`；流式场景改配 `worldGeneration.spawnChance`，每个 chunk 确定性生成至多一个候选点。`clusterRadius` 是每个点周围落叶团的圆形半径，不是单片落叶大小。 |
 
 示例：
 

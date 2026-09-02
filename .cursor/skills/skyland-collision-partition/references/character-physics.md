@@ -123,11 +123,12 @@ SkyLand 有一米高的垂直块边，Rapier heightfield 无法表达，必须�
 
 水面不是 Rapier 实体地面。进入水面支持时：
 
+- 吃水深度由各 Actor 原型的 `minimumDraft` / `maximumDraft` 独立配置；玩家可以深嵌水面，木筏可以保持较浅吃水；
 - 临时关闭 snap-to-ground，避免海岸低地把玩家从水面向下吸；
 - 由权威/预测双方提供同定义的 `buoyancyHeight` 作为弹簧目标，而不是直接写 Y；
 - 岸边进入水域先按重力下落，浸入吃水线后由共享固定步的弹簧/阻尼改变 `vy`；
 - 接近稳定吃水线时才获得可跳跃的浮力支撑状态；
-- 波浪 bobbing 只能写 `visualRoot`，不能进入玩法吃水线或逻辑 Transform。
+- 波浪 bobbing 按输入 tick 调制浮力弹簧目标，客户端预测/回放与服务端必须使用同一相位；角色逻辑 Y 仍只能由固定步物理积分产生，禁止直接写入。
 
 ## Collider authoring 与 layer
 

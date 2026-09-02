@@ -25,7 +25,6 @@
             "points",
             "curve",
             "lineColor",
-            "shadowColor",
             "markerColor",
             "lineWidth",
             "dashLength",
@@ -46,12 +45,11 @@
                 "type": "array",
                 "minItems": 3,
                 "maxItems": 3,
-                "items": { "type": "number" }
+                "items": { "type": "number", "minimum": -64, "maximum": 64 }
               }
             },
             "curve": { "enum": ["linear", "catmull-rom"] },
             "lineColor": { "$ref": "#/$defs/color" },
-            "shadowColor": { "$ref": "#/$defs/color" },
             "markerColor": { "$ref": "#/$defs/color" },
             "lineWidth": { "type": "number", "minimum": 1, "maximum": 20 },
             "dashLength": { "type": "number", "minimum": 0.05, "maximum": 8 },
@@ -178,6 +176,20 @@
             "breakLength": { "type": "number", "exclusiveMinimum": 0, "maximum": 12 },
             "mouthHeight": { "type": "number", "minimum": 0, "maximum": 3 },
             "mouthForwardOffset": { "type": "number", "minimum": 0, "maximum": 2 }
+          }
+        },
+        "elasticDetach": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {}
+        },
+        "mushroomPop": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["forwardImpulse", "upwardImpulse"],
+          "properties": {
+            "forwardImpulse": { "type": "number", "minimum": 0, "maximum": 20 },
+            "upwardImpulse": { "type": "number", "minimum": 0, "maximum": 20 }
           }
         },
         "hazard": {

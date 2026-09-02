@@ -2,6 +2,8 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   ActorWorld,
+  DROP_MOTION_COMPONENT,
+  ELASTIC_DETACH_COMPONENT,
   ELASTIC_TETHER_COMPONENT,
   GENERATED_PROP_COMPONENT,
   REPLICATED_COMPONENT,
@@ -41,6 +43,16 @@ function elasticArchetypeFor(id) {
         breakLength: 2.65,
         mouthHeight: 0.3,
         mouthForwardOffset: 0.36,
+      },
+      elasticDetach: {},
+      mushroomPop: { forwardImpulse: 0.55, upwardImpulse: 2.2 },
+      dropMotion: {
+        gravity: 9.8,
+        drag: 1.8,
+        groundDrag: 7,
+        restitution: 0.28,
+        radius: 0.28,
+        settleSpeed: 0.1,
       },
       replicationPolicy: { mode: 'aoi', radiusChunks: 2 },
     },
@@ -142,6 +154,34 @@ test('蘑菇放置记录生成完整复制的弹性 Actor，而不是本地派�
     assert.equal(actor.hasComponents(GENERATED_PROP_COMPONENT), false);
     assert.equal(actor.hasComponents(REPLICATED_COMPONENT), true);
   }
+});
+
+test('脱离的流式蘑菇跨 chunk 卸载重载后保持落点与脱离状态', () => {
+  const { world, props } = createManager(
+    [elasticArchetypeFor('elastic-mushroom')],
+    { mushroom: variants(['elastic-mushroom']) },
+  );
+  props.ensureAround(0, 0);
+  const mushroom = world.query(ELASTIC_TETHER_COMPONENT)[0];
+  assert.ok(mushroom);
+  const id = mushroom.id;
+  const identity = parseGeneratedPropId(id);
+  const transform = mushroom.requireComponent('transform');
+  transform.setWorldTransform([transform.x + 1.25, transform.y + 0.2, transform.z - 0.75]);
+  mushroom.requireComponent(ELASTIC_DETACH_COMPONENT).markDetached();
+  const motion = mushroom.requireComponent(DROP_MOTION_COMPONENT);
+  motion.velocityX = 0.4;
+  motion.velocityY = -0.2;
+
+  props.sync([{ x: CHUNK_SIZE * 20, z: CHUNK_SIZE * 20 }]);
+  assert.equal(world.getActor(id), undefined);
+  props.ensureAround(identity.chunkX * CHUNK_SIZE, identity.chunkZ * CHUNK_SIZE);
+  const restored = world.getActor(id);
+  assert.ok(restored);
+  assert.equal(restored.requireComponent(ELASTIC_DETACH_COMPONENT).detached, true);
+  assert.equal(restored.requireComponent('interactable').enabled, false);
+  assert.equal(restored.requireComponent('transform').x, transform.x);
+  assert.equal(restored.requireComponent(DROP_MOTION_COMPONENT).velocityX, 0.4);
 });
 
 test('同一种树按世界种子和权重稳定混合多个原型', () => {

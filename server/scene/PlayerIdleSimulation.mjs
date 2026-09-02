@@ -4,11 +4,7 @@ import {
 } from '../../shared/networkTuning.mjs';
 
 /** 补步用的中性输入：不移动、不冲刺、不跳，只让重力和碰撞继续生效。 */
-const NEUTRAL_INPUT = Object.freeze({
-  move: Object.freeze({ x: 0, z: 0 }),
-  sprint: false,
-  jump: false,
-});
+const NEUTRAL_MOVE = Object.freeze({ x: 0, z: 0 });
 
 /** 单个 tick 最多替一名玩家补的固定步数，防止长时间静默后一次补几百步。 */
 export const MAXIMUM_IDLE_CATCH_UP_STEPS = 6;
@@ -46,11 +42,14 @@ export class PlayerIdleSimulation {
     this.preparePlayer = options.preparePlayer;
     this.idleTimeoutMs = options.idleTimeoutMs ?? MOVEMENT_IDLE_TIMEOUT_MS;
     this.maximumCatchUpSteps = Math.max(1, options.maximumCatchUpSteps ?? MAXIMUM_IDLE_CATCH_UP_STEPS);
+    // 补步是每 tick 的热路径，复用同一个输入对象，不逐步分配。
+    this.input = { move: NEUTRAL_MOVE, sprint: false, jump: false, tick: 0 };
   }
 
-  /** 收到真实输入后清空补步余量，避免同一段时间被模拟两次。 */
+  /** 收到真实输入后清空补步余量与代发的 tick，避免同一段时间被模拟两次。 */
   reset(player) {
     player.idleStepAccumulator = 0;
+    player.idleStepTick = 0;
   }
 
   /**
@@ -84,7 +83,15 @@ export class PlayerIdleSimulation {
       // 玩法系统可能直接改过 Transform；和输入包一样，先让刚体回到同一份
       // characterState 上，否则这一批补步会从旧位置出发。
       this.preparePlayer?.(player);
-      for (let index = 0; index < count; index += 1) this.stepPlayer(player, NEUTRAL_INPUT);
+      // 浮力等按 tick 取时间的效果需要一条连续的步号；补步接着客户端最后一条
+      // 确认的 tick 往下发，收到真实输入时再由 reset 交还给客户端的序列。
+      let tick = Math.max(player.idleStepTick ?? 0, player.ackTick ?? 0);
+      for (let index = 0; index < count; index += 1) {
+        tick += 1;
+        this.input.tick = tick;
+        this.stepPlayer(player, this.input);
+      }
+      player.idleStepTick = tick;
       stepped += count;
     }
     return stepped;

@@ -47,6 +47,12 @@ test('Player InputAction、InputConfig、Context 与设备提示来自同一份 
   );
   assert.equal(
     PlayerInputSchemeDefinition.inputMappingContexts[0].mappings.find((mapping) => (
+      mapping.id === 'Jump.Touch.Button'
+    ))?.control,
+    'Virtual.JumpButton',
+  );
+  assert.equal(
+    PlayerInputSchemeDefinition.inputMappingContexts[0].mappings.find((mapping) => (
       mapping.id === 'Move.Keyboard.Up'
     ))?.control,
     'Keyboard.KeyW',
@@ -102,8 +108,12 @@ test('Player InputAction、InputConfig、Context 与设备提示来自同一份 
   const runtime = createPlayerInputScheme({ storage: null });
   assert.equal(runtime.getControlLabel('Keyboard.KeyE'), 'E');
   assert.equal(runtime.getControlLabel('Virtual.WorldInteractButton'), 'ACT');
+  assert.equal(runtime.getControlLabel('Virtual.JumpButton'), 'JUMP');
   assert.equal(runtime.getControlLabel('Gamepad.ButtonNorth'), 'Y');
   assert.match(runtime.getPrompt('topdown', 'keyboardMouse'), /W\/A\/S\/D · 移动/);
+  assert.match(runtime.getPrompt('topdown', 'keyboardMouse'), /左键拖动 · 镜头/);
+  assert.match(runtime.getPrompt('topdown', 'touch'), /拖动屏幕 · 镜头/);
+  assert.match(runtime.getPrompt('topdown', 'touch'), /JUMP · 跳跃/);
   assert.match(runtime.getPrompt('fly', 'gamepad', 'unlocked'), /F 接管木筏/);
 });
 
@@ -195,6 +205,22 @@ test('替换 InputSubsystem Context 后新绑定立即生效且旧绑定失效',
   assert.ok(input.getAxis2D(PlayerInputTags.Move).y > 0);
 });
 
+test('触屏跳跃按钮通过配置映射到 Player Jump', () => {
+  const device = new VirtualInputDevice();
+  const scheme = createPlayerInputScheme({ storage: null });
+  const input = new InputSubsystem({
+    actions: scheme.actions,
+    config: scheme.config,
+    contexts: scheme.contexts,
+    devices: [device],
+  });
+
+  device.setDigital('Virtual.JumpButton', true);
+  input.update();
+
+  assert.equal(input.getDigital(PlayerInputTags.Jump), true);
+});
+
 test('配置解析会拒绝不存在的设备提示 Mapping 引用', () => {
   const broken = JSON.parse(JSON.stringify(PlayerInputSchemeDefinition)) as {
     devicePrompts: { prompts: Array<{ entries?: Array<{ mappingIds?: string[] }> }> };
@@ -212,6 +238,7 @@ test('虚拟摇杆 V2 配置来自 JSON，并拒绝没有 touch Mapping 的控�
       'Virtual.SprintButton',
       'Virtual.InteractButton',
       'Virtual.DodgeButton',
+      'Virtual.JumpButton',
       'Virtual.WorldInteractButton',
     ],
   );

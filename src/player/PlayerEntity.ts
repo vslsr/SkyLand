@@ -4,6 +4,7 @@ import {
   BuoyancyComponent,
   PlayerJumpComponent,
   PlayerMovementComponent,
+  sampleBuoyancyBobOffset,
 } from '../../shared/actor/index.mjs';
 import {
   GrassDisplacementComponent,
@@ -38,7 +39,10 @@ import {
 } from '../../shared/abilities/playerMovementEffects.mjs';
 import type { PhysicsWorld } from '../../shared/physics/PhysicsWorld.mjs';
 import type { PlayerInputStep } from '../network/protocol';
-import { MAXIMUM_PENDING_INPUT_STEPS } from '../../shared/networkTuning.mjs';
+import {
+  MAXIMUM_PENDING_INPUT_STEPS,
+  SIMULATION_STEP_SECONDS,
+} from '../../shared/networkTuning.mjs';
 
 export interface PlayerTransformDebugState {
   logic: { x: number; y: number; z: number };
@@ -157,14 +161,21 @@ export class PlayerEntity extends Actor {
         ) ?? false,
       ),
       resolveWalkSpeed: () => this.waterMovementEffect.moveSpeed,
-      resolveBuoyancyHeight: () => (
-        this.isWaterAt?.(this.controller?.position.x ?? spawn.x, this.controller?.position.z ?? spawn.z)
-          ? samplePlayerHeight?.(
-              this.controller?.position.x ?? spawn.x,
-              this.controller?.position.z ?? spawn.z,
-            )
-          : undefined
-      ),
+      resolveBuoyancyHeight: (tick) => {
+        if (!buoyancy) return undefined;
+        const x = this.controller?.position.x ?? spawn.x;
+        const z = this.controller?.position.z ?? spawn.z;
+        if (!this.isWaterAt?.(x, z)) return undefined;
+        const supportY = samplePlayerHeight?.(x, z);
+        if (supportY === undefined) return undefined;
+        const bobOffset = sampleBuoyancyBobOffset(
+          playerId,
+          tick * SIMULATION_STEP_SECONDS,
+          buoyancy.bobAmplitude,
+          buoyancy.bobFrequency,
+        );
+        return Math.max(sampleGroundHeight?.(x, z) ?? -Infinity, supportY + bobOffset);
+      },
       sampleGroundHeight: samplePlayerHeight,
       raycastGround,
       // 玩法 TopDown 保持 Scene 配置的完整构图；树木和建筑可以遮挡，但不能把镜头推近。

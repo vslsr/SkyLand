@@ -54,7 +54,9 @@ export class ActorColliderIndex {
       ) {
         collision?.setDynamic(actor.id, instance);
         const definitions = simpleCollisionInstanceToPhysicsDefinitions(instance);
-        if (definitions.length > 0) physics?.setActorCollider(actor.id, definitions);
+        if (definitions.length > 0 && !physics?.hasDynamicActor(actor.id)) {
+          physics?.setActorCollider(actor.id, definitions);
+        }
         instance.publishedX = transform.x;
         instance.publishedY = transform.y;
         instance.publishedZ = transform.z;
@@ -66,6 +68,7 @@ export class ActorColliderIndex {
       this.instances.delete(actorId);
       collision?.removeDynamic(actorId);
       physics?.removeActorCollider(actorId);
+      physics?.removeDynamicActor(actorId);
     }
   }
 }

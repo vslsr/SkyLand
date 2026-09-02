@@ -34,6 +34,14 @@ export {
   ElasticTetherComponent,
 } from './components/ElasticTetherComponent.mjs';
 export {
+  ELASTIC_DETACH_COMPONENT,
+  ElasticDetachComponent,
+} from './components/ElasticDetachComponent.mjs';
+export {
+  MUSHROOM_POP_COMPONENT,
+  MushroomPopComponent,
+} from './components/MushroomPopComponent.mjs';
+export {
   HAZARD_COMPONENT,
   HazardComponent,
 } from './components/HazardComponent.mjs';
@@ -60,6 +68,7 @@ export {
 export {
   GUIDE_PATH_COMPONENT,
   GuidePathComponent,
+  MAX_GUIDE_LOCAL_COORDINATE,
   MAX_GUIDE_PATH_POINTS,
 } from './components/GuidePathComponent.mjs';
 export {

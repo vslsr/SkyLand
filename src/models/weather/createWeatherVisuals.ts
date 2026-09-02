@@ -5,8 +5,12 @@ export const WEATHER_VISUAL_CAPACITY = Object.freeze({
   activeChunks: 9,
   // 与参考场景相同的固定雨幕容量；只覆盖玩家附近，不随世界面积增长。
   rainDrops: 560,
+  // 固定池：暴雨时循环复用，不为每次落地创建 Object3D 或几何体。
+  rainSplashes: 96,
   snowFlakes: 440,
 });
+
+export const RAIN_SPLASH_SEGMENTS_PER_EFFECT = 12;
 
 export interface WeatherCloudVisual {
   readonly root: THREE.Group;
@@ -23,6 +27,10 @@ export interface WeatherVisuals {
   readonly rainGeometry: THREE.BufferGeometry;
   readonly rainPositions: Float32Array;
   readonly rainMaterial: THREE.LineBasicMaterial;
+  readonly rainSplashLines: THREE.LineSegments;
+  readonly rainSplashGeometry: THREE.BufferGeometry;
+  readonly rainSplashPositions: Float32Array;
+  readonly rainSplashMaterial: THREE.LineBasicMaterial;
   readonly snowLines: THREE.LineSegments;
   readonly snowGeometry: THREE.BufferGeometry;
   readonly snowPositions: Float32Array;
@@ -125,6 +133,33 @@ export function createWeatherVisuals(): WeatherVisuals {
   rainLines.visible = false;
   root.add(rainLines);
 
+  // 一个动态 LineSegments 承载全部落地水花：8 段扩散环 + 4 段溅线。
+  const rainSplashPositions = new Float32Array(
+    WEATHER_VISUAL_CAPACITY.rainSplashes * RAIN_SPLASH_SEGMENTS_PER_EFFECT * 6,
+  );
+  const rainSplashGeometry = new THREE.BufferGeometry();
+  rainSplashGeometry.setAttribute(
+    'position',
+    new THREE.BufferAttribute(rainSplashPositions, 3),
+  );
+  rainSplashGeometry.setDrawRange(0, 0);
+  const rainSplashMaterial = new THREE.LineBasicMaterial({
+    color: 0x6fa4cf,
+    transparent: true,
+    opacity: 0.88,
+    depthWrite: false,
+    fog: false,
+    toneMapped: false,
+  });
+  const rainSplashLines = new THREE.LineSegments(
+    rainSplashGeometry,
+    rainSplashMaterial,
+  );
+  rainSplashLines.name = 'chunk-weather-rain-splashes';
+  rainSplashLines.frustumCulled = false;
+  rainSplashLines.visible = false;
+  root.add(rainSplashLines);
+
   // 三条交叉线组成一片低成本线稿雪花：每片 6 个顶点。
   const snowPositions = new Float32Array(WEATHER_VISUAL_CAPACITY.snowFlakes * 18);
   const snowGeometry = new THREE.BufferGeometry();
@@ -169,6 +204,10 @@ export function createWeatherVisuals(): WeatherVisuals {
     rainGeometry,
     rainPositions,
     rainMaterial,
+    rainSplashLines,
+    rainSplashGeometry,
+    rainSplashPositions,
+    rainSplashMaterial,
     snowLines,
     snowGeometry,
     snowPositions,
@@ -185,6 +224,8 @@ export function createWeatherVisuals(): WeatherVisuals {
       cloudLineMaterial.dispose();
       rainGeometry.dispose();
       rainMaterial.dispose();
+      rainSplashGeometry.dispose();
+      rainSplashMaterial.dispose();
       snowGeometry.dispose();
       snowMaterial.dispose();
       lightningGeometry.dispose();

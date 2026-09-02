@@ -10,9 +10,22 @@
     },
     "elasticTether": {
       "restLength": 0.72,
-      "breakLength": 2.65,
+      "breakLength": 1.55,
       "mouthHeight": 0.3,
       "mouthForwardOffset": 0.36
+    },
+    "elasticDetach": {},
+    "mushroomPop": {
+      "forwardImpulse": 0.55,
+      "upwardImpulse": 2.2
+    },
+    "dropMotion": {
+      "gravity": 9.8,
+      "drag": 1.8,
+      "groundDrag": 7,
+      "restitution": 0.28,
+      "radius": 0.28,
+      "settleSpeed": 0.1
     },
     "replicationPolicy": {
       "mode": "aoi",

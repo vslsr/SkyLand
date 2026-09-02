@@ -218,6 +218,7 @@ export class ServerScene {
         this.chunkColliders.ensureAround(player.x, player.z);
         this.terrainColliders.ensureAround(player.x, player.z);
         this.generatedProps.ensureAround(player.x, player.z);
+        this.actorWorld.context.refreshActorColliders?.();
         this.physics.setCharacterTranslation(player.id, player.characterState);
       },
     });
@@ -237,6 +238,7 @@ export class ServerScene {
     this.chunkColliders.ensureAround(spawn.x, spawn.z);
     this.terrainColliders.ensureAround(spawn.x, spawn.z);
     this.generatedProps.ensureAround(spawn.x, spawn.z);
+    this.actorWorld.context.refreshActorColliders?.();
     const spawnGroundY = this.terrainEnabled
       ? terrainMovementHeight(
           sampleTerrain(this.worldSeed, spawn.x, spawn.z, {}, this.terrainCellCodeAt),
@@ -664,6 +666,7 @@ export class ServerScene {
     this.chunkColliders.ensureAround(player.x, player.z);
     this.terrainColliders.ensureAround(player.x, player.z);
     this.generatedProps.ensureAround(player.x, player.z);
+    this.actorWorld.context.refreshActorColliders?.();
     // 传送、出生修正或玩法系统可能直接更新 Transform；每包开始先把角色刚体
     // 对齐到同一份 characterState，避免视觉/服务端坐标走了而 Rapier 留在旧处。
     this.physics.setCharacterTranslation(player.id, player.characterState);
@@ -710,7 +713,12 @@ export class ServerScene {
     player.syncWaterMovementEffect(this.isWaterAt(player.x, player.z));
     player.characterParams.walkSpeed = player.waterMovementEffect.moveSpeed;
     player.characterParams.buoyancyHeight = this.isWaterAt(player.x, player.z)
-      ? this.playerSupportHeightAt(player, player.x, player.z, this.now() / 1000)
+      ? this.playerBuoyancyHeightAt(
+          player,
+          player.x,
+          player.z,
+          toFiniteNumber(input.tick) * SIMULATION_STEP_SECONDS,
+        )
       : undefined;
     stepCharacter(
       player.characterState,
@@ -798,16 +806,19 @@ export class ServerScene {
     return this.actorWorld.context.seaLevel - buoyancy.draft;
   }
 
-  playerBuoyancyOffsetAt(player, timeSeconds) {
+  playerBuoyancyHeightAt(player, x, z, timeSeconds) {
     const buoyancy = player.getComponent(BUOYANCY_COMPONENT);
-    return buoyancy && this.isWaterAt(player.x, player.z)
-      ? sampleBuoyancyBobOffset(
-          player.id,
-          timeSeconds,
-          buoyancy.bobAmplitude,
-          buoyancy.bobFrequency,
-        )
-      : 0;
+    const supportY = this.playerSupportHeightAt(player, x, z, timeSeconds);
+    if (!buoyancy || !this.isWaterAt(x, z)) return supportY;
+    const targetY = supportY + sampleBuoyancyBobOffset(
+      player.id,
+      timeSeconds,
+      buoyancy.bobAmplitude,
+      buoyancy.bobFrequency,
+    );
+    if (!this.terrainEnabled) return targetY;
+    const terrain = sampleTerrain(this.worldSeed, x, z, {}, this.terrainCellCodeAt);
+    return Math.max(terrain.groundY, targetY);
   }
 
   /** 按服务端时钟补充固定模拟步预算。 */

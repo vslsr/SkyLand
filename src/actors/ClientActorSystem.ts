@@ -13,6 +13,8 @@ import {
   COMBUSTIBLE_COMPONENT,
   CombustibleComponent,
   DropMotionComponent,
+  ELASTIC_DETACH_COMPONENT,
+  ElasticDetachComponent,
   ELASTIC_TETHER_COMPONENT,
   ElasticTetherComponent,
   HazardComponent,
@@ -657,6 +659,9 @@ export class ClientActorSystem implements SceneVisualSystem {
     if (archetype.components.elasticTether) {
       actor.addComponent(new ElasticTetherComponent(archetype.components.elasticTether));
     }
+    if (archetype.components.elasticDetach) {
+      actor.addComponent(new ElasticDetachComponent(archetype.components.elasticDetach));
+    }
     if (archetype.components.hazard) {
       actor.addComponent(new HazardComponent(archetype.components.hazard));
     }
@@ -827,6 +832,27 @@ export class ClientActorSystem implements SceneVisualSystem {
       tether.targetZ = snapshot.elasticTether.targetZ;
       tether.releaseRevision = snapshot.elasticTether.releaseRevision;
       tether.revision = snapshot.elasticTether.revision;
+    }
+    if (snapshot.elasticDetach) {
+      const detachable = actor.requireComponent(
+        ELASTIC_DETACH_COMPONENT,
+      ) as ElasticDetachComponent;
+      detachable.detached = snapshot.elasticDetach.detached;
+      detachable.revision = snapshot.elasticDetach.revision;
+      if (detachable.detached && !detachable.dropCollisionApplied) {
+        const motion = actor.getComponent('dropMotion') as DropMotionComponent | undefined;
+        if (motion) {
+          (actor.requireComponent(SIMPLE_COLLISION_COMPONENT) as SimpleCollisionComponent)
+            .setDefinition({
+              shape: 'cylinder',
+              halfWidth: motion.radius,
+              halfLength: motion.radius,
+              minimumY: -motion.radius,
+              maximumY: motion.radius,
+            });
+          detachable.dropCollisionApplied = true;
+        }
+      }
     }
     if (snapshot.thermal) {
       const temperature = actor.requireComponent(TEMPERATURE_COMPONENT) as TemperatureComponent;

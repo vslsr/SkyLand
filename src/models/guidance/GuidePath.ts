@@ -9,7 +9,6 @@ export interface GuidePathOptions {
   points: readonly GuidePathPoint[];
   curve?: 'linear' | 'catmull-rom';
   lineColor?: THREE.ColorRepresentation;
-  shadowColor?: THREE.ColorRepresentation;
   markerColor?: THREE.ColorRepresentation;
   lineWidth?: number;
   dashLength?: number;
@@ -20,13 +19,15 @@ export interface GuidePathOptions {
 
 interface MarkerVisual {
   readonly root: THREE.Group;
-  readonly materials: readonly THREE.SpriteMaterial[];
+  readonly material: THREE.SpriteMaterial;
   alpha: number;
   targetAlpha: number;
 }
 
 const DEFAULT_RESOLUTION = new THREE.Vector2(1, 1);
 const MIN_SEGMENT_LENGTH = 0.000_1;
+let sharedMarkerTexture: THREE.DataTexture | undefined;
+let sharedMarkerTextureReferences = 0;
 
 /**
  * 有上限的客户端引导路径表现。CPU/GPU 成本只和最多 64 个路点、256 个采样点有关，
@@ -36,12 +37,10 @@ export class GuidePath {
   public readonly root = new THREE.Group();
   private readonly geometry = new GuidePathGeometry();
   private readonly lineMaterial: THREE.ShaderMaterial;
-  private readonly shadowMaterial: THREE.ShaderMaterial;
   private readonly lineMesh: THREE.Mesh;
-  private readonly shadowMesh: THREE.Mesh;
   private readonly markerTexture: THREE.DataTexture;
   private readonly markerRoot = new THREE.Group();
-  private readonly markers: MarkerVisual[] = [];
+  private readonly marker: MarkerVisual;
   private readonly waypoints: THREE.Vector3[] = [];
   private readonly markerSize: number;
   private elapsedSeconds = 0;
@@ -51,6 +50,8 @@ export class GuidePath {
   private disposed = false;
 
   public constructor(options: GuidePathOptions) {
+    // 在分配 GPU 资源前先校验，避免无效配置抛错时遗留材质或共享纹理引用。
+    validatePathPoints(options.points);
     this.markerSize = Math.max(0.01, options.markerSize ?? 0.55);
     this.lineMaterial = createLineMaterial({
       color: options.lineColor ?? 0xfffdf4,
@@ -58,31 +59,18 @@ export class GuidePath {
       dashLength: options.dashLength ?? 0.8,
       gapLength: options.gapLength ?? 0.55,
       dashSpeed: options.dashSpeed ?? 0.5,
-      dashed: true,
       opacity: 1,
     });
-    this.shadowMaterial = createLineMaterial({
-      color: options.shadowColor ?? 0x544b43,
-      width: (options.lineWidth ?? 5) + 4,
-      dashLength: 1,
-      gapLength: 0,
-      dashSpeed: 0,
-      dashed: false,
-      opacity: 0.2,
-    });
-    this.shadowMaterial.blending = THREE.MultiplyBlending;
-
-    this.shadowMesh = new THREE.Mesh(this.geometry, this.shadowMaterial);
-    this.shadowMesh.name = 'guide-path-shadow';
-    this.shadowMesh.renderOrder = 40;
     this.lineMesh = new THREE.Mesh(this.geometry, this.lineMaterial);
     this.lineMesh.name = 'guide-path-line';
     this.lineMesh.renderOrder = 41;
 
-    this.markerTexture = createRadialGlowTexture();
+    this.markerTexture = acquireMarkerTexture();
+    this.marker = createMarker(this.markerTexture, options.markerColor ?? 0xfffdf4, this.markerSize);
     this.markerRoot.name = 'guide-path-markers';
+    this.markerRoot.add(this.marker.root);
     this.root.name = 'guide-path';
-    this.root.add(this.shadowMesh, this.lineMesh, this.markerRoot);
+    this.root.add(this.lineMesh, this.markerRoot);
     this.setPath(options.points, options.curve ?? 'catmull-rom', options.markerColor ?? 0xfffdf4);
   }
 
@@ -104,9 +92,7 @@ export class GuidePath {
     markerColor: THREE.ColorRepresentation = 0xfffdf4,
   ): void {
     this.assertUsable();
-    if (points.length < 2 || points.length > MAX_GUIDE_WAYPOINTS) {
-      throw new RangeError(`GuidePath 需要 2-${MAX_GUIDE_WAYPOINTS} 个路点`);
-    }
+    validatePathPoints(points);
     this.waypoints.length = 0;
     for (const point of points) {
       const vector = point instanceof THREE.Vector3
@@ -120,7 +106,7 @@ export class GuidePath {
 
     const samples = samplePath(this.waypoints, curve);
     this.geometry.updatePath(samples);
-    this.rebuildMarkers(markerColor);
+    this.marker.material.color.set(markerColor);
     this.reset();
   }
 
@@ -128,7 +114,6 @@ export class GuidePath {
     const safeWidth = Number.isFinite(width) ? Math.max(1, width) : 1;
     const safeHeight = Number.isFinite(height) ? Math.max(1, height) : 1;
     this.lineMaterial.uniforms.uResolution.value.set(safeWidth, safeHeight);
-    this.shadowMaterial.uniforms.uResolution.value.set(safeWidth, safeHeight);
   }
 
   public getCurrentMarkerPosition(target: THREE.Vector3): boolean {
@@ -142,9 +127,13 @@ export class GuidePath {
   public advance(): boolean {
     this.assertUsable();
     if (this.isComplete) return true;
-    this.markers[this.activeMarker].targetAlpha = 0;
+    this.marker.targetAlpha = 0;
     this.activeMarker += 1;
-    if (!this.isComplete) this.markers[this.activeMarker].targetAlpha = 1;
+    if (!this.isComplete) {
+      this.marker.root.position.copy(this.waypoints[this.activeMarker]);
+      this.marker.alpha = 0;
+      this.marker.targetAlpha = 1;
+    }
     this.updateCompletedProgress();
     return this.isComplete;
   }
@@ -155,10 +144,12 @@ export class GuidePath {
     if (!Number.isInteger(index) || index < 0 || index > this.waypoints.length) {
       throw new RangeError(`GuidePath 节点索引必须在 0-${this.waypoints.length} 内`);
     }
-    this.activeMarker = index;
-    for (let markerIndex = 0; markerIndex < this.markers.length; markerIndex += 1) {
-      this.markers[markerIndex].targetAlpha = markerIndex === index ? 1 : 0;
+    if (this.activeMarker !== index) {
+      this.activeMarker = index;
+      this.marker.alpha = 0;
     }
+    this.marker.targetAlpha = this.isComplete ? 0 : 1;
+    if (!this.isComplete) this.marker.root.position.copy(this.waypoints[this.activeMarker]);
     this.updateCompletedProgress();
   }
 
@@ -172,12 +163,10 @@ export class GuidePath {
     this.activeMarker = 0;
     this.elapsedSeconds = 0;
     this.reveal = 0;
-    for (let index = 0; index < this.markers.length; index += 1) {
-      const marker = this.markers[index];
-      marker.alpha = index === 0 ? 1 : 0;
-      marker.targetAlpha = index === 0 ? 1 : 0;
-      this.applyMarkerVisual(marker, 1);
-    }
+    this.marker.root.position.copy(this.waypoints[0]);
+    this.marker.alpha = 1;
+    this.marker.targetAlpha = 1;
+    this.applyMarkerVisual(this.marker, 1);
     this.updateCompletedProgress();
     this.setRevealUniforms(0);
   }
@@ -188,18 +177,12 @@ export class GuidePath {
     this.elapsedSeconds += delta;
     this.reveal = Math.min(1, this.reveal + delta * 1.15);
     this.lineMaterial.uniforms.uTime.value = this.elapsedSeconds;
-    this.shadowMaterial.uniforms.uTime.value = this.elapsedSeconds;
     this.setRevealUniforms(this.reveal);
 
     const response = 1 - Math.exp(-10 * delta);
-    for (let index = 0; index < this.markers.length; index += 1) {
-      const marker = this.markers[index];
-      marker.alpha += (marker.targetAlpha - marker.alpha) * response;
-      const pulse = index === this.activeMarker
-        ? 1 + Math.sin(this.elapsedSeconds * 3.2) * 0.08
-        : 1;
-      this.applyMarkerVisual(marker, pulse);
-    }
+    this.marker.alpha += (this.marker.targetAlpha - this.marker.alpha) * response;
+    const pulse = this.isComplete ? 1 : 1 + Math.sin(this.elapsedSeconds * 3.2) * 0.08;
+    this.applyMarkerVisual(this.marker, pulse);
   }
 
   public dispose(): void {
@@ -208,53 +191,39 @@ export class GuidePath {
     this.root.parent?.remove(this.root);
     this.geometry.dispose();
     this.lineMaterial.dispose();
-    this.shadowMaterial.dispose();
-    this.disposeMarkers();
-    this.markerTexture.dispose();
+    this.marker.material.dispose();
+    releaseMarkerTexture(this.markerTexture);
     this.root.clear();
-  }
-
-  private rebuildMarkers(color: THREE.ColorRepresentation): void {
-    this.disposeMarkers();
-    for (const waypoint of this.waypoints) {
-      const marker = createMarker(this.markerTexture, color, this.markerSize);
-      marker.root.position.copy(waypoint);
-      this.markerRoot.add(marker.root);
-      this.markers.push(marker);
-    }
-  }
-
-  private disposeMarkers(): void {
-    for (const marker of this.markers) {
-      marker.root.parent?.remove(marker.root);
-      for (const material of marker.materials) material.dispose();
-    }
-    this.markers.length = 0;
-    this.markerRoot.clear();
   }
 
   private applyMarkerVisual(marker: MarkerVisual, pulse: number): void {
     marker.root.visible = marker.alpha > 0.001;
     marker.root.scale.setScalar(Math.max(0.001, marker.alpha * pulse));
-    marker.materials[0].opacity = marker.alpha;
-    marker.materials[1].opacity = marker.alpha * 0.58;
-    marker.materials[2].opacity = marker.alpha * 0.2;
+    marker.material.opacity = marker.alpha;
   }
 
   private updateCompletedProgress(): void {
     const denominator = Math.max(1, this.waypoints.length - 1);
     const completed = this.isComplete ? 1 : Math.max(0, this.activeMarker / denominator);
     this.lineMaterial.uniforms.uCompleted.value = completed;
-    this.shadowMaterial.uniforms.uCompleted.value = completed;
   }
 
   private setRevealUniforms(value: number): void {
     this.lineMaterial.uniforms.uReveal.value = value;
-    this.shadowMaterial.uniforms.uReveal.value = value;
   }
 
   private assertUsable(): void {
     if (this.disposed) throw new Error('GuidePath 已释放');
+  }
+}
+
+function validatePathPoints(points: readonly GuidePathPoint[]): void {
+  if (points.length < 2 || points.length > MAX_GUIDE_WAYPOINTS) {
+    throw new RangeError(`GuidePath 需要 2-${MAX_GUIDE_WAYPOINTS} 个路点`);
+  }
+  for (const point of points) {
+    const values = point instanceof THREE.Vector3 ? [point.x, point.y, point.z] : point;
+    if (!values.every(Number.isFinite)) throw new TypeError('GuidePath 路点必须是有限数字');
   }
 }
 
@@ -326,15 +295,15 @@ function createLineMaterial(options: {
   dashLength: number;
   gapLength: number;
   dashSpeed: number;
-  dashed: boolean;
   opacity: number;
 }): THREE.ShaderMaterial {
   return new THREE.ShaderMaterial({
-    name: options.dashed ? 'GuidePathDashedMaterial' : 'GuidePathShadowMaterial',
+    name: 'WayfinderGuidePathMaterial',
     transparent: true,
     depthTest: false,
     depthWrite: false,
     side: THREE.DoubleSide,
+    toneMapped: false,
     extensions: { derivatives: true },
     uniforms: {
       uResolution: { value: DEFAULT_RESOLUTION.clone() },
@@ -344,7 +313,6 @@ function createLineMaterial(options: {
       uDashLength: { value: Math.max(0.001, options.dashLength) },
       uGapLength: { value: Math.max(0, options.gapLength) },
       uDashSpeed: { value: options.dashSpeed },
-      uDashed: { value: options.dashed },
       uTime: { value: 0 },
       uReveal: { value: 0 },
       uCompleted: { value: 0 },
@@ -394,7 +362,6 @@ function createLineMaterial(options: {
       uniform float uDashLength;
       uniform float uGapLength;
       uniform float uDashSpeed;
-      uniform bool uDashed;
       uniform float uTime;
       uniform float uReveal;
       uniform float uCompleted;
@@ -403,7 +370,7 @@ function createLineMaterial(options: {
       void main() {
         if (vDistance.y > uReveal) discard;
         float alpha = uOpacity;
-        if (uDashed && vDistance.y > uCompleted + 0.0001) {
+        if (vDistance.y > uCompleted + 0.0001) {
           float period = max(0.001, uDashLength + uGapLength);
           float cycle = fract((vDistance.x - uTime * uDashSpeed) / period);
           float dashRatio = uDashLength / period;
@@ -425,12 +392,15 @@ function createRadialGlowTexture(size = 64): THREE.DataTexture {
       const dx = (x - center) / center;
       const dy = (y - center) / center;
       const radius = Math.sqrt(dx * dx + dy * dy);
-      const alpha = Math.max(0, Math.min(1, 1 - radius));
+      const haloMask = 1 - THREE.MathUtils.smoothstep(radius, 0.68, 1);
+      const halo = Math.exp(-radius * radius * 3.2) * haloMask;
+      const core = 1 - THREE.MathUtils.smoothstep(radius, 0.02, 0.24);
+      const alpha = Math.max(0, Math.min(1, halo * 0.58 + core));
       const offset = (y * size + x) * 4;
       data[offset] = 255;
       data[offset + 1] = 255;
       data[offset + 2] = 255;
-      data[offset + 3] = Math.round(255 * alpha * alpha);
+      data[offset + 3] = Math.round(255 * alpha);
     }
   }
   const texture = new THREE.DataTexture(data, size, size, THREE.RGBAFormat);
@@ -442,34 +412,41 @@ function createRadialGlowTexture(size = 64): THREE.DataTexture {
   return texture;
 }
 
+/** 所有已加载 GuidePath 共享同一张不可变光晕纹理，最后一个实例释放时才销毁。 */
+function acquireMarkerTexture(): THREE.DataTexture {
+  sharedMarkerTexture ??= createRadialGlowTexture();
+  sharedMarkerTextureReferences += 1;
+  return sharedMarkerTexture;
+}
+
+function releaseMarkerTexture(texture: THREE.DataTexture): void {
+  sharedMarkerTextureReferences = Math.max(0, sharedMarkerTextureReferences - 1);
+  if (sharedMarkerTextureReferences > 0 || sharedMarkerTexture !== texture) return;
+  texture.dispose();
+  sharedMarkerTexture = undefined;
+}
+
 function createMarker(
   texture: THREE.Texture,
   color: THREE.ColorRepresentation,
   size: number,
 ): MarkerVisual {
   const root = new THREE.Group();
-  const layers = [
-    { scale: 0.7, opacity: 1 },
-    { scale: 1.6, opacity: 0.58 },
-    { scale: 3.1, opacity: 0.2 },
-  ];
-  const materials = layers.map((layer, index) => {
-    const material = new THREE.SpriteMaterial({
-      map: texture,
-      color,
-      transparent: true,
-      opacity: layer.opacity,
-      blending: THREE.AdditiveBlending,
-      depthTest: false,
-      depthWrite: false,
-      fog: false,
-    });
-    const sprite = new THREE.Sprite(material);
-    sprite.name = `guide-path-marker-layer-${index}`;
-    sprite.scale.setScalar(size * layer.scale);
-    sprite.renderOrder = 42 + index;
-    root.add(sprite);
-    return material;
+  const material = new THREE.SpriteMaterial({
+    map: texture,
+    color,
+    transparent: true,
+    opacity: 1,
+    blending: THREE.AdditiveBlending,
+    depthTest: false,
+    depthWrite: false,
+    fog: false,
+    toneMapped: false,
   });
-  return { root, materials, alpha: 0, targetAlpha: 0 };
+  const sprite = new THREE.Sprite(material);
+  sprite.name = 'guide-path-wayfinder-marker';
+  sprite.scale.setScalar(size * 3.1);
+  sprite.renderOrder = 42;
+  root.add(sprite);
+  return { root, material, alpha: 0, targetAlpha: 0 };
 }

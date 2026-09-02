@@ -52,15 +52,18 @@
               "type",
               "id",
               "preset",
-              "position",
               "particleCount",
-              "radius",
+              "clusterRadius",
               "seed",
               "fillColor",
               "accentColor",
               "lineColor",
               "interactionRadius",
               "impulseStrength"
+            ],
+            "oneOf": [
+              { "required": ["position"] },
+              { "required": ["worldGeneration"] }
             ],
             "properties": {
               "type": { "const": "interactive-particle-effect" },
@@ -73,7 +76,25 @@
                 "items": { "type": "number" }
               },
               "particleCount": { "type": "integer", "minimum": 16, "maximum": 512 },
-              "radius": { "type": "number", "minimum": 1, "maximum": 32 },
+              "clusterRadius": {
+                "type": "number",
+                "minimum": 1,
+                "maximum": 12,
+                "description": "每个生成点的圆形落叶团半径，不会改变单片落叶大小"
+              },
+              "worldGeneration": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["spawnChance"],
+                "properties": {
+                  "spawnChance": {
+                    "type": "number",
+                    "exclusiveMinimum": 0,
+                    "maximum": 1,
+                    "description": "每个流式 chunk 的候选生成点出现概率"
+                  }
+                }
+              },
               "seed": { "type": "integer", "minimum": 0, "maximum": 4294967295 },
               "fillColor": { "$ref": "#/$defs/color" },
               "accentColor": { "$ref": "#/$defs/color" },
