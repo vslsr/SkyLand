@@ -4,6 +4,7 @@ import type { CollisionWorld } from '../../shared/collision/index.mjs';
 import type { DayNightVisualTarget } from '../environment/EnvironmentTypes';
 import type { SceneEnvironmentRuntime } from '../materials/createFillMaterial';
 import type { GrassInteractionTarget } from '../grass';
+import type { ThreeMeshProxy } from '../render/three/ThreeMeshProxy';
 import type { SnapshotActor } from '../network/protocol';
 import type { ActorFloatState, ActorEventType } from '../network/protocol';
 import type { WeatherType } from '../weather/index';
@@ -39,6 +40,11 @@ export interface WeatherVisualTarget {
 export interface ActorSnapshotTarget {
   syncSnapshots(snapshots: readonly SnapshotActor[], serverTime: number, receivedAt?: number): void;
   getActor(actorId: string): Actor | undefined;
+  /**
+   * 按 Actor id 取渲染世界里的 proxy。Actor 上只有 proxyId，Object3D 住在渲染侧，
+   * 所以还留在客户端的表现代码（能力实验室的目标 rig）经由这里查。
+   */
+  getActorRenderProxy(actorId: string): ThreeMeshProxy | undefined;
   findOwnedActorId(playerId: string): string | undefined;
   findControllableActorId(): string | undefined;
   pickInteractableActor(

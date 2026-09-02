@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import type { ThreeObjectComponent } from '../../actors/components/ThreeObjectComponent';
+import type { ThreeMeshProxy } from '../../render/three/ThreeMeshProxy';
 import { createAbilityLabModel } from '../../models/abilityLab';
 import type { AbilityLabAction, AbilityLabViewState } from './AbilityLabSimulation';
 
@@ -27,7 +27,7 @@ export class AbilityLabVisualSystem {
   private readonly model = createAbilityLabModel();
   private readonly projectiles: AbilityProjectile[] = [];
   private readonly targetPosition = new THREE.Vector3();
-  private targetRender?: ThreeObjectComponent;
+  private targetRender?: ThreeMeshProxy;
   private hitPulse = 0;
   private ragePulse = 0;
 
@@ -35,7 +35,7 @@ export class AbilityLabVisualSystem {
     return this.model.root;
   }
 
-  public bindTarget(targetRender: ThreeObjectComponent): void {
+  public bindTarget(targetRender: ThreeMeshProxy): void {
     if (!targetRender.abilityTargetRig) {
       throw new Error('能力实验室目标 Actor 缺少 abilityTargetRig');
     }

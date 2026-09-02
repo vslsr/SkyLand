@@ -20,6 +20,7 @@ import type {
   WeatherVisualTarget,
 } from '../scene/SceneVisualSystem';
 import type { SnapshotActor } from '../network/protocol';
+import type { ThreeMeshProxy } from '../render/three/ThreeMeshProxy';
 import type { SceneBeforeRenderListener } from '../scene/components';
 import type { SceneDefinition } from '../scenes/data/SceneDefinition';
 import type { TerrainWorld } from '../world/TerrainWorld';
@@ -137,6 +138,11 @@ export class SceneRenderer implements GrassInteractionTarget {
 
   public getActor(actorId: string): Actor | undefined {
     return this.actorSnapshotTarget?.getActor(actorId);
+  }
+
+  /** Actor 在渲染世界里的 proxy；Actor 自身只持有 proxyId。 */
+  public getActorRenderProxy(actorId: string): ThreeMeshProxy | undefined {
+    return this.actorSnapshotTarget?.getActorRenderProxy(actorId);
   }
 
   public findOwnedActorId(playerId: string): string | undefined {

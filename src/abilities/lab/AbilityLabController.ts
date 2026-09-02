@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import type { Actor } from '../../../shared/actor/Actor.mjs';
-import type { ThreeObjectComponent } from '../../actors/components/ThreeObjectComponent';
+import type { ThreeMeshProxy } from '../../render/three/ThreeMeshProxy';
 import { PlayerInputTags, type InputSubsystem } from '../../input/index';
 import { AbilityLabPanel } from '../../ui/AbilityLabPanel';
 import {
@@ -50,7 +50,7 @@ export class AbilityLabController {
     casterActor: Actor,
     casterObject: THREE.Object3D,
     targetActor: Actor,
-    targetRender: ThreeObjectComponent,
+    targetRender: ThreeMeshProxy,
   ): void {
     this.deactivate();
     this.visuals.bindTarget(targetRender);

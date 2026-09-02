@@ -58,7 +58,9 @@ import {
 import { toWorldSeed } from '../../shared/world/worldConfig.mjs';
 import { selectWorldPropVariant } from '../../shared/world/worldPropVariants.mjs';
 import type { FillMaterialEnvironment } from '../materials/createFillMaterial';
-import { createActorVisualModel } from '../models/actors/createActorVisualModel';
+import { RenderTransformBuffer } from '../render/RenderTransformBuffer';
+import type { ThreeMeshProxy } from '../render/three/ThreeMeshProxy';
+import { ThreeRenderScene } from '../render/three/ThreeRenderScene';
 import type { SnapshotActor } from '../network/protocol';
 import type { SceneDefinition } from '../scenes/data/SceneDefinition';
 import type {
@@ -72,14 +74,15 @@ import {
   ReplicationComponent,
 } from './components/ReplicationComponent';
 import {
-  THREE_OBJECT_COMPONENT,
-  ThreeObjectComponent,
-} from './components/ThreeObjectComponent';
+  RENDER_PROXY_COMPONENT,
+  RenderProxyComponent,
+} from './components/RenderProxyComponent';
 import {
   INTERACTION_MARKER_COMPONENT,
   InteractionMarkerComponent,
 } from './components/InteractionMarkerComponent';
 import { ActorTransformSystem } from './systems/ActorTransformSystem';
+import { RenderTransformSyncSystem } from './systems/RenderTransformSyncSystem';
 import { AttachmentVisualSystem } from './systems/AttachmentVisualSystem';
 import { CargoVisualSystem } from './systems/CargoVisualSystem';
 import { WaterBobVisualSystem } from './systems/WaterBobVisualSystem';
@@ -136,6 +139,13 @@ type PropOverrideTarget = (chunkX: number, chunkZ: number, propIndex: number, re
 /** 接收服务端完整 Actor 快照并维护对应的客户端 Replica。 */
 export class ClientActorSystem implements SceneVisualSystem {
   public readonly root = new THREE.Group();
+  /**
+   * Game World 与 Render World 之间那条边界（路线图 §2 / 第 1 步）。
+   * Actor 手上只有 proxyId；Object3D 全部住在 renderScene 里，
+   * 两侧靠 transforms 这段字节通信。
+   */
+  private readonly transforms = new RenderTransformBuffer();
+  private readonly renderScene: ThreeRenderScene;
   private readonly world = new ActorWorld();
   private readonly archetypes: Map<string, SceneDefinition['actorArchetypes'][number]>;
   private readonly snapshots = new ActorSnapshotBuffer();
@@ -161,7 +171,6 @@ export class ClientActorSystem implements SceneVisualSystem {
   private collidersStale = true;
   private hoveredActorId?: string;
   private hoverHelper?: THREE.BoxHelper;
-  private simpleCollisionVisible = false;
   private temperatureVisible = false;
   private readonly generatedPropChunks = new Map<string, Set<string>>();
   private readonly generatedPropStates = new Map<string, PropStateSnapshot>();
@@ -201,22 +210,25 @@ export class ClientActorSystem implements SceneVisualSystem {
     this.physics = options.physics;
     this.highCountBatches = new HighCountActorBatchSystem(options.environment, this.archetypes);
     this.fruit = new GeneratedPropFruitSystem(options.environment, this.archetypes);
+    this.renderScene = new ThreeRenderScene(this.root, options.environment);
     // 客户端不运行 AttachmentSystem：最终世界坐标来自快照插值，不能被
     // localTransform 再次解算覆盖。
-    this.world.addSystem(new ActorTransformSystem(this.root));
+    //
+    // 前两个 System 就是那条边界：ActorTransformSystem 只写 SoA 字节，
+    // RenderTransformSyncSystem 翻面并交给渲染世界。后面所有表现 System 读的都是
+    // 已经摆好位置的 matrixWorld，所以这两个必须排在最前且相邻。
+    this.world.addSystem(new ActorTransformSystem(this.transforms));
+    this.world.addSystem(new RenderTransformSyncSystem(this.transforms, this.renderScene));
     this.world.addSystem(new GuidePathVisualSystem());
-    this.world.addSystem(new HybridSlimeVisualSystem());
+    this.world.addSystem(new HybridSlimeVisualSystem(this.renderScene));
     if (options.definition.renderer.ocean) {
-      this.world.addSystem(new WaterBobVisualSystem(options.definition.renderer.ocean));
-      this.world.addSystem(new CargoVisualSystem(options.definition.renderer.ocean));
+      this.world.addSystem(new WaterBobVisualSystem(this.renderScene, options.definition.renderer.ocean));
+      this.world.addSystem(new CargoVisualSystem(this.renderScene, options.definition.renderer.ocean));
     }
-    this.world.addSystem(new AttachmentVisualSystem());
-    this.world.addSystem(new ElasticTetherVisualSystem());
+    this.world.addSystem(new AttachmentVisualSystem(this.renderScene));
+    this.world.addSystem(new ElasticTetherVisualSystem(this.renderScene));
     this.world.addSystem(new FireVisualSystem());
-    this.environment = options.environment;
   }
-
-  private readonly environment: FillMaterialEnvironment;
 
   public syncSnapshots(
     snapshots: readonly SnapshotActor[],
@@ -381,6 +393,11 @@ export class ClientActorSystem implements SceneVisualSystem {
     return this.world.getActor(actorId) as Actor | undefined;
   }
 
+  public getActorRenderProxy(actorId: string): ThreeMeshProxy | undefined {
+    const actor = this.world.getActor(actorId) as Actor | undefined;
+    return actor ? this.resolveRender(actor) : undefined;
+  }
+
   public findOwnedActorId(playerId: string): string | undefined {
     return (this.world.query(ACTOR_CONTROL_COMPONENT) as Actor[]).find((actor) => (
       (actor.requireComponent(ACTOR_CONTROL_COMPONENT) as ActorControlComponent).ownerPlayerId === playerId
@@ -411,11 +428,8 @@ export class ClientActorSystem implements SceneVisualSystem {
   }
 
   public setSimpleCollisionVisible(visible: boolean): void {
-    this.simpleCollisionVisible = visible;
-    for (const actor of this.world.query(THREE_OBJECT_COMPONENT) as Actor[]) {
-      const render = actor.requireComponent(THREE_OBJECT_COMPONENT) as ThreeObjectComponent;
-      render.setSimpleCollisionVisible(visible);
-    }
+    // 碰撞盒可视化是渲染世界自己的状态：这里不再遍历 Actor。
+    this.renderScene.setSimpleCollisionVisible(visible);
   }
 
   public setGeneratedPropOverrideTarget(target?: PropOverrideTarget): void {
@@ -509,11 +523,12 @@ export class ClientActorSystem implements SceneVisualSystem {
     let nearest: { distance: number; candidate: ActorInteractionCandidate } | undefined;
     for (const actor of this.world.query(
       INTERACTABLE_COMPONENT,
-      THREE_OBJECT_COMPONENT,
+      RENDER_PROXY_COMPONENT,
     ) as Actor[]) {
       const interactable = actor.requireComponent(INTERACTABLE_COMPONENT) as InteractableComponent;
       if (!interactable.enabled) continue;
-      const render = actor.requireComponent(THREE_OBJECT_COMPONENT) as ThreeObjectComponent;
+      const render = this.resolveRender(actor);
+      if (!render) continue;
       render.root.updateWorldMatrix(true, true);
       const hit = this.raycaster.intersectObject(render.root, true)[0];
       if (!hit || (nearest && hit.distance >= nearest.distance)) continue;
@@ -594,7 +609,7 @@ export class ClientActorSystem implements SceneVisualSystem {
     this.disposeHoverHelper();
     this.hoveredActorId = actorId;
     const actor = actorId ? this.world.getActor(actorId) as Actor | undefined : undefined;
-    const render = actor?.getComponent(THREE_OBJECT_COMPONENT) as ThreeObjectComponent | undefined;
+    const render = actor ? this.resolveRender(actor) : undefined;
     if (!render) return;
     render.root.updateWorldMatrix(true, true);
     this.hoverHelper = new THREE.BoxHelper(render.visualRoot, 0x8a6238);
@@ -709,44 +724,22 @@ export class ClientActorSystem implements SceneVisualSystem {
     }
 
     if (!archetype.components.render && archetype.components.guidePath) {
-      const root = new THREE.Group();
-      const visualRoot = new THREE.Group();
-      root.name = `actor-${snapshot.id}-root`;
-      visualRoot.name = `actor-${snapshot.id}-visual`;
-      root.add(visualRoot);
-      const render = new ThreeObjectComponent({
-        root,
-        visualRoot,
-        length: 0,
-        width: 0,
-        simpleCollision: {
-          shape: 'box',
-          centerX: 0,
-          centerZ: 0,
-          halfWidth: 0,
-          halfLength: 0,
-          minimumY: 0,
-          maximumY: 0,
-          supportShape: 'box',
-          supportHalfWidth: 0,
-          supportHalfLength: 0,
-        },
-      });
-      actor.addComponent(render);
-      this.attachGuidePathVisual(actor, render);
-      this.root.add(root);
+      const info = this.renderScene.createMeshProxy({ name: `actor-${snapshot.id}` });
+      actor.addComponent(new RenderProxyComponent(info.id, this.renderScene));
+      this.attachGuidePathVisual(actor);
       this.world.addActor(actor);
       return actor;
     }
     if (!archetype.components.render) throw new Error(`可视 Actor ${archetype.id} 缺少 render`);
-    const model = createActorVisualModel(this.environment, archetype.components.render);
-    model.root.name = `actor-${snapshot.id}-root`;
-    model.visualRoot.name = `actor-${snapshot.id}-visual`;
-    actor.addComponent(new SimpleCollisionComponent(model.simpleCollision));
-    const render = new ThreeObjectComponent(model);
-    render.setSimpleCollisionVisible(this.simpleCollisionVisible);
-    actor.addComponent(render);
-    this.attachGuidePathVisual(actor, render);
+    // 几何由渲染世界自己从配置生成；Game World 只拿回 proxyId 与几个数值。
+    const info = this.renderScene.createMeshProxy({
+      name: `actor-${snapshot.id}`,
+      render: archetype.components.render,
+    });
+    actor.addComponent(new SimpleCollisionComponent(info.simpleCollision));
+    actor.addComponent(new RenderProxyComponent(info.id, this.renderScene));
+    const render = this.renderScene.resolve(info.id) as ThreeMeshProxy;
+    this.attachGuidePathVisual(actor);
     if (
       archetype.components.render.model === 'line-art-pbf-slime'
       && render.pbfSlimeVisualRig
@@ -761,25 +754,27 @@ export class ClientActorSystem implements SceneVisualSystem {
       actor.addComponent(new FireVisualComponent(render.fireVisualRig, emitter?.enabled ? 1 : 0));
     }
     if (archetype.components.interactable) {
-      actor.addComponent(new InteractionMarkerComponent(
-        model.root,
-        render.interactionAnchorY,
-      ));
+      actor.addComponent(new InteractionMarkerComponent(render.root, info.interactionAnchorY));
     }
     if (archetype.components.temperature) {
       const temperature = actor.requireComponent(TEMPERATURE_COMPONENT) as TemperatureComponent;
       const marker = new TemperatureMarkerComponent(
-        model.root,
-        render.simpleCollision.centerX + render.simpleCollision.halfWidth + 0.42,
-        render.interactionAnchorY,
+        render.root,
+        info.simpleCollision.centerX + info.simpleCollision.halfWidth + 0.42,
+        info.interactionAnchorY,
         temperature.temperature,
       );
       marker.setVisible(this.temperatureVisible);
       actor.addComponent(marker);
     }
-    this.root.add(model.root);
     this.world.addActor(actor);
     return actor;
+  }
+
+  /** 渲染侧查找。拾取、悬停高亮这类仍住在客户端的表现代码经由它取 Object3D。 */
+  private resolveRender(actor: Actor): ThreeMeshProxy | undefined {
+    const proxy = actor.getComponent(RENDER_PROXY_COMPONENT) as RenderProxyComponent | undefined;
+    return proxy ? this.renderScene.resolve(proxy.proxyId) : undefined;
   }
 
   private applySnapshot(actor: Actor, snapshot: SnapshotActor): void {
@@ -892,8 +887,6 @@ export class ClientActorSystem implements SceneVisualSystem {
       });
     }
     replication.revision = Math.max(replication.revision, snapshot.revision);
-    const render = actor.getComponent(THREE_OBJECT_COMPONENT) as ThreeObjectComponent | undefined;
-    if (render) render.root.userData.floatState = snapshot.buoyancy?.state;
   }
 
   private disposeHoverHelper(): void {
@@ -976,9 +969,11 @@ export class ClientActorSystem implements SceneVisualSystem {
     throw new Error(`Actor ${snapshot.id} 的快照缺少 archetypeId`);
   }
 
-  private attachGuidePathVisual(actor: Actor, render: ThreeObjectComponent): void {
+  private attachGuidePathVisual(actor: Actor): void {
     const state = actor.getComponent(GUIDE_PATH_COMPONENT) as GuidePathComponent | undefined;
     if (!state) return;
+    const render = this.resolveRender(actor);
+    if (!render) return;
     const visual = new GuidePathVisualComponent(state);
     visual.guide.root.name = `actor-${actor.id}-guide-path`;
     render.visualRoot.add(visual.guide.root);

@@ -12,10 +12,6 @@ import {
   INTERACTION_MARKER_COMPONENT,
   type InteractionMarkerComponent,
 } from '../src/actors/components/InteractionMarkerComponent';
-import {
-  THREE_OBJECT_COMPONENT,
-  type ThreeObjectComponent,
-} from '../src/actors/components/ThreeObjectComponent';
 import { ActorInteractionController } from '../src/controllers/ActorInteractionController';
 import {
   createPlayerInputScheme,
@@ -405,7 +401,7 @@ test('弹性蘑菇 Replica 拉长并在释放后回弹，标记组件始终可�
   }], 1_100);
   now = 1_230;
   for (let index = 0; index < 90; index += 1) system.update(1 / 60, index / 60);
-  const render = actor?.requireComponent(THREE_OBJECT_COMPONENT) as ThreeObjectComponent;
+  const render = system.getActorRenderProxy(actor!.id)!;
   const stretchedScale = render.elasticTetherRig?.stemRoot.scale.y ?? 1;
   assert.ok(stretchedScale > 2);
   const tether = actor?.requireComponent(ELASTIC_TETHER_COMPONENT) as ElasticTetherComponent;

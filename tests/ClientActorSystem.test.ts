@@ -32,9 +32,8 @@ import { DEFAULT_WORLD_SEED, PROP_KIND } from '../shared/world/worldConfig.mjs';
 import { selectWorldPropVariant } from '../shared/world/worldPropVariants.mjs';
 import { ClientActorSystem } from '../src/actors/ClientActorSystem';
 import {
-  THREE_OBJECT_COMPONENT,
-  type ThreeObjectComponent,
-} from '../src/actors/components/ThreeObjectComponent';
+  RENDER_PROXY_COMPONENT,
+} from '../src/actors/components/RenderProxyComponent';
 import {
   FIRE_VISUAL_COMPONENT,
   type FireVisualComponent,
@@ -511,12 +510,14 @@ test('客户端收到快照后才创建 Actor Replica 并应用权威 Component 
   const actor = system.getActor(snapshot.id)!;
   const transform = actor.requireComponent(TRANSFORM_COMPONENT) as TransformComponent;
   const buoyancy = actor.requireComponent(BUOYANCY_COMPONENT) as BuoyancyComponent;
-  const render = actor.requireComponent(THREE_OBJECT_COMPONENT) as ThreeObjectComponent;
+  const render = system.getActorRenderProxy(actor.id)!;
   assert.deepEqual([transform.x, transform.y, transform.z, transform.yaw], [2, 0, -3, 0.4]);
   assert.equal(buoyancy.draft, 0.21);
+  // 渲染世界拿到的是权威 transform 的 f32 镜像（边界上的 SoA 是 Float32Array），
+  // 所以这里按 f32 精度比较；Actor 上的权威值仍然是 f64，见上一行 deepEqual。
   assert.equal(render.root.position.x, 2);
   assert.equal(render.root.position.z, -3);
-  assert.equal(render.root.rotation.y, 0.4);
+  assert.ok(Math.abs(render.root.rotation.y - 0.4) < 1e-6);
   assert.ok(system.root.getObjectByName('actor-demo-raft-01-visual'));
   const collision = actor.requireComponent(SIMPLE_COLLISION_COMPONENT) as SimpleCollisionComponent;
   assert.equal(collision.halfWidth, 1.6);
@@ -548,7 +549,7 @@ test('视觉波动只作用于 VisualRoot，且快照移除会销毁 Replica', (
   system.update(1 / 60, 1.25);
 
   const actor = system.getActor(snapshot.id)!;
-  const render = actor.requireComponent(THREE_OBJECT_COMPONENT) as ThreeObjectComponent;
+  const render = system.getActorRenderProxy(actor.id)!;
   assert.equal(render.root.position.y, snapshot.transform.y);
   assert.ok(Number.isFinite(render.visualRoot.position.y));
   assert.notEqual(render.visualRoot.position.y, render.root.position.y);
@@ -603,14 +604,13 @@ test('能力实验室对象由 Actor 快照创建，训练假人暴露 visualRoo
   system.update(0, 0);
 
   const actor = system.getActor(trainingDummySnapshot.id)!;
-  const render = actor.requireComponent(THREE_OBJECT_COMPONENT) as ThreeObjectComponent;
+  const render = system.getActorRenderProxy(actor.id)!;
   assert.equal(actor.archetypeId, 'training-dummy');
   assert.ok(render.abilityTargetRig);
   assert.equal(render.abilityTargetRig.targetRoot, render.visualRoot);
   assert.equal(render.abilityTargetRig.burningAura.visible, false);
   assert.equal(render.root.position.z, -1.5);
-  const focusRender = system.getActor(focusObeliskSnapshot.id)!
-    .requireComponent(THREE_OBJECT_COMPONENT) as ThreeObjectComponent;
+  const focusRender = system.getActorRenderProxy(focusObeliskSnapshot.id)!;
   assert.ok(focusRender.root.getObjectByName('focus-obelisk-crystal'));
   const plaqueCollision = system.getActor(floorPlaqueSnapshot.id)!
     .requireComponent(SIMPLE_COLLISION_COMPONENT) as SimpleCollisionComponent;
@@ -634,8 +634,8 @@ test('客户端离散恢复父子关系，并只插值子 Actor 的权威世界�
 
   const parent = system.getActor(snapshot.id)!;
   const child = system.getActor(childFrom.id)!;
-  const parentRender = parent.requireComponent(THREE_OBJECT_COMPONENT) as ThreeObjectComponent;
-  const childRender = child.requireComponent(THREE_OBJECT_COMPONENT) as ThreeObjectComponent;
+  const parentRender = system.getActorRenderProxy(parent.id)!;
+  const childRender = system.getActorRenderProxy(child.id)!;
   const childTransform = child.requireComponent(TRANSFORM_COMPONENT) as TransformComponent;
   let childGeometry: THREE.BufferGeometry | undefined;
   childRender.root.traverse((object) => {
@@ -651,10 +651,11 @@ test('客户端离散恢复父子关系，并只插值子 Actor 的权威世界�
   assert.equal(child.parent, parent);
   assert.deepEqual(parent.children, [child]);
   assert.equal(childRender.root.parent, parentRender.root);
-  assert.ok(Math.abs(childRender.root.position.x - 0.72) < 1e-9);
-  assert.ok(Math.abs(childRender.root.position.y - 0.62) < 1e-9);
-  assert.ok(Math.abs(childRender.root.position.z + 0.55) < 1e-9);
-  assert.ok(Math.abs(childRender.root.rotation.y + 0.1) < 1e-9);
+  // 局部坐标由渲染侧从 f32 的父/子世界坐标反算，容差按 f32 取。
+  assert.ok(Math.abs(childRender.root.position.x - 0.72) < 1e-6);
+  assert.ok(Math.abs(childRender.root.position.y - 0.62) < 1e-6);
+  assert.ok(Math.abs(childRender.root.position.z + 0.55) < 1e-6);
+  assert.ok(Math.abs(childRender.root.rotation.y + 0.1) < 1e-6);
   assert.ok(Math.abs(childTransform.x - childFrom.transform.x) < 1e-9);
   assert.ok(
     childRender.attachmentVisualRoot.position.lengthSq() > 1e-9
@@ -666,13 +667,14 @@ test('客户端离散恢复父子关系，并只插值子 Actor 的权威世界�
   system.syncSnapshots([snapshot, childTo], 1_100, 1_100);
   now = 1_170;
   system.update(0, 1.3);
-  assert.ok(Math.abs(childRender.root.position.x - 1.22) < 1e-9);
+  assert.ok(Math.abs(childRender.root.position.x - 1.22) < 1e-6);
   assert.equal(childTransform.localX, 1.72);
   parentRender.root.updateWorldMatrix(true, true);
+  // Three 层级组合出的世界坐标必须等于权威插值结果，容差按 f32 镜像取。
   const childWorld = childRender.root.getWorldPosition(new THREE.Vector3());
-  assert.ok(Math.abs(childWorld.x - childTransform.x) < 1e-9);
-  assert.ok(Math.abs(childWorld.y - childTransform.y) < 1e-9);
-  assert.ok(Math.abs(childWorld.z - childTransform.z) < 1e-9);
+  assert.ok(Math.abs(childWorld.x - childTransform.x) < 1e-6);
+  assert.ok(Math.abs(childWorld.y - childTransform.y) < 1e-6);
+  assert.ok(Math.abs(childWorld.z - childTransform.z) < 1e-6);
 
   // 服务端删除父节点时采用默认策略：子节点解除挂载并保持世界坐标。
   const detached = { ...childTo, parentActorId: null };
@@ -733,7 +735,7 @@ test('客户端按权威燃烧状态显示参考 LineLoop 火焰，稳定篝火�
   system.setTemperatureVisible(true);
   assert.equal(temperatureMarker.visible, true);
   assert.equal(temperatureMarker.label, '20.0 °C');
-  assert.ok(hayActor.requireComponent(THREE_OBJECT_COMPONENT)
+  assert.ok(system.getActorRenderProxy(hayActor.id)!
     .root.getObjectByName('actor-temperature-marker'));
   const camera = new THREE.PerspectiveCamera();
   camera.position.set(3, 4, 7);
@@ -796,7 +798,7 @@ test('混合史莱姆用单球核心与休眠弹簧蒙皮，且不会改写权�
   system.update(0, 0);
 
   const actor = system.getActor(pbfSlime.id)!;
-  const render = actor.requireComponent(THREE_OBJECT_COMPONENT) as ThreeObjectComponent;
+  const render = system.getActorRenderProxy(actor.id)!;
   const visual = actor.requireComponent(
     HYBRID_SLIME_VISUAL_COMPONENT,
   ) as HybridSlimeVisualComponent;
@@ -807,10 +809,14 @@ test('混合史莱姆用单球核心与休眠弹簧蒙皮，且不会改写权�
     system.update(1 / 60, frame / 60);
   }
 
-  assert.deepEqual(
-    [render.root.position.x, render.root.position.y, render.root.position.z, render.root.rotation.y],
-    [1.5, 0, -2.8, 0.2],
-  );
+  for (const [actual, expected] of [
+    [render.root.position.x, 1.5],
+    [render.root.position.y, 0],
+    [render.root.position.z, -2.8],
+    [render.root.rotation.y, 0.2],
+  ]) {
+    assert.ok(Math.abs(actual - expected) < 1e-6, `权威根节点被改写：${actual} ≠ ${expected}`);
+  }
   assert.ok(
     Math.abs(render.root.rotation.y + visual.rig.root.rotation.y) < 1e-9,
     '弹簧外壳应抵消权威 Actor yaw，避免把软体蒙皮整团硬转',
@@ -1013,7 +1019,7 @@ test('无模型 GuidePath Actor 只在快照存在时创建客户端 Three.js �
   const actor = system.getActor(guideSnapshot.id)!;
   const state = actor.requireComponent(GUIDE_PATH_COMPONENT) as GuidePathComponent;
   const visual = actor.requireComponent(GUIDE_PATH_VISUAL_COMPONENT) as GuidePathVisualComponent;
-  const render = actor.requireComponent(THREE_OBJECT_COMPONENT) as ThreeObjectComponent;
+  const render = system.getActorRenderProxy(actor.id)!;
   assert.equal(actor.hasComponents(SIMPLE_COLLISION_COMPONENT), false);
   assert.equal(state.currentPointIndex, 1);
   assert.equal(state.curve, 'linear');
@@ -1621,7 +1627,7 @@ test('高数量物品 Actor 保留交互与碰撞身份，但用批次绘制而�
   system.update(0, 0);
 
   const actor = system.getActor(wood.id)!;
-  assert.equal(actor.getComponent(THREE_OBJECT_COMPONENT), undefined);
+  assert.equal(actor.getComponent(RENDER_PROXY_COMPONENT), undefined);
   assert.equal((actor.requireComponent(ITEM_STACK_COMPONENT) as ItemStackComponent).quantity, 12);
   assert.ok(actor.getComponent(SIMPLE_COLLISION_COMPONENT));
   assert.equal(system.findNearbyInteractableActor({ x: 1, z: 2 })?.quantity, 12);
@@ -1998,7 +2004,7 @@ test('流式树按 Chunk 构造无网格 Actor，偏离态可在无 Transform �
   const actorId = formatGeneratedPropId(PROP_KIND.TREE, -1, 0, propIndex);
   const actor = system.getActor(actorId)!;
   assert.ok(actor);
-  assert.equal(actor.hasComponents(THREE_OBJECT_COMPONENT), false);
+  assert.equal(actor.hasComponents(RENDER_PROXY_COMPONENT), false);
   const transform = actor.requireComponent(TRANSFORM_COMPONENT) as TransformComponent;
   assert.equal(
     system.findNearbyInteractableActor({ x: transform.x + 0.2, z: transform.z })?.actorId,

@@ -7,9 +7,10 @@ import {
   type TransformComponent,
 } from '../../../shared/actor/index.mjs';
 import {
-  THREE_OBJECT_COMPONENT,
-  type ThreeObjectComponent,
-} from '../components/ThreeObjectComponent';
+  RENDER_PROXY_COMPONENT,
+  type RenderProxyComponent,
+} from '../components/RenderProxyComponent';
+import type { ThreeRenderScene } from '../../render/three/ThreeRenderScene';
 
 interface ElasticVisualState {
   tip: THREE.Vector3;
@@ -34,19 +35,22 @@ function stablePhase(id: string): number {
 /** 复制关系只决定目标端点；所有拉伸、摆动和回弹均限制在 visualRoot 子树。 */
 export class ElasticTetherVisualSystem {
   private readonly states = new Map<string, ElasticVisualState>();
+
   private readonly desired = new THREE.Vector3();
   private readonly direction = new THREE.Vector3();
   private readonly rotation = new THREE.Quaternion();
+
+  public constructor(private readonly scene: ThreeRenderScene) {}
 
   public update(world: ActorWorld, deltaSeconds: number, elapsedSeconds: number): void {
     const live = new Set<string>();
     for (const actor of world.query(
       ELASTIC_TETHER_COMPONENT,
       TRANSFORM_COMPONENT,
-      THREE_OBJECT_COMPONENT,
+      RENDER_PROXY_COMPONENT,
     ) as Actor[]) {
-      const render = actor.requireComponent(THREE_OBJECT_COMPONENT) as ThreeObjectComponent;
-      const rig = render.elasticTetherRig;
+      const proxy = actor.requireComponent(RENDER_PROXY_COMPONENT) as RenderProxyComponent;
+      const rig = this.scene.resolve(proxy.proxyId)?.elasticTetherRig;
       if (!rig) continue;
       live.add(actor.id);
       const tether = actor.requireComponent(ELASTIC_TETHER_COMPONENT) as ElasticTetherComponent;
