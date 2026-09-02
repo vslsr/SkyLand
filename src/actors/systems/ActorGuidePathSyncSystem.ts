@@ -3,8 +3,7 @@ import {
   GUIDE_PATH_COMPONENT,
   type GuidePathComponent,
 } from '../../../shared/actor/index.mjs';
-import type { ProxyId } from '../../render/RenderScene';
-import type { ThreeRenderScene } from '../../render/three/ThreeRenderScene';
+import type { ProxyId, RenderCommandSink } from '../../render/RenderScene';
 import {
   RENDER_PROXY_COMPONENT,
   type RenderProxyComponent,
@@ -28,7 +27,7 @@ export class ActorGuidePathSyncSystem {
   private readonly appliedPathRevision = new Map<ProxyId, number>();
   private readonly appliedRevision = new Map<ProxyId, number>();
 
-  public constructor(private readonly scene: ThreeRenderScene) {}
+  public constructor(private readonly commands: RenderCommandSink) {}
 
   public update(world: ActorWorld, _deltaSeconds: number, _elapsedSeconds: number): void {
     const live = new Set<ProxyId>();
@@ -41,7 +40,7 @@ export class ActorGuidePathSyncSystem {
       if (!pathChanged && this.appliedRevision.get(id) === state.revision) continue;
       this.appliedPathRevision.set(id, state.pathRevision);
       this.appliedRevision.set(id, state.revision);
-      this.scene.setGuidePath(id, {
+      this.commands.setGuidePath(id, {
         points: state.points as unknown as ReadonlyArray<readonly [number, number, number]>,
         curve: state.curve,
         markerColor: state.markerColor,

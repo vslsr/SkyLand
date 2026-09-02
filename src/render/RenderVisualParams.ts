@@ -47,5 +47,40 @@ export const PARAM_SLIME_AIRBORNE = 6;
 export const PARAM_SLIME_COLLISION_DISPLACEMENT_X = 7;
 export const PARAM_SLIME_COLLISION_DISPLACEMENT_Z = 8;
 
+/**
+ * 船体波动的静态偏置（第 1.75 步）。波面高度由渲染侧自己采样——浪的公式是渲染
+ * 配置，不是玩法状态；过边界的只有吃水深度和装载造成的静态倾斜。
+ */
+export const PARAM_BUOYANCY_DRAFT = 9;
+export const PARAM_BUOYANCY_STATIC_PITCH = 10;
+export const PARAM_BUOYANCY_STATIC_ROLL = 11;
+
+/**
+ * 弹性拉伸（第 1.75 步）。弹簧积分、拉伸比例与摆动全在渲染侧，
+ * 玩法侧只给「被谁拉到哪儿」和两个状态位。
+ */
+export const PARAM_ELASTIC_DETACHED = 12;
+/** 有人叼着（`holderPlayerId !== null`）。渲染侧只需要知道刚度取哪一档。 */
+export const PARAM_ELASTIC_HELD = 13;
+export const PARAM_ELASTIC_TARGET_X = 14;
+export const PARAM_ELASTIC_TARGET_Y = 15;
+export const PARAM_ELASTIC_TARGET_Z = 16;
+export const PARAM_ELASTIC_DETACH_LENGTH = 17;
+/**
+ * 松手计数。渲染侧只比较「和上一帧一样吗」，不做算术，所以 f32 够用——
+ * 一次会话里它到不了 f32 整数精度的边界（2^24）。
+ */
+export const PARAM_ELASTIC_RELEASE_REVISION = 18;
+
+/**
+ * 脱落物件的刚体姿态（第 1.75 步）。四元数按 0 写入不是单位四元数，
+ * 但渲染侧只在 `detached` 且 `radius > 0` 时才应用它，所以静止槽位的零值到不了。
+ */
+export const PARAM_DROP_RADIUS = 19;
+export const PARAM_DROP_ROTATION_X = 20;
+export const PARAM_DROP_ROTATION_Y = 21;
+export const PARAM_DROP_ROTATION_Z = 22;
+export const PARAM_DROP_ROTATION_W = 23;
+
 /** 每个 proxy 槽位的参数个数。新增参数就在上面加常量并把这里加一。 */
-export const RENDER_VISUAL_PARAM_COUNT = 9;
+export const RENDER_VISUAL_PARAM_COUNT = 24;

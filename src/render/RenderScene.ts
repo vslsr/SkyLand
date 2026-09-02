@@ -66,6 +66,14 @@ export interface MeshProxyDesc {
    * 给定；每帧过边界的只有路点、当前节点与开关。
    */
   readonly guidePath?: GuidePathStyle;
+  /**
+   * 这个 proxy 的 `visualRoot` 由哪种客户端波动驱动。
+   *
+   * 「是船体还是货箱」来自原型（有 buoyancy 还是有 cargo），是 spawn 时的一次性
+   * 事实，所以走 desc；每帧过边界的只有吃水与静态倾斜那三个标量。
+   * 没有海的地图上渲染世界会忽略它。
+   */
+  readonly waterMotion?: 'hull' | 'cargo';
 }
 
 export interface GuidePathStyle {
@@ -132,13 +140,32 @@ export interface MeshProxyInfo {
 }
 
 /**
+ * 引导路径每帧可能变的那部分。**变长**，所以它走命令而不是参数段。
+ *
+ * 路径与索引装在同一条命令里：`GuidePath.setPath` 内部会 `reset()` 把进度归零，
+ * 拆成两条、中间隔一帧的话，玩家会看到引导线闪回起点再跳回去。
+ */
+export interface GuidePathState {
+  readonly points: readonly (readonly [number, number, number])[];
+  readonly curve: 'linear' | 'catmull-rom';
+  readonly markerColor: string;
+  readonly currentPointIndex: number;
+  readonly enabled: boolean;
+}
+
+/**
  * Game World 往 Render World 发的命令。
  *
  * 单线程下它是一次直接调用；上 worker 之后同一个方法变成「往环形缓冲写一条
- * destroy 命令」。持有这个接口的 Component 因此只持有一个命令口，不持有场景。
+ * 命令」。持有这个接口的 System 因此只持有一个命令口，不持有场景。
  */
 export interface RenderCommandSink {
   destroyMeshProxy(id: ProxyId): void;
+  /**
+   * 应用一次引导路径状态。`pathChanged` 由玩法侧按 pathRevision 判断——
+   * 「要不要重铺路径」是发送方的事实，渲染侧只负责应用。
+   */
+  setGuidePath(id: ProxyId, state: GuidePathState, pathChanged: boolean): void;
 }
 
 export interface RenderScene extends RenderCommandSink {

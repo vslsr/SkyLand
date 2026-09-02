@@ -42,7 +42,7 @@ export function createLineArtScene(
   // 而它不是 Replica（实现路径文档 §1.5 的第 1 条注意）。
   const renderWorldRoot = new THREE.Group();
   renderWorldRoot.name = 'render-world';
-  const renderScene = new ThreeRenderScene(renderWorldRoot, environment);
+  const renderScene = new ThreeRenderScene(renderWorldRoot, environment, renderer.ocean);
   const renderTransforms = new RenderTransformBuffer();
   let grassInteraction: GrassInteractionTarget | undefined;
   // Actor 世界总是建，哪怕这张地图一个 Actor 都没有：**渲染世界那次翻面归它管**

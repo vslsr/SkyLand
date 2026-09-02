@@ -81,11 +81,6 @@ import {
 import { ActorTransformSystem } from './systems/ActorTransformSystem';
 import { ActorVisualParamSystem } from './systems/ActorVisualParamSystem';
 import { RenderTransformSyncSystem } from './systems/RenderTransformSyncSystem';
-import { AttachmentVisualSystem } from './systems/AttachmentVisualSystem';
-import { CargoVisualSystem } from './systems/CargoVisualSystem';
-import { WaterBobVisualSystem } from './systems/WaterBobVisualSystem';
-import { ActorDropRollSystem } from './systems/ActorDropRollSystem';
-import { ElasticTetherVisualSystem } from './systems/ElasticTetherVisualSystem';
 import {
   FIRE_VISUAL_COMPONENT,
   FireVisualComponent,
@@ -266,7 +261,11 @@ export class ClientActorSystem implements SceneVisualSystem {
     this.fruit = new GeneratedPropFruitSystem(options.environment, this.archetypes);
     this.transforms = options.transforms ?? new RenderTransformBuffer();
     this.renderScene = options.renderScene
-      ?? new ThreeRenderScene(createActorWorldRoot(), options.environment);
+      ?? new ThreeRenderScene(
+        createActorWorldRoot(),
+        options.environment,
+        options.definition.renderer.ocean,
+      );
     // 客户端不运行 AttachmentSystem：最终世界坐标来自快照插值，不能被
     // localTransform 再次解算覆盖。
     //
@@ -278,14 +277,9 @@ export class ClientActorSystem implements SceneVisualSystem {
     this.world.addSystem(new ActorVisualParamSystem(this.transforms));
     this.world.addSystem(new RenderTransformSyncSystem(this.transforms, this.renderScene));
     this.world.addSystem(new ActorGuidePathSyncSystem(this.renderScene));
-    if (options.definition.renderer.ocean) {
-      this.world.addSystem(new WaterBobVisualSystem(this.renderScene, options.definition.renderer.ocean));
-      this.world.addSystem(new CargoVisualSystem(this.renderScene, options.definition.renderer.ocean));
-    }
-    this.world.addSystem(new AttachmentVisualSystem(this.renderScene));
-    this.world.addSystem(new ElasticTetherVisualSystem(this.renderScene));
-    // 必须排在弹性拉伸之后：脱落物件的姿态由这一步覆盖成刚体朝向。
-    this.world.addSystem(new ActorDropRollSystem(this.renderScene));
+    // 到这里 Actor 世界里就只剩四个 System 了，而且**一个都不 import three**：
+    // 两个写 SoA、一个发命令、一个翻面。船体波动、货箱浮沉、附着继承、弹性拉伸
+    // 与脱落翻滚全部搬进了渲染世界（实现路径文档 §1.75）。
   }
 
   public syncSnapshots(
@@ -851,6 +845,11 @@ export class ClientActorSystem implements SceneVisualSystem {
       interactionMarker: Boolean(archetype.components.interactable),
       temperatureMarker: Boolean(archetype.components.temperature),
       guidePath: guidePathStyle,
+      // 船体和货箱在原型里互斥（有 buoyancy 的没有 cargo，反之亦然），
+      // 所以「哪一种浮动」是一个值而不是两个开关。
+      waterMotion: archetype.components.buoyancy
+        ? 'hull'
+        : (archetype.components.cargo ? 'cargo' : undefined),
     });
     // proxy 已经占了一个槽位，但要到 addActor 之后才由 RenderProxyComponent 的
     // 生命周期负责回收。这中间任何一步抛出（例如原型声明了 temperature 却没装上

@@ -1,11 +1,13 @@
 import * as THREE from 'three';
 import type { FillMaterialEnvironment } from '../../materials/createFillMaterial';
+import type { OceanVisualDefinition } from '../../scenes/data/SceneDefinition';
 import { createActorVisualModel } from '../../models/actors/createActorVisualModel';
 import type { ActorVisualModel } from '../../models/actors/ActorVisualModel';
 import { createPbfSlimeModel } from '../../models/actors/createPbfSlimeModel';
 import { createPlayerSlimeModel, createSlimePalette } from '../../models/playerSlime';
 import {
   NULL_PROXY_ID,
+  type GuidePathState,
   type GuidePathStyle,
   type MeshProxyDesc,
   type MeshProxyInfo,
@@ -23,9 +25,16 @@ import {
 import type { RenderTransform, RenderTransformBuffer } from '../RenderTransformBuffer';
 import { PARAM_SLIME_SPEED, PARAM_TEMPERATURE } from '../RenderVisualParams';
 import { ThreeFireVisual } from './ThreeFireVisual';
-import { ThreeGuidePathVisual, type GuidePathState } from './ThreeGuidePathVisual';
+import { ThreeGuidePathVisual } from './ThreeGuidePathVisual';
 import { ThreeHybridSlimeVisual } from './ThreeHybridSlimeVisual';
+import { ThreeAttachmentVisual } from './ThreeAttachmentVisual';
+import { ThreeDropRollVisual } from './ThreeDropRollVisual';
+import { ThreeElasticTetherVisual } from './ThreeElasticTetherVisual';
 import { ThreeMeshProxy } from './ThreeMeshProxy';
+import {
+  ThreeWaterMotionVisual,
+  type WaterMotionMode,
+} from './ThreeWaterMotionVisual';
 import { ThreeSlimeAnimator } from './ThreeSlimeAnimator';
 import {
   createDefaultSlimeSurfaceDragDefinition,
@@ -109,11 +118,21 @@ export class ThreeRenderScene implements RenderScene {
   private readonly slimeDrags = new Map<ProxyId, ThreeSlimeSurfaceDrag>();
   /** 逐帧复用的参数读出缓冲，避免每个史莱姆每帧分配一个对象。 */
   private readonly slimeMotion: SlimeMotionParams = { ...SLIME_MOTION_AT_REST };
+  /** proxyId → 客户端波面浮动的模式。没有海的地图上这张表永远是空的。 */
+  private readonly waterMotions = new Map<ProxyId, WaterMotionMode>();
+  private readonly waterMotionVisual?: ThreeWaterMotionVisual;
+  /** proxyId → 弹性拉伸 / 脱落翻滚。两者都只有弹性蘑菇那种模型才有。 */
+  private readonly elasticTethers = new Map<ProxyId, ThreeElasticTetherVisual>();
+  private readonly dropRolls = new Map<ProxyId, ThreeDropRollVisual>();
+  private readonly attachmentVisual = new ThreeAttachmentVisual();
 
   public constructor(
     public readonly root: THREE.Group,
     private readonly environment: FillMaterialEnvironment,
-  ) {}
+    ocean?: OceanVisualDefinition,
+  ) {
+    this.waterMotionVisual = ocean ? new ThreeWaterMotionVisual(ocean) : undefined;
+  }
 
   public createMeshProxy(desc: MeshProxyDesc): MeshProxyInfo {
     const model = desc.render
@@ -135,6 +154,18 @@ export class ThreeRenderScene implements RenderScene {
         proxy.id,
         new ThreeHybridSlimeVisual(model.pbfSlimeVisualRig, desc.render),
       );
+    }
+    // 没有海的地图上这两条表现不存在，模式给了也忽略。
+    if (desc.waterMotion && this.waterMotionVisual) {
+      this.waterMotions.set(proxy.id, desc.waterMotion);
+    }
+    // 这两项由模型自己产出的 rig 决定，不需要 desc 再说一遍：只有弹性蘑菇那种
+    // 模型会建出这两套 rig，而它们正是原来那两个 System 会挑中的 Actor。
+    if (model.elasticTetherRig) {
+      this.elasticTethers.set(proxy.id, new ThreeElasticTetherVisual(proxy.id, model.elasticTetherRig));
+    }
+    if (model.dropRollRig) {
+      this.dropRolls.set(proxy.id, new ThreeDropRollVisual(proxy.id, model.dropRollRig));
     }
     return describeProxy(proxy);
   }
@@ -197,6 +228,10 @@ export class ThreeRenderScene implements RenderScene {
     this.slimeDrags.delete(id);
     this.slimeVisuals.delete(id);
     this.slimeAnimators.delete(id);
+    this.waterMotions.delete(id);
+    this.elasticTethers.delete(id);
+    this.dropRolls.delete(id);
+    this.attachmentVisual.forget(id);
     proxy.dispose();
   }
 
@@ -259,6 +294,20 @@ export class ThreeRenderScene implements RenderScene {
     elapsedSeconds: number,
   ): void {
     const live = this.liveProxies();
+    // 顺序照搬搬迁之前 Actor 世界里的那一段：波动先算（附着要读父级摆好的
+    // visualRoot），附着居中，弹性拉伸在脱落翻滚之前（翻滚会覆盖它摆好的姿态）。
+    if (this.waterMotionVisual) {
+      for (const [id, mode] of this.waterMotions) {
+        const proxy = this.resolve(id);
+        if (!proxy) continue;
+        this.waterMotionVisual.update(proxy, mode, transforms, deltaSeconds, elapsedSeconds);
+      }
+    }
+    this.attachmentVisual.update(live, (id) => this.resolve(id), transforms);
+    for (const tether of this.elasticTethers.values()) {
+      tether.update(transforms, deltaSeconds, elapsedSeconds);
+    }
+    for (const drop of this.dropRolls.values()) drop.update(transforms);
     this.fireVisual.update(live, transforms, deltaSeconds, elapsedSeconds);
     for (const proxy of live) {
       proxy.markers.setTemperature(transforms.readParam(proxy.id, PARAM_TEMPERATURE));
@@ -379,6 +428,9 @@ export class ThreeRenderScene implements RenderScene {
     this.slimeDrags.clear();
     this.slimeVisuals.clear();
     this.slimeAnimators.clear();
+    this.waterMotions.clear();
+    this.elasticTethers.clear();
+    this.dropRolls.clear();
     for (const proxy of this.proxies) proxy?.dispose();
     this.proxies.length = 0;
     this.freeSlots.length = 0;

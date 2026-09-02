@@ -5,6 +5,21 @@ import {
   writeSlimeMotionParams,
 } from '../../render/RenderSlimeMotion';
 import {
+  PARAM_BUOYANCY_DRAFT,
+  PARAM_BUOYANCY_STATIC_PITCH,
+  PARAM_BUOYANCY_STATIC_ROLL,
+  PARAM_DROP_RADIUS,
+  PARAM_DROP_ROTATION_W,
+  PARAM_DROP_ROTATION_X,
+  PARAM_DROP_ROTATION_Y,
+  PARAM_DROP_ROTATION_Z,
+  PARAM_ELASTIC_DETACH_LENGTH,
+  PARAM_ELASTIC_DETACHED,
+  PARAM_ELASTIC_HELD,
+  PARAM_ELASTIC_RELEASE_REVISION,
+  PARAM_ELASTIC_TARGET_X,
+  PARAM_ELASTIC_TARGET_Y,
+  PARAM_ELASTIC_TARGET_Z,
   PARAM_FIRE_TARGET_INTENSITY,
   PARAM_TEMPERATURE,
   RENDER_VISUAL_PARAM_COUNT,
@@ -18,6 +33,14 @@ import {
   type FireVisualComponent,
 } from '../components/FireVisualComponent';
 import {
+  BUOYANCY_COMPONENT,
+  type BuoyancyComponent,
+  DROP_MOTION_COMPONENT,
+  type DropMotionComponent,
+  ELASTIC_DETACH_COMPONENT,
+  type ElasticDetachComponent,
+  ELASTIC_TETHER_COMPONENT,
+  type ElasticTetherComponent,
   TEMPERATURE_COMPONENT,
   type TemperatureComponent,
 } from '../../../shared/actor/index.mjs';
@@ -60,7 +83,68 @@ export class ActorVisualParamSystem {
       // 所以这里写的是静止值，而不是「跳过不写」：槽位会被复用，上一个玩家
       // 留下的速度会让新 proxy 一出生就在滑行。
       writeSlimeMotionParams(this.transforms, proxy.proxyId, SLIME_MOTION_AT_REST);
+      this.writeBuoyancy(actor, proxy);
+      this.writeElastic(actor, proxy);
+      this.writeDropMotion(actor, proxy);
     }
+  }
+
+  /** 船体波动只要三个静态偏置；浪高由渲染侧自己采。 */
+  private writeBuoyancy(actor: Actor, proxy: RenderProxyComponent): void {
+    const buoyancy = actor.getComponent(BUOYANCY_COMPONENT) as BuoyancyComponent | undefined;
+    this.transforms.writeParam(proxy.proxyId, PARAM_BUOYANCY_DRAFT, buoyancy?.draft ?? 0);
+    this.transforms.writeParam(
+      proxy.proxyId,
+      PARAM_BUOYANCY_STATIC_PITCH,
+      buoyancy?.staticPitch ?? 0,
+    );
+    this.transforms.writeParam(
+      proxy.proxyId,
+      PARAM_BUOYANCY_STATIC_ROLL,
+      buoyancy?.staticRoll ?? 0,
+    );
+  }
+
+  private writeElastic(actor: Actor, proxy: RenderProxyComponent): void {
+    const detach = actor.getComponent(
+      ELASTIC_DETACH_COMPONENT,
+    ) as ElasticDetachComponent | undefined;
+    const tether = actor.getComponent(
+      ELASTIC_TETHER_COMPONENT,
+    ) as ElasticTetherComponent | undefined;
+    this.transforms.writeParam(
+      proxy.proxyId,
+      PARAM_ELASTIC_DETACHED,
+      detach?.detached ? 1 : 0,
+    );
+    // 渲染侧只需要知道弹簧刚度取哪一档，不需要知道是谁在拉。
+    this.transforms.writeParam(
+      proxy.proxyId,
+      PARAM_ELASTIC_HELD,
+      tether?.holderPlayerId != null ? 1 : 0,
+    );
+    this.transforms.writeParam(proxy.proxyId, PARAM_ELASTIC_TARGET_X, tether?.targetX ?? 0);
+    this.transforms.writeParam(proxy.proxyId, PARAM_ELASTIC_TARGET_Y, tether?.targetY ?? 0);
+    this.transforms.writeParam(proxy.proxyId, PARAM_ELASTIC_TARGET_Z, tether?.targetZ ?? 0);
+    this.transforms.writeParam(
+      proxy.proxyId,
+      PARAM_ELASTIC_DETACH_LENGTH,
+      tether?.detachLength ?? 0,
+    );
+    this.transforms.writeParam(
+      proxy.proxyId,
+      PARAM_ELASTIC_RELEASE_REVISION,
+      tether?.releaseRevision ?? 0,
+    );
+  }
+
+  private writeDropMotion(actor: Actor, proxy: RenderProxyComponent): void {
+    const motion = actor.getComponent(DROP_MOTION_COMPONENT) as DropMotionComponent | undefined;
+    this.transforms.writeParam(proxy.proxyId, PARAM_DROP_RADIUS, motion?.radius ?? 0);
+    this.transforms.writeParam(proxy.proxyId, PARAM_DROP_ROTATION_X, motion?.rotationX ?? 0);
+    this.transforms.writeParam(proxy.proxyId, PARAM_DROP_ROTATION_Y, motion?.rotationY ?? 0);
+    this.transforms.writeParam(proxy.proxyId, PARAM_DROP_ROTATION_Z, motion?.rotationZ ?? 0);
+    this.transforms.writeParam(proxy.proxyId, PARAM_DROP_ROTATION_W, motion?.rotationW ?? 0);
   }
 }
 

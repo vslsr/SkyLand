@@ -1,4 +1,5 @@
-import { GuidePath, type GuidePathOptions, type GuidePathPoint } from '../../guidance/index';
+import { GuidePath, type GuidePathOptions } from '../../guidance/index';
+import type { GuidePathState } from '../RenderScene';
 
 /**
  * 渲染世界里的一条引导路径（引擎迁移路线图 第 1.5 步）。
@@ -12,14 +13,6 @@ import { GuidePath, type GuidePathOptions, type GuidePathPoint } from '../../gui
  * 所以它们照 `MeshProxyDesc.render` 的先例在 `createMeshProxy` 时一次性给定。
  * 每帧过边界的只有路点、曲线类型、当前节点与开关。
  */
-export interface GuidePathState {
-  readonly points: readonly GuidePathPoint[];
-  readonly curve: 'linear' | 'catmull-rom';
-  readonly markerColor: string;
-  readonly currentPointIndex: number;
-  readonly enabled: boolean;
-}
-
 export class ThreeGuidePathVisual {
   public readonly guide: GuidePath;
 

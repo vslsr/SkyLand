@@ -185,6 +185,49 @@ test('还在 import 渲染侧模块的 Actor Component 只有已知的那几个'
   );
 });
 
+/**
+ * 第 1.75 步的棘轮（`doc/engine-migration-implementation-plan.md` §1.75）。
+ *
+ * Component 干净了还不够：Actor 世界里跑的 **System** 也得干净，否则第 2 步
+ * 一样搬不进 worker。这四个是 `ClientActorSystem` 注册进 `ActorWorld` 的全部
+ * System——两个写 SoA、一个发命令、一个翻面，谁都不认识 `THREE`。
+ *
+ * 名单写死在这里是有意的：新增一个 ActorWorld System 就要在这里登记，
+ * 而登记的代价是它必须先通过这条断言。
+ */
+const ACTOR_WORLD_SYSTEMS = [
+  'ActorTransformSystem.ts',
+  'ActorVisualParamSystem.ts',
+  'ActorGuidePathSyncSystem.ts',
+  'RenderTransformSyncSystem.ts',
+];
+
+test('Actor 世界里的 System 一个都不 import 渲染实现', () => {
+  const directory = new URL('../src/actors/systems/', import.meta.url);
+  for (const name of ACTOR_WORLD_SYSTEMS) {
+    const source = readFileSync(new URL(name, directory), 'utf8');
+    // 注释里出现 `from 'three'` 这样的字样不算数，只看真正的 import 行。
+    const code = source.split('\n').filter((line) => !line.trimStart().startsWith('*')).join('\n');
+    assert.doesNotMatch(
+      code,
+      RENDER_SIDE_IMPORT,
+      `${name} 引了渲染实现——Actor 世界里的 System 只能写字节和发命令`,
+    );
+  }
+});
+
+test('这份名单就是 ClientActorSystem 注册进 ActorWorld 的全部 System', () => {
+  // 断言两边对得上：漏登记一个，上面那条检查就悄悄放过了它。
+  const source = readFileSync(
+    new URL('../src/actors/ClientActorSystem.ts', import.meta.url),
+    'utf8',
+  );
+  const registered = Array.from(source.matchAll(/this\.world\.addSystem\(new (\w+)\(/g))
+    .map((match) => `${match[1]}.ts`)
+    .sort();
+  assert.deepEqual(registered, [...ACTOR_WORLD_SYSTEMS].sort());
+});
+
 test('装配中途抛出不会泄漏 proxy 槽位', () => {
   // createMeshProxy 占了槽位，但要到 addActor 之后才由 RenderProxyComponent 的
   // 生命周期负责回收。中间任何一步抛出，槽位既不在 freeSlots 里也没有 Actor 持有
