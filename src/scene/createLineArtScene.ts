@@ -10,6 +10,7 @@ import type { SceneDefinition } from '../scenes/data/SceneDefinition';
 import { DEFAULT_WORLD_SEED, toWorldSeed } from '../../shared/world/worldConfig.mjs';
 import { ChunkStreamer, TerrainWorld } from '../world';
 import { WeatherSystem } from '../weather/index';
+import { DayNightSystem } from '../environment/index';
 import { createSceneEnvironment } from '../materials/createFillMaterial';
 import type { SceneComposition, SceneVisualSystem } from './SceneVisualSystem';
 
@@ -54,18 +55,26 @@ export function createLineArtScene(
   }
   scene.background = new THREE.Color(renderer.background);
   scene.fog = new THREE.Fog(renderer.fog.color, renderer.fog.near, renderer.fog.far);
+  // 昼夜先更新：天气要在同一帧里读它算出的天空底色，再合成最终环境。
+  const dayNight = new DayNightSystem({
+    backgroundColor: renderer.background,
+    dayNight: definition.environment.dayNight,
+  });
   const weather = new WeatherSystem(scene, {
     backgroundColor: renderer.background,
     fogColor: renderer.fog.color,
     fogNear: renderer.fog.near,
     fogFar: renderer.fog.far,
     runtime: environment.runtime,
+    sky: dayNight,
     sampleGroundHeight: terrainWorld
       ? (x, z) => terrainWorld.sampleGroundHeight(x, z)
       : undefined,
   });
+  dayNight.setWeatherSource(weather);
+  scene.add(dayNight.root);
   scene.add(weather.root);
-  visualSystems.push(weather);
+  visualSystems.push(dayNight, weather);
   if (renderer.world) {
     // 流式世界接管地面、树、草与岩石：内容由世界种子推导、随焦点进出，
     // content 的开关在这里改为决定 chunk 里放什么。
@@ -157,6 +166,8 @@ export function createLineArtScene(
     scene,
     visualSystems,
     weatherTarget: weather,
+    dayNightTarget: dayNight,
+    environmentRuntime: environment.runtime,
     grassInteraction,
     actorSnapshotTarget,
     collisionWorld,

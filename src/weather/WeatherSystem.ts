@@ -5,6 +5,11 @@ import {
   toChunkKey,
 } from '../../shared/world/chunkKey.mjs';
 import { CHUNK_SIZE } from '../../shared/world/worldConfig.mjs';
+import type {
+  SkyStateSource,
+  WeatherFieldSource,
+  WeatherFieldState,
+} from '../environment/EnvironmentTypes';
 import type { SceneEnvironmentRuntime } from '../materials/createFillMaterial';
 import {
   WEATHER_VISUAL_CAPACITY,
@@ -69,6 +74,10 @@ export interface WeatherEnvironmentDefinition {
   fogFar: number;
   runtime?: SceneEnvironmentRuntime;
   sampleGroundHeight?: (x: number, z: number) => number;
+  /**
+   * 昼夜系统提供的天空状态。缺省时天空恒为场景背景色，等同于没有昼夜的场景。
+   */
+  sky?: SkyStateSource;
 }
 
 const WEATHER_PRESETS: Readonly<Record<WeatherType, WeatherPreset>> = {
@@ -88,6 +97,9 @@ const CLOUD_WRAP_HALF_SIZE = 70;
 const WIND_X = 0.86;
 const WIND_Z = 0.51;
 const TRANSITION_SPEED = 0.55;
+
+/** 没有昼夜系统时的中性白光。 */
+const NEUTRAL_AMBIENT_COLOR = new THREE.Color(0xffffff);
 
 export const WEATHER_PARTICLE_LIMITS = Object.freeze({
   chunkSize: CHUNK_SIZE,
@@ -139,16 +151,23 @@ function wrapAround(value: number, center: number, halfSize: number): number {
  * 服务端只同步七态天气枚举。客户端把玩家所在 chunk 周围 3×3 的天气块激活，
  * 每块拥有固定槽位；雨雪顶点使用绝对世界坐标，玩家在 chunk 内移动时不会拖着
  * 整片粒子平移。跨边界或快速传送只替换离开的块，不沿路补算。
+ *
+ * 这里同时是场景环境的唯一写入方：昼夜系统算出天空底色与环境光，天气在它
+ * 上面叠加云量、灰度与雷闪，然后一次性写进 scene.background、scene.fog 和
+ * 共享光照 uniform。
  */
-export class WeatherSystem implements SceneVisualSystem, WeatherVisualTarget {
+export class WeatherSystem implements SceneVisualSystem, WeatherVisualTarget, WeatherFieldSource {
   public readonly root: THREE.Group;
 
   private readonly visuals = createWeatherVisuals();
   private readonly scene: THREE.Scene;
   private readonly runtime?: SceneEnvironmentRuntime;
+  private readonly sky?: SkyStateSource;
   private readonly sampleGroundHeight: (x: number, z: number) => number;
   private readonly baseBackground: THREE.Color;
   private readonly baseFogColor: THREE.Color;
+  /** 作者写下的雾色相对背景色的偏移；天空随昼夜变化时保留这份偏移。 */
+  private readonly fogColorOffset: THREE.Color;
   private readonly baseFogNear: number;
   private readonly baseFogFar: number;
   private readonly activeChunks = new Map<string, WeatherChunk>();
@@ -171,19 +190,36 @@ export class WeatherSystem implements SceneVisualSystem, WeatherVisualTarget {
   private focusZ = 0;
   private visibleRainCount = 0;
   private visibleSnowCount = 0;
-  private sunOpacity = 0.78;
   private currentDaylight = 1;
   private lightningRemaining = 0;
+  private currentLightningFlash = 0;
   private nextLightningSeconds = 7;
   private disposed = false;
+  /** 每帧原地复用的天气场量快照，供昼夜系统读取云量与灰度。 */
+  private readonly field: WeatherFieldState = {
+    clouds: WEATHER_PRESETS[DEFAULT_WEATHER].clouds,
+    cloudCover: WEATHER_PRESETS[DEFAULT_WEATHER].clouds / 10,
+    rain: 0,
+    snow: 0,
+    fog: 0,
+    gray: 0,
+    wind: WEATHER_PRESETS[DEFAULT_WEATHER].wind,
+    lightningFlash: 0,
+  };
 
   public constructor(scene: THREE.Scene, environment: WeatherEnvironmentDefinition) {
     this.scene = scene;
     this.root = this.visuals.root;
     this.runtime = environment.runtime;
+    this.sky = environment.sky;
     this.sampleGroundHeight = environment.sampleGroundHeight ?? (() => 0);
     this.baseBackground = new THREE.Color(environment.backgroundColor);
     this.baseFogColor = new THREE.Color(environment.fogColor);
+    this.fogColorOffset = new THREE.Color(
+      this.baseFogColor.r - this.baseBackground.r,
+      this.baseFogColor.g - this.baseBackground.g,
+      this.baseFogColor.b - this.baseBackground.b,
+    );
     this.baseFogNear = environment.fogNear;
     this.baseFogFar = environment.fogFar;
     this.syncActiveChunks(0, 0);
@@ -223,20 +259,11 @@ export class WeatherSystem implements SceneVisualSystem, WeatherVisualTarget {
     this.state.wind = lerp(this.state.wind, target.wind, transition);
 
     this.updateLightning(dt);
+    this.publishWeatherField();
     this.updateEnvironment(dt);
     this.updateClouds(dt, elapsedSeconds);
     this.updateRain(dt);
     this.updateSnow(dt, elapsedSeconds);
-  }
-
-  public beforeRender(_renderer: THREE.WebGLRenderer, camera: THREE.Camera): void {
-    // 日轮是无限远天空元素，跟相机改变观察原点；雨雪和云层仍是世界坐标。
-    this.visuals.sunRoot.position.set(
-      camera.position.x - 34,
-      camera.position.y + 25,
-      camera.position.z - 42,
-    );
-    this.visuals.sunRoot.lookAt(camera.position);
   }
 
   public getParticleCounts(): { rain: number; snow: number } {
@@ -248,12 +275,26 @@ export class WeatherSystem implements SceneVisualSystem, WeatherVisualTarget {
     return this.activeChunkOrder.map((chunk) => chunk.key);
   }
 
-  public getLightingState(): { ambientColor: string; daylight: number; sunOpacity: number } {
+  public getLightingState(): {
+    ambientColor: string;
+    skyColor: string;
+    daylight: number;
+    cloudCover: number;
+  } {
     return {
       ambientColor: `#${this.ambientColor.getHexString()}`,
+      skyColor: `#${this.backgroundColor.getHexString()}`,
       daylight: this.currentDaylight,
-      sunOpacity: this.sunOpacity,
+      cloudCover: this.field.cloudCover,
     };
+  }
+
+  /**
+   * 当前混合出的连续天气场量。昼夜系统按它决定日月被云遮住多少、星空能亮
+   * 到什么程度；返回的是复用对象，调用方只读不持有。
+   */
+  public getWeatherField(): Readonly<WeatherFieldState> {
+    return this.field;
   }
 
   public dispose(): void {
@@ -367,16 +408,22 @@ export class WeatherSystem implements SceneVisualSystem, WeatherVisualTarget {
     return Number.isFinite(height) ? height : 0;
   }
 
+  /**
+   * 合成这一帧的场景环境。
+   *
+   * 天空底色、环境光和主光方向来自昼夜系统，天气只在它上面叠加云量压灰、
+   * 雾浓度和雷闪。全场景唯一的一次写入在这里完成——背景、雾和共享 uniform
+   * 如果被两套系统各写一遍，就会在同一帧里互相覆盖。
+   */
   private updateEnvironment(deltaSeconds: number): void {
-    grayscale(this.baseBackground, this.grayColor);
-    this.backgroundColor.copy(this.baseBackground).lerp(
+    const sky = this.sky?.getSkyState();
+    const skyColor = sky ? sky.skyColor : this.baseBackground;
+    grayscale(skyColor, this.grayColor);
+    this.backgroundColor.copy(skyColor).lerp(
       this.grayColor,
       clamp01(this.state.gray) * 0.75,
     );
-    const lightningFlash = this.lightningRemaining > 0
-      ? Math.max(0, Math.sin(this.lightningRemaining * 34))
-        * Math.min(1, this.lightningRemaining / 0.45)
-      : 0;
+    const lightningFlash = this.currentLightningFlash;
     if (lightningFlash > 0) {
       this.backgroundColor.lerp(this.lightningColor, lightningFlash * 0.4);
     }
@@ -385,10 +432,11 @@ export class WeatherSystem implements SceneVisualSystem, WeatherVisualTarget {
     const fog = this.scene.fog instanceof THREE.Fog
       ? this.scene.fog
       : new THREE.Fog(this.baseFogColor, this.baseFogNear, this.baseFogFar);
-    grayscale(this.baseFogColor, this.grayColor);
-    this.fogColor.copy(this.baseFogColor).lerp(
-      this.grayColor,
-      clamp01(this.state.gray) * 0.75,
+    // 雾跟着天空走，远景才会融进当前时刻的天色；作者写下的雾色偏移原样保留。
+    this.fogColor.setRGB(
+      clamp01(this.backgroundColor.r + this.fogColorOffset.r),
+      clamp01(this.backgroundColor.g + this.fogColorOffset.g),
+      clamp01(this.backgroundColor.b + this.fogColorOffset.b),
     );
     fog.color.copy(this.fogColor);
     const denseNear = Math.min(3, this.baseFogNear);
@@ -397,16 +445,19 @@ export class WeatherSystem implements SceneVisualSystem, WeatherVisualTarget {
     fog.far = lerp(this.baseFogFar, denseFar, this.state.fog);
     this.scene.fog = fog;
 
-    const cloudCover = clamp01(this.state.clouds / 10);
-    this.currentDaylight = clamp01(1 - cloudCover * 0.72 - this.state.fog * 0.18);
+    const cloudCover = this.field.cloudCover;
+    this.currentDaylight = clamp01(
+      (sky ? sky.dayFactor : 1)
+        * (1 - cloudCover * 0.72 - this.state.fog * 0.18),
+    );
     const ambientMix = clamp01(this.state.gray * 0.52 + cloudCover * 0.1);
     const ambientBrightness = Math.max(
       0.55,
       1 - this.state.gray * 0.28 - cloudCover * 0.06,
     );
-    this.ambientColor.setHex(0xffffff)
+    this.ambientColor.copy(sky ? sky.ambientColor : NEUTRAL_AMBIENT_COLOR)
       .lerp(this.stormAmbientColor, ambientMix)
-      .multiplyScalar(ambientBrightness);
+      .multiplyScalar(ambientBrightness * (sky ? sky.ambientBrightness : 1));
     if (lightningFlash > 0) this.ambientColor.lerp(this.lightningColor, lightningFlash * 0.55);
 
     if (this.runtime) {
@@ -415,6 +466,7 @@ export class WeatherSystem implements SceneVisualSystem, WeatherVisualTarget {
       this.runtime.fogFar.value = fog.far;
       this.runtime.ambientColor.value.copy(this.ambientColor);
       this.runtime.daylight.value = this.currentDaylight;
+      if (sky) this.runtime.sunDirection.value.copy(sky.sunDirection);
     }
 
     const fade = Math.min(1, deltaSeconds * 2);
@@ -429,12 +481,18 @@ export class WeatherSystem implements SceneVisualSystem, WeatherVisualTarget {
     );
     this.visuals.cloudFillMaterial.color.copy(this.cloudColor);
     this.visuals.cloudLineMaterial.color.copy(this.cloudColor).multiplyScalar(0.58);
+  }
 
-    const targetSunOpacity = clamp01(1 - cloudCover * 1.18);
-    this.sunOpacity = lerp(this.sunOpacity, targetSunOpacity, fade);
-    this.visuals.sunRoot.visible = this.sunOpacity > 0.01;
-    this.visuals.sunFillMaterial.opacity = this.sunOpacity;
-    this.visuals.sunLineMaterial.opacity = this.sunOpacity;
+  /** 把这一帧混合出的连续状态写进复用快照，供昼夜系统在下一帧读取。 */
+  private publishWeatherField(): void {
+    this.field.clouds = this.state.clouds;
+    this.field.cloudCover = clamp01(this.state.clouds / 10);
+    this.field.rain = this.state.rain;
+    this.field.snow = this.state.snow;
+    this.field.fog = this.state.fog;
+    this.field.gray = this.state.gray;
+    this.field.wind = this.state.wind;
+    this.field.lightningFlash = this.currentLightningFlash;
   }
 
   private updateClouds(deltaSeconds: number, elapsedSeconds: number): void {
@@ -574,11 +632,18 @@ export class WeatherSystem implements SceneVisualSystem, WeatherVisualTarget {
       this.nextLightningSeconds -= deltaSeconds;
       if (this.nextLightningSeconds <= 0) this.spawnLightning();
     }
-    if (this.lightningRemaining <= 0) return;
+    if (this.lightningRemaining <= 0) {
+      this.currentLightningFlash = 0;
+      return;
+    }
+    // 闪光既照亮天空也照亮地面，所以强度算一次、天空与环境光共用。
+    this.currentLightningFlash = Math.max(0, Math.sin(this.lightningRemaining * 34))
+      * Math.min(1, this.lightningRemaining / 0.45);
     this.lightningRemaining -= deltaSeconds;
     const strength = Math.max(0, this.lightningRemaining / 0.45);
     this.visuals.lightningMaterial.opacity = strength;
     if (this.lightningRemaining <= 0) {
+      this.currentLightningFlash = 0;
       this.visuals.lightningLine.visible = false;
       this.visuals.lightningMaterial.opacity = 0;
     }

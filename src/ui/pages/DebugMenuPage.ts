@@ -5,7 +5,37 @@ import {
   WEATHER_TYPES,
   type WeatherType,
 } from '../../weather/index';
+import { DAY_PHASE_HOURS, DEFAULT_START_HOUR } from '../../../shared/dayNight.mjs';
 import type { PlayerTransformLogState } from '../../debug/PlayerTransformLogRecorder';
+
+interface TimePresetDefinition {
+  label: string;
+  hour: number;
+}
+
+/** 调试用的四个整点时段；请求仍由服务端按场景配置决定接不接受。 */
+const TIME_PRESETS: readonly TimePresetDefinition[] = Object.freeze([
+  { label: '午夜', hour: DAY_PHASE_HOURS.midnight },
+  { label: '拂晓', hour: DAY_PHASE_HOURS.dawn },
+  { label: '正午', hour: DAY_PHASE_HOURS.noon },
+  { label: '黄昏', hour: DAY_PHASE_HOURS.dusk },
+]);
+
+function formatClock(timeOfDay: number): string {
+  const totalMinutes = Math.round(timeOfDay * 60) % (24 * 60);
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`;
+}
+
+function describePhase(timeOfDay: number): string {
+  if (timeOfDay < 5 || timeOfDay >= 22) return '深夜';
+  if (timeOfDay < 7) return '拂晓';
+  if (timeOfDay < 9) return '清晨';
+  if (timeOfDay < 16) return '白昼';
+  if (timeOfDay < 19) return '黄昏';
+  return '入夜';
+}
 
 export class DebugMenuPage extends ModalWindow {
   private readonly transformLogButton: HTMLButtonElement;
@@ -13,6 +43,8 @@ export class DebugMenuPage extends ModalWindow {
   private readonly collisionButton: HTMLButtonElement;
   private readonly temperatureButton: HTMLButtonElement;
   private readonly weatherButtons = new Map<WeatherType, HTMLButtonElement>();
+  private readonly dayNightStatus: HTMLParagraphElement;
+  private timeOfDaySelectHandler?: (timeOfDay: number) => void;
   private collisionToggleHandler?: (visible: boolean) => void;
   private temperatureToggleHandler?: (visible: boolean) => void;
   private weatherSelectHandler?: (weather: WeatherType) => void;
@@ -112,17 +144,48 @@ export class DebugMenuPage extends ModalWindow {
     }
     weatherSection.append(weatherHeading, weatherDescription, weatherGrid);
 
+    const dayNightSection = document.createElement('section');
+    dayNightSection.className = 'debug-menu__section';
+    const dayNightHeading = document.createElement('h3');
+    dayNightHeading.textContent = 'ROOM DAY / NIGHT';
+    const dayNightDescription = document.createElement('p');
+    dayNightDescription.textContent = '服务端只同步时刻与一天的真实秒数；天空渐变、日月轨迹、环境光与星空由客户端本地推导。';
+    this.dayNightStatus = document.createElement('p');
+    this.dayNightStatus.className = 'debug-menu__status debug-menu__clock';
+    this.dayNightStatus.setAttribute('role', 'status');
+    const timeGrid = document.createElement('div');
+    timeGrid.className = 'debug-menu__weather-grid';
+    timeGrid.setAttribute('role', 'group');
+    timeGrid.setAttribute('aria-label', '请求房间时刻');
+    for (const preset of TIME_PRESETS) {
+      const button = document.createElement('button');
+      button.className = 'paper-button debug-menu__weather-button';
+      button.type = 'button';
+      button.dataset.timeOfDay = String(preset.hour);
+      button.textContent = preset.label;
+      button.addEventListener('click', () => this.timeOfDaySelectHandler?.(preset.hour));
+      timeGrid.append(button);
+    }
+    dayNightSection.append(
+      dayNightHeading,
+      dayNightDescription,
+      timeGrid,
+      this.dayNightStatus,
+    );
+
     this.bodyElement.append(
       transformLogSection,
       collisionSection,
       temperatureSection,
       weatherSection,
+      dayNightSection,
     );
     this.setTransformLogState('inactive');
     this.setTransformLogAvailable(false);
     this.setCollisionVisible(false);
     this.setTemperatureVisible(false);
     this.setWeather(DEFAULT_WEATHER);
+    this.setTimeOfDay(DEFAULT_START_HOUR);
   }
 
   public onCollisionToggle(handler: (visible: boolean) => void): void {
@@ -135,6 +198,10 @@ export class DebugMenuPage extends ModalWindow {
 
   public onWeatherSelect(handler: (weather: WeatherType) => void): void {
     this.weatherSelectHandler = handler;
+  }
+
+  public onTimeOfDaySelect(handler: (timeOfDay: number) => void): void {
+    this.timeOfDaySelectHandler = handler;
   }
 
   public onTransformLogToggle(handler: (recording: boolean) => void): void {
@@ -182,6 +249,15 @@ export class DebugMenuPage extends ModalWindow {
     this.temperatureButton.textContent = visible
       ? '隐藏 Actor 温度'
       : '显示 Actor 温度';
+  }
+
+  /** 显示房间同步过来的时刻；dayLengthSeconds 为 0 表示时钟被冻结。 */
+  public setTimeOfDay(timeOfDay: number, dayLengthSeconds = 0): void {
+    const pace = dayLengthSeconds > 0
+      ? `一天 ${Math.round(dayLengthSeconds)} 秒`
+      : '时钟已冻结';
+    this.dayNightStatus.textContent =
+      `${formatClock(timeOfDay)} · ${describePhase(timeOfDay)} · ${pace}`;
   }
 
   public setWeather(weather: WeatherType): void {

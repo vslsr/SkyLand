@@ -6,6 +6,14 @@
   "description": "低多边形线稿、交错起伏与客户端浮力演示构成的纸绘海域。",
   "capacity": 8,
   "sceneComponents": [],
+  "environment": {
+    "weather": { "initial": "sunny" },
+    "dayNight": {
+      "enabled": true,
+      "startHour": 16.9,
+      "dayLengthSeconds": 1500
+    }
+  },
   "actors": [
     {
       "id": "demo-raft-01",

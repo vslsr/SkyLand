@@ -529,6 +529,14 @@ body.has-interaction-target .crosshair {
   overflow-wrap: anywhere;
 }
 
+/* 房间权威时钟：等宽数字避免每分钟跳动时整行左右抖动。 */
+.debug-menu__clock {
+  min-height: 1.6em;
+  color: rgba(28, 26, 23, 0.82);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.04em;
+}
+
 .debug-menu__weather-grid {
   display: flex;
   flex-wrap: wrap;

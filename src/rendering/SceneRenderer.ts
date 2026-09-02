@@ -8,6 +8,8 @@ import {
   type GrassInteractionTarget,
 } from '../grass';
 import { createLineArtScene } from '../scene/createLineArtScene';
+import type { DayNightVisualTarget } from '../environment/EnvironmentTypes';
+import type { SceneEnvironmentRuntime } from '../materials/createFillMaterial';
 import type {
   ActorInteractionCandidate,
   ActorSnapshotTarget,
@@ -23,6 +25,7 @@ import type { SceneDefinition } from '../scenes/data/SceneDefinition';
 import type { TerrainWorld } from '../world/TerrainWorld';
 import type { PhysicsWorld } from '../../shared/physics/PhysicsWorld.mjs';
 import { DEFAULT_WEATHER, type WeatherType } from '../weather/index';
+import { DEFAULT_START_HOUR } from '../../shared/dayNight.mjs';
 
 const EMPTY_SCENE_COLOR = 0xfdfbf6;
 
@@ -52,6 +55,8 @@ export class SceneRenderer implements GrassInteractionTarget {
   private grassInteraction?: GrassInteractionTarget;
   private actorSnapshotTarget?: ActorSnapshotTarget;
   private weatherTarget?: WeatherVisualTarget;
+  private dayNightTarget?: DayNightVisualTarget;
+  private sceneEnvironmentRuntime?: SceneEnvironmentRuntime;
   private collisionWorld?: CollisionWorld;
   private terrainWorld?: TerrainWorld;
   private physicsWorld?: PhysicsWorld;
@@ -282,6 +287,24 @@ export class SceneRenderer implements GrassInteractionTarget {
   }
 
   /**
+   * 同步房间权威时刻。两帧快照之间由昼夜系统本地推进，这里只做校正，
+   * 所以时间不会随快照频率跳动。
+   */
+  public setTimeOfDay(timeOfDay: number, dayLengthSeconds: number): void {
+    this.dayNightTarget?.applyServerTime(timeOfDay, dayLengthSeconds);
+  }
+
+  /** 当前场景的共享光照与雾 uniform；场景 Component 的表现接到同一份上。 */
+  public get environmentRuntime(): SceneEnvironmentRuntime | undefined {
+    return this.sceneEnvironmentRuntime;
+  }
+
+  /** 当前渲染用的时刻；没有加载场景时回落到正午。 */
+  public get timeOfDay(): number {
+    return this.dayNightTarget?.timeOfDay ?? DEFAULT_START_HOUR;
+  }
+
+  /**
    * 加载场景。worldSeed 来自房间，决定流式世界长什么样；
    * 不做流式加载的场景会忽略它。
    */
@@ -312,6 +335,8 @@ export class SceneRenderer implements GrassInteractionTarget {
     this.scene = composition.scene;
     this.visualSystems = composition.visualSystems;
     this.weatherTarget = composition.weatherTarget;
+    this.dayNightTarget = composition.dayNightTarget;
+    this.sceneEnvironmentRuntime = composition.environmentRuntime;
     this.grassInteraction = composition.grassInteraction;
     this.actorSnapshotTarget = composition.actorSnapshotTarget;
     this.collisionWorld = composition.collisionWorld;

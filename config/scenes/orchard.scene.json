@@ -6,6 +6,22 @@
   "description": "和无边草原同一套世界生成，树换成了可反复采摘的果树。",
   "capacity": 16,
   "sceneComponents": [],
+  "environment": {
+    "weather": {
+      "initial": "cloudy",
+      "cycle": {
+        "enabled": true,
+        "minimumSeconds": 120,
+        "maximumSeconds": 300,
+        "candidates": ["sunny", "cloudy", "rain"]
+      }
+    },
+    "dayNight": {
+      "enabled": true,
+      "startHour": 10.5,
+      "dayLengthSeconds": 720
+    }
+  },
   "actors": [],
   "renderer": {
     "type": "line-art",

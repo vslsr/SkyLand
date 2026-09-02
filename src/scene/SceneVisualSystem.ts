@@ -1,6 +1,8 @@
 import type * as THREE from 'three';
 import type { Actor } from '../../shared/actor/Actor.mjs';
 import type { CollisionWorld } from '../../shared/collision/index.mjs';
+import type { DayNightVisualTarget } from '../environment/EnvironmentTypes';
+import type { SceneEnvironmentRuntime } from '../materials/createFillMaterial';
 import type { GrassInteractionTarget } from '../grass';
 import type { SnapshotActor } from '../network/protocol';
 import type { ActorFloatState, ActorEventType } from '../network/protocol';
@@ -79,6 +81,9 @@ export interface SceneComposition {
   scene: THREE.Scene;
   visualSystems: SceneVisualSystem[];
   weatherTarget?: WeatherVisualTarget;
+  dayNightTarget?: DayNightVisualTarget;
+  /** 场景级共享光照/雾 uniform；场景 Component 建的表现也接到同一份上。 */
+  environmentRuntime?: SceneEnvironmentRuntime;
   grassInteraction?: GrassInteractionTarget;
   actorSnapshotTarget?: ActorSnapshotTarget;
   /**

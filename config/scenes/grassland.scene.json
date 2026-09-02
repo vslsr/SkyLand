@@ -22,6 +22,14 @@
       "impulseStrength": 3.4
     }
   ],
+  "environment": {
+    "weather": { "initial": "sunny" },
+    "dayNight": {
+      "enabled": true,
+      "startHour": 9,
+      "dayLengthSeconds": 600
+    }
+  },
   "actors": [
     {
       "id": "elastic-mushroom-01",

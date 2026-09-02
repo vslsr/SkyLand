@@ -141,6 +141,9 @@ export class GrasslandScene extends Scene {
       this.debugMenuPage.onWeatherSelect((weather) => {
         if (this.joinedRoom) this.roomClient.setWeather(weather);
       });
+      this.debugMenuPage.onTimeOfDaySelect((timeOfDay) => {
+        if (this.joinedRoom) this.roomClient.setTimeOfDay(timeOfDay);
+      });
       this.refreshDebugMenuShortcut();
     }
     this.virtualControls = new VirtualControls({
@@ -405,6 +408,7 @@ export class GrasslandScene extends Scene {
     page.setCollisionVisible(this.renderer.isSimpleCollisionVisible);
     page.setTemperatureVisible(this.renderer.isTemperatureVisible);
     page.setWeather(this.renderer.weather);
+    page.setTimeOfDay(this.renderer.timeOfDay);
     page.setTransformLogAvailable(Boolean(this.joinedRoom && this.player));
     this.commonUI.push(page);
   }
@@ -443,7 +447,9 @@ export class GrasslandScene extends Scene {
   private handleSnapshot(snapshot: RoomSnapshot): void {
     if (!this.joinedRoom) return;
     this.renderer.setWeather(snapshot.weather);
+    this.renderer.setTimeOfDay(snapshot.timeOfDay, snapshot.dayLength);
     this.debugMenuPage?.setWeather(snapshot.weather);
+    this.debugMenuPage?.setTimeOfDay(snapshot.timeOfDay, snapshot.dayLength);
     this.renderer.syncActors(snapshot.actors, snapshot.serverTime);
     this.snapshots.push(snapshot);
 

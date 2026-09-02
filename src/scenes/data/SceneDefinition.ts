@@ -1,3 +1,5 @@
+import type { WeatherType } from '../../weather/WeatherTypes';
+
 export interface SceneBounds {
   minimumX: number;
   maximumX: number;
@@ -296,6 +298,39 @@ export interface ActorArchetypeDefinition {
   };
 }
 
+/**
+ * 房间权威的天气轮换配置。服务端按它切换离散天气；客户端只按同步到的
+ * 结果渲染云、雨雪与光照。
+ */
+export interface SceneWeatherDefinition {
+  initial: WeatherType;
+  /** 关闭后调试菜单的天气请求会被服务端忽略。 */
+  allowPlayerControl: boolean;
+  cycle?: {
+    enabled: boolean;
+    minimumSeconds: number;
+    maximumSeconds: number;
+    candidates: WeatherType[];
+  };
+}
+
+/** 房间权威的昼夜配置。时刻本身随快照同步，这里描述它怎么走。 */
+export interface SceneDayNightDefinition {
+  /** 关闭时场景恒定停在 startHour。 */
+  enabled: boolean;
+  /** 启用昼夜但冻结时间，用于固定黄昏、夜景这类静态氛围。 */
+  paused: boolean;
+  startHour: number;
+  /** 一整天（24 小时）走多少真实秒。 */
+  dayLengthSeconds: number;
+  allowPlayerControl: boolean;
+}
+
+export interface SceneEnvironmentDefinition {
+  weather: SceneWeatherDefinition;
+  dayNight: SceneDayNightDefinition;
+}
+
 export interface SceneActorDefinition {
   id: string;
   archetypeId: string;
@@ -352,6 +387,8 @@ export interface WorldPropVariantDefinition {
 export interface SceneDefinition extends SceneSummary {
   schemaVersion: 1;
   sceneComponents: SceneComponentDefinition[];
+  /** 房间权威的天气与昼夜推进配置；服务端净化后随 room:joined 下发。 */
+  environment: SceneEnvironmentDefinition;
   actors: SceneActorDefinition[];
   actorArchetypes: ActorArchetypeDefinition[];
   renderer: {

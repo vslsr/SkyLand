@@ -21,6 +21,22 @@
       "impulseStrength": 3.4
     }
   ],
+  "environment": {
+    "weather": {
+      "initial": "sunny",
+      "cycle": {
+        "enabled": true,
+        "minimumSeconds": 90,
+        "maximumSeconds": 240,
+        "candidates": ["sunny", "cloudy", "fog", "rain", "storm"]
+      }
+    },
+    "dayNight": {
+      "enabled": true,
+      "startHour": 7.4,
+      "dayLengthSeconds": 900
+    }
+  },
   "actors": [],
   "renderer": {
     "type": "line-art",

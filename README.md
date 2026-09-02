@@ -585,11 +585,53 @@ const page: CommonUIPage = {
 
 开发构建额外启用 `IMC.Development`。按 F8 会通过数据化 InputAction 打开 CommonUI
 调试页；页面仍遵守栈顶输入、焦点、Escape/F8 关闭和 Scene 清理规则。调试页可以切换
-Actor 简易碰撞边框、温度标签和房间权威天气。天气按钮只发送切换请求，房间 DS 校验后
-随快照同步当前天气；雨雪等表现由客户端按本地玩家周围的 3×3 chunk 激活，粒子保持世界
-坐标固定，天气光照与远景雾通过场景共享 uniform 驱动；纸面地表、地面网格与草叶
-不混入距离雾色。产品构建会移除
+Actor 简易碰撞边框、温度标签、房间权威天气，并显示房间时钟、请求跳到某个时段。
+天气与时段按钮都只发送请求，房间 DS 按场景配置校验后随快照同步结果。产品构建会移除
 该 Mapping，不占用 F8。
+
+## 服务器权威的天气与昼夜
+
+天气和昼夜都是房间级权威状态，客户端只渲染结果。DS 每 tick 推进
+`server/scene/SceneEnvironmentDirector.mjs`，快照里只多三个数：离散天气枚举
+`weather`、时刻 `timeOfDay`（小时，`[0, 24)`）和 `dayLength`（一整天的真实秒数，
+0 表示时钟被冻结）。云量、雨雪、风、天空渐变、日月轨迹、星空亮度和环境光全部由
+客户端按这三个数本地推导，网络上不传任何表现参数。
+
+「怎么切」写在场景 JSON 的 `environment` 里：
+
+```json
+"environment": {
+  "weather": {
+    "initial": "sunny",
+    "allowPlayerControl": true,
+    "cycle": {
+      "enabled": true,
+      "minimumSeconds": 90,
+      "maximumSeconds": 240,
+      "candidates": ["sunny", "cloudy", "fog", "rain", "storm"]
+    }
+  },
+  "dayNight": { "enabled": true, "startHour": 7.4, "dayLengthSeconds": 900 }
+}
+```
+
+- `weather.cycle` 让 DS 在候选天气之间自动轮换，间隔按房间世界种子确定性抽样，
+  每次都会换成与当前不同的一种；`allowPlayerControl` 关掉之后连调试菜单也改不动天气。
+- `dayNight.enabled` 关闭的场景恒定停在 `startHour`（默认正午），
+  `paused` 则是启用昼夜但冻结时间，用来做固定黄昏或夜景。
+- 整块 `environment` 可以省略：默认是晴天加一个停在正午的冻结时钟，正午的天空正好
+  等于 `renderer.background`，因此没有接入昼夜的场景和以前逐像素一致。
+
+客户端把两套表现拆成两个视觉 System，并且**只有天气系统写场景环境**：
+`src/environment/DayNightSystem.ts` 先按本地时钟算出天空底色、环境光、主光方向、
+日月位置与星空亮度，`src/weather/WeatherSystem.ts` 再在同一帧把云量压灰、雾浓度和
+雷闪叠上去，一次性写进 `scene.background`、`scene.fog` 与场景共享 uniform；两套系统
+各写一遍就会在同一帧互相覆盖。日轮、月轮、星空与流星是无限远元素，每帧跟着相机平移；
+雨雪仍按本地玩家周围的 3×3 chunk 激活，粒子保持世界坐标固定。纸面地表、地面网格与
+草叶不混入距离雾色。
+
+时刻在两帧快照之间由 `DayNightClock` 用与服务端相同的共享数学继续推进，收到快照时
+小偏差平滑追赶、大偏差（重连、调试跳时段）直接跳过去，所以时间不会随快照频率跳动。
 
 ## 数据化场景
 
@@ -611,6 +653,7 @@ Actor 简易碰撞边框、温度标签和房间权威天气。天气按钮只�
 - `gameplay.playerActor.archetype` 选择按连接动态生成的玩家 Actor 原型
 - `gameplay.runtimeActorArchetypes` 声明运行时允许生成、但不固定摆放的 Actor 原型
 - 按顺序加载的场景级 Component（场景专属逻辑、流程与规则）
+- `environment` 中房间权威的初始天气、天气轮换规则与昼夜推进速率
 - 渲染器类型、背景、雾效、内容开关和颜色表
 - 服务端权威活动边界与出生点规则
 - 默认观察相机参数
@@ -836,6 +879,8 @@ GAS `Movement.Speed` 的 CurrentValue；涉水 GameplayEffect 因此同时约束
 - `src/scenes/`：Scene 基类、SceneManager 与草地场景
 - `src/scene/components/`：由场景 JSON 选择的场景级 Component、生命周期宿主与注册表
 - `src/world/`：chunk 流式加载、ChunkView 与生成后端的加载
+- `src/environment/`：昼夜时钟镜像、天空渐变与日月星空视觉 System
+- `src/weather/`：天气粒子、云层与场景环境合成
 - `src/ui/common/`：CommonUI 栈和通用窗体
 - `src/ui/pages/`：房间大厅、创建房间页面
 - `src/interaction/`：最底层游戏交互事件路由
@@ -844,7 +889,7 @@ GAS `Movement.Speed` 的 CurrentValue；涉水 GameplayEffect 因此同时约束
 - `src/player/`：玩家实体和史莱姆动画
 - `src/network/`：浏览器房间客户端、消息协议与快照插值
 - `src/scenes/data/`：客户端场景 JSON 类型
-- `src/models/`：程序化地面、树木、草丛、岩石与 chunk 模板/合批
+- `src/models/`：程序化地面、树木、草丛、岩石、天体与 chunk 模板/合批
 - `src/materials/`：填充 Shader 与轮廓线材质
 - `server/network/`：WebSocket 网关
 - `server/http/`：API 路由、HTTP 响应和生产静态站点服务
@@ -856,7 +901,7 @@ GAS `Movement.Speed` 的 CurrentValue；涉水 GameplayEffect 因此同时约束
 - `src/actors/`：客户端 Actor Replica、Actor 快照缓冲、渲染 Component 与视觉 System
 - `config/actors/`：可复用 Actor 原型 JSON 与 Schema
 - `config/scenes/`：每张地图的独立 JSON 与 Schema
-- `shared/`：前后端共用的移动模拟与同步常量
+- `shared/`：前后端共用的移动模拟、昼夜时钟数学与同步常量
 - `shared/world/`：世界配置、chunk 坐标、确定性生成、两种生成后端与 chunk 静态碰撞体
 - `shared/collision/`：均匀网格空间划分、场景碰撞世界与扫掠球求交
 - `native/chunkgen/`：编译为 WebAssembly 的 Rust 生成与合批实现

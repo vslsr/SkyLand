@@ -15,6 +15,7 @@
 | `description` | 1–120 个字符 | 大厅中的地图说明，帮助玩家理解玩法或视觉特征。 |
 | `capacity` | 1–64 的整数 | 使用该场景创建的房间人数上限，由房间/DS 权威限制。 |
 | `sceneComponents` | 0–16 项的数组 | 按声明顺序加载场景特化逻辑，类似该场景的 GameMode；退出与换图时按相反顺序停用、释放。 |
+| `environment` | 可选对象 | 房间权威的天气与昼夜推进规则；省略即晴天 + 停在正午的冻结时钟。 |
 | `actors` | 0–256 项的数组 | 场景内服务端权威 Actor 的摆放列表；每项引用 `config/actors` 中的原型。 |
 | `renderer` | 对象 | 客户端如何构建和表现这个场景。 |
 | `gameplay` | 对象 | DS 和客户端共同使用的玩家 Actor、可活动区域、出生规则与环境基准。 |
@@ -71,6 +72,56 @@
 | `secondaryColor` | `#RRGGBB` | 海面的次级色，用于丰富纸绘水面层次。 |
 | `gridLineColor` | `#RRGGBB` | 低多边形三角网格的线稿颜色。 |
 | `gridLineOpacity` | 0–1 | 三角网格线稿的不透明度。 |
+
+## `environment`：房间权威天气与昼夜
+
+天气与昼夜都是房间级权威状态。服务端按这一块推进，随快照同步 `weather`、`timeOfDay`（小时，`[0, 24)`）和 `dayLength`（一整天的真实秒数，0 表示时钟被冻结）三个值；云、雨雪、天空渐变、日月轨迹、星空与环境光全部由客户端本地推导，网络上不传任何表现参数。
+
+整块 `environment` 可以省略，省略等于 `weather.initial = "sunny"` 加一个停在正午的冻结时钟——正午的天空正好等于 `renderer.background`，所以不接入昼夜的场景和以前逐像素一致。
+
+### `environment.weather`
+
+| 字段 | 格式/范围 | 作用 |
+| --- | --- | --- |
+| `initial` | 七态天气之一，默认 `sunny` | 房间创建时的天气。 |
+| `allowPlayerControl` | 布尔，默认 `true` | 是否接受客户端的天气切换请求（F8 调试菜单）。关掉之后天气只由 `cycle` 驱动。 |
+| `cycle` | 可选对象 | 服务端自动轮换天气；省略表示天气只在被请求时改变。 |
+| `cycle.enabled` | 布尔，默认 `true` | 关掉可以保留配置但暂停轮换。 |
+| `cycle.minimumSeconds` / `cycle.maximumSeconds` | 5–7200 秒，且 max ≥ min | 两次切换之间的真实秒数区间，按房间世界种子确定性抽样。 |
+| `cycle.candidates` | 1–7 项不重复天气；启用轮换时至少 2 项 | 轮换只会切到列表里的天气，且每次都换成与当前不同的一项。 |
+
+### `environment.dayNight`
+
+| 字段 | 格式/范围 | 作用 |
+| --- | --- | --- |
+| `enabled` | 布尔，默认 `false` | 关闭时场景恒定停在 `startHour`，天空、光照与星空按该时刻渲染。 |
+| `paused` | 布尔，默认 `false` | 启用昼夜但冻结时间；用于固定黄昏、夜景这类静态氛围。 |
+| `startHour` | `[0, 24)`，默认 `12` | 房间创建时的时刻。正午等于场景纸面色，`6` 前后是日出，`18.6` 前后是日落。 |
+| `dayLengthSeconds` | 20–86400，默认 `900` | 一整天（24 小时）走多少真实秒。 |
+| `allowPlayerControl` | 布尔，默认 `true` | 是否接受客户端的时刻跳转请求（F8 调试菜单的四个时段按钮）。 |
+
+配置示例：
+
+```json
+"environment": {
+  "weather": {
+    "initial": "sunny",
+    "cycle": {
+      "enabled": true,
+      "minimumSeconds": 90,
+      "maximumSeconds": 240,
+      "candidates": ["sunny", "cloudy", "fog", "rain", "storm"]
+    }
+  },
+  "dayNight": { "enabled": true, "startHour": 7.4, "dayLengthSeconds": 900 }
+}
+```
+
+作者注意事项：
+
+- 远景雾跟着天空走。雾几乎铺满画面的场景（大片海面、开阔平原）不要把 `startHour` 定在日出日落的峰值，`16.9` 这样的金色时刻比 `18.2` 的正橙更接近这套线稿的克制色调。
+- `dayLengthSeconds` 越短，天色变化越明显，但也越容易让玩家在一局里反复经历昼夜；展示用场景可以短到几分钟，玩法场景建议 10 分钟以上。
+- 想要一张固定氛围的地图，用 `enabled: true` + `paused: true` + `startHour`，而不是把 `dayLengthSeconds` 调到最大。
 
 ## `sceneComponents`：场景特化规则与流程
 
@@ -198,6 +249,8 @@ Transform。危险物碰撞只由 DS 根据权威 Transform 计算。
 - `fog.far` 必须大于 `fog.near`。
 - 出生中心必须位于玩法边界内；当前校验不检查整个出生圆是否越界，作者仍应自行保证。
 - 海洋开关、`renderer.ocean`、`gameplay.water` 三者应成组出现。
+- `environment.weather.cycle` 启用时至少要有 2 种候选天气，且 `maximumSeconds` 不小于 `minimumSeconds`。
+- `environment.dayNight.startHour` 必须落在 `[0, 24)`；`24` 属于非法值，写 `0`。
 - `sceneComponents` 必须在每张场景中显式填写，可为空数组；组件类型不得重复，且必须满足各自的跨字段依赖。
 - `actors[].archetype` 必须能在 `config/actors/*.actor.json` 中找到，Actor id 在同一场景内必须唯一。
 - `gameplay.playerActor.archetype` 必须引用带 `playerMovement` 的史莱姆原型，且不能放进 `actors[]`。
@@ -211,12 +264,13 @@ Transform。危险物碰撞只由 DS 根据权威 Transform 计算。
 1. 从 `grassland.scene.json`、`open-meadow.scene.json` 或 `water.scene.json` 中选择最接近的模板。
 2. 设置唯一文件名、`id`、名称、说明和容量。
 3. 设置 `sceneComponents`、内容开关、配色和雾效；海域补齐 `renderer.ocean`。
-4. 设置玩家 Actor、玩法边界、出生区域；海域补齐 `gameplay.water`。
-5. 选择 `topdown` 玩法模式或 `fly` 展示模式并调整初始相机。
-6. 若摆放可交互物，确认它与初始可控 Actor 的距离不超过 `interactable.maximumDistance`；危险物还要核对半径与边界。
-7. 用编辑器/Schema 检查 JSON，再以 `SceneCatalog` 和 `ActorCatalog` 测试确认运行时校验。
-8. 运行 `npm run test:server`、`npm run test:client` 和 `npm run build`。
-9. 重启服务，确认 `/api/scenes` 出现新条目；创建房间并加入，确认 DS 返回并加载正确场景。
+4. 需要天气轮换或昼夜时补上 `environment`，并确认时刻与雾覆盖面积搭配得当。
+5. 设置玩家 Actor、玩法边界、出生区域；海域补齐 `gameplay.water`。
+6. 选择 `topdown` 玩法模式或 `fly` 展示模式并调整初始相机。
+7. 若摆放可交互物，确认它与初始可控 Actor 的距离不超过 `interactable.maximumDistance`；危险物还要核对半径与边界。
+8. 用编辑器/Schema 检查 JSON，再以 `SceneCatalog` 和 `ActorCatalog` 测试确认运行时校验。
+9. 运行 `npm run test:server`、`npm run test:client` 和 `npm run build`。
+10. 重启服务，确认 `/api/scenes` 出现新条目；创建房间并加入，确认 DS 返回并加载正确场景。
 
 ## 何时需要扩展代码
 

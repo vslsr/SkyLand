@@ -85,6 +85,62 @@
         ]
       }
     },
+    "environment": {
+      "type": "object",
+      "description": "房间权威的天气与昼夜配置；服务端按它推进状态，客户端只渲染表现",
+      "additionalProperties": false,
+      "properties": {
+        "weather": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "initial": { "$ref": "#/$defs/weatherType" },
+            "allowPlayerControl": {
+              "type": "boolean",
+              "description": "是否接受客户端的天气切换请求；关闭后只有服务端循环能改天气"
+            },
+            "cycle": {
+              "type": "object",
+              "description": "服务端自动轮换天气；省略表示天气只在被请求时改变",
+              "additionalProperties": false,
+              "required": ["minimumSeconds", "maximumSeconds", "candidates"],
+              "properties": {
+                "enabled": { "type": "boolean" },
+                "minimumSeconds": { "type": "number", "minimum": 5, "maximum": 7200 },
+                "maximumSeconds": { "type": "number", "minimum": 5, "maximum": 7200 },
+                "candidates": {
+                  "type": "array",
+                  "minItems": 1,
+                  "maxItems": 7,
+                  "uniqueItems": true,
+                  "items": { "$ref": "#/$defs/weatherType" }
+                }
+              }
+            }
+          }
+        },
+        "dayNight": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "description": "关闭时场景恒定停在 startHour，天空、光照与星空按该时刻渲染"
+            },
+            "paused": {
+              "type": "boolean",
+              "description": "启用昼夜但冻结时间；用于固定黄昏、夜景这类静态氛围"
+            },
+            "startHour": { "type": "number", "minimum": 0, "exclusiveMaximum": 24 },
+            "dayLengthSeconds": { "type": "number", "minimum": 20, "maximum": 86400 },
+            "allowPlayerControl": {
+              "type": "boolean",
+              "description": "是否接受客户端的时刻跳转请求（调试菜单用）"
+            }
+          }
+        }
+      }
+    },
     "actors": {
       "type": "array",
       "maxItems": 256,
@@ -328,6 +384,9 @@
     }
   ],
   "$defs": {
+    "weatherType": {
+      "enum": ["sunny", "cloudy", "fog", "rain", "storm", "snow", "blizzard"]
+    },
     "color": {
       "type": "string",
       "pattern": "^#[0-9A-Fa-f]{6}$"

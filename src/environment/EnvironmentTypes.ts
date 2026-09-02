@@ -1,0 +1,73 @@
+import type * as THREE from 'three';
+
+/**
+ * 天气系统每帧混出的连续场量。
+ *
+ * 服务端只同步离散天气枚举；这些数字是客户端在两种天气之间过渡时的当前值，
+ * 昼夜系统读它来决定日月与星空被云遮住多少。
+ */
+export interface WeatherFieldState {
+  /** 目标云朵数量（0-10），与 WEATHER_PRESETS 同量纲。 */
+  clouds: number;
+  /** 归一化云量，0 是完全晴朗。 */
+  cloudCover: number;
+  rain: number;
+  snow: number;
+  fog: number;
+  /** 天空被压灰的程度，0-1。 */
+  gray: number;
+  wind: number;
+  /** 当前雷闪强度，0-1；没有闪电时是 0。 */
+  lightningFlash: number;
+}
+
+export interface WeatherFieldSource {
+  /** 返回内部复用的只读快照，调用方不得持有或修改。 */
+  getWeatherField(): Readonly<WeatherFieldState>;
+}
+
+/**
+ * 昼夜系统按房间权威时刻推导出的天空状态。
+ *
+ * 这些量都还没有掺进天气：天气系统拿到之后再叠加灰度、雷闪与云量衰减，
+ * 最终写进场景背景、雾和共享光照 uniform。
+ */
+export interface SkyState {
+  /** 房间权威时刻，单位小时，落在 [0, 24)。 */
+  timeOfDay: number;
+  /** 夜晚程度，0 是完全白昼，1 是深夜。 */
+  night: number;
+  /** 白昼程度，等于 1 - night。 */
+  dayFactor: number;
+  /** 晨昏程度，0-1；日出与日落各有一个峰。 */
+  twilight: number;
+  /** 月光强度，0-1；夜晚、月亮在地平线以上且天空干净时才明显。 */
+  moonlit: number;
+  /** 未掺天气的天空底色。 */
+  skyColor: THREE.Color;
+  /** 未掺天气的环境光颜色。 */
+  ambientColor: THREE.Color;
+  /** 未掺天气的环境光亮度系数。 */
+  ambientBrightness: number;
+  /** 主光方向；太阳落山后交给月亮，夜里也保留方向感。 */
+  sunDirection: THREE.Vector3;
+  /** 日轮高度，-1 到 1。 */
+  sunElevation: number;
+  /** 月轮高度，-1 到 1。 */
+  moonElevation: number;
+}
+
+export interface SkyStateSource {
+  /** 返回内部复用的只读快照，调用方不得持有或修改。 */
+  getSkyState(): Readonly<SkyState>;
+}
+
+/** 场景渲染器同步房间权威时刻的入口。 */
+export interface DayNightVisualTarget {
+  readonly timeOfDay: number;
+  /**
+   * @param timeOfDay 房间权威时刻（小时）
+   * @param dayLengthSeconds 一整天走多少真实秒；0 表示时钟被冻结
+   */
+  applyServerTime(timeOfDay: number, dayLengthSeconds: number): void;
+}

@@ -56,6 +56,7 @@ export type ClientMessage =
   | { type: 'room:join'; roomId: string; name: string }
   | { type: 'room:leave' }
   | { type: 'weather:set'; weather: WeatherType }
+  | { type: 'daynight:set'; timeOfDay: number }
   | {
       type: 'player:input';
       inputs: PlayerInputStep[];

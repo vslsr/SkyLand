@@ -116,6 +116,9 @@ test('晴天与多云共享同一套场景雾和光照 uniform', () => {
   settle(system, 6);
   const sunny = system.getLightingState();
   const sunnyAmbient = environment.runtime!.ambientColor.value.clone();
+  // 没有昼夜系统时天空恒为场景背景色，光照与接入昼夜之前一致。
+  assert.equal(sunny.skyColor, '#fdfbf6');
+  assert.equal(sunny.daylight > 0.85, true);
   assert.equal(material.uniforms.uAmbientColor, environment.runtime!.ambientColor);
   assert.equal(material.uniforms.uDaylight, environment.runtime!.daylight);
   assert.equal(material.uniforms.uFogColor, environment.runtime!.fogColor);
@@ -124,7 +127,7 @@ test('晴天与多云共享同一套场景雾和光照 uniform', () => {
   settle(system, 14);
   const cloudy = system.getLightingState();
   assert.ok(cloudy.daylight < sunny.daylight * 0.55);
-  assert.ok(cloudy.sunOpacity < sunny.sunOpacity * 0.2);
+  assert.ok(cloudy.cloudCover > sunny.cloudCover * 3);
   assert.ok(environment.runtime!.ambientColor.value.getHex() !== sunnyAmbient.getHex());
   assert.ok(environment.runtime!.fogFar.value < 52);
 

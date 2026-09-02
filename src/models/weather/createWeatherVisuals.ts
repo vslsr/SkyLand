@@ -17,9 +17,6 @@ export interface WeatherCloudVisual {
 
 export interface WeatherVisuals {
   readonly root: THREE.Group;
-  readonly sunRoot: THREE.Group;
-  readonly sunFillMaterial: THREE.MeshBasicMaterial;
-  readonly sunLineMaterial: THREE.LineBasicMaterial;
   readonly clouds: readonly WeatherCloudVisual[];
   readonly cloudFillMaterial: THREE.MeshBasicMaterial;
   readonly cloudLineMaterial: THREE.LineBasicMaterial;
@@ -49,52 +46,13 @@ function createRandom(seed: number): () => number {
 /**
  * 创建天气系统的固定容量线稿资源。粒子状态与 chunk 激活由 WeatherSystem 管理，
  * 这里仅负责程序化模型和 GPU 缓冲，避免把几何构造塞进场景组合代码。
+ *
+ * 日轮、月轮与星空属于昼夜系统，见 `src/models/sky/createCelestialVisuals.ts`。
  */
 export function createWeatherVisuals(): WeatherVisuals {
   const random = createRandom(0x51ca_b1e7);
   const root = new THREE.Group();
   root.name = 'chunk-weather-system';
-
-  const sunRoot = new THREE.Group();
-  sunRoot.name = 'weather-sun';
-  const sunFillMaterial = new THREE.MeshBasicMaterial({
-    color: 0xffd75e,
-    transparent: true,
-    opacity: 0.78,
-    depthWrite: false,
-    fog: false,
-    side: THREE.DoubleSide,
-  });
-  const sunLineMaterial = new THREE.LineBasicMaterial({
-    color: 0xc98a2e,
-    transparent: true,
-    opacity: 0.78,
-    depthWrite: false,
-    fog: false,
-  });
-  const sunDiscGeometry = new THREE.CircleGeometry(1.35, 28);
-  const sunEdgeGeometry = new THREE.EdgesGeometry(sunDiscGeometry, 15);
-  const rayPositions: number[] = [];
-  for (let ray = 0; ray < 12; ray += 1) {
-    const angle = ray / 12 * Math.PI * 2;
-    const cosine = Math.cos(angle);
-    const sine = Math.sin(angle);
-    rayPositions.push(
-      cosine * 1.7, sine * 1.7, 0,
-      cosine * 2.35, sine * 2.35, 0,
-    );
-  }
-  const sunRayGeometry = new THREE.BufferGeometry();
-  sunRayGeometry.setAttribute(
-    'position',
-    new THREE.Float32BufferAttribute(rayPositions, 3),
-  );
-  sunRoot.add(
-    new THREE.Mesh(sunDiscGeometry, sunFillMaterial),
-    new THREE.LineSegments(sunEdgeGeometry, sunLineMaterial),
-    new THREE.LineSegments(sunRayGeometry, sunLineMaterial),
-  );
-  root.add(sunRoot);
 
   const cloudFillMaterial = new THREE.MeshBasicMaterial({
     color: 0xffffff,
@@ -200,9 +158,6 @@ export function createWeatherVisuals(): WeatherVisuals {
 
   return {
     root,
-    sunRoot,
-    sunFillMaterial,
-    sunLineMaterial,
     clouds,
     cloudFillMaterial,
     cloudLineMaterial,
@@ -222,11 +177,6 @@ export function createWeatherVisuals(): WeatherVisuals {
       while (root.children.length > 0) root.remove(root.children[0]);
       cloudFillGeometry.dispose();
       cloudLineGeometry.dispose();
-      sunDiscGeometry.dispose();
-      sunEdgeGeometry.dispose();
-      sunRayGeometry.dispose();
-      sunFillMaterial.dispose();
-      sunLineMaterial.dispose();
       cloudFillMaterial.dispose();
       cloudLineMaterial.dispose();
       rainGeometry.dispose();

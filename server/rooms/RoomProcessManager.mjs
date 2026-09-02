@@ -172,6 +172,12 @@ export class RoomProcessManager extends EventEmitter {
     record.child.send({ type: 'weather:set', playerId, weather });
   }
 
+  setTimeOfDay(roomId, playerId, timeOfDay) {
+    const record = this.rooms.get(roomId);
+    if (!record || !record.players.has(playerId)) return;
+    record.child.send({ type: 'daynight:set', playerId, timeOfDay });
+  }
+
   /** 取最小的空闲座位号，出生点由座位号决定。 */
   allocateSlot(record) {
     const used = new Set(Array.from(record.players.values(), (player) => player.slot));

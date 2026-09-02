@@ -132,6 +132,11 @@ export class RoomConnectionHub {
             this.roomManager.setWeather(session.roomId, session.playerId, message.weather);
           }
           break;
+        case 'daynight:set':
+          if (session.roomId && session.playerId) {
+            this.roomManager.setTimeOfDay(session.roomId, session.playerId, message.timeOfDay);
+          }
+          break;
         case 'actor:claim':
           if (session.roomId && session.playerId) {
             this.roomManager.claimActorControl(session.roomId, session.playerId, message.actorId);

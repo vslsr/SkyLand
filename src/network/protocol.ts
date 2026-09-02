@@ -119,6 +119,10 @@ export interface RoomSnapshot {
   tick: number;
   serverTime: number;
   weather: WeatherType;
+  /** 房间权威时刻，单位小时，落在 [0, 24)。 */
+  timeOfDay: number;
+  /** 一整天走多少真实秒；时钟被冻结或关闭时是 0，客户端据此停止本地推进。 */
+  dayLength: number;
   actors: SnapshotActor[];
   players: SnapshotPlayer[];
 }

@@ -6,6 +6,15 @@
   "description": "观察篝火加热干草、达到燃点后着火并继续向邻近干草传播热量。",
   "capacity": 4,
   "sceneComponents": [],
+  "environment": {
+    "weather": { "initial": "snow", "allowPlayerControl": true },
+    "dayNight": {
+      "enabled": true,
+      "paused": true,
+      "startHour": 21.5,
+      "allowPlayerControl": true
+    }
+  },
   "actors": [
     {
       "id": "campfire-01",

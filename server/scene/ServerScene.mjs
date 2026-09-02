@@ -55,7 +55,7 @@ import {
   selectFruitDropAnchors,
 } from '../../shared/world/fruitDrop.mjs';
 import { toWorldSeed } from '../../shared/world/worldConfig.mjs';
-import { DEFAULT_WEATHER, isWeatherType } from '../../shared/weather.mjs';
+import { SceneEnvironmentDirector } from './SceneEnvironmentDirector.mjs';
 import { TERRAIN_CELL_SIZE, TERRAIN_SURFACE } from '../../shared/world/terrainConfig.mjs';
 import { sampleTerrain } from '../../shared/world/terrainContent.mjs';
 import { TerrainEditor } from '../../shared/world/terrainEditing.mjs';
@@ -167,7 +167,10 @@ export class ServerScene {
     this.now = options.now ?? (() => Date.now());
     this.playerTransformDebug = options.playerTransformDebug;
     this.players = new Map();
-    this.weather = DEFAULT_WEATHER;
+    // 天气与昼夜都是房间级权威状态：客户端只能提出合法请求，推进由这里完成。
+    this.environment = new SceneEnvironmentDirector(definition.environment, {
+      seed: this.worldSeed,
+    });
     // 一张空间网格同时承载 Actor 与流式世界的静态物件。玩家推出只查身边的
     // 几个格子，成本不随房间里的 Actor 数或世界面积增长。
     this.collision = new CollisionWorld();
@@ -719,12 +722,25 @@ export class ServerScene {
 
   /**
    * 天气是房间级权威离散状态。客户端只能提出一个合法枚举请求，不能上传
-   * 粒子、风速、雾距离或其它表现参数。
+   * 粒子、风速、雾距离或其它表现参数；场景也可以完全关掉这条请求路径。
    */
   setWeather(playerId, weather) {
-    if (!this.players.has(playerId) || !isWeatherType(weather)) return false;
-    this.weather = weather;
-    return true;
+    if (!this.players.has(playerId)) return false;
+    return this.environment.requestWeather(weather);
+  }
+
+  /** 房间当前天气；快照与测试都读这一个来源。 */
+  get weather() {
+    return this.environment.weather;
+  }
+
+  /**
+   * 昼夜时刻同样是房间权威。客户端请求的是「跳到几点」，服务端决定接不接受；
+   * 日轮角度、天空渐变和星空亮度全部由客户端本地按同步到的时刻推导。
+   */
+  setTimeOfDay(playerId, timeOfDay) {
+    if (!this.players.has(playerId)) return false;
+    return this.environment.requestTimeOfDay(timeOfDay);
   }
 
   isWaterAt(x, z) {
@@ -793,6 +809,7 @@ export class ServerScene {
     const now = this.now();
     const elapsedSeconds = Math.max(0, (now - this.lastRefillAt) / 1000);
     this.lastRefillAt = now;
+    this.environment.advance(elapsedSeconds);
 
     for (const player of this.players.values()) {
       player.stepBudget = Math.min(
@@ -904,7 +921,7 @@ export class ServerScene {
       sceneId: this.id,
       tick: this.tick,
       serverTime: this.now(),
-      weather: this.weather,
+      ...this.environment.snapshot(),
       actors: createActorSnapshots(this.actorWorld, { viewer }),
       players: Array.from(this.players.values(), (player) => ({
         id: player.id,

@@ -236,6 +236,47 @@ test('房间服务端校验天气枚举并通过快照同步当前天气', () =>
   assert.equal(scene.createSnapshot().weather, 'blizzard');
 });
 
+test('房间快照带上权威时刻与一天的真实秒数，客户端据此本地推进', () => {
+  let now = 1_000_000;
+  const scene = new ServerScene({
+    id: 'daynight-probe',
+    environment: {
+      weather: { initial: 'cloudy', allowPlayerControl: false },
+      dayNight: {
+        enabled: true,
+        paused: false,
+        startHour: 8,
+        dayLengthSeconds: 240,
+        allowPlayerControl: true,
+      },
+    },
+    gameplay: {
+      bounds: { minimumX: -8, maximumX: 8, minimumZ: -8, maximumZ: 8 },
+      spawn: { centerX: 0, centerZ: 0, radius: 0, slots: 2 },
+    },
+  }, { now: () => now });
+  scene.addPlayer({ id: 'player-1', name: '旅人', slot: 0 });
+
+  const initial = scene.createSnapshot();
+  assert.equal(initial.weather, 'cloudy');
+  assert.equal(initial.timeOfDay, 8);
+  assert.equal(initial.dayLength, 240);
+
+  // 一天 240 秒即每秒 0.1 小时；服务端时钟走 1 秒就该前进 0.1 小时。
+  now += 1000;
+  scene.update();
+  assert.ok(Math.abs(scene.createSnapshot().timeOfDay - 8.1) < 0.002);
+
+  // 天气被场景锁死，时刻仍然接受请求；两条路径互不影响。
+  assert.equal(scene.setWeather('player-1', 'storm'), false);
+  assert.equal(scene.setTimeOfDay('missing-player', 3), false);
+  assert.equal(scene.setTimeOfDay('player-1', 30), false);
+  assert.equal(scene.setTimeOfDay('player-1', 21.5), true);
+  const requested = scene.createSnapshot();
+  assert.equal(requested.weather, 'cloudy');
+  assert.equal(requested.timeOfDay, 21.5);
+});
+
 test('场景 JSON 的边界与出生配置参与权威模拟', () => {
   const scene = new ServerScene({
     id: 'tiny-map',

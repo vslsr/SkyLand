@@ -132,11 +132,14 @@ export class LineArtLeafParticleEffect implements InteractiveParticleEffect {
     source.fill.dispose();
     source.outline.dispose();
 
+    // 拿到场景共享 uniform 时直接复用：天气改一次雾和光照，叶片同一帧跟上。
+    const runtime = options.environment.runtime;
     const sharedUniforms = {
       uTime: this.timeUniform,
-      uFogColor: { value: new THREE.Color(options.environment.fogColor) },
-      uFogNear: { value: options.environment.fogNear },
-      uFogFar: { value: options.environment.fogFar },
+      uAmbientColor: runtime?.ambientColor ?? { value: new THREE.Color(0xffffff) },
+      uFogColor: runtime?.fogColor ?? { value: new THREE.Color(options.environment.fogColor) },
+      uFogNear: runtime?.fogNear ?? { value: options.environment.fogNear },
+      uFogFar: runtime?.fogFar ?? { value: options.environment.fogFar },
     };
     this.fillMaterial = new THREE.ShaderMaterial({
       vertexShader: INTERACTIVE_LEAF_VERTEX_SHADER,

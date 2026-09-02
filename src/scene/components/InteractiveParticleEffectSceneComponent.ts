@@ -121,6 +121,7 @@ function createEffect(
           fogColor: context.definition.renderer.fog.color,
           fogNear: context.definition.renderer.fog.near,
           fogFar: context.definition.renderer.fog.far,
+          runtime: context.renderer.environmentRuntime,
         },
       });
     default: {

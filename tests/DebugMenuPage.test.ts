@@ -110,6 +110,25 @@ test('F8 调试菜单温度按钮切换文案、无障碍状态并派发回调',
     page.setWeather('storm');
     assert.equal(sunnyButton.getAttribute('aria-pressed'), 'false');
     assert.equal(stormButton.getAttribute('aria-pressed'), 'true');
+
+    const duskButton = fakeDocument.elements.find((element) => (
+      element.tagName === 'button' && element.dataset.timeOfDay === '18.6'
+    ));
+    assert.ok(duskButton);
+    const timeRequests: number[] = [];
+    page.onTimeOfDaySelect((timeOfDay) => timeRequests.push(timeOfDay));
+    duskButton.dispatchEvent(new Event('click'));
+    assert.deepEqual(timeRequests, [18.6]);
+
+    // 时刻同样只提交意图；显示的时钟来自房间快照。
+    const clock = fakeDocument.elements.find((element) => (
+      element.className.includes('debug-menu__clock')
+    ));
+    assert.ok(clock);
+    page.setTimeOfDay(7.5, 600);
+    assert.equal(clock.textContent, '07:30 · 清晨 · 一天 600 秒');
+    page.setTimeOfDay(21.5, 0);
+    assert.equal(clock.textContent, '21:30 · 入夜 · 时钟已冻结');
   } finally {
     Object.defineProperty(globalThis, 'document', {
       value: previousDocument,

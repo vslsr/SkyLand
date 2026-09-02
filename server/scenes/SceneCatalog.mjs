@@ -8,6 +8,14 @@ import {
   WORLD_PROP_VARIANT_MAXIMUM_COUNT,
   WORLD_PROP_VARIANT_WEIGHT_MAXIMUM,
 } from '../../shared/world/worldPropVariants.mjs';
+import { DEFAULT_WEATHER, WEATHER_TYPES, isWeatherType } from '../../shared/weather.mjs';
+import {
+  DEFAULT_DAY_LENGTH_SECONDS,
+  DEFAULT_START_HOUR,
+  HOURS_PER_DAY,
+  MAXIMUM_DAY_LENGTH_SECONDS,
+  MINIMUM_DAY_LENGTH_SECONDS,
+} from '../../shared/dayNight.mjs';
 
 export const DEFAULT_SCENE_DIRECTORY = fileURLToPath(new URL('../../config/scenes/', import.meta.url));
 
@@ -291,12 +299,153 @@ function validateWorldProps(gameplay, filename, actorCatalog, world, content) {
   return bindings;
 }
 
+const WEATHER_CYCLE_MINIMUM_SECONDS = 5;
+const WEATHER_CYCLE_MAXIMUM_SECONDS = 7200;
+
+/**
+ * 天气与昼夜的房间权威配置。
+ *
+ * 这一块决定服务端「怎么切」：初始状态、是否自动轮换、一整天走多少真实秒，
+ * 以及客户端能不能提出切换请求。表现参数一律不在这里——客户端只按同步到的
+ * 离散天气和时刻渲染。
+ */
+function validateEnvironment(raw, filename) {
+  const path = `${filename}.environment`;
+  const environment = raw === undefined ? {} : requireObject(raw, path);
+  for (const key of Object.keys(environment)) {
+    if (key !== 'weather' && key !== 'dayNight') {
+      throw new TypeError(`${path}.${key} 不受支持`);
+    }
+  }
+
+  const rawWeather = environment.weather === undefined
+    ? {}
+    : requireObject(environment.weather, `${path}.weather`);
+  for (const key of Object.keys(rawWeather)) {
+    if (key !== 'initial' && key !== 'allowPlayerControl' && key !== 'cycle') {
+      throw new TypeError(`${path}.weather.${key} 不受支持`);
+    }
+  }
+  const initial = rawWeather.initial ?? DEFAULT_WEATHER;
+  if (!isWeatherType(initial)) {
+    throw new TypeError(`${path}.weather.initial 必须是 ${WEATHER_TYPES.join(' / ')}`);
+  }
+  const allowWeatherControl = rawWeather.allowPlayerControl === undefined
+    ? true
+    : requireBoolean(rawWeather.allowPlayerControl, `${path}.weather.allowPlayerControl`);
+
+  let cycle;
+  if (rawWeather.cycle !== undefined) {
+    const cyclePath = `${path}.weather.cycle`;
+    const rawCycle = requireObject(rawWeather.cycle, cyclePath);
+    for (const key of Object.keys(rawCycle)) {
+      if (
+        key !== 'enabled'
+        && key !== 'minimumSeconds'
+        && key !== 'maximumSeconds'
+        && key !== 'candidates'
+      ) {
+        throw new TypeError(`${cyclePath}.${key} 不受支持`);
+      }
+    }
+    const minimumSeconds = requireNumber(rawCycle.minimumSeconds, `${cyclePath}.minimumSeconds`);
+    const maximumSeconds = requireNumber(rawCycle.maximumSeconds, `${cyclePath}.maximumSeconds`);
+    if (
+      minimumSeconds < WEATHER_CYCLE_MINIMUM_SECONDS
+      || maximumSeconds > WEATHER_CYCLE_MAXIMUM_SECONDS
+      || maximumSeconds < minimumSeconds
+    ) {
+      throw new TypeError(
+        `${cyclePath} 的间隔必须落在 ${WEATHER_CYCLE_MINIMUM_SECONDS}-${WEATHER_CYCLE_MAXIMUM_SECONDS} 秒且 maximumSeconds 不小于 minimumSeconds`,
+      );
+    }
+    if (!Array.isArray(rawCycle.candidates) || rawCycle.candidates.length === 0) {
+      throw new TypeError(`${cyclePath}.candidates 必须是至少 1 项的天气数组`);
+    }
+    const candidates = [];
+    for (const [index, candidate] of rawCycle.candidates.entries()) {
+      if (!isWeatherType(candidate)) {
+        throw new TypeError(`${cyclePath}.candidates[${index}] 不是已知天气`);
+      }
+      if (candidates.includes(candidate)) {
+        throw new TypeError(`${cyclePath}.candidates 不能重复：${candidate}`);
+      }
+      candidates.push(candidate);
+    }
+    const enabled = rawCycle.enabled === undefined
+      ? true
+      : requireBoolean(rawCycle.enabled, `${cyclePath}.enabled`);
+    // 只有一项候选时轮换永远切不出新天气，等于配置写错了。
+    if (enabled && candidates.length < 2) {
+      throw new TypeError(`${cyclePath}.candidates 启用轮换时至少需要 2 种天气`);
+    }
+    cycle = { enabled, minimumSeconds, maximumSeconds, candidates };
+  }
+
+  const rawDayNight = environment.dayNight === undefined
+    ? {}
+    : requireObject(environment.dayNight, `${path}.dayNight`);
+  for (const key of Object.keys(rawDayNight)) {
+    if (
+      key !== 'enabled'
+      && key !== 'paused'
+      && key !== 'startHour'
+      && key !== 'dayLengthSeconds'
+      && key !== 'allowPlayerControl'
+    ) {
+      throw new TypeError(`${path}.dayNight.${key} 不受支持`);
+    }
+  }
+  const dayNightEnabled = rawDayNight.enabled === undefined
+    ? false
+    : requireBoolean(rawDayNight.enabled, `${path}.dayNight.enabled`);
+  const paused = rawDayNight.paused === undefined
+    ? false
+    : requireBoolean(rawDayNight.paused, `${path}.dayNight.paused`);
+  const startHour = rawDayNight.startHour === undefined
+    ? DEFAULT_START_HOUR
+    : requireNumber(rawDayNight.startHour, `${path}.dayNight.startHour`);
+  if (startHour < 0 || startHour >= HOURS_PER_DAY) {
+    throw new TypeError(`${path}.dayNight.startHour 必须落在 [0, ${HOURS_PER_DAY})`);
+  }
+  const dayLengthSeconds = rawDayNight.dayLengthSeconds === undefined
+    ? DEFAULT_DAY_LENGTH_SECONDS
+    : requireNumber(rawDayNight.dayLengthSeconds, `${path}.dayNight.dayLengthSeconds`);
+  if (
+    dayLengthSeconds < MINIMUM_DAY_LENGTH_SECONDS
+    || dayLengthSeconds > MAXIMUM_DAY_LENGTH_SECONDS
+  ) {
+    throw new TypeError(
+      `${path}.dayNight.dayLengthSeconds 必须落在 ${MINIMUM_DAY_LENGTH_SECONDS}-${MAXIMUM_DAY_LENGTH_SECONDS} 秒`,
+    );
+  }
+  const allowDayNightControl = rawDayNight.allowPlayerControl === undefined
+    ? true
+    : requireBoolean(rawDayNight.allowPlayerControl, `${path}.dayNight.allowPlayerControl`);
+
+  return {
+    weather: {
+      initial,
+      allowPlayerControl: allowWeatherControl,
+      ...(cycle ? { cycle } : {}),
+    },
+    dayNight: {
+      enabled: dayNightEnabled,
+      paused,
+      startHour,
+      dayLengthSeconds,
+      allowPlayerControl: allowDayNightControl,
+    },
+  };
+}
+
 function validateSceneDefinition(raw, filename, actorCatalog) {
   const scene = requireObject(raw, filename);
   if (scene.schemaVersion !== 1) throw new TypeError(`${filename}.schemaVersion 必须是 1`);
   const id = requireString(scene.id, `${filename}.id`, 48);
   if (!SCENE_ID_PATTERN.test(id)) throw new TypeError(`${filename}.id 格式无效`);
   const sceneComponents = validateSceneComponents(scene.sceneComponents, filename);
+  const environment = validateEnvironment(scene.environment, filename);
 
   const renderer = requireObject(scene.renderer, `${filename}.renderer`);
   if (renderer.type !== 'line-art') throw new TypeError(`${filename}.renderer.type 暂只支持 line-art`);
@@ -540,6 +689,7 @@ function validateSceneDefinition(raw, filename, actorCatalog) {
     description: requireString(scene.description, `${filename}.description`, 120),
     capacity: requireInteger(scene.capacity, `${filename}.capacity`, 1, 64),
     sceneComponents,
+    environment,
     ...actorComposition,
     renderer: {
       type: 'line-art',

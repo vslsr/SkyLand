@@ -149,6 +149,11 @@ export class RoomClient {
     this.send({ type: 'weather:set', weather }, 'control');
   }
 
+  /** 请求房间跳到某个时刻；服务端按场景配置决定接不接受。 */
+  public setTimeOfDay(timeOfDay: number): void {
+    this.send({ type: 'daynight:set', timeOfDay }, 'control');
+  }
+
   /** 上报仍未被服务端确认的固定模拟步；丢包时下一包会自然重带旧步。 */
   public sendPlayerInput(inputs: readonly PlayerInputStep[]): number | undefined {
     if (inputs.length === 0) return undefined;

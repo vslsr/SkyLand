@@ -163,6 +163,10 @@ process.on('message', (message) => {
       if (!scene) break;
       scene.setWeather(message.playerId, message.weather);
       break;
+    case 'daynight:set':
+      if (!scene) break;
+      scene.setTimeOfDay(message.playerId, message.timeOfDay);
+      break;
     case 'actor:claim':
       if (!scene) break;
       scene.claimActorControl(message.playerId, message.actorId);
