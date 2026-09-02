@@ -3,6 +3,7 @@ import type { FillMaterialEnvironment } from '../../materials/createFillMaterial
 import { createActorVisualModel } from '../../models/actors/createActorVisualModel';
 import type { ActorVisualModel } from '../../models/actors/ActorVisualModel';
 import {
+  NULL_PROXY_ID,
   type MeshProxyDesc,
   type MeshProxyInfo,
   type ProxyId,
@@ -10,6 +11,7 @@ import {
   toProxyId,
 } from '../RenderScene';
 import type { RenderTransform, RenderTransformBuffer } from '../RenderTransformBuffer';
+import { PARAM_TEMPERATURE } from '../RenderVisualParams';
 import { ThreeFireVisual } from './ThreeFireVisual';
 import { ThreeMeshProxy } from './ThreeMeshProxy';
 
@@ -63,6 +65,9 @@ export class ThreeRenderScene implements RenderScene {
   private readonly world: RenderTransform = { x: 0, y: 0, z: 0, yaw: 0 };
   private readonly parentWorld: RenderTransform = { x: 0, y: 0, z: 0, yaw: 0 };
   private simpleCollisionVisible = false;
+  private temperatureMarkersVisible = false;
+  /** 当前选中的交互目标；NULL_PROXY_ID 表示没有选中。 */
+  private selectedInteractionProxy: ProxyId = NULL_PROXY_ID;
   /** 渲染世界自己的表现系统。它们只认识 ProxyId，不认识 Actor。 */
   private readonly fireVisual = new ThreeFireVisual();
 
@@ -83,6 +88,11 @@ export class ThreeRenderScene implements RenderScene {
     const proxy = new ThreeMeshProxy(toProxyId(slot), model);
     this.proxies[slot] = proxy;
     proxy.setSimpleCollisionVisible(this.simpleCollisionVisible);
+    if (desc.interactionMarker) proxy.markers.attachInteraction(proxy.interactionAnchorY);
+    if (desc.temperatureMarker) {
+      proxy.markers.attachTemperature(proxy.temperatureAnchorX, proxy.interactionAnchorY, 0);
+      proxy.markers.setTemperatureVisible(this.temperatureMarkersVisible);
+    }
     this.root.add(proxy.root);
     return {
       id: proxy.id,
@@ -99,6 +109,7 @@ export class ThreeRenderScene implements RenderScene {
     this.proxies[id] = undefined;
     this.freeSlots.push(id);
     this.fireVisual.forget(id);
+    if (this.selectedInteractionProxy === id) this.selectedInteractionProxy = NULL_PROXY_ID;
     proxy.dispose();
   }
 
@@ -155,7 +166,39 @@ export class ThreeRenderScene implements RenderScene {
     deltaSeconds: number,
     elapsedSeconds: number,
   ): void {
-    this.fireVisual.update(this.liveProxies(), transforms, deltaSeconds, elapsedSeconds);
+    const live = this.liveProxies();
+    this.fireVisual.update(live, transforms, deltaSeconds, elapsedSeconds);
+    for (const proxy of live) {
+      proxy.markers.setTemperature(transforms.readParam(proxy.id, PARAM_TEMPERATURE));
+    }
+  }
+
+  /**
+   * 选中哪一个交互目标。`NULL_PROXY_ID` 表示没有选中——生成物件带
+   * InteractableComponent 却没有 proxy，所以「目标没有 proxyId」必须是合法输入。
+   */
+  public setInteractionMarker(id: ProxyId, label: string): void {
+    this.selectedInteractionProxy = id;
+    for (const proxy of this.proxies) {
+      if (!proxy?.markers.hasInteraction) continue;
+      const selected = proxy.id === id && label.length > 0;
+      proxy.markers.setInteraction(label, selected);
+    }
+  }
+
+  /** 温度牌的全局开关。和 setSimpleCollisionVisible 一样是渲染世界自己的状态。 */
+  public setTemperatureMarkersVisible(visible: boolean): void {
+    this.temperatureMarkersVisible = visible;
+    for (const proxy of this.proxies) proxy?.markers.setTemperatureVisible(visible);
+  }
+
+  public get isTemperatureMarkersVisible(): boolean {
+    return this.temperatureMarkersVisible;
+  }
+
+  /** 让所有世界 UI 正对相机。由 beforeRender 驱动——它拿得到相机。 */
+  public faceCameras(camera: THREE.Camera): void {
+    for (const proxy of this.proxies) proxy?.markers.faceCamera(camera);
   }
 
   /** 简易碰撞盒的可视化开关。是渲染世界自己的状态，遍历不经过任何 Actor。 */

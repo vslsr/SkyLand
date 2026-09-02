@@ -10,6 +10,7 @@ import type {
 } from '../../models/actors/ActorVisualModel';
 import { createSimpleCollisionHelper } from '../../models/actors/createSimpleCollisionHelper';
 import { releaseOwnResources } from '../renderAssets';
+import { ThreeActorMarkers } from './ThreeActorMarkers';
 import type { ProxyId } from '../RenderScene';
 
 /**
@@ -45,6 +46,8 @@ export class ThreeMeshProxy {
   public readonly fireVisualRig?: LineArtFireVisualRig;
   public readonly pbfSlimeVisualRig?: PbfSlimeVisualRig;
   private collisionHelper?: THREE.LineSegments<THREE.BufferGeometry, THREE.LineBasicMaterial>;
+  /** 交互标记与温度牌。挂在权威 root 上，不随 visualRoot 的波动摇晃。 */
+  public readonly markers: ThreeActorMarkers;
 
   public constructor(public readonly id: ProxyId, model: ActorVisualModel) {
     this.root = model.root;
@@ -59,6 +62,7 @@ export class ThreeMeshProxy {
     this.fireVisualRig = model.fireVisualRig;
     this.pbfSlimeVisualRig = model.pbfSlimeVisualRig;
     this.root.userData[PROXY_ROOT_MARKER] = true;
+    this.markers = new ThreeActorMarkers(this.root);
     this.attachmentVisualRoot.name = 'actor-attachment-visual-root';
     const visualParent = this.visualRoot.parent ?? this.root;
     visualParent.add(this.attachmentVisualRoot);
@@ -77,8 +81,17 @@ export class ThreeMeshProxy {
     if (this.collisionHelper) this.collisionHelper.visible = visible;
   }
 
+  /** 温度牌挂在 simpleCollision 的右侧外沿——这段算术本来就产在渲染侧。 */
+  public get temperatureAnchorX(): number {
+    return this.simpleCollision.centerX + this.simpleCollision.halfWidth + 0.42;
+  }
+
   public dispose(): void {
     this.root.parent?.remove(this.root);
+    // 标记先释放：它们的 canvas 纹理不在 disposeSubtree 的覆盖范围内，
+    // 而且必须在遍历走到它们的子树之前把自己摘下来（原来靠 Component 的
+    // 逆序 endPlay 保证，现在由这一行显式保证）。
+    this.markers.dispose();
     disposeSubtree(this.root, this.root);
   }
 }

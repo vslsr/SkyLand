@@ -39,10 +39,6 @@ import {
   type FireVisualComponent,
 } from '../src/actors/components/FireVisualComponent';
 import {
-  TEMPERATURE_MARKER_COMPONENT,
-  type TemperatureMarkerComponent,
-} from '../src/actors/components/TemperatureMarkerComponent';
-import {
   HYBRID_SLIME_VISUAL_COMPONENT,
   type HybridSlimeVisualComponent,
 } from '../src/actors/components/HybridSlimeVisualComponent';
@@ -730,19 +726,17 @@ test('客户端按权威燃烧状态显示参考 LineLoop 火焰，稳定篝火�
     '静态热源的目标强度应当在 spawn 时就是 1',
   );
   assert.equal(hayFire.targetIntensity, 0, '没烧起来时目标强度是 0');
-  const temperatureMarker = hayActor.requireComponent(
-    TEMPERATURE_MARKER_COMPONENT,
-  ) as TemperatureMarkerComponent;
+  const temperatureMarker = system.getActorRenderProxy(hayActor.id)!.markers;
   assert.equal(campfireRig.root.visible, true);
   assert.equal(hayRig.root.visible, false);
-  assert.equal(temperatureMarker.visible, false);
-  assert.equal(temperatureMarker.label, '');
+  assert.equal(temperatureMarker.temperatureVisible, false);
+  assert.equal(temperatureMarker.temperatureLabel, '');
   assert.equal(campfireRig.flames.length, 5);
   assert.equal(campfireRig.sparks.length, 6);
 
   system.setTemperatureVisible(true);
-  assert.equal(temperatureMarker.visible, true);
-  assert.equal(temperatureMarker.label, '20.0 °C');
+  assert.equal(temperatureMarker.temperatureVisible, true);
+  assert.equal(temperatureMarker.temperatureLabel, '20.0 °C');
   assert.ok(system.getActorRenderProxy(hayActor.id)!
     .root.getObjectByName('actor-temperature-marker'));
   const camera = new THREE.PerspectiveCamera();
@@ -763,7 +757,7 @@ test('客户端按权威燃烧状态显示参考 LineLoop 火焰，稳定篝火�
   assert.equal(combustible.burning, true);
   assert.equal(hayFire.targetIntensity, 1, '燃烧快照必须把目标强度推到 1');
   assert.equal(hayRig.root.visible, true);
-  assert.equal(temperatureMarker.label, '78.4 °C');
+  assert.equal(temperatureMarker.temperatureLabel, '78.4 °C');
   assert.equal(hayRig.flames.length, 4);
   assert.equal(hayRig.sparks.length, 4);
   const flameTop = Math.max(...hayRig.flames.map((flame) => (
@@ -787,7 +781,7 @@ test('客户端按权威燃烧状态显示参考 LineLoop 火焰，稳定篝火�
   const positions = hayRig.flames[0].position.array as Float32Array;
   assert.ok(positions.some((value) => Math.abs(value) > 1e-5));
   system.setTemperatureVisible(false);
-  assert.equal(temperatureMarker.visible, false);
+  assert.equal(temperatureMarker.temperatureVisible, false);
   system.dispose();
 });
 

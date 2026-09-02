@@ -168,9 +168,7 @@ test('Game→Render 的写入点不再 import three', () => {
 const COMPONENTS_STILL_IMPORTING_RENDER_MODULES = [
   'GuidePathVisualComponent.ts',
   'HybridSlimeVisualComponent.ts',
-  'InteractionMarkerComponent.ts',
   'SlimeSurfaceDragComponent.ts',
-  'TemperatureMarkerComponent.ts',
 ];
 
 // 不含 render/：`RenderProxyComponent` 引的是边界本身的类型（ProxyId 与命令口），

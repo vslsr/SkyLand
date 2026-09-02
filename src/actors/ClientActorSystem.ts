@@ -58,6 +58,7 @@ import {
 import { toWorldSeed } from '../../shared/world/worldConfig.mjs';
 import { selectWorldPropVariant } from '../../shared/world/worldPropVariants.mjs';
 import type { FillMaterialEnvironment } from '../materials/createFillMaterial';
+import { NULL_PROXY_ID } from '../render/RenderScene';
 import { RenderTransformBuffer } from '../render/RenderTransformBuffer';
 import type { ThreeMeshProxy } from '../render/three/ThreeMeshProxy';
 import { ThreeRenderScene } from '../render/three/ThreeRenderScene';
@@ -77,10 +78,6 @@ import {
   RENDER_PROXY_COMPONENT,
   RenderProxyComponent,
 } from './components/RenderProxyComponent';
-import {
-  INTERACTION_MARKER_COMPONENT,
-  InteractionMarkerComponent,
-} from './components/InteractionMarkerComponent';
 import { ActorTransformSystem } from './systems/ActorTransformSystem';
 import { ActorVisualParamSystem } from './systems/ActorVisualParamSystem';
 import { RenderTransformSyncSystem } from './systems/RenderTransformSyncSystem';
@@ -97,10 +94,6 @@ import { GeneratedPropFruitSystem } from './systems/GeneratedPropFruitSystem';
 import { HighCountActorBatchSystem } from './systems/HighCountActorBatchSystem';
 import { HybridSlimeVisualComponent } from './components/HybridSlimeVisualComponent';
 import { HybridSlimeVisualSystem } from './systems/HybridSlimeVisualSystem';
-import {
-  TEMPERATURE_MARKER_COMPONENT,
-  TemperatureMarkerComponent,
-} from './components/TemperatureMarkerComponent';
 import {
   LOCAL_DERIVED_ACTOR_COMPONENT,
   LocalDerivedActorComponent,
@@ -223,7 +216,6 @@ export class ClientActorSystem implements SceneVisualSystem {
   private collidersStale = true;
   private hoveredActorId?: string;
   private hoverHelper?: THREE.BoxHelper;
-  private temperatureVisible = false;
   private readonly generatedPropChunks = new Map<string, Set<string>>();
   private readonly generatedPropStates = new Map<string, PropStateSnapshot>();
   private generatedPropOverrideTarget?: PropOverrideTarget;
@@ -436,19 +428,8 @@ export class ClientActorSystem implements SceneVisualSystem {
       ) as GuidePathVisualComponent;
       visual.setResolution(_renderer.domElement.width, _renderer.domElement.height);
     }
-    for (const actor of this.world.query(INTERACTION_MARKER_COMPONENT) as Actor[]) {
-      const marker = actor.requireComponent(
-        INTERACTION_MARKER_COMPONENT,
-      ) as InteractionMarkerComponent;
-      marker.faceCamera(camera);
-    }
-    if (!this.temperatureVisible) return;
-    for (const actor of this.world.query(TEMPERATURE_MARKER_COMPONENT) as Actor[]) {
-      const marker = actor.requireComponent(
-        TEMPERATURE_MARKER_COMPONENT,
-      ) as TemperatureMarkerComponent;
-      marker.faceCamera(camera);
-    }
+    // 世界 UI 的朝向是渲染世界自己的事；这里只负责把相机递过去。
+    this.renderScene.faceCameras(camera);
   }
 
   public dispose(): void {
@@ -580,13 +561,8 @@ export class ClientActorSystem implements SceneVisualSystem {
   }
 
   public setTemperatureVisible(visible: boolean): void {
-    this.temperatureVisible = visible;
-    for (const actor of this.world.query(TEMPERATURE_MARKER_COMPONENT) as Actor[]) {
-      const marker = actor.requireComponent(
-        TEMPERATURE_MARKER_COMPONENT,
-      ) as TemperatureMarkerComponent;
-      marker.setVisible(visible);
-    }
+    // 和 setSimpleCollisionVisible 一样：这是渲染世界自己的状态，不再在 Actor 上镜像。
+    this.renderScene.setTemperatureMarkersVisible(visible);
   }
 
   public pickInteractableActor(
@@ -697,15 +673,11 @@ export class ClientActorSystem implements SceneVisualSystem {
   }
 
   public setInteractionMarkerActorId(actorId?: string, inputLabel?: string): void {
-    // Actor 数量由场景 Schema 固定在 256 以内；标记切换不随世界面积增长。
-    for (const actor of this.world.query(INTERACTION_MARKER_COMPONENT) as Actor[]) {
-      const marker = actor.requireComponent(
-        INTERACTION_MARKER_COMPONENT,
-      ) as InteractionMarkerComponent;
-      const selected = actor.id === actorId && Boolean(inputLabel);
-      marker.setLabel(selected ? inputLabel! : '');
-      marker.setVisible(selected);
-    }
+    // 生成物件带 InteractableComponent 却没有 proxy，所以「目标没有 proxyId」
+    // 与「没有选中」都是合法输入，统一退化成 NULL_PROXY_ID。
+    const actor = actorId ? this.world.getActor(actorId) as Actor | undefined : undefined;
+    const proxy = actor?.getComponent(RENDER_PROXY_COMPONENT) as RenderProxyComponent | undefined;
+    this.renderScene.setInteractionMarker(proxy?.proxyId ?? NULL_PROXY_ID, inputLabel ?? '');
   }
 
   public setHoveredActorId(actorId?: string): void {
@@ -839,6 +811,9 @@ export class ClientActorSystem implements SceneVisualSystem {
     const info = this.renderScene.createMeshProxy({
       name: `actor-${snapshot.id}`,
       render: archetype.components.render,
+      // 「要不要标记」是 spawn 时的一次性事实；锚点本来就产在渲染侧，不必回送。
+      interactionMarker: Boolean(archetype.components.interactable),
+      temperatureMarker: Boolean(archetype.components.temperature),
     });
     // proxy 已经占了一个槽位，但要到 addActor 之后才由 RenderProxyComponent 的
     // 生命周期负责回收。这中间任何一步抛出（例如原型声明了 temperature 却没装上
@@ -864,20 +839,6 @@ export class ClientActorSystem implements SceneVisualSystem {
       if (render.fireVisualRig) {
         const emitter = actor.getComponent(HEAT_EMITTER_COMPONENT) as HeatEmitterComponent | undefined;
         actor.addComponent(new FireVisualComponent(emitter?.enabled ? 1 : 0));
-      }
-      if (archetype.components.interactable) {
-        actor.addComponent(new InteractionMarkerComponent(render.root, info.interactionAnchorY));
-      }
-      if (archetype.components.temperature) {
-        const temperature = actor.requireComponent(TEMPERATURE_COMPONENT) as TemperatureComponent;
-        const marker = new TemperatureMarkerComponent(
-          render.root,
-          info.simpleCollision.centerX + info.simpleCollision.halfWidth + 0.42,
-          info.interactionAnchorY,
-          temperature.temperature,
-        );
-        marker.setVisible(this.temperatureVisible);
-        actor.addComponent(marker);
       }
       this.world.addActor(actor);
       assembled = true;
@@ -976,10 +937,6 @@ export class ClientActorSystem implements SceneVisualSystem {
       const temperature = actor.requireComponent(TEMPERATURE_COMPONENT) as TemperatureComponent;
       temperature.temperature = snapshot.thermal.temperature;
       temperature.revision = snapshot.thermal.revision;
-      const temperatureMarker = actor.getComponent(
-        TEMPERATURE_MARKER_COMPONENT,
-      ) as TemperatureMarkerComponent | undefined;
-      temperatureMarker?.setTemperature(snapshot.thermal.temperature);
       const combustible = actor.getComponent(COMBUSTIBLE_COMPONENT) as CombustibleComponent | undefined;
       if (combustible) {
         combustible.burning = snapshot.thermal.burning;

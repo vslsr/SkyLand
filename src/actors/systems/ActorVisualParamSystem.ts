@@ -2,6 +2,7 @@ import type { Actor, ActorWorld } from '../../../shared/actor/index.mjs';
 import type { RenderTransformBuffer } from '../../render/RenderTransformBuffer';
 import {
   PARAM_FIRE_TARGET_INTENSITY,
+  PARAM_TEMPERATURE,
   RENDER_VISUAL_PARAM_COUNT,
 } from '../../render/RenderVisualParams';
 import {
@@ -12,6 +13,10 @@ import {
   FIRE_VISUAL_COMPONENT,
   type FireVisualComponent,
 } from '../components/FireVisualComponent';
+import {
+  TEMPERATURE_COMPONENT,
+  type TemperatureComponent,
+} from '../../../shared/actor/index.mjs';
 
 /**
  * 把玩法侧决定的表现参数写进边界（引擎迁移路线图 第 1.5 步）。
@@ -37,6 +42,14 @@ export class ActorVisualParamSystem {
         proxy.proxyId,
         PARAM_FIRE_TARGET_INTENSITY,
         fire ? fire.targetIntensity : 0,
+      );
+      const temperature = actor.getComponent(
+        TEMPERATURE_COMPONENT,
+      ) as TemperatureComponent | undefined;
+      this.transforms.writeParam(
+        proxy.proxyId,
+        PARAM_TEMPERATURE,
+        temperature ? temperature.temperature : 0,
       );
     }
   }

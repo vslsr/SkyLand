@@ -49,6 +49,14 @@ export interface MeshProxyDesc {
    * 省略时得到一对空的 root / visualRoot，供纯挂载用途的 Actor 使用。
    */
   readonly render?: ActorRenderDefinition;
+  /**
+   * 这个 proxy 要不要交互标记 / 温度牌。
+   *
+   * 「要不要」是 spawn 时的一次性事实，所以走 desc 而不是每帧的参数段；
+   * 锚点不在这里——它们由模型自己产出，本来就在渲染侧（见 MeshProxyInfo）。
+   */
+  readonly interactionMarker?: boolean;
+  readonly temperatureMarker?: boolean;
 }
 
 /**

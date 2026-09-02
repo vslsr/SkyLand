@@ -19,5 +19,8 @@
 /** 火焰的目标强度。0 或 1，由快照 thermal.burning 或静态热源配置决定。 */
 export const PARAM_FIRE_TARGET_INTENSITY = 0;
 
+/** 权威温度。只有带温度牌的 proxy 会用到，其余槽位每帧写 0。 */
+export const PARAM_TEMPERATURE = 1;
+
 /** 每个 proxy 槽位的参数个数。新增参数就在上面加常量并把这里加一。 */
-export const RENDER_VISUAL_PARAM_COUNT = 1;
+export const RENDER_VISUAL_PARAM_COUNT = 2;

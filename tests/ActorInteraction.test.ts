@@ -8,10 +8,6 @@ import {
   type ElasticTetherComponent,
 } from '../shared/actor/index.mjs';
 import { ClientActorSystem } from '../src/actors/ClientActorSystem';
-import {
-  INTERACTION_MARKER_COMPONENT,
-  type InteractionMarkerComponent,
-} from '../src/actors/components/InteractionMarkerComponent';
 import { ActorInteractionController } from '../src/controllers/ActorInteractionController';
 import {
   createPlayerInputScheme,
@@ -374,10 +370,10 @@ test('弹性蘑菇 Replica 拉长并在释放后回弹，标记组件始终可�
 
   system.setInteractionMarkerActorId('mushroom-1', 'E');
   const actor = system.getActor('mushroom-1');
-  const marker = actor?.requireComponent(
-    INTERACTION_MARKER_COMPONENT,
-  ) as InteractionMarkerComponent;
-  assert.equal(marker.visible, true);
+  // 标记住在渲染世界里；Actor 那侧什么都不剩。
+  const markers = system.getActorRenderProxy('mushroom-1')!.markers;
+  assert.equal(markers.interactionVisible, true);
+  assert.equal(markers.interactionLabel, 'E');
   const camera = new THREE.PerspectiveCamera();
   camera.position.set(4, 6, 8);
   system.beforeRender({} as THREE.WebGLRenderer, camera);
