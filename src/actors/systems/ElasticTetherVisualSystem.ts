@@ -1,6 +1,8 @@
 import * as THREE from 'three';
 import type { Actor, ActorWorld } from '../../../shared/actor/index.mjs';
 import {
+  ELASTIC_DETACH_COMPONENT,
+  type ElasticDetachComponent,
   ELASTIC_TETHER_COMPONENT,
   type ElasticTetherComponent,
   TRANSFORM_COMPONENT,
@@ -48,6 +50,16 @@ export class ElasticTetherVisualSystem {
       const render = actor.requireComponent(THREE_OBJECT_COMPONENT) as ThreeObjectComponent;
       const rig = render.elasticTetherRig;
       if (!rig) continue;
+      // 已经脱落的物件不再是「长在地上、被拉长的菌柄」，姿态由刚体朝向接管。
+      // 这里若继续把它掰回竖直，翻滚就会被每帧拽回立姿。
+      const detachable = actor.getComponent(
+        ELASTIC_DETACH_COMPONENT,
+      ) as ElasticDetachComponent | undefined;
+      if (detachable?.detached) {
+        this.states.delete(actor.id);
+        this.restPose(rig);
+        continue;
+      }
       live.add(actor.id);
       const tether = actor.requireComponent(ELASTIC_TETHER_COMPONENT) as ElasticTetherComponent;
       const transform = actor.requireComponent(TRANSFORM_COMPONENT) as TransformComponent;
@@ -93,6 +105,15 @@ export class ElasticTetherVisualSystem {
     for (const actorId of this.states.keys()) {
       if (!live.has(actorId)) this.states.delete(actorId);
     }
+  }
+
+  /** 脱落瞬间把拉伸、摆动和回弹一次性收回原状，交给翻滚系统摆姿势。 */
+  private restPose(rig: NonNullable<ThreeObjectComponent['elasticTetherRig']>): void {
+    rig.elasticRoot.quaternion.identity();
+    rig.stemRoot.scale.set(1, 1, 1);
+    rig.capRoot.position.y = rig.restLength;
+    rig.capRoot.scale.set(1, 1, 1);
+    rig.capRoot.rotation.set(0, 0, 0);
   }
 
   private createState(

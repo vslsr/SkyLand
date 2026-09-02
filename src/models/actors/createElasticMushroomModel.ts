@@ -33,11 +33,17 @@ export function createElasticMushroomModel(
 ): ActorVisualModel {
   const root = new THREE.Group();
   const visualRoot = new THREE.Group();
+  // 脱落之前 pivotRoot / bodyRoot 都是单位变换，蘑菇照旧立在原点上；
+  // 拔断之后由 ActorDropRollSystem 把它们撑成绕刚体球心的翻滚枢轴。
+  const pivotRoot = new THREE.Group();
+  const bodyRoot = new THREE.Group();
   const elasticRoot = new THREE.Group();
   const stemRoot = new THREE.Group();
   const capRoot = new THREE.Group();
   root.add(visualRoot);
-  visualRoot.add(elasticRoot);
+  visualRoot.add(pivotRoot);
+  pivotRoot.add(bodyRoot);
+  bodyRoot.add(elasticRoot);
   elasticRoot.add(stemRoot, capRoot);
 
   const outline = new THREE.LineBasicMaterial({ color: 0x352b27 });
@@ -104,6 +110,7 @@ export function createElasticMushroomModel(
   );
   shadow.rotation.x = -Math.PI / 2;
   shadow.position.y = 0.012;
+  // 影子贴在地面上，不进翻滚枢轴，否则蘑菇躺下时影子会立起来。
   visualRoot.add(shadow);
 
   return {
@@ -114,5 +121,6 @@ export function createElasticMushroomModel(
     simpleCollision: createSimpleCollisionFromRender(definition),
     interactionAnchorY: definition.height + 0.48,
     elasticTetherRig: { elasticRoot, stemRoot, capRoot, restLength },
+    dropRollRig: { pivotRoot, bodyRoot },
   };
 }
