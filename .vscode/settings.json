@@ -1,0 +1,20 @@
+{
+  "typescript.tsdk": "node_modules/typescript/lib",
+  "typescript.enablePromptUseWorkspaceTsdk": true,
+  "debug.javascript.autoAttachFilter": "smart",
+  "debug.javascript.terminalOptions": {
+    "skipFiles": [
+      "<node_internals>/**",
+      "${workspaceFolder}/node_modules/**"
+    ]
+  },
+  "files.exclude": {
+    "dist": true,
+    ".vite": true
+  },
+  "search.exclude": {
+    "dist": true,
+    ".vite": true,
+    "node_modules": true
+  }
+}

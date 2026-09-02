@@ -156,6 +156,25 @@ npm run build:wasm  # 只有改了 native/ 下的 Rust 源码才需要
 `tests/` 下的客户端测试通过项目内的轻量 TypeScript 测试加载器运行，只覆盖不依赖
 DOM 的纯逻辑（标签、输入配置、和解、快照插值等），因此不参与 `tsc` 构建。
 
+### VS Code 启动与调试
+
+仓库已提供 `.vscode/launch.json` 与 `.vscode/tasks.json`：
+
+1. 用 VS Code 打开仓库根目录，在“运行和调试”中选择 `SkyLand: 全栈调试`。
+2. 按 `F5`。VS Code 会启动 Node.js 服务端、Vite 开发服务器和独立 Chrome 调试窗口。
+3. 客户端 TypeScript 可直接在 `src/` 中下断点；服务端可在 `server/` 中下断点。
+   创建房间后产生的 `room-worker.mjs` 子进程也会自动附加，可直接调试房间 DS。
+4. 停止复合调试会同时结束服务端与浏览器；Vite 后台任务由 VS Code 管理，可通过
+   “终止任务”停止。
+
+只需要运行、不需要断点时，执行任务 `SkyLand: 启动开发环境（不调试）`。`Ctrl+Shift+B`
+执行生产构建；测试、WASM 重建和当前测试文件调试也已分别配置。当前客户端测试文件请用
+`SkyLand: 当前客户端测试文件`，`.mjs` 服务端测试文件请用
+`SkyLand: 当前服务端测试文件`。
+
+Rust/WASM 调试不是日常启动的前置条件。只有修改 `native/chunkgen/` 后才需要安装 Rust、
+添加 `wasm32-unknown-unknown` target，并执行 `SkyLand: 重建 Rust/WASM`。
+
 ## 配置驱动输入与运行时重绑定
 
 玩家输入方案位于 `config/input/player.input.json`，并由

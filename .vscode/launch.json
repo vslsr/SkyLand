@@ -1,0 +1,84 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "SkyLand: 服务端（Node + 房间 DS）",
+      "type": "node",
+      "request": "launch",
+      "program": "${workspaceFolder}/server/index.mjs",
+      "cwd": "${workspaceFolder}",
+      "env": {
+        "SKYLAND_SERVER_HOST": "127.0.0.1",
+        "SKYLAND_SERVER_PORT": "3090"
+      },
+      "console": "integratedTerminal",
+      "internalConsoleOptions": "neverOpen",
+      "autoAttachChildProcesses": true,
+      "skipFiles": [
+        "<node_internals>/**",
+        "${workspaceFolder}/node_modules/**"
+      ]
+    },
+    {
+      "name": "SkyLand: 客户端（Chrome + Vite）",
+      "type": "chrome",
+      "request": "launch",
+      "url": "http://127.0.0.1:5180/",
+      "webRoot": "${workspaceFolder}",
+      "preLaunchTask": "SkyLand: Vite 开发服务器",
+      "sourceMaps": true,
+      "resolveSourceMapLocations": [
+        "${workspaceFolder}/**",
+        "!**/node_modules/**"
+      ]
+    },
+    {
+      "name": "SkyLand: 当前服务端测试文件",
+      "type": "node",
+      "request": "launch",
+      "runtimeExecutable": "node",
+      "runtimeArgs": [
+        "--test"
+      ],
+      "args": [
+        "${file}"
+      ],
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "internalConsoleOptions": "neverOpen",
+      "skipFiles": [
+        "<node_internals>/**"
+      ]
+    },
+    {
+      "name": "SkyLand: 当前客户端测试文件",
+      "type": "node",
+      "request": "launch",
+      "runtimeExecutable": "node",
+      "runtimeArgs": [
+        "--import",
+        "./tests/register-typescript-loader.mjs",
+        "--test"
+      ],
+      "args": [
+        "${file}"
+      ],
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "internalConsoleOptions": "neverOpen",
+      "skipFiles": [
+        "<node_internals>/**"
+      ]
+    }
+  ],
+  "compounds": [
+    {
+      "name": "SkyLand: 全栈调试",
+      "configurations": [
+        "SkyLand: 服务端（Node + 房间 DS）",
+        "SkyLand: 客户端（Chrome + Vite）"
+      ],
+      "stopAll": true
+    }
+  ]
+}
