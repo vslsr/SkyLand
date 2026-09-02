@@ -76,6 +76,17 @@ export class RemotePlayer extends Actor {
     return this.model.root;
   }
 
+  /** 本地物理世界里给这名远端玩家建代理时用的圆柱尺寸。 */
+  public get collisionShape(): { radius: number, height: number } {
+    return { radius: this.visual.collisionRadius, height: this.visual.collisionHeight };
+  }
+
+  /** 快照插值后的脚底位置，供碰撞代理跟随。 */
+  public get feetPosition(): { x: number, y: number, z: number } {
+    const position = this.model.root.position;
+    return { x: position.x, y: position.y, z: position.z };
+  }
+
   public applyState(state: InterpolatedPlayerState): void {
     this.name = state.name;
     // 位置与朝向都已经在 SnapshotBuffer 里按渲染时间插值过，这里直接落到模型上。

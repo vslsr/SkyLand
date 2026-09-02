@@ -67,6 +67,9 @@ export class ServerPlayerActor extends Actor {
     this.actorInteractionSequence = 0;
     this.terrainEditSequence = 0;
     this.stepBudget = Math.floor(INPUT_TIME_BUDGET_SECONDS / SIMULATION_STEP_SECONDS);
+    // 客户端静默期间由 PlayerIdleSimulation 累积、消费的补步余量与代发步号。
+    this.idleStepAccumulator = 0;
+    this.idleStepTick = 0;
     this.lastInputAt = now;
     // ServerScene.players 过去保存普通对象；保留可枚举坐标，兼容监控/测试里
     // 通过对象展开记录一帧位置的用法，同时实际数据仍由 Transform Component 持有。

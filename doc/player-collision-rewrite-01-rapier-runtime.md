@@ -49,7 +49,7 @@
      | 常量 | 值 | 依据 |
      | --- | --- | --- |
      | `CHARACTER_OFFSET` | `0.02` | 皮肤间隙；探针中脚底停在 1.02 |
-     | `AUTOSTEP_MAX_HEIGHT` | `1.05` | 略高于 `TERRAIN_HEIGHT_STEP = 1.0` |
+     | `AUTOSTEP_MAX_HEIGHT` | `0.35` | 见 `07-followups.md`：原定的 `1.05` 让 1m 崖壁和一切矮物件都变成免费台阶 |
      | `AUTOSTEP_MIN_WIDTH` | `0.15` | 台阶上方需要的净空 |
      | `SNAP_TO_GROUND_DISTANCE` | `0.25` | 走下小坡不弹跳，超过即离地下落 |
      | `MAX_SLOPE_CLIMB_ANGLE` | `60°` | 地形斜坡实际约 26.6°，留足余量 |
