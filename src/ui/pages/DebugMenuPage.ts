@@ -44,6 +44,7 @@ export class DebugMenuPage extends ModalWindow {
   private readonly temperatureButton: HTMLButtonElement;
   private readonly weatherButtons = new Map<WeatherType, HTMLButtonElement>();
   private readonly dayNightStatus: HTMLParagraphElement;
+  private readonly cppSmokeStatus: HTMLParagraphElement;
   private timeOfDaySelectHandler?: (timeOfDay: number) => void;
   private collisionToggleHandler?: (visible: boolean) => void;
   private temperatureToggleHandler?: (visible: boolean) => void;
@@ -173,6 +174,17 @@ export class DebugMenuPage extends ModalWindow {
       this.dayNightStatus,
     );
 
+    const cppSmokeSection = document.createElement('section');
+    cppSmokeSection.className = 'debug-menu__section';
+    const cppSmokeHeading = document.createElement('h3');
+    cppSmokeHeading.textContent = 'NATIVE C++ (WASM)';
+    const cppSmokeDescription = document.createElement('p');
+    cppSmokeDescription.textContent = '自检 native/cppsmoke 这条 C++ → WebAssembly 链路：产物能实例化、跨语言传参与返回值正确。它没有玩法作用，失败也不影响进游戏。';
+    this.cppSmokeStatus = document.createElement('p');
+    this.cppSmokeStatus.className = 'debug-menu__status';
+    this.cppSmokeStatus.setAttribute('role', 'status');
+    cppSmokeSection.append(cppSmokeHeading, cppSmokeDescription, this.cppSmokeStatus);
+
     this.bodyElement.append(
       // 房间环境是最常用的即时调试项，放在首屏，避免被较长的诊断区挤到
       // 滚动区域底部后看起来像是没有昼夜控制。
@@ -181,6 +193,7 @@ export class DebugMenuPage extends ModalWindow {
       transformLogSection,
       collisionSection,
       temperatureSection,
+      cppSmokeSection,
     );
     this.setTransformLogState('inactive');
     this.setTransformLogAvailable(false);
@@ -188,6 +201,7 @@ export class DebugMenuPage extends ModalWindow {
     this.setTemperatureVisible(false);
     this.setWeather(DEFAULT_WEATHER);
     this.setTimeOfDay(DEFAULT_START_HOUR);
+    this.setCppSmokeStatus('正在加载 C++ 冒烟模块…');
   }
 
   public onCollisionToggle(handler: (visible: boolean) => void): void {
@@ -266,6 +280,11 @@ export class DebugMenuPage extends ModalWindow {
     for (const [candidate, button] of this.weatherButtons) {
       button.setAttribute('aria-pressed', String(candidate === weather));
     }
+  }
+
+  /** 显示 C++ → WASM 冒烟自检的结论，由 runCppSmoke() 产出。 */
+  public setCppSmokeStatus(message: string): void {
+    this.cppSmokeStatus.textContent = message;
   }
 
   public onOpen(): void {

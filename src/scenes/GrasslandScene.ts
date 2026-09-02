@@ -2,6 +2,7 @@ import { FlyController } from '../camera/FlyController';
 import { GameInteractionLayer } from '../interaction/GameInteractionLayer';
 import { isDevelopmentRuntime } from '../debug/developmentRuntime';
 import { PlayerTransformLogRecorder } from '../debug/PlayerTransformLogRecorder';
+import { runCppSmoke } from '../native/loadCppSmoke';
 import {
   createPlayerInputScheme,
   GamepadInputDevice,
@@ -98,6 +99,9 @@ export class GrasslandScene extends Scene {
     });
     if (this.developmentRuntime) {
       this.debugMenuPage = new DebugMenuPage();
+      // 冒烟自检与场景生命周期无关，也不该阻塞它：发出去就不管，
+      // 结果回来时菜单还在就更新一行文案，不在就自然丢弃。
+      void runCppSmoke().then((status) => this.debugMenuPage?.setCppSmokeStatus(status));
       this.playerTransformLog = new PlayerTransformLogRecorder({
         start: () => this.roomClient.startPlayerTransformLog(),
         append: (sessionId, events) => (

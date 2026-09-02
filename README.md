@@ -148,10 +148,12 @@ npm run dev
 ```bash
 npm test          # 服务端与客户端纯逻辑测试
 npm run build
-npm run build:wasm  # 只有改了 native/ 下的 Rust 源码才需要
+npm run build:wasm      # 只有改了 native/chunkgen 下的 Rust 源码才需要
+npm run build:cpp-wasm  # 只有改了 native/cppsmoke 下的 C++ 源码才需要
 ```
 
-`chunkgen.wasm` 是签入仓库的，日常开发不需要安装 Rust 工具链。
+`chunkgen.wasm` 与 `cppsmoke.wasm` 都是签入仓库的，日常开发既不需要安装 Rust
+工具链，也不需要安装 Emscripten。
 
 `tests/` 下的客户端测试通过项目内的轻量 TypeScript 测试加载器运行，只覆盖不依赖
 DOM 的纯逻辑（标签、输入配置、和解、快照插值等），因此不参与 `tsc` 构建。
@@ -347,6 +349,48 @@ V8 对这种紧凑的 TypedArray 循环优化得很好，所以端到端只快�
 以及为之后调大视距、加大物件密度留出余量。剩下 39% 的开销是两条
 路径都要付的切片拷贝，真要继续压缩，下一步是把位置、法线、颜色交错进同一份
 `InterleavedBuffer`，把三次拷贝并成一次。
+
+### C++ → WASM 冒烟链路
+
+`doc/engine-migration-roadmap.html` 规划的自研引擎把渲染器核心放在 C++、经
+Emscripten 编到 WASM。`native/cppsmoke` 是那条链路的最小可运行切片，先于任何
+引擎代码存在：它只导出一个 `add(int, int)` 和一个契约版本号，不做任何真实工作。
+
+这样安排是为了让失败落在正确的地方——工具链断了的时候，红的是这个三行的文件，
+而不是几千行的渲染器。
+
+链路的每一环都有断言：
+
+| 环节 | 验证方式 |
+| --- | --- |
+| `em++` 编得出 | `npm run build:cpp-wasm`（emcmake + CMake + Ninja） |
+| 产物零 import | `server/tests/cppSmoke.test.mjs` 断言 `WebAssembly.Module.imports()` 为空 |
+| 跨语言传参正确 | 同一测试用五组输入比对 C++ 与 JS 的加法结果 |
+| 产物没有落后于源码 | `smoke_abi_version()` 与 `CPP_SMOKE_ABI_VERSION` 必须相等 |
+| 浏览器里跑得起来 | 开发运行时下 F8 调试菜单的 `NATIVE C++ (WASM)` 一节 |
+
+产物用 `-sSTANDALONE_WASM --no-entry` 编译，所以 **没有 Emscripten 的 JS 胶水**：
+import 段为空，调用方和 `chunkgen.wasm` 一样用 `WebAssembly.instantiate(bytes, {})`
+拿到实例，仓库里也就不必签入一份生成的 JS。测试里那条「import 段必须为空」的断言
+守的正是这个性质——链接选项一旦退化，胶水就会以 import 的形式回来。
+
+要改 C++ 源码才需要装 Emscripten：
+
+```bash
+git clone https://github.com/emscripten-core/emsdk.git
+cd emsdk && ./emsdk install latest && ./emsdk activate latest
+source ./emsdk_env.sh   # Windows 用 emsdk_env.bat
+```
+
+之后 `npm run build:cpp-wasm` 会自己找到 PATH 上的 `emcmake`，或退回 `$EMSDK`。
+改了导出签名记得同时 +1 `smoke_abi_version()` 与 `CPP_SMOKE_ABI_VERSION`，
+并把重新编出的 `.wasm` 一起提交。
+
+**已知的下一道门槛**：真正的渲染器要用 Emscripten 的 pthreads，那时产物不再是
+自包含 wasm，会带回 JS 胶水；而 pthreads 依赖 `SharedArrayBuffer`，需要跨源隔离
+（`crossOriginIsolated === true`），也就是服务端补上 `Cross-Origin-Opener-Policy:
+same-origin` 与 `Cross-Origin-Embedder-Policy: require-corp`。这两个响应头目前
+`server/http/` 与 `vite.config.ts` 里都还没有。
 
 ## 碰撞与空间划分
 
@@ -923,4 +967,6 @@ GAS `Movement.Speed` 的 CurrentValue；涉水 GameplayEffect 因此同时约束
 - `shared/world/`：世界配置、chunk 坐标、确定性生成、两种生成后端与 chunk 静态碰撞体
 - `shared/collision/`：均匀网格空间划分、场景碰撞世界与扫掠球求交
 - `native/chunkgen/`：编译为 WebAssembly 的 Rust 生成与合批实现
+- `native/cppsmoke/`：C++ → WebAssembly 工具链的冒烟件
+- `shared/native/`：C++ 冒烟产物的 JS 门面与签入的 `.wasm`
 - `tests/`：不依赖浏览器的客户端逻辑测试
