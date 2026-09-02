@@ -322,6 +322,12 @@ export class ClientActorSystem implements SceneVisualSystem {
       TRANSFORM_COMPONENT,
       SIMPLE_COLLISION_COMPONENT,
     ) as Actor[]) {
+      // 与服务端一致：叼在嘴上的东西不参与碰撞，否则本地预测会被自己嘴里
+      // 那一个顶住，走不动。
+      const detachable = actor.getComponent(
+        ELASTIC_DETACH_COMPONENT,
+      ) as ElasticDetachComponent | undefined;
+      if (detachable?.carriedByPlayerId) continue;
       live.add(actor.id);
       let instance = this.colliderInstances.get(actor.id);
       if (!instance) {

@@ -435,3 +435,77 @@ test('放进水里的物件停在水底，不会一直往下掉', async () => {
     `没有停在水底：物件在 ${settled.transform.y.toFixed(2)}，水底在 ${seaFloor.toFixed(2)}`,
   );
 });
+
+test('叼着蘑菇不会被自己嘴里那一株顶住', async () => {
+  const clock = createClock();
+  const catalog = await SceneCatalog.load();
+  const scene = new ServerScene(catalog.require('grassland'), { now: clock.now });
+  scene.addPlayer({ id: 'walker', name: '叼着走', slot: 0 });
+
+  const mushroomId = 'elastic-mushroom-01';
+  const initial = scene.createSnapshot().actors.find((actor) => actor.id === mushroomId);
+  const player = scene.players.get('walker');
+  player.x = initial.transform.x - 0.8;
+  player.z = initial.transform.z;
+  player.yaw = Math.PI / 2;
+  scene.interactWithActor('walker', { actorId: mushroomId, sequence: 1 });
+  assert.equal(
+    pullUntilDetached(scene, clock, 'walker', mushroomId, initial.transform.x),
+    true,
+  );
+  assert.equal(scene.findCarriedActorId('walker'), mushroomId);
+
+  /** 用真实输入朝正前方走一段，返回实际位移。 */
+  let tick = 0;
+  const walkForward = (seconds) => {
+    const fromX = player.x;
+    const fromZ = player.z;
+    for (let packet = 0; packet < seconds * 20; packet += 1) {
+      scene.applyInput('walker', {
+        inputs: [0, 1, 2].map((step) => ({
+          tick: tick + step + 1,
+          move: { x: 1, z: 0 },
+          yaw: Math.PI / 2,
+        })),
+      });
+      tick += 3;
+      clock.advance(0.05);
+      scene.update();
+    }
+    return Math.hypot(player.x - fromX, player.z - fromZ);
+  };
+
+  // 叼着的东西挂在嘴前 0.36m，而玩家半径加物件半径要 0.7m 才不重叠：登记它的
+  // 碰撞盒等于把玩家焊死在原地。
+  assert.ok(walkForward(2) > 2, '叼着蘑菇走不动，被自己嘴里那一株顶住了');
+
+  // 放下之后玩家也必须是自由的：落点要在身体之外，不能就地塞进自己身上。
+  assert.equal(scene.interactWithActor('walker', { actorId: mushroomId, sequence: 2 }), true);
+  const dropped = scene.createSnapshot().actors.find((actor) => actor.id === mushroomId);
+  const clearance = player.collisionRadius
+    + scene.actorWorld.getActor(mushroomId).requireComponent('dropMotion').radius;
+  assert.ok(
+    Math.hypot(dropped.transform.x - player.x, dropped.transform.z - player.z) >= clearance,
+    '放下的位置和玩家重叠了',
+  );
+  // 掉头就走应当畅通无阻。
+  player.yaw = -Math.PI / 2;
+  const back = (() => {
+    const fromX = player.x;
+    const fromZ = player.z;
+    for (let packet = 0; packet < 40; packet += 1) {
+      scene.applyInput('walker', {
+        inputs: [0, 1, 2].map((step) => ({
+          tick: tick + step + 1,
+          move: { x: -1, z: 0 },
+          yaw: Math.PI / 2,
+        })),
+      });
+      tick += 3;
+      clock.advance(0.05);
+      scene.update();
+    }
+    return Math.hypot(player.x - fromX, player.z - fromZ);
+  })();
+  assert.ok(back > 2, `放下之后仍然走不动：只走了 ${back.toFixed(2)}m`);
+});

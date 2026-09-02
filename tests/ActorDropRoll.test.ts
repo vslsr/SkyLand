@@ -17,6 +17,8 @@ import { ElasticTetherVisualSystem } from '../src/actors/systems/ElasticTetherVi
 import { ThreeObjectComponent } from '../src/actors/components/ThreeObjectComponent';
 import { createElasticMushroomModel } from '../src/models/actors/createElasticMushroomModel';
 import { ActorSnapshotBuffer } from '../src/actors/ActorSnapshotBuffer';
+import { ClientActorSystem } from '../src/actors/ClientActorSystem';
+import type { SceneDefinition } from '../src/scenes/data/SceneDefinition';
 import { INTERPOLATION_DELAY_MS } from '../shared/networkTuning.mjs';
 import type { SnapshotActor } from '../src/network/protocol';
 import { ActorInteractionController } from '../src/controllers/ActorInteractionController';
@@ -312,5 +314,115 @@ test('手上有蘑菇时，交互键指向它并给出放下/松开提示', () =
   controller.update(frame);
   assert.deepEqual(sent, ['m3']);
   assert.match(prompt ?? '', /叼住/);
+  controller.dispose();
+});
+
+test('端到端：快照说我叼着它，按一次交互键就发出放下请求', () => {
+  const definition = {
+    schemaVersion: 1,
+    id: 'grassland',
+    displayName: 'x',
+    description: 'x',
+    capacity: 8,
+    sceneComponents: [],
+    actors: [],
+    actorArchetypes: [{
+      schemaVersion: 1,
+      id: 'elastic-mushroom',
+      components: {
+        interactable: { action: 'mushroom-bite', label: '弹弹菇', maximumDistance: 1.35 },
+        elasticTether: {
+          restLength: 0.72,
+          breakLength: 1.55,
+          pullDistance: PULL_DISTANCE,
+          mouthHeight: 0.3,
+          mouthForwardOffset: 0.36,
+        },
+        elasticDetach: {},
+        dropMotion: {
+          gravity: 9.8, drag: 1.8, groundDrag: 7, restitution: 0.28,
+          radius: DROP_RADIUS, angularDamping: 0.35, settleSpeed: 0.1,
+        },
+        replicationPolicy: { mode: 'aoi', radiusChunks: 1 },
+        render: RENDER,
+      },
+    }],
+    renderer: {},
+    gameplay: {
+      playerActor: { archetypeId: 'player-slime' },
+      worldProps: {},
+      bounds: { minimumX: -10, maximumX: 10, minimumZ: -10, maximumZ: 10 },
+    },
+  } as unknown as SceneDefinition;
+
+  const mushroom = (over: Record<string, unknown>): SnapshotActor => ({
+    id: 'm1',
+    archetypeId: 'elastic-mushroom',
+    parentActorId: null,
+    revision: 1,
+    transform: { x: 0, y: 0, z: 0, yaw: 0 },
+    localTransform: { x: 0, y: 0, z: 0, yaw: 0 },
+    // 叼住之后 interactable 是关的：靠就近搜索永远找不到它。
+    interactable: {
+      action: 'mushroom-bite', label: '弹弹菇', enabled: false,
+      maximumDistance: 1.35, revision: 1,
+    },
+    elasticTether: {
+      holderPlayerId: null, targetX: 0, targetY: 0.72, targetZ: 0,
+      releaseRevision: 0, revision: 1,
+    },
+    elasticDetach: { detached: false, carriedByPlayerId: null, revision: 1 },
+    ...over,
+  } as unknown as SnapshotActor);
+
+  let now = 1_000;
+  const system = new ClientActorSystem({
+    definition,
+    environment: ENVIRONMENT,
+    now: () => now,
+  } as never);
+
+  const sent: string[] = [];
+  let trigger: () => void = () => undefined;
+  const input = {
+    enabled: true,
+    bind: (_tag: unknown, handler: () => void) => { trigger = handler; return () => undefined; },
+  } as unknown as InputSubsystem;
+  const controller = new ActorInteractionController(input, {
+    getPlayerId: () => 'me',
+    getPlayerPosition: () => ({ x: 0, z: 0 }),
+    findOwnedActorId: () => undefined,
+    pick: () => undefined,
+    findNearby: (position) => system.findNearbyInteractableActor(position),
+    findHeld: (playerId) => system.findHeldInteractableActor(playerId),
+    getInputLabel: () => 'E',
+    setHoveredActorId: () => undefined,
+    sendInteraction: (actorId) => sent.push(actorId),
+    setPrompt: () => undefined,
+  });
+  const frame = {} as never;
+
+  // 拉着还没断：按 E 应当发出取消请求。
+  system.syncSnapshots([mushroom({
+    elasticTether: {
+      holderPlayerId: 'me', targetX: 1.2, targetY: 0.72, targetZ: 0,
+      releaseRevision: 0, revision: 1,
+    },
+  })], now);
+  system.update(1 / 60, 0);
+  trigger();
+  controller.update(frame);
+  assert.deepEqual(sent, ['m1'], '拉着时按 E 没有发出请求');
+
+  // 叼在嘴上：按 E 应当发出放下请求。
+  sent.length = 0;
+  now = 2_000;
+  system.syncSnapshots([mushroom({
+    elasticDetach: { detached: true, carriedByPlayerId: 'me', revision: 2, rotation: [0, 0, 0, 1] },
+  })], now);
+  system.update(1 / 60, 1);
+  trigger();
+  controller.update(frame);
+  assert.deepEqual(sent, ['m1'], '叼着时按 E 没有发出请求');
   controller.dispose();
 });

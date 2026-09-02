@@ -95,6 +95,9 @@ const ACTOR_ID_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,95}$/;
 /** 玩家能编辑到的最远距离（米）。和交互一样按权威坐标校验。 */
 const TERRAIN_EDIT_RANGE = 12;
 
+/** 放下物件时留在玩家身体之外的额外余量（米）。 */
+const DROP_CLEARANCE_MARGIN = 0.08;
+
 function clamp(value, minimum, maximum) {
   return Math.max(minimum, Math.min(maximum, value));
 }
@@ -418,14 +421,26 @@ export class ServerScene {
   }
 
   /**
-   * 放下叼着的物件：不给任何冲量，就在离手的位置和姿态上变成自由刚体。
-   * 落地是躺是立完全由叼住时的姿态决定，而叼着时它是横衔的。
+   * 放下叼着的物件：不给任何冲量，就在离手的姿态上变成自由刚体。落地是躺是立
+   * 完全由叼住时的姿态决定，而叼着时它是横衔的。
+   *
+   * 落点要放到身前，不能就地松口。嘴只在身前 mouthForwardOffset（0.36m）处，
+   * 而玩家半径加物件半径要 0.7m 才不重叠：就地放下等于把它塞进自己身体里，
+   * 玩家会当场被自己刚放下的东西顶住走不动，看起来像根本没松口。
    */
-  dropCarriedActor(actor, detachable) {
+  dropCarriedActor(player, actor, detachable) {
     if (!detachable.release()) return false;
     const motion = actor.getComponent(DROP_MOTION_COMPONENT);
     const transform = actor.getComponent(TRANSFORM_COMPONENT);
     if (!motion || !transform) return true;
+    if (player) {
+      const clearance = player.collisionRadius + motion.radius + DROP_CLEARANCE_MARGIN;
+      transform.setWorldTransform([
+        player.x + Math.sin(player.yaw) * clearance,
+        transform.y,
+        player.z + Math.cos(player.yaw) * clearance,
+      ], transform.yaw);
+    }
     this.physics.createDynamicActor(actor.id, {
       x: transform.x,
       y: transform.y + motion.radius,
@@ -448,7 +463,11 @@ export class ServerScene {
     const actorId = this.findCarriedActorId(playerId);
     if (!actorId) return false;
     const actor = this.actorWorld.getActor(actorId);
-    return this.dropCarriedActor(actor, actor.getComponent(ELASTIC_DETACH_COMPONENT));
+    return this.dropCarriedActor(
+      this.players.get(playerId),
+      actor,
+      actor.getComponent(ELASTIC_DETACH_COMPONENT),
+    );
   }
 
   interactWithActor(playerId, message) {
@@ -468,7 +487,7 @@ export class ServerScene {
       const detachable = target.getComponent(ELASTIC_DETACH_COMPONENT);
       if (!tether) return false;
       if (detachable?.carriedByPlayerId === playerId) {
-        if (!this.dropCarriedActor(target, detachable)) return false;
+        if (!this.dropCarriedActor(player, target, detachable)) return false;
         player.actorInteractionSequence = sequence;
         return true;
       }
