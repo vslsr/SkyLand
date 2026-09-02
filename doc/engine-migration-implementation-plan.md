@@ -18,7 +18,7 @@
 | 第 0.5 步 · 合并两套碰撞 | 未开始 | 见 §0.5b——它不是纯清理，需要单独立项 |
 | 第 1 步 · 剥出 Render World 边界 | **已完成** | `src/render/`、`RenderProxyComponent`、`ActorTransformSystem` |
 | §8.2 · GPU 资源所有权表 | **已完成（最小核心）** | `src/core/assets/AssetOwner.ts`、`src/render/renderAssets.ts` |
-| 第 1.5 步 · 表现 Component 脱离 THREE | **进行中** · 棘轮 8 → 5 | 已搬火焰与草地压弯，剩 5 个，见 §1.5 |
+| 第 1.5 步 · 表现 Component 脱离 THREE | **已完成** · 棘轮 8 → 0 | 见 §1.5；玩家实体也接到了边界上 |
 | 第 2 步 · Sim Worker | 未开始 | 见 §2 |
 | 第 3 步 · OffscreenCanvas | 未开始 | 见 §3 |
 | 第 4 步 · 换掉 Three.js | 可无限期推迟 | 见 §4 |
@@ -142,43 +142,68 @@ ActorTransformSystem       │ f32 x y z yaw        │
 - **视图只在 `RenderTransformBuffer.#adopt()` 里重建。** 现在只有自己的扩容会重新分配；
   等 Emscripten 开了 pthreads，WASM heap 是 SAB、别的线程增长堆会让所有 JS 侧视图失效——
   那时这个类改成「每次访问重取视图」，接口不变。路线图 §5 的第三个坑被关在了这一个文件里。
-- **表现 System 仍然读 Actor 的 Component**（浮力、货物、弹性绳）。它们现在按 `proxyId` 向渲染世界
-  取 Object3D，不再从 Actor 上直接摘。这条剩余耦合是第 1.5 步的内容。
+- **表现 System 仍然读 Actor 的 Component**（浮力、货物、弹性绳、挂载、脱落翻滚）。它们现在按
+  `proxyId` 向渲染世界取 Object3D，不再从 Actor 上直接摘。第 1.5 步的棘轮管的是 **Component**，
+  管不到它们——这条耦合到第 1.5 步结束仍然在，是第 2 步要划的那条缝（见 §1.5「渲染世界的归属」）。
 
 ---
 
-## 第 1.5 步 · 表现 Component 脱离 THREE（未开始）
+## 第 1.5 步 · 表现 Component 脱离 THREE ✅
 
 第 1 步只搬了 `ThreeObjectComponent`。**只要还有一个 Actor Component 握着 Object3D，
 Sim Worker 就搬不过去**——对象过不了线程边界。所以这一步是第 2 步的硬前置。
 
 规则：**Actor Component 不得 import 渲染侧模块**（`three` / `models` / `guidance` /
 `slime` / `grass` / `materials`；`render/` 里的边界类型不算，那正是它该引的）。
-`tests/RenderSceneBoundary.test.ts` 里有一份豁免清单当棘轮，**只能变短**；
-清单空了，第 2 步的前置条件就满足了。
+`tests/RenderSceneBoundary.test.ts` 里那份豁免清单当棘轮，**只能变短**——现在它空了。
 
-### 剩余清单（5 个，起点是 8）
+### 八项都搬完了
 
-| Component | 持有 | 跨边界要送的数据 |
+| Component | 原来持有 | 现在过边界的 |
 | --- | --- | --- |
-| `InteractionMarkerComponent` | 自绘标记 + 朝向相机的四元数 | 标签字符串、可见性、锚点高度 |
-| `TemperatureMarkerComponent` | 同上 | 温度值、可见性、锚点 |
-| `GuidePathVisualComponent` | `GuidePath` 整条线 | **变长**：路径点 + 两个 revision |
-| `HybridSlimeVisualComponent` | 蒙皮 rig，`BufferAttribute` 直写 | 权威 yaw、移动速度 |
-| `SlimeSurfaceDragComponent` | `Raycaster` + 一堆 `Vector3` | 拾取射线；本质是渲染侧的交互 |
+| `PbfSlimeVisualComponent` | 整条旧 PBF 表现 | **删除**（不可达，见下） |
+| `GrassDisplacementComponent` | `THREE.Object3D` | `WorldPositionSampler` 回调 + 数字 |
+| `FireVisualComponent` | 火焰动画状态 | 一个目标强度（参数段） |
+| `InteractionMarkerComponent` | 自绘标记 + 朝向相机的四元数 | spawn 时的「要不要」+ 标签命令 |
+| `TemperatureMarkerComponent` | 同上 | 温度值（参数段）+ 全局开关 |
+| `GuidePathVisualComponent` | `GuidePath` 整条线 | **变长**：走 `RenderCommandSink` |
+| `HybridSlimeVisualComponent` | 蒙皮 rig，`BufferAttribute` 直写 | 七个 f32（`SlimeMotionParams`） |
+| `SlimeSurfaceDragComponent` | `Raycaster` + 一堆 `Vector3` | **什么都不过**：整体属于渲染侧 |
 
-已经划掉的三项：
+`PbfSlimeVisualComponent` 是删的不是搬的：连同 `PbfSlimeVisualSystem` 整条旧 PBF 表现路径
+不可达——那个 System 从未出现在 `addSystem` 列表里，Component 也只被它自己引用。
+（`src/slime/pbf/PbfSlimeSimulation.ts` 因此没有引用者了；路线图写明「旧 PBF 求解器仍独立
+保留」，删不删是产品决定。）
 
-- **`PbfSlimeVisualComponent`（删除）**——连同 `PbfSlimeVisualSystem` 整条 PBF 表现路径不可达：
-  那个 System 从未出现在 `addSystem` 列表里，Component 也只被它自己引用。
-  （`src/slime/pbf/PbfSlimeSimulation.ts` 因此没有引用者了；路线图写明「旧 PBF 求解器仍独立保留」，
-  删不删是产品决定。）
-- **`GrassDisplacementComponent`**——`THREE.Object3D` 换成 `WorldPositionSampler` 回调 + 普通数字。
-- **`FireVisualComponent`**——缩成只剩一个目标强度，动画搬进 `ThreeFireVisual`。
+### 玩家实体也接到了边界上
 
-### 定长参数通道（已落地）
+最后两项锁在一起（共用同一份 rig 与 `HybridSlimeSimulation`），而且都卡在同一个前提上：
+**本地玩家根本没有 ProxyId**——它的模型由 `renderer.addWorldObject()` 直接挂进场景，
+从没经过 `ThreeRenderScene`。所以这一步顺带把 `src/player/` 整个接了过来：
 
-火焰立起来的这段通道，剩下四项里的定长参数直接复用：
+- `RenderScene` 新增具名入口 `createPlayerProxy(PlayerProxyDesc)`。玩家是**另一类内容**
+  （自带配色、走路动画、蒙皮拖拽），按 §4.5 的取向给它一个入口，而不是往 `MeshProxyDesc`
+  上挂几个只有玩家会用的可选字段。
+- **过边界的配色是身份不是颜色**：desc 里是 `paletteSeed`（远端玩家的 id），
+  哪种身份配哪套颜色由渲染侧决定。
+- `PlayerEntity` / `RemotePlayer` 各自持有一份 f64 的 transform 记录，每帧兑现进 SoA；
+  渲染侧那份 f32 是镜像，不是源。两者都不再持有 `Object3D`，
+  `createPlayerActorVisual` 缩成 `playerVisualShape.ts` 里的三个标量。
+- 过渡形态 `src/player/objectPositionSampler.ts` 随之删除。
+- **帧序**：玩家更新排到 `renderer.update` 之前。翻面发生在 Actor 世界里，写在翻面之后
+  就晚一帧——软体读到的速度会和它被摆到的位置对不上。
+
+### 蒙皮拖拽：不是所有表现都要过边界
+
+`SlimeSurfaceDragComponent` 有一个同步 `beginDrag(ray): boolean`——看上去是条 Render→Game
+的反向读，实际上不是：**指针、相机和外壳三样东西都在渲染这一侧**。它从来就不是玩法
+（拾取的是动态 `BufferGeometry`，写的是纯客户端弹簧力，既不移动 Actor 根节点，也不碰
+权威碰撞或网络状态）。所以整条链路搬进渲染世界，`SlimeSurfaceDragController` 改由场景
+持有、按 `ProxyId` 寻址，往玩法侧只发「拖拽开始/结束」一个布尔（一次手势只有一个所有者）。
+
+### 定长参数通道
+
+火焰立起来的这段通道，后面几项的定长参数直接复用：
 
 ```text
 ActorTransformSystem      写 transform ─┐
@@ -193,15 +218,23 @@ RenderTransformSyncSystem publish + submit                （帧一致，不会�
   transform 段已有的不变量，而不是另立一条「谁负责清零」的规则。
 - **不要量化**。火焰那对阈值（吸附 0.002、可见 0.01）是一对，塞进 u8 或 f16 会让强度永远吸不到 0。
 
-### 两条注意
+三条通道按**数据形状**选，不按内容选：
 
-1. **除了 Replica 这条路，还有本地玩家那条。** `src/player/PlayerEntity.ts` 与
-   `RemotePlayer.ts` 也是 Actor，视觉走 `createPlayerActorVisual()`，**完全没有经过
-   `ThreeRenderScene`**。这一步必须把它们也接到同一条边界上，否则 Sim Worker 里会留一半场景图。
-2. **变长数据需要命令通道，不是 SoA 槽位。** 定长参数（强度、温度、yaw）可以加进
-   `RenderTransformBuffer` 旁边的第二段 SoA；引导路径那种变长的要走
-   `RenderCommandSink`——它现在只有 `destroyMeshProxy` 一个方法，就是为这件事留的口子。
-   单线程下是直接调用，上 worker 之后是往环形缓冲写命令。
+| 形状 | 通道 | 例子 |
+| --- | --- | --- |
+| spawn 时的一次性事实 | `MeshProxyDesc` / `PlayerProxyDesc` | 模型配置、要不要标记牌、引导线样式、配色种子 |
+| 每帧的定长标量 | 参数段 SoA | 火焰强度、温度、史莱姆的七个运动量 |
+| 变长 / 只在变化时 | `RenderCommandSink` | 引导路径的路点、交互标签 |
+
+`PARAM_SLIME_AIRBORNE` 存的是「离地」而不是「贴地」，这是被上面那条「写 0」规则逼出来的：
+求解器的默认态是 `grounded = true`，存 `grounded` 的话 0 就成了「浮空」，所有不驱动这项
+参数的史莱姆都会被当成在空中。取反之后默认值自洽。
+
+**权威 yaw 一个字节都没过边界。** 它就是 `submitTransforms` 刚写进 `proxy.root.rotation.y`
+的那个角度——外壳要抵消的正是「root 这一级实际被转了多少」，在渲染世界内部读它是
+Render→Render。这也顺手修掉了 `HybridSlimeVisualSystem` 那条反向依赖（那个 System 整个
+删掉了）：它此前从 `render.root.rotation.y` 回读，上 worker 之后读不到，而且对**有父节点的
+Actor 是错的**——`submitTransforms` 给子节点写的是相对 yaw，读回来当世界 yaw 用会抵消错角度。
 
 ### 顺带修掉的两个真实缺陷
 
@@ -213,17 +246,27 @@ RenderTransformSyncSystem publish + submit                （帧一致，不会�
 - `ClientActorSystem.dispose` 不调用 `renderScene.dispose()`，渲染资源的释放完全依赖
   「每个 proxy 都恰好有一个活着的 Actor 持有它」这条不变量，而上面那条路径正好破坏它。
 
-### 还没解决的两条
+### 渲染世界的归属
 
-- **`HybridSlimeVisualSystem` 有一条 Render→Game 的反向依赖**：`authorityYaw` 取自
-  `render.root.rotation.y`——也就是 SoA 刚兑现出去的 yaw 又被读回来。上 worker 之后读不到。
-  正确的源是 `TransformComponent.yaw`（父子情况下还要减去父 yaw）。搬这一项时必须一起修。
-- **本地玩家那条路径仍然绕开边界**。`src/player/objectPositionSampler.ts` 是过渡形态：
-  它把 Object3D 挡在了 Actor Component 之外，但闭包本身仍捕获渲染世界的对象——
-  **棘轮变短不等于真的能进 Sim Worker**。真正过边界要等 `PlayerEntity` / `RemotePlayer`
-  也走 `createMeshProxy`。
+渲染世界（`ThreeRenderScene` + `RenderTransformBuffer`）现在由 `createLineArtScene` 建，
+挂在 `SceneComposition` / `SceneRenderer` 上——不再归 `ClientActorSystem`。理由是玩家：
+它不是 Replica，但它的 proxy 必须和 Actor 的 proxy 落在同一张槽位表、同一段 SoA 里，
+否则「一个 `ProxyId` 指一个东西」就不成立了。
 
-建议继续按 Component 逐个搬，每搬一个从棘轮清单里划掉一个，保持每次提交都是绿的。
+两处连带：
+
+- **Actor 世界改成总是建**，哪怕地图上一个 Actor 都没有。渲染世界那次翻面归它管
+  （`RenderTransformSyncSystem` 夹在写 SoA 与依赖翻面结果的 Actor 表现 System 之间），
+  按「有没有 Actor」建它会让没有 Actor 的地图上玩家整个不动。空的 `ActorWorld` 每帧什么都不做。
+- **那个夹心结构是第 2 步要拆的东西**：`AttachmentVisualSystem` 读的是翻面之后摆好的
+  Three 局部变换，所以 publish/submit 拆不出 Actor 世界。在拆开之前，「谁驱动谁就负责释放」
+  比多一个只管析构的系统更清楚——所以 `ClientActorSystem.dispose()` 仍然释放渲染世界。
+
+### 下一步
+
+棘轮空了，第 2 步的前置条件满足。但**棘轮为 0 不等于零耦合**：
+`src/scenes/GrasslandScene.ts` 这一层仍然同时握着输入、相机、玩家实体和渲染器，
+第 2 步要把其中属于玩法的那半搬进 worker，这条缝在哪儿划要在 §2 里定。
 
 ---
 
