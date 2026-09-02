@@ -356,9 +356,11 @@ test('同一个玩家采树和采石得到两种不同的物品', async () => {
     sequence += 1;
   }
 
+  // 快照按货位顺序发，不排序：格子位置本身是玩家记得住的信息。
+  // 这里先采树后采石，所以圆木在前。
   assert.deepEqual(
     inventory.snapshot().map((entry) => entry.itemType),
-    ['stone', 'wood-log'],
+    ['wood-log', 'stone'],
     '两种物品分别入账，没有被当成同一种堆叠',
   );
 });

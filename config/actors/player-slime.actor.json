@@ -30,6 +30,9 @@
       "maximumFallSpeed": 20,
       "airControl": 0.85
     },
+    "inventory": {
+      "slotCapacity": 8
+    },
     "pickupDrop": {
       "mouthLocalX": 0,
       "mouthLocalY": 0.3,

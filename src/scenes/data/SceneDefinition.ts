@@ -267,6 +267,10 @@ export interface ActorArchetypeDefinition {
     };
     elasticDetach?: {
     };
+    /** 角色能带走的货位数；不写按 DEFAULT_SLOT_CAPACITY。 */
+    inventory?: {
+      slotCapacity: number;
+    };
     pickupDrop?: {
       mouthLocalX: number;
       mouthLocalY: number;

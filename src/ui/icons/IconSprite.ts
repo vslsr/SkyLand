@@ -1,6 +1,4 @@
-const SVG_NAMESPACE = 'http://www.w3.org/2000/svg';
-const SPRITE_ELEMENT_ID = 'ui-icon-sprite';
-const SYMBOL_ID_PREFIX = 'icon-';
+import { SvgSprite } from './svgSprite';
 
 /**
  * 地形图标共用的底图：一条地平线加一段山脊。
@@ -59,62 +57,25 @@ const ICON_PATHS = {
 /** 可用图标 ID。新增图标只要往 ICON_PATHS 里加一项。 */
 export type IconId = keyof typeof ICON_PATHS;
 
-export const ICON_IDS = Object.keys(ICON_PATHS) as readonly IconId[];
+const sprite = new SvgSprite<IconId>({
+  elementId: 'ui-icon-sprite',
+  symbolIdPrefix: 'icon-',
+  paths: ICON_PATHS,
+});
+
+export const ICON_IDS = sprite.ids;
 
 /** @returns 这个图标在 sprite 里的 symbol id，供 `<use href="#...">` 引用。 */
 export function iconSymbolId(id: IconId): string {
-  return `${SYMBOL_ID_PREFIX}${id}`;
+  return sprite.symbolId(id);
 }
 
-/**
- * 把 sprite 注入文档，重复调用只做一次。
- *
- * 每个图标的路径数据只出现一份，用到几次都是 `<use>` 引用——按钮多起来
- * 也不会把同样的 path 复制很多遍。
- */
+/** 把 sprite 注入文档，重复调用只做一次。 */
 export function ensureIconSprite(host: Document = document): SVGSVGElement {
-  const existing = host.getElementById(SPRITE_ELEMENT_ID);
-  if (existing) return existing as unknown as SVGSVGElement;
-
-  const sprite = host.createElementNS(SVG_NAMESPACE, 'svg');
-  sprite.id = SPRITE_ELEMENT_ID;
-  sprite.setAttribute('aria-hidden', 'true');
-  // 不能用 display:none：那样 Safari 里 <use> 会引用不到。
-  sprite.setAttribute(
-    'style',
-    'position:absolute;width:0;height:0;overflow:hidden;pointer-events:none',
-  );
-  for (const [id, markup] of Object.entries(ICON_PATHS)) {
-    const symbol = host.createElementNS(SVG_NAMESPACE, 'symbol');
-    symbol.id = iconSymbolId(id as IconId);
-    symbol.setAttribute('viewBox', '0 0 24 24');
-    symbol.setAttribute('fill', 'none');
-    symbol.setAttribute('stroke', 'currentColor');
-    symbol.setAttribute('stroke-width', '1.6');
-    symbol.setAttribute('stroke-linecap', 'round');
-    symbol.setAttribute('stroke-linejoin', 'round');
-    symbol.innerHTML = markup;
-    sprite.append(symbol);
-  }
-  host.body.append(sprite);
-  return sprite;
+  return sprite.ensure(host);
 }
 
-/**
- * 造一个引用 sprite 的图标元素。
- *
- * 默认 `aria-hidden`：图标旁边通常已经有 aria-label 或可见文字，
- * 再读一遍只会让读屏重复。
- */
+/** 造一个引用 sprite 的图标元素。 */
 export function createIcon(id: IconId, options: { className?: string } = {}): SVGSVGElement {
-  ensureIconSprite();
-  const svg = document.createElementNS(SVG_NAMESPACE, 'svg');
-  svg.setAttribute('viewBox', '0 0 24 24');
-  svg.setAttribute('aria-hidden', 'true');
-  svg.setAttribute('focusable', 'false');
-  if (options.className) svg.setAttribute('class', options.className);
-  const use = document.createElementNS(SVG_NAMESPACE, 'use');
-  use.setAttribute('href', `#${iconSymbolId(id)}`);
-  svg.append(use);
-  return svg;
+  return sprite.createElement(id, options);
 }

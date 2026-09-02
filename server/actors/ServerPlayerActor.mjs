@@ -51,7 +51,7 @@ export class ServerPlayerActor extends Actor {
       sprintMultiplier: movement.sprintMultiplier,
       maximumStepHeight: movement.maximumStepHeight,
     };
-    this.addComponent(new InventoryComponent());
+    this.addComponent(new InventoryComponent(archetype.components.inventory));
     if (archetype.components.pickupDrop) {
       this.addComponent(new PickupDropComponent(archetype.components.pickupDrop));
     }

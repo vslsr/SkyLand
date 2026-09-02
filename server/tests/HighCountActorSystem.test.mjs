@@ -4,9 +4,11 @@ import {
   ACTOR_RESIDENCY_COMPONENT,
   COMBUSTIBLE_COMPONENT,
   DROP_MOTION_COMPONENT,
+  INVENTORY_COMPONENT,
   ITEM_STACK_COMPONENT,
   TRANSFORM_COMPONENT,
 } from '../../shared/actor/index.mjs';
+import { itemCatalog } from '../../shared/items/index.mjs';
 import { SceneCatalog } from '../scenes/SceneCatalog.mjs';
 import { ServerScene } from '../scene/ServerScene.mjs';
 
@@ -47,6 +49,40 @@ test('附近的休眠物品堆自动合并，并通过通用 Actor 交互进入�
   assert.deepEqual(scene.createSnapshot('player-1').players[0].inventory, [
     { itemType: 'wood-log', quantity: 10 },
   ]);
+});
+
+test('背包货位占满之后，掉落堆留在世界里而不是被吞掉', async () => {
+  const { scene, advance } = await createFixture();
+  scene.addPlayer({ id: 'player-1', name: '收集者', slot: 0 });
+  const player = scene.players.get('player-1');
+  const inventory = player.requireComponent(INVENTORY_COMPONENT);
+
+  // 一格堆到上限才会开下一格，所以这样正好把所有货位占满。
+  const stackLimit = itemCatalog.require('stone').stackLimit;
+  inventory.add('stone', stackLimit * inventory.slotCapacity);
+  assert.equal(inventory.isFull, true);
+  assert.equal(inventory.slots.length, inventory.slotCapacity);
+
+  scene.spawnItemStack('wood-log', {
+    quantity: 3,
+    position: [player.x, 0.1, player.z],
+  });
+  advance(16);
+  const pile = scene.actorWorld.query(ITEM_STACK_COMPONENT)[0];
+  assert.ok(pile, '圆木应该还在世界里');
+
+  assert.equal(
+    scene.interactWithActor('player-1', { actorId: pile.id, sequence: 1 }),
+    false,
+    '拿不下就不该判定交互成功',
+  );
+  assert.equal(pile.requireComponent(ITEM_STACK_COMPONENT).quantity, 3, '数量一个都不该少');
+  assert.equal(inventory.quantityOf('wood-log'), 0);
+
+  const snapshot = scene.createSnapshot('player-1').players[0];
+  assert.equal(snapshot.inventory.length, inventory.slotCapacity);
+  assert.deepEqual(snapshot.inventory[0], { itemType: 'stone', quantity: stackLimit });
+  assert.equal(snapshot.inventoryRevision, inventory.revision);
 });
 
 test('圆木受重力落下并滚动减速，停稳后进入 sleeping 且不再逐 tick 移动', async () => {

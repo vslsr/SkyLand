@@ -41,12 +41,14 @@ export const PlayerInputActionIds = {
   AbilityRage: 'IA_AbilityLab_Rage',
   AbilitySilence: 'IA_AbilityLab_Silence',
   AbilityReset: 'IA_AbilityLab_Reset',
+  Inventory: 'IA_Player_Inventory',
   DebugMenu: 'IA_Debug_Menu',
   Dodge: 'IA_Player_Dodge',
 } as const;
 
 export const PlayerInputMappingIds = {
   DebugMenuKeyboard: 'DebugMenu.Keyboard.F8',
+  InventoryKeyboard: 'Inventory.Keyboard.Primary',
   JumpKeyboard: 'Jump.Keyboard.Primary',
 } as const;
 
@@ -71,6 +73,7 @@ export const PlayerInputTags = {
   AbilityRage: defineTag(tagForAction(PlayerInputActionIds.AbilityRage)),
   AbilitySilence: defineTag(tagForAction(PlayerInputActionIds.AbilitySilence)),
   AbilityReset: defineTag(tagForAction(PlayerInputActionIds.AbilityReset)),
+  Inventory: defineTag(tagForAction(PlayerInputActionIds.Inventory)),
   DebugMenu: defineTag(tagForAction(PlayerInputActionIds.DebugMenu)),
   Dodge: defineTag(tagForAction(PlayerInputActionIds.Dodge)),
 } as const;

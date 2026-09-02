@@ -2,6 +2,7 @@ import { readdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { MAX_GUIDE_LOCAL_COORDINATE } from '../../shared/actor/components/GuidePathComponent.mjs';
+import { itemCatalog } from '../../shared/items/index.mjs';
 
 export const DEFAULT_ACTOR_DIRECTORY = fileURLToPath(new URL('../../config/actors/', import.meta.url));
 
@@ -237,6 +238,14 @@ function validateHeatEmitter(raw, filename) {
     radius: requireNumber(definition.radius, `${path}.radius`, Number.EPSILON, 32),
     enabled: definition.enabled,
   };
+}
+
+function validateInventory(raw, filename) {
+  const path = `${filename}.components.inventory`;
+  const definition = requireObject(raw, path);
+  const slotCapacity = requireNumber(definition.slotCapacity, `${path}.slotCapacity`, 1, 64);
+  if (!Number.isInteger(slotCapacity)) throw new TypeError(`${path}.slotCapacity 必须是整数`);
+  return { slotCapacity };
 }
 
 function validateItemStack(raw, filename) {
@@ -699,6 +708,7 @@ function validateActorArchetype(raw, filename) {
     'temperature',
     'combustible',
     'heatEmitter',
+    'inventory',
     'itemStack',
     'actorResidency',
     'dropMotion',
@@ -780,6 +790,7 @@ function validateActorArchetype(raw, filename) {
   const heatEmitter = components.heatEmitter
     ? validateHeatEmitter(components.heatEmitter, filename)
     : undefined;
+  const inventory = components.inventory ? validateInventory(components.inventory, filename) : undefined;
   const itemStack = components.itemStack ? validateItemStack(components.itemStack, filename) : undefined;
   const actorResidency = components.actorResidency
     ? validateActorResidency(components.actorResidency, filename)
@@ -806,6 +817,12 @@ function validateActorArchetype(raw, filename) {
   }
   if (itemStack && interactable?.action !== 'pickup-stack') {
     throw new TypeError(`${filename}.components.itemStack 需要 pickup-stack interactable`);
+  }
+  // 掉落物必须是物品目录里登记过的东西，否则捡起来时背包查不到堆叠上限和货位占用。
+  if (itemStack && !itemCatalog.has(itemStack.itemType)) {
+    throw new TypeError(
+      `${filename}.components.itemStack.itemType 没有登记进物品目录：${itemStack.itemType}`,
+    );
   }
   // 堆叠模型由 HighCountActorBatchSystem 合批绘制，没有 itemStack 就没有东西可画。
   if (PILE_RENDER_MODELS.has(render?.model) && !itemStack) {
@@ -838,6 +855,7 @@ function validateActorArchetype(raw, filename) {
       ...(temperature ? { temperature } : {}),
       ...(combustible ? { combustible } : {}),
       ...(heatEmitter ? { heatEmitter } : {}),
+      ...(inventory ? { inventory } : {}),
       ...(itemStack ? { itemStack } : {}),
       ...(actorResidency ? { actorResidency } : {}),
       ...(dropMotion ? { dropMotion } : {}),

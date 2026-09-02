@@ -245,6 +245,19 @@
             "enabled": { "type": "boolean" }
           }
         },
+        "inventory": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["slotCapacity"],
+          "properties": {
+            "slotCapacity": {
+              "description": "角色能带走的货位数。设计稿 §6.5：容量小，够带回一次岛上收获。",
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 64
+            }
+          }
+        },
         "itemStack": {
           "type": "object",
           "additionalProperties": false,
