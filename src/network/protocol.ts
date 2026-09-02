@@ -103,6 +103,10 @@ export interface SnapshotActor {
     state: 'active' | 'sleeping';
     revision: number;
   };
+  elasticDetach?: {
+    detached: boolean;
+    revision: number;
+  };
   guidePath?: {
     points: Array<[number, number, number]>;
     curve: 'linear' | 'catmull-rom';

@@ -37,6 +37,7 @@ export class PhysicsWorld {
   #chunks = new Map();
   #staticGroups = new Map();
   #actors = new Map();
+  #dynamicActors = new Map();
   #characters = new Map();
   #characterColliderHandles = new Set();
   #disposed = false;
@@ -179,6 +180,80 @@ export class PhysicsWorld {
     return true;
   }
 
+  /** 为已脱离 Actor 建立真正的 Rapier 动态刚体，并返回一次性弹出冲量入口。 */
+  createDynamicActor(id, options = {}) {
+    this.#assertAlive();
+    this.removeActorCollider(id);
+    this.removeDynamicActor(id);
+    const body = this.#world.createRigidBody(
+      this.#rapier.RigidBodyDesc.dynamic()
+        .setTranslation(finite(options.x), finite(options.y), finite(options.z))
+        .setLinearDamping(Math.max(0, finite(options.linearDamping, 1.8)))
+        .setAngularDamping(Math.max(0, finite(options.angularDamping, 2))),
+    );
+    const collider = this.#world.createCollider(
+      this.#rapier.ColliderDesc.ball(positive(options.radius, 0.28))
+        .setRestitution(Math.max(0, Math.min(1, finite(options.restitution, 0.28))))
+        .setFriction(Math.max(0, finite(options.friction, 0.8)))
+        .setCollisionGroups(SOLID_COLLIDER_GROUPS),
+      body,
+    );
+    this.#dynamicActors.set(id, { body, collider });
+    this.#queriesDirty = true;
+    return body;
+  }
+
+  hasDynamicActor(id) {
+    return this.#dynamicActors.has(id);
+  }
+
+  applyDynamicActorImpulse(id, impulse) {
+    const entry = this.#dynamicActors.get(id);
+    if (!entry) return false;
+    entry.body.applyImpulse({
+      x: finite(impulse?.x), y: finite(impulse?.y), z: finite(impulse?.z),
+    }, true);
+    return true;
+  }
+
+  setDynamicActorVelocity(id, velocity) {
+    const entry = this.#dynamicActors.get(id);
+    if (!entry) return false;
+    entry.body.setLinvel({
+      x: finite(velocity?.x), y: finite(velocity?.y), z: finite(velocity?.z),
+    }, true);
+    return true;
+  }
+
+  applyDynamicActorGravity(id, gravity, deltaSeconds) {
+    const entry = this.#dynamicActors.get(id);
+    if (!entry) return false;
+    const velocity = entry.body.linvel();
+    entry.body.setLinvel({
+      x: velocity.x,
+      y: velocity.y - Math.max(0, finite(gravity, 9.8)) * Math.max(0, finite(deltaSeconds)),
+      z: velocity.z,
+    }, true);
+    return true;
+  }
+
+  getDynamicActorState(id) {
+    const entry = this.#dynamicActors.get(id);
+    if (!entry) return undefined;
+    const position = entry.body.translation();
+    const velocity = entry.body.linvel();
+    return { position: { ...position }, velocity: { ...velocity } };
+  }
+
+  removeDynamicActor(id) {
+    const entry = this.#dynamicActors.get(id);
+    if (!entry) return false;
+    if (entry.body.isValid()) this.#world.removeRigidBody(entry.body);
+    this.#dynamicActors.delete(id);
+    this.#queriesDirty = true;
+    return true;
+  }
+
   setCharacterTranslation(id, position) {
     const character = this.#requireCharacter(id);
     const center = {
@@ -306,6 +381,7 @@ export class PhysicsWorld {
     this.#chunks.clear();
     this.#staticGroups.clear();
     this.#actors.clear();
+    this.#dynamicActors.clear();
     this.#world.free();
     this.#disposed = true;
   }

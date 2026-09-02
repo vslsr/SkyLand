@@ -13,7 +13,7 @@
       "preset": "line-art-leaves",
       "position": [0, 0, 1.5],
       "particleCount": 180,
-      "radius": 8,
+      "clusterRadius": 8,
       "seed": 139732,
       "fillColor": "#d6a45b",
       "accentColor": "#bd7041",

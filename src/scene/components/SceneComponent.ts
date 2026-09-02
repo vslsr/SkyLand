@@ -15,6 +15,10 @@ export interface SceneComponentContext {
   readonly input: InputSubsystem;
   readonly renderer: SceneRenderer;
   readonly player?: PlayerEntity;
+  /** 房间分配的流式世界种子；固定场景可以省略。 */
+  readonly worldSeed?: number;
+  /** 与 ChunkStreamer 共用的当前玩家/相机焦点。 */
+  readonly getFocus?: () => { focusX: number; focusY: number; focusZ: number };
 }
 
 /**

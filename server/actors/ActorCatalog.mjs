@@ -1,6 +1,7 @@
 import { readdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { MAX_GUIDE_LOCAL_COORDINATE } from '../../shared/actor/components/GuidePathComponent.mjs';
 
 export const DEFAULT_ACTOR_DIRECTORY = fileURLToPath(new URL('../../config/actors/', import.meta.url));
 
@@ -292,6 +293,21 @@ function validateDropMotion(raw, filename) {
   };
 }
 
+function validateElasticDetach(raw, filename) {
+  const path = `${filename}.components.elasticDetach`;
+  requireObject(raw, path);
+  return {};
+}
+
+function validateMushroomPop(raw, filename) {
+  const path = `${filename}.components.mushroomPop`;
+  const definition = requireObject(raw, path);
+  return {
+    forwardImpulse: requireNumber(definition.forwardImpulse, `${path}.forwardImpulse`, 0, 20),
+    upwardImpulse: requireNumber(definition.upwardImpulse, `${path}.upwardImpulse`, 0, 20),
+  };
+}
+
 function validatePlayerJump(raw, filename) {
   const path = `${filename}.components.playerJump`;
   const definition = requireObject(raw, path);
@@ -365,7 +381,6 @@ function validateGuidePath(raw, filename) {
     'points',
     'curve',
     'lineColor',
-    'shadowColor',
     'markerColor',
     'lineWidth',
     'dashLength',
@@ -388,7 +403,12 @@ function validateGuidePath(raw, filename) {
       throw new TypeError(`${path}.points[${pointIndex}] 必须包含 3 个数字`);
     }
     return rawPoint.map((value, axis) => (
-      requireNumber(value, `${path}.points[${pointIndex}][${axis}]`)
+      requireNumber(
+        value,
+        `${path}.points[${pointIndex}][${axis}]`,
+        -MAX_GUIDE_LOCAL_COORDINATE,
+        MAX_GUIDE_LOCAL_COORDINATE,
+      )
     ));
   });
   if (definition.curve !== 'linear' && definition.curve !== 'catmull-rom') {
@@ -409,7 +429,6 @@ function validateGuidePath(raw, filename) {
     points,
     curve: definition.curve,
     lineColor: requireColor(definition.lineColor, `${path}.lineColor`),
-    shadowColor: requireColor(definition.shadowColor, `${path}.shadowColor`),
     markerColor: requireColor(definition.markerColor, `${path}.markerColor`),
     lineWidth: requireNumber(definition.lineWidth, `${path}.lineWidth`, 1, 20),
     dashLength: requireNumber(definition.dashLength, `${path}.dashLength`, 0.05, 8),
@@ -673,6 +692,8 @@ function validateActorArchetype(raw, filename) {
     'interactable',
     'cargo',
     'elasticTether',
+    'elasticDetach',
+    'mushroomPop',
     'hazard',
     'temperature',
     'combustible',
@@ -716,6 +737,12 @@ function validateActorArchetype(raw, filename) {
   const elasticTether = components.elasticTether
     ? validateElasticTether(components.elasticTether, filename)
     : undefined;
+  const elasticDetach = components.elasticDetach
+    ? validateElasticDetach(components.elasticDetach, filename)
+    : undefined;
+  const mushroomPop = components.mushroomPop
+    ? validateMushroomPop(components.mushroomPop, filename)
+    : undefined;
   if (elasticTether && interactable?.action !== 'mushroom-bite') {
     throw new TypeError(`${filename}.components.elasticTether 需要 mushroom-bite interactable`);
   }
@@ -724,6 +751,12 @@ function validateActorArchetype(raw, filename) {
   }
   if (elasticTether && render?.model !== 'line-art-elastic-mushroom') {
     throw new TypeError(`${filename}.components.elasticTether 需要 line-art-elastic-mushroom render`);
+  }
+  if (elasticDetach && (!elasticTether || !components.dropMotion)) {
+    throw new TypeError(`${filename}.components.elasticDetach 需要 elasticTether 和 dropMotion`);
+  }
+  if (mushroomPop && (!elasticDetach || render?.model !== 'line-art-elastic-mushroom')) {
+    throw new TypeError(`${filename}.components.mushroomPop 需要蘑菇 render 和 elasticDetach`);
   }
   if (playerMovement && !PLAYER_RENDER_MODELS.has(render?.model)) {
     throw new TypeError(`${filename}.components.playerMovement 需要玩家史莱姆 render`);
@@ -798,6 +831,8 @@ function validateActorArchetype(raw, filename) {
       ...(interactable ? { interactable } : {}),
       ...(components.cargo ? { cargo: validateCargo(components.cargo, filename) } : {}),
       ...(elasticTether ? { elasticTether } : {}),
+      ...(elasticDetach ? { elasticDetach } : {}),
+      ...(mushroomPop ? { mushroomPop } : {}),
       ...(components.hazard ? { hazard: validateHazard(components.hazard, filename) } : {}),
       ...(temperature ? { temperature } : {}),
       ...(combustible ? { combustible } : {}),

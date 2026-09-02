@@ -87,7 +87,7 @@ test('loads every selectable map from an independent scene JSON', async () => {
     preset: 'line-art-leaves',
     position: [0, 0, 1.5],
     particleCount: 180,
-    radius: 8,
+    clusterRadius: 8,
     seed: 139732,
     fillColor: '#d6a45b',
     accentColor: '#bd7041',
@@ -97,7 +97,20 @@ test('loads every selectable map from an independent scene JSON', async () => {
   });
   assert.equal(catalog.require('open-meadow').renderer.content.trees, false);
   const openWorld = catalog.require('open-world');
-  assert.deepEqual(openWorld.sceneComponents[0], grassland.sceneComponents[1]);
+  assert.deepEqual(openWorld.sceneComponents[0], {
+    type: 'interactive-particle-effect',
+    id: 'grassland-leaves',
+    preset: 'line-art-leaves',
+    worldGeneration: { spawnChance: 0.35 },
+    particleCount: 96,
+    clusterRadius: 4.5,
+    seed: 139732,
+    fillColor: '#d6a45b',
+    accentColor: '#bd7041',
+    lineColor: '#493426',
+    interactionRadius: 0.9,
+    impulseStrength: 3.4,
+  });
   // 变体写在场景里；普通树占 5 份、果树占 1 份，选择由房间种子决定。
   assert.deepEqual(openWorld.gameplay.worldProps, {
     tree: [

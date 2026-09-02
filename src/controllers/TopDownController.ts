@@ -1,5 +1,6 @@
 import { CameraBoom, type CameraProbe } from '../camera/CameraBoom';
 import { CameraFollow } from '../camera/CameraFollow';
+import { TopDownCameraOrbit } from '../camera/TopDownCameraOrbit';
 import type { CameraFrame } from '../camera/CameraTransform';
 import type { CameraAxes } from '../camera/cameraMath';
 import { createCameraViewMatrix } from '../camera/cameraMath';
@@ -64,6 +65,8 @@ export interface TopDownControllerOptions {
   cameraOffset?: Vec3;
   /** TopDown 镜头追随玩家的收敛速度；越大越紧，默认保留轻微粘滞感。 */
   cameraFollowSharpness?: number;
+  /** 是否允许在画面上拖动旋转 TopDown 镜头。默认开启。 */
+  cameraDragEnabled?: boolean;
   fieldOfViewDegrees?: number;
   bounds?: SceneBounds;
   collisionRadius?: number;
@@ -84,8 +87,8 @@ export interface TopDownControllerOptions {
   updateMovementState?: () => void;
   /** 返回 GAS Movement.Speed 的 CurrentValue。 */
   resolveWalkSpeed?: () => number;
-  /** 水面支撑高度；不在水中返回 undefined。 */
-  resolveBuoyancyHeight?: () => number | undefined;
+  /** 当前固定模拟 tick 的动态浮力目标；不在水中返回 undefined。 */
+  resolveBuoyancyHeight?: (tick: number) => number | undefined;
   resolveCollision?: (
     position: { x: number; z: number },
     radius: number,
@@ -114,6 +117,7 @@ export class TopDownController {
   private readonly player: THREE.Object3D;
   private readonly inputDisposers: Array<() => void> = [];
   private readonly cameraOffset: Vec3;
+  private readonly cameraDragEnabled: boolean;
   private readonly fieldOfViewRadians: number;
   private readonly pointer = { x: 0, y: 0, available: false, dirty: false };
   private readonly movementInput = { x: 0, y: 0 };
@@ -142,6 +146,16 @@ export class TopDownController {
   private readonly cameraProbe?: CameraProbe;
   private readonly cameraBoom = new CameraBoom();
   private readonly cameraFollow: CameraFollow;
+  private readonly cameraOrbit: TopDownCameraOrbit;
+  private readonly cameraDrag = {
+    pointerId: -1,
+    pressX: 0,
+    pressY: 0,
+    lastX: 0,
+    lastY: 0,
+    moved: 0,
+    active: false,
+  };
   private cameraDistanceRatio = 1;
   private enabled: boolean;
   private facingYaw = Math.PI;
@@ -166,6 +180,8 @@ export class TopDownController {
     this.player = player;
     this.enabled = options.enabled ?? true;
     this.cameraOffset = [...(options.cameraOffset ?? DEFAULT_TOP_DOWN_CAMERA_OFFSET)];
+    this.cameraDragEnabled = options.cameraDragEnabled ?? true;
+    this.cameraOrbit = new TopDownCameraOrbit(this.cameraOffset);
     this.bounds = options.bounds ?? PLAYER_BOUNDS;
     this.collisionRadius = Math.max(0, options.collisionRadius ?? 0);
     this.movement = options.movement ?? {
@@ -445,6 +461,8 @@ export class TopDownController {
       this.jumpRequestPending = false;
       this.jumpAbility?.setPressed(false);
       this.mouseFacingActive = false;
+      this.cancelCameraDrag();
+      this.cameraOrbit.cancelPending();
     }
   }
 
@@ -453,6 +471,8 @@ export class TopDownController {
     this.cameraBoom.reset();
     this.cameraDistanceRatio = 1;
     this.cameraFollow.reset(this.cameraPivot);
+    this.cancelCameraDrag();
+    this.cameraOrbit.cancelPending();
   }
 
   public setPosition(x: number, z: number): void {
@@ -530,7 +550,11 @@ export class TopDownController {
   /** 表面拖拽命中玩家自身时暂停左键朝向，避免同一次手势同时旋转 Actor。 */
   public setMouseFacingSuppressed(suppressed: boolean): void {
     this.mouseFacingSuppressed = suppressed;
-    if (suppressed) this.mouseFacingActive = false;
+    if (suppressed) {
+      this.mouseFacingActive = false;
+      this.cancelCameraDrag();
+      this.cameraOrbit.cancelPending();
+    }
   }
 
   public translate(deltaX: number, deltaZ: number): void {
@@ -538,6 +562,7 @@ export class TopDownController {
   }
 
   public update(deltaSeconds: number): void {
+    this.updateCameraOrbit(deltaSeconds);
     this.decayRenderOffset(deltaSeconds);
     // 镜头必须先解算：即使输入被 UI 接管，角色仍可能被服务端和解拉着走，
     // 这时镜头照样要躲开挡在中间的树。
@@ -630,7 +655,6 @@ export class TopDownController {
   ): void {
     if (!this.characterState || !this.characterParams || !this.physicsWorld) return;
     this.characterParams.walkSpeed = walkSpeed ?? this.movement.walkSpeed;
-    this.characterParams.buoyancyHeight = this.resolveBuoyancyHeight?.();
     const jump = this.jumpHeld || this.jumpRequestPending;
     this.simulationClock.advance(deltaSeconds, (stepSeconds: number) => {
       this.previousSimulationPosition = {
@@ -646,6 +670,7 @@ export class TopDownController {
         yaw: normalizeAngle(this.facingYaw),
       };
       this.nextInputTick += 1;
+      this.characterParams!.buoyancyHeight = this.resolveBuoyancyHeight?.(input.tick);
       stepCharacter(
         this.characterState!,
         input,
@@ -717,15 +742,26 @@ export class TopDownController {
     );
   }
 
+  private updateCameraOrbit(deltaSeconds: number): void {
+    const offset = this.cameraOrbit.update(deltaSeconds);
+    this.cameraOffset[0] = offset[0];
+    this.cameraOffset[1] = offset[1];
+    this.cameraOffset[2] = offset[2];
+  }
+
   public dispose(): void {
     for (const dispose of this.inputDisposers.splice(0)) dispose();
     if (this.physicsWorld && this.characterId) {
       this.physicsWorld.removeCharacter(this.characterId);
     }
-    this.canvas.removeEventListener('pointerdown', this.handlePointerMove);
+    this.cancelCameraDrag();
+    this.canvas.removeEventListener('pointerdown', this.handlePointerDown);
     this.canvas.removeEventListener('pointermove', this.handlePointerMove);
     this.canvas.removeEventListener('pointerenter', this.handlePointerMove);
     this.canvas.removeEventListener('pointerleave', this.handlePointerLeave);
+    this.canvas.removeEventListener('pointerup', this.handlePointerEnd);
+    this.canvas.removeEventListener('pointercancel', this.handlePointerEnd);
+    this.canvas.removeEventListener('lostpointercapture', this.handlePointerCaptureLost);
   }
 
   private projectPointerToGameplayPlane(): { x: number; y: number } | undefined {
@@ -755,18 +791,98 @@ export class TopDownController {
     };
   }
 
-  private readonly handlePointerMove = (event: PointerEvent): void => {
-    if (!this.enabled) return;
+  private syncPointer(event: PointerEvent): void {
     this.pointer.x = event.clientX;
     this.pointer.y = event.clientY;
     this.pointer.available = true;
     this.pointer.dirty = true;
+  }
+
+  private readonly handlePointerDown = (event: PointerEvent): void => {
+    if (!this.enabled) return;
+    this.syncPointer(event);
+    if (
+      !this.cameraDragEnabled
+      || this.mouseFacingSuppressed
+      || event.button !== 0
+      || this.cameraDrag.pointerId >= 0
+    ) return;
+    this.cameraDrag.pointerId = event.pointerId;
+    this.cameraDrag.pressX = event.clientX;
+    this.cameraDrag.pressY = event.clientY;
+    this.cameraDrag.lastX = event.clientX;
+    this.cameraDrag.lastY = event.clientY;
+    this.cameraDrag.moved = 0;
+    this.cameraDrag.active = false;
+    try {
+      this.canvas.setPointerCapture?.(event.pointerId);
+    } catch {
+      // pointerup 仍会正常结束手势；部分浏览器会拒绝捕获已离开的指针。
+    }
+  };
+
+  private readonly handlePointerMove = (event: PointerEvent): void => {
+    if (!this.enabled) return;
+    this.syncPointer(event);
+    if (event.type !== 'pointermove' || event.pointerId !== this.cameraDrag.pointerId) return;
+    if (this.mouseFacingSuppressed) {
+      this.cancelCameraDrag();
+      return;
+    }
+    const deltaX = event.clientX - this.cameraDrag.lastX;
+    const deltaY = event.clientY - this.cameraDrag.lastY;
+    this.cameraDrag.lastX = event.clientX;
+    this.cameraDrag.lastY = event.clientY;
+    this.cameraDrag.moved += Math.abs(deltaX) + Math.abs(deltaY);
+    if (!this.cameraDrag.active && this.cameraDrag.moved >= 6) {
+      this.cameraDrag.active = true;
+      this.mouseFacingActive = false;
+      this.pointer.dirty = false;
+      this.cameraOrbit.addPointerDelta(
+        event.clientX - this.cameraDrag.pressX,
+        event.clientY - this.cameraDrag.pressY,
+      );
+    } else if (this.cameraDrag.active) {
+      this.cameraOrbit.addPointerDelta(deltaX, deltaY);
+    }
+    if (this.cameraDrag.active && event.cancelable) event.preventDefault();
   };
 
   private readonly handlePointerLeave = (): void => {
+    if (this.cameraDrag.pointerId >= 0) return;
     this.pointer.available = false;
     this.pointer.dirty = false;
   };
+
+  private readonly handlePointerEnd = (event: PointerEvent): void => {
+    if (event.pointerId !== this.cameraDrag.pointerId) return;
+    this.syncPointer(event);
+    this.cancelCameraDrag();
+  };
+
+  private readonly handlePointerCaptureLost = (event: PointerEvent): void => {
+    if (event.pointerId !== this.cameraDrag.pointerId) return;
+    this.cameraDrag.pointerId = -1;
+    this.cameraDrag.active = false;
+    this.cameraDrag.moved = 0;
+  };
+
+  private cancelCameraDrag(): void {
+    const pointerId = this.cameraDrag.pointerId;
+    this.cameraDrag.pointerId = -1;
+    this.cameraDrag.active = false;
+    this.cameraDrag.moved = 0;
+    if (
+      pointerId < 0
+      || !this.canvas.hasPointerCapture?.(pointerId)
+      || !this.canvas.releasePointerCapture
+    ) return;
+    try {
+      this.canvas.releasePointerCapture(pointerId);
+    } catch {
+      // lostpointercapture 可能已经先一步释放，状态在上方已清理。
+    }
+  }
 
   private bindInput(input: InputSubsystem): void {
     this.inputDisposers.push(
@@ -778,11 +894,14 @@ export class TopDownController {
   }
 
   private bindPointerEvents(): void {
-    // 点击本身仍由 Input.Player.Primary 决定；这里只同步点击瞬间的光标坐标。
-    this.canvas.addEventListener('pointerdown', this.handlePointerMove);
+    // 点击语义仍由 Input.Player.Primary 决定；DOM 层只识别连续拖拽和同步光标。
+    this.canvas.addEventListener('pointerdown', this.handlePointerDown);
     this.canvas.addEventListener('pointermove', this.handlePointerMove);
     this.canvas.addEventListener('pointerenter', this.handlePointerMove);
     this.canvas.addEventListener('pointerleave', this.handlePointerLeave);
+    this.canvas.addEventListener('pointerup', this.handlePointerEnd);
+    this.canvas.addEventListener('pointercancel', this.handlePointerEnd);
+    this.canvas.addEventListener('lostpointercapture', this.handlePointerCaptureLost);
   }
 
   private handleMoveInput(event: InputActionEvent): void {
@@ -825,6 +944,7 @@ export class TopDownController {
       this.mouseFacingActive = (
         this.enabled
         && !this.mouseFacingSuppressed
+        && !this.cameraDrag.active
         && event.value === true
       );
     }

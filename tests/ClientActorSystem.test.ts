@@ -269,7 +269,6 @@ const guidePathArchetype: SceneDefinition['actorArchetypes'][number] = {
       points: [[0, 0.4, 0], [2, 0.4, -2], [4, 0.4, 0]],
       curve: 'catmull-rom',
       lineColor: '#fffdf4',
-      shadowColor: '#544b43',
       markerColor: '#fffdf4',
       lineWidth: 5,
       dashLength: 0.8,

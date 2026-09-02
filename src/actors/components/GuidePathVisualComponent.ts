@@ -16,7 +16,6 @@ export class GuidePathVisualComponent extends ActorComponent {
       points: state.points as Array<[number, number, number]>,
       curve: state.curve,
       lineColor: state.lineColor,
-      shadowColor: state.shadowColor,
       markerColor: state.markerColor,
       lineWidth: state.lineWidth,
       dashLength: state.dashLength,

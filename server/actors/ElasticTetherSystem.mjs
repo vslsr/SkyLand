@@ -1,5 +1,6 @@
 import {
   ELASTIC_TETHER_COMPONENT,
+  ELASTIC_DETACH_COMPONENT,
   INTERACTABLE_COMPONENT,
   TRANSFORM_COMPONENT,
 } from '../../shared/actor/index.mjs';
@@ -35,7 +36,9 @@ export class ElasticTetherSystem {
         tether.targetY - transform.y,
         tether.targetZ - transform.z,
       );
-      if (length >= tether.breakLength) releaseElasticTether(tether, interactable);
+      if (length >= tether.breakLength && !actor.getComponent(ELASTIC_DETACH_COMPONENT)) {
+        releaseElasticTether(tether, interactable);
+      }
     }
   }
 }

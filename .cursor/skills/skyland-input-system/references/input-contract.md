@@ -138,6 +138,7 @@ Device activity and binding replacement can change the label between frames. Re-
 
 - joystick -> `Virtual.MoveStick` axis2D;
 - run button -> `Virtual.SprintButton` digital;
+- jump button -> `Virtual.JumpButton` digital;
 - hold button -> `Virtual.InteractButton` digital;
 - world interaction button -> `Virtual.WorldInteractButton` digital;
 - double-tap button -> `Virtual.DodgeButton` digital.

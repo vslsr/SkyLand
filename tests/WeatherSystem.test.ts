@@ -17,7 +17,7 @@ import {
 } from '../src/shaders/grass';
 import { WEATHER_PARTICLE_LIMITS, WeatherSystem } from '../src/weather/index';
 
-function createSystem(): {
+function createSystem(sampleGroundHeight: (x: number, z: number) => number = () => 2): {
   scene: THREE.Scene;
   system: WeatherSystem;
   environment: ReturnType<typeof createSceneEnvironment>;
@@ -32,7 +32,7 @@ function createSystem(): {
     fogNear: 22,
     fogFar: 52,
     runtime: environment.runtime,
-    sampleGroundHeight: () => 2,
+    sampleGroundHeight,
   });
   scene.add(system.root);
   return { scene, system, environment };
@@ -156,6 +156,44 @@ test('负坐标和快速传送直接替换天气 chunk，容量保持有界', ()
 
   system.dispose();
   assert.equal(system.root.children.length, 0);
+});
+
+test('雨滴接近地面时才复采高度，并用固定共享缓冲绘制落地水花', () => {
+  let groundHeight = 0;
+  let sampleCount = 0;
+  const { system } = createSystem(() => {
+    sampleCount += 1;
+    return groundHeight;
+  });
+  const samplesAfterCreation = sampleCount;
+  groundHeight = 3;
+  system.setWeather('storm');
+  settle(system, 2);
+
+  const counts = system.getParticleCounts();
+  assert.ok(counts.rain > 300);
+  assert.ok(counts.rainSplashes > 0);
+  assert.ok(counts.rainSplashes <= WEATHER_PARTICLE_LIMITS.rainSplashes);
+  // 如果逐帧查询，2 秒内至少会有 rain × 20 次；两阶段方案远低于该数量。
+  assert.ok(sampleCount - samplesAfterCreation < WEATHER_PARTICLE_LIMITS.rainDrops * 4);
+
+  const splashes = system.root.getObjectByName(
+    'chunk-weather-rain-splashes',
+  ) as THREE.LineSegments<THREE.BufferGeometry, THREE.LineBasicMaterial>;
+  assert.equal(splashes.material.color.getHexString(), '6fa4cf');
+  assert.equal(splashes.material.fog, false);
+  assert.equal(splashes.material.toneMapped, false);
+  assert.equal(
+    splashes.geometry.drawRange.count,
+    counts.rainSplashes * 12 * 2,
+  );
+  const positions = splashes.geometry.getAttribute('position').array as Float32Array;
+  for (let index = 1; index < splashes.geometry.drawRange.count * 3; index += 3) {
+    assert.ok(positions[index] >= groundHeight, '水花顶点不能落到采样地面以下');
+    assert.ok(positions[index] < groundHeight + 0.25, '水花必须紧贴采样地面');
+  }
+
+  system.dispose();
 });
 
 test('晴天与多云共享同一套场景雾和光照 uniform', () => {

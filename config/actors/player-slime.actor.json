@@ -7,8 +7,8 @@
       "minimumBeam": 0.84,
       "minimumLength": 0.84,
       "maximumTrimRadians": 0,
-      "minimumDraft": 0.08,
-      "maximumDraft": 0.28,
+      "minimumDraft": 0.24,
+      "maximumDraft": 0.44,
       "bobAmplitude": 0.22,
       "bobFrequency": 0.55,
       "parts": [

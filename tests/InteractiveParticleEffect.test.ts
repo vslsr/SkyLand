@@ -4,11 +4,13 @@ import * as THREE from 'three';
 import { ActorWorld } from '../shared/actor/ActorWorld.mjs';
 import { InteractiveParticleEffectActor } from '../src/actors/InteractiveParticleEffectActor';
 import { InteractiveParticleEffectSystem } from '../src/actors/systems/InteractiveParticleEffectSystem';
+import { InteractiveParticleEffectSceneComponent } from '../src/scene/components/InteractiveParticleEffectSceneComponent';
 import { createLineArtLeafGeometry, LINE_ART_LEAF_GEOMETRY_STATS } from '../src/models/particles/lineArtLeaf';
 import {
   LINE_ART_LEAF_PARTICLE_LIMITS,
   LineArtLeafParticleEffect,
 } from '../src/particles/LineArtLeafParticleEffect';
+import { generateInteractiveParticleWorldPoint } from '../src/particles/interactiveParticleWorld';
 
 const environment = { fogColor: '#fdfbf6', fogNear: 22, fogFar: 52 };
 
@@ -103,4 +105,71 @@ test('large focus jumps do not sweep an interaction across the whole world', () 
 
   assert.equal(affected, 0);
   effect.dispose();
+});
+
+test('streamed leaf clusters are deterministic and stay inside negative-coordinate chunks', () => {
+  const first = generateInteractiveParticleWorldPoint(0x12345678, 91, -2, 3, 1, 4.5);
+  const second = generateInteractiveParticleWorldPoint(0x12345678, 91, -2, 3, 1, 4.5);
+  assert.deepEqual(first, second);
+  assert.ok(first);
+  assert.ok(first.x >= -64 + 4.5 && first.x <= -32 - 4.5);
+  assert.ok(first.z >= 96 + 4.5 && first.z <= 128 - 4.5);
+
+  assert.equal(
+    generateInteractiveParticleWorldPoint(0x12345678, 91, -2, 3, 0, 4.5),
+    undefined,
+  );
+});
+
+test('streamed leaf clusters stay bounded and discard old chunks after a large focus jump', () => {
+  const mounted = new Set<THREE.Object3D>();
+  let focus = { focusX: 0, focusY: 0, focusZ: 0 };
+  const renderer = {
+    environmentRuntime: undefined,
+    addWorldObject: (object: THREE.Object3D) => mounted.add(object),
+    removeWorldObject: (object: THREE.Object3D) => mounted.delete(object),
+    isWaterAt: () => false,
+    sampleGroundHeight: () => 0,
+  };
+  const definition = {
+    type: 'interactive-particle-effect',
+    id: 'streamed-leaves',
+    preset: 'line-art-leaves',
+    worldGeneration: { spawnChance: 1 },
+    particleCount: 16,
+    clusterRadius: 4,
+    seed: 91,
+    fillColor: '#d6a45b',
+    accentColor: '#bd7041',
+    lineColor: '#493426',
+    interactionRadius: 0.9,
+    impulseStrength: 3.4,
+  } as const;
+  const component = new InteractiveParticleEffectSceneComponent(definition, {
+    definition: {
+      renderer: {
+        fog: { color: '#fdfbf6', near: 22, far: 52 },
+        world: { loadRadius: 2, keepRadius: 3 },
+      },
+    } as never,
+    renderer: renderer as never,
+    worldSeed: 0x12345678,
+    getFocus: () => focus,
+  } as never);
+
+  component.activate();
+  for (let frame = 0; frame < 30; frame += 1) component.update(1 / 60, frame / 60);
+  assert.equal(mounted.size, 25);
+
+  focus = { focusX: 160, focusY: 0, focusZ: 0 };
+  component.update(1 / 60, 1);
+  assert.ok(
+    mounted.size <= 6,
+    '传送后只保留 keepRadius 边缘的迟滞列，并且每帧只补一个新 chunk',
+  );
+  for (let frame = 0; frame < 30; frame += 1) component.update(1 / 60, 2 + frame / 60);
+  assert.ok(mounted.size <= 49, '常驻落叶团始终受 keepRadius 的 7×7 chunk 窗口约束');
+
+  component.dispose();
+  assert.equal(mounted.size, 0);
 });

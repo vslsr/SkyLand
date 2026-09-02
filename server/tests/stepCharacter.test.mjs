@@ -9,6 +9,7 @@ import {
 } from '../../shared/physics/stepCharacter.mjs';
 import { createSimpleCollisionFromRender } from '../../shared/actor/simpleCollision.mjs';
 import { simpleCollisionInstanceToPhysicsDefinitions } from '../../shared/physics/simpleCollisionToPhysics.mjs';
+import { sampleBuoyancyBobOffset } from '../../shared/actor/buoyancyMotion.mjs';
 
 const DT = 1 / 60;
 const MOVEMENT = {
@@ -177,5 +178,44 @@ test('岸边进入水域只通过重力与浮力速度积分下降，不会把 Y
   assert.ok(leftShore.vy < 0, '离岸后应由向下速度开始下落');
   assert.ok(maximumStepDrop < 0.12, `出现单步 Y 瞬移：${maximumStepDrop}`);
   assert.ok(Math.abs(state.y - targetY) < 0.06, `浮力未稳定在吃水线附近：${state.y}`);
+  physics.dispose();
+});
+
+test('动态浮力目标产生可见上下起伏，角色 Y 仍由物理逐步积分', () => {
+  const supportY = -0.6;
+  const { physics, state, params } = setup(
+    { x: 0, y: supportY, z: 0 },
+    [box(0, -1.2, -1, 4)],
+  );
+  let minimumY = Infinity;
+  let maximumY = -Infinity;
+  let maximumStepDelta = 0;
+  let previousY = state.y;
+  let samplesPinnedToTarget = 0;
+  let measuredSamples = 0;
+
+  for (let tick = 0; tick < 600; tick += 1) {
+    params.buoyancyHeight = supportY + sampleBuoyancyBobOffset(
+      'player',
+      tick * DT,
+      0.3,
+      0.55,
+    );
+    stepCharacter(state, { move: { x: 0, z: 0 } }, DT, physics, params);
+    maximumStepDelta = Math.max(maximumStepDelta, Math.abs(state.y - previousY));
+    previousY = state.y;
+    if (tick < 120) continue;
+    minimumY = Math.min(minimumY, state.y);
+    maximumY = Math.max(maximumY, state.y);
+    measuredSamples += 1;
+    if (Math.abs(state.y - params.buoyancyHeight) < 1e-6) samplesPinnedToTarget += 1;
+  }
+
+  assert.ok(maximumY - minimumY > 0.16, `浮力起伏不明显：${maximumY - minimumY}`);
+  assert.ok(maximumStepDelta < 0.08, `浮力造成单步 Y 瞬移：${maximumStepDelta}`);
+  assert.ok(
+    samplesPinnedToTarget < measuredSamples * 0.05,
+    `角色 Y 疑似被直接钉到动态目标：${samplesPinnedToTarget}/${measuredSamples}`,
+  );
   physics.dispose();
 });

@@ -127,6 +127,19 @@ test('空房间不建任何物件，玩家到场才装载他周围的那一片',
   assert.equal(mushroomSnapshot.propState, undefined);
   assert.equal(mushroomSnapshot.interactable.action, 'mushroom-bite');
   assert.equal(mushroomSnapshot.elasticTether.holderPlayerId, null);
+  const mushroomActor = mushrooms.find((actor) => actor.id === mushroomSnapshot.id);
+  const mushroomTransform = mushroomActor.requireComponent(TRANSFORM_COMPONENT);
+  scene.physics.removeCharacter('woodcutter');
+  const capHit = scene.physics.castRay(
+    { x: mushroomTransform.x, y: mushroomTransform.y + 2, z: mushroomTransform.z },
+    { x: 0, y: -1, z: 0 },
+    3,
+  );
+  assert.ok(capHit, '生成蘑菇挂载后应立即进入服务端 Rapier 查询');
+  assert.ok(
+    Math.abs((mushroomTransform.y + 2 - capHit.timeOfImpact) - (mushroomTransform.y + 0.95)) < 0.01,
+    `向下射线应先命中可站立菌盖，而不是 y=${mushroomTransform.y + 2 - capHit.timeOfImpact}`,
+  );
 
   // 常驻半径至少要覆盖复制半径，否则 AOI 里的树没有 Actor 可复制偏离态。
   const archetype = scene.generatedProps.archetypeForKind(PROP_KIND.TREE);
