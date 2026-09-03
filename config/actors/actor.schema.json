@@ -370,6 +370,27 @@
             }
           }
         },
+        "patrolPath": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["waypoints", "speed"],
+          "properties": {
+            "waypoints": {
+              "type": "array",
+              "minItems": 2,
+              "maxItems": 16,
+              "items": {
+                "type": "array",
+                "minItems": 3,
+                "maxItems": 3,
+                "items": { "type": "number", "minimum": -64, "maximum": 64 }
+              }
+            },
+            "speed": { "type": "number", "exclusiveMinimum": 0, "maximum": 20 },
+            "waitSeconds": { "type": "number", "minimum": 0, "maximum": 60 },
+            "mode": { "enum": ["ping-pong", "loop"] }
+          }
+        },
         "render": {
           "oneOf": [
             {

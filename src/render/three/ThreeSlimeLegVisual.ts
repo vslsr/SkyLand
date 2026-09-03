@@ -16,6 +16,10 @@ const AIRBORNE_DANGLE_RATIO = 0.72;
 const IK_REACH_SAFETY = 0.998;
 /** 拉到总腿长的这个比例就必须迈步，早于 IK 开始收脚的那一刻。 */
 const OVERSTRETCH_RATIO = 0.94;
+/** 差分速度的平滑响应，1/s。快照按渲染时刻插值，逐帧差分本身是有台阶的。 */
+const DERIVED_VELOCITY_RESPONSE = 12;
+/** 玩法侧的速度小于它就当作「没给」，改用差分。 */
+const PARAM_VELOCITY_EPSILON = 1e-4;
 const UP = new THREE.Vector3(0, 1, 0);
 const RING_AXIS = new THREE.Vector3(0, 0, 1);
 
@@ -63,6 +67,11 @@ export class ThreeSlimeLegVisual {
   private readonly maximumConcurrentSteps: number;
   /** 身体相对髋高的上下浮动，跟着落脚点的平均高度走。 */
   private bodyLift = 0;
+  /** 这一帧用来预判落脚点的水平速度，可能来自参数段也可能是差分出来的。 */
+  private driveVelocityX = 0;
+  private driveVelocityZ = 0;
+  private previousWorldX = 0;
+  private previousWorldZ = 0;
   private hasPose = false;
   // 逐帧复用，避免每条腿每帧分配四个向量。
   private readonly hip = new THREE.Vector3();
@@ -113,10 +122,47 @@ export class ThreeSlimeLegVisual {
       this.hasPose = true;
     }
 
+    this.updateDriveVelocity(frameSeconds, world, motion);
     this.updateBodyLift(frameSeconds, world, airborne);
     const hipY = world.y + this.definition.hipHeight + this.bodyLift;
-    this.advanceSteps(frameSeconds, world, sinYaw, cosYaw, motion, probe, hipY, airborne);
+    this.advanceSteps(frameSeconds, world, sinYaw, cosYaw, probe, hipY, airborne);
     this.applyPose(world, sinYaw, cosYaw, hipY);
+  }
+
+  /**
+   * 这一帧用哪个速度预判落脚点。
+   *
+   * 玩家（本地与远端）自己把速度写进参数段，那份最准：它来自预测/插值出来的运动
+   * 状态，没有台阶。但 **Replica 的 Actor 不复制运动演示**——服务端推着走的巡逻
+   * 史莱姆，参数段里是一水儿的 0（见 `ActorVisualParamSystem`）。那种情况下速度
+   * 只能从「它这一帧被摆到哪儿」差分出来。
+   *
+   * 差分结果要平滑：快照按渲染时刻插值，逐帧位移本身是带台阶的，直接拿去预判会
+   * 让落脚点抖。平滑只影响预判，不影响脚踩在哪儿——落脚点由位置决定，不由速度。
+   */
+  private updateDriveVelocity(
+    frameSeconds: number,
+    world: RenderTransform,
+    motion: SlimeMotionParams,
+  ): void {
+    const paramSpeed = Math.hypot(motion.movementVelocityX, motion.movementVelocityZ);
+    if (paramSpeed > PARAM_VELOCITY_EPSILON) {
+      this.driveVelocityX = motion.movementVelocityX;
+      this.driveVelocityZ = motion.movementVelocityZ;
+    } else if (frameSeconds > 0) {
+      const response = 1 - Math.exp(-DERIVED_VELOCITY_RESPONSE * frameSeconds);
+      const sampledX = (world.x - this.previousWorldX) / frameSeconds;
+      const sampledZ = (world.z - this.previousWorldZ) / frameSeconds;
+      this.driveVelocityX += (sampledX - this.driveVelocityX) * response;
+      this.driveVelocityZ += (sampledZ - this.driveVelocityZ) * response;
+    }
+    this.previousWorldX = world.x;
+    this.previousWorldZ = world.z;
+  }
+
+  /** 这一帧的水平速率，供身体的挤压动画用。见 `updateDriveVelocity` 的说明。 */
+  public get presentationSpeed(): number {
+    return Math.hypot(this.driveVelocityX, this.driveVelocityZ);
   }
 
   /** 首帧把脚直接摆到理想位置，否则整套腿会从世界原点飞过来。 */
@@ -140,6 +186,8 @@ export class ThreeSlimeLegVisual {
       state.stepProgress = 0;
     }
     this.bodyLift = 0;
+    this.previousWorldX = world.x;
+    this.previousWorldZ = world.z;
   }
 
   /**
@@ -171,7 +219,6 @@ export class ThreeSlimeLegVisual {
     world: RenderTransform,
     sinYaw: number,
     cosYaw: number,
-    motion: SlimeMotionParams,
     probe: SlimeGroundProbeParams,
     hipY: number,
     airborne: boolean,
@@ -198,8 +245,8 @@ export class ThreeSlimeLegVisual {
         continue;
       }
 
-      let targetX = hipX + motion.movementVelocityX * STRIDE_LEAD_SECONDS * stepDuration;
-      let targetZ = hipZ + motion.movementVelocityZ * STRIDE_LEAD_SECONDS * stepDuration;
+      let targetX = hipX + this.driveVelocityX * STRIDE_LEAD_SECONDS * stepDuration;
+      let targetZ = hipZ + this.driveVelocityZ * STRIDE_LEAD_SECONDS * stepDuration;
       // 预判不能超过一步的长度，否则高速下落脚点会跑到腿够不着的前方。
       const leadX = targetX - hipX;
       const leadZ = targetZ - hipZ;
@@ -238,7 +285,7 @@ export class ThreeSlimeLegVisual {
     }
 
     if (airborne) return;
-    this.startSteps(world, sinYaw, cosYaw, motion, hipY, steppingCount);
+    this.startSteps(world, sinYaw, cosYaw, hipY, steppingCount);
   }
 
   /**
@@ -251,7 +298,6 @@ export class ThreeSlimeLegVisual {
     world: RenderTransform,
     sinYaw: number,
     cosYaw: number,
-    motion: SlimeMotionParams,
     hipY: number,
     activeSteps: number,
   ): void {
@@ -281,8 +327,8 @@ export class ThreeSlimeLegVisual {
         if (state.stepping) continue;
         const hipX = world.x + cosYaw * leg.hipLocalX + sinYaw * leg.hipLocalZ;
         const hipZ = world.z - sinYaw * leg.hipLocalX + cosYaw * leg.hipLocalZ;
-        const targetX = hipX + motion.movementVelocityX * STRIDE_LEAD_SECONDS * stepDuration;
-        const targetZ = hipZ + motion.movementVelocityZ * STRIDE_LEAD_SECONDS * stepDuration;
+        const targetX = hipX + this.driveVelocityX * STRIDE_LEAD_SECONDS * stepDuration;
+        const targetZ = hipZ + this.driveVelocityZ * STRIDE_LEAD_SECONDS * stepDuration;
         const error = Math.hypot(targetX - state.footX, targetZ - state.footZ);
         if (error <= bestError) continue;
         bestError = error;

@@ -450,3 +450,45 @@ test('没有地面采样的槽位退回 Actor 自己的脚底平面，而不是�
     .getWorldPosition(new THREE.Vector3());
   assert.ok(Math.abs(foot.y - 12) < 1e-3, `脚应停在 Actor 自己的脚底平面上：${foot.y}`);
 });
+
+test('服务端推着走的 Replica 没有速度参数，步态从 transform 差分出来', () => {
+  const harness = createLegHarness();
+  for (let frame = 0; frame < 30; frame += 1) harness.step(1 / 60, { x: 0, z: 0 });
+
+  // 站着不动：不该无缘无故迈步。
+  let lifted = 0;
+  for (let frame = 0; frame < 60; frame += 1) {
+    harness.step(1 / 60, { x: 0, z: 0 });
+    if (feetOf(harness).some((foot) => foot.y > 1e-3)) lifted += 1;
+  }
+  assert.equal(lifted, 0, '原地不动时不该迈步');
+
+  // 巡逻 Actor 走的就是这条路：位置每帧在变，运动参数全是静止值
+  // （见 ActorVisualParamSystem——Replica 不复制运动演示）。
+  let z = 0;
+  let maximumLift = 0;
+  const stepped = [0, 0];
+  let previous = feetOf(harness).map((foot) => foot.clone());
+  for (let frame = 0; frame < 180; frame += 1) {
+    z += 1.6 / 60;
+    harness.step(1 / 60, { x: 0, z });
+    const feet = feetOf(harness);
+    for (const [index, foot] of feet.entries()) {
+      maximumLift = Math.max(maximumLift, foot.y);
+      if (foot.y > 1e-3 && previous[index].y <= 1e-3) stepped[index] += 1;
+    }
+    previous = feet.map((foot) => foot.clone());
+  }
+
+  assert.ok(maximumLift > 0.03, `被服务端推着走时也要抬腿，实际最高 ${maximumLift}`);
+  assert.ok(stepped[0] > 2 && stepped[1] > 2, `两条腿都要迈：${stepped.join(' / ')}`);
+
+  // 脚最终仍然踩在采样出来的地面上，没有被拖在身后。
+  const bodyZ = z;
+  for (const foot of feetOf(harness)) {
+    assert.ok(
+      Math.abs(foot.z - bodyZ) < LEGGED_SLIME.stepLength + LEGGED_SLIME.legSpread + 0.35,
+      `落脚点不该被落在身后：脚 ${foot.z}，身体 ${bodyZ}`,
+    );
+  }
+});

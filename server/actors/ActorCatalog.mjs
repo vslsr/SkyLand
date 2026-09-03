@@ -2,6 +2,10 @@ import { readdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { MAX_GUIDE_LOCAL_COORDINATE } from '../../shared/actor/components/GuidePathComponent.mjs';
+import {
+  MAX_PATROL_LOCAL_COORDINATE,
+  MAX_PATROL_WAYPOINTS,
+} from '../../shared/actor/components/PatrolPathComponent.mjs';
 import { itemCatalog } from '../../shared/items/index.mjs';
 
 export const DEFAULT_ACTOR_DIRECTORY = fileURLToPath(new URL('../../config/actors/', import.meta.url));
@@ -423,6 +427,49 @@ function validateReplicationPolicy(raw, filename) {
   return { mode: definition.mode, radiusChunks };
 }
 
+function validatePatrolPath(raw, filename) {
+  const path = `${filename}.components.patrolPath`;
+  const definition = requireObject(raw, path);
+  const knownKeys = new Set(['waypoints', 'speed', 'waitSeconds', 'mode']);
+  for (const key of Object.keys(definition)) {
+    if (!knownKeys.has(key)) throw new TypeError(`${path} 包含未知字段：${key}`);
+  }
+  const raws = definition.waypoints;
+  if (!Array.isArray(raws) || raws.length < 2 || raws.length > MAX_PATROL_WAYPOINTS) {
+    throw new TypeError(`${path}.waypoints 必须是 2 到 ${MAX_PATROL_WAYPOINTS} 个路点`);
+  }
+  const waypoints = raws.map((point, index) => {
+    const pointPath = `${path}.waypoints[${index}]`;
+    if (!Array.isArray(point) || point.length !== 3) {
+      throw new TypeError(`${pointPath} 必须是 [x, y, z]`);
+    }
+    return point.map((value, axis) => requireNumber(
+      value,
+      `${pointPath}[${axis}]`,
+      -MAX_PATROL_LOCAL_COORDINATE,
+      MAX_PATROL_LOCAL_COORDINATE,
+    ));
+  });
+  // 全部重合的路线走不动，也就没有巡逻可言；早点报错好过在场景里盯着它发呆。
+  const moves = waypoints.some((point) => (
+    Math.hypot(point[0] - waypoints[0][0], point[1] - waypoints[0][1], point[2] - waypoints[0][2])
+      > 1e-6
+  ));
+  if (!moves) throw new TypeError(`${path}.waypoints 至少要有两个不重合的路点`);
+  const mode = definition.mode ?? 'ping-pong';
+  if (mode !== 'ping-pong' && mode !== 'loop') {
+    throw new TypeError(`${path}.mode 必须是 ping-pong 或 loop`);
+  }
+  return {
+    waypoints,
+    speed: requireNumber(definition.speed, `${path}.speed`, Number.EPSILON, 20),
+    waitSeconds: definition.waitSeconds === undefined
+      ? 0
+      : requireNumber(definition.waitSeconds, `${path}.waitSeconds`, 0, 60),
+    mode,
+  };
+}
+
 function validateGuidePath(raw, filename) {
   const path = `${filename}.components.guidePath`;
   const definition = requireObject(raw, path);
@@ -804,6 +851,7 @@ function validateActorArchetype(raw, filename) {
     'replicationPolicy',
     'generatedProp',
     'guidePath',
+    'patrolPath',
     'render',
   ]);
   for (const componentName of Object.keys(components)) {
@@ -817,6 +865,9 @@ function validateActorArchetype(raw, filename) {
     : undefined;
   const guidePath = components.guidePath
     ? validateGuidePath(components.guidePath, filename)
+    : undefined;
+  const patrolPath = components.patrolPath
+    ? validatePatrolPath(components.patrolPath, filename)
     : undefined;
   if (!render && !generatedProp && !guidePath) {
     throw new TypeError(`${filename}.components 至少需要 render、generatedProp 或 guidePath`);
@@ -870,8 +921,10 @@ function validateActorArchetype(raw, filename) {
   if (render?.model === 'line-art-player-slime' && !playerMovement) {
     throw new TypeError(`${filename}.components.render line-art-player-slime 需要 playerMovement`);
   }
-  if (render?.model === 'line-art-legged-slime' && !playerMovement) {
-    throw new TypeError(`${filename}.components.render line-art-legged-slime 需要 playerMovement`);
+  // line-art-legged-slime 两头都能用：带 playerMovement 是玩家外壳，不带就是
+  // 服务端推着走的生物（见 patrolPath）。所以这里**不**强制要 playerMovement。
+  if (patrolPath && playerMovement) {
+    throw new TypeError(`${filename}.components.patrolPath 不能与 playerMovement 并存`);
   }
   if (slimeSurfaceDrag && render?.model !== 'line-art-pbf-slime') {
     throw new TypeError(`${filename}.components.slimeSurfaceDrag 需要 line-art-pbf-slime render`);
@@ -960,6 +1013,7 @@ function validateActorArchetype(raw, filename) {
       ...(replicationPolicy ? { replicationPolicy } : {}),
       ...(generatedProp ? { generatedProp } : {}),
       ...(guidePath ? { guidePath } : {}),
+      ...(patrolPath ? { patrolPath } : {}),
       ...(render ? { render } : {}),
     },
   };

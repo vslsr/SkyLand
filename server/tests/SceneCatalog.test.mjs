@@ -147,8 +147,17 @@ test('loads every selectable map from an independent scene JSON', async () => {
       ['pbf-collision-dummy-center', 'training-dummy'],
       ['pbf-collision-obelisk-left', 'arcane-focus-obelisk'],
       ['pbf-collision-obelisk-right', 'arcane-focus-obelisk'],
+      ['legged-slime-walker-near', 'legged-slime-walker'],
+      ['legged-slime-walker-far', 'legged-slime-walker'],
     ],
   );
+  // 同一个原型摆两份就是两条巡逻线：路线在原型里（局部空间），落在哪儿、朝哪边
+  // 由场景放置决定。
+  const walker = pbfSlimeTest.actorArchetypes.find((actor) => actor.id === 'legged-slime-walker');
+  assert.equal(walker.components.render.model, 'line-art-legged-slime');
+  assert.equal(walker.components.patrolPath.mode, 'ping-pong');
+  assert.deepEqual(walker.components.patrolPath.waypoints, [[0, 0, -4], [0, 0, 4]]);
+  assert.equal(walker.components.playerMovement, undefined);
   assert.equal(
     pbfSlimeTest.actorArchetypes.find((actor) => actor.id === 'pbf-slime')
       .components.render.model,

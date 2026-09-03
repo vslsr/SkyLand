@@ -238,6 +238,16 @@ export interface ActorArchetypeDefinition {
       enabled: boolean;
       currentPointIndex: number;
     };
+    /**
+     * 服务端权威的固定巡逻路线；路点在 Actor 局部空间。客户端不读它——位置整段
+     * 由快照插值而来——列在这里是为了让原型的形状在两侧对得上。
+     */
+    patrolPath?: {
+      waypoints: Array<[number, number, number]>;
+      speed: number;
+      waitSeconds: number;
+      mode: 'ping-pong' | 'loop';
+    };
     playerMovement?: {
       walkSpeed: number;
       sprintMultiplier: number;

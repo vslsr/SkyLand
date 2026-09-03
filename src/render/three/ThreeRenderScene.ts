@@ -394,11 +394,9 @@ export class ThreeRenderScene implements RenderScene {
         readSlimeMotionParams(transforms, id, this.slimeMotion),
       );
     }
-    for (const [id, animator] of this.slimeAnimators) {
-      animator.update(deltaSeconds, elapsedSeconds, transforms.readParam(id, PARAM_SLIME_SPEED));
-    }
-    // 腿排在身体之后：`bodyRoot` 的高度由步态决定，而软体只在 `bodyRoot` 下面
-    // 原地挤压，两者写的不是同一个节点。
+    // 腿排在身体之前：它解出的水平速率是身体挤压动画的输入。两者写的不是同一个
+    // 节点（腿写 `bodyRoot` 的高度，软体在 `bodyRoot` 下面原地挤压），所以这个
+    // 顺序只为了那一个标量。
     for (const [id, legs] of this.slimeLegs) {
       if (!this.resolve(id)) continue;
       legs.update(
@@ -406,6 +404,16 @@ export class ThreeRenderScene implements RenderScene {
         transforms.readTransform(id, this.legWorld),
         readSlimeMotionParams(transforms, id, this.slimeMotion),
         readSlimeGroundProbeParams(transforms, id, this.slimeGroundProbe),
+      );
+    }
+    for (const [id, animator] of this.slimeAnimators) {
+      // 服务端推着走的 Replica 在参数段里速度是 0（它不复制运动演示），
+      // 但腿已经从它被摆到哪儿差分出了速率——身体的挤压该跟着那一个走。
+      const legs = this.slimeLegs.get(id);
+      animator.update(
+        deltaSeconds,
+        elapsedSeconds,
+        legs ? legs.presentationSpeed : transforms.readParam(id, PARAM_SLIME_SPEED),
       );
     }
   }

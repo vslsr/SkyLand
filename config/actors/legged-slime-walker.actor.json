@@ -1,0 +1,39 @@
+{
+  "$schema": "./actor.schema.json",
+  "schemaVersion": 1,
+  "id": "legged-slime-walker",
+  "components": {
+    "patrolPath": {
+      "waypoints": [
+        [0, 0, -4],
+        [0, 0, 4]
+      ],
+      "speed": 1.6,
+      "waitSeconds": 0.6,
+      "mode": "ping-pong"
+    },
+    "render": {
+      "model": "line-art-legged-slime",
+      "radius": 0.44,
+      "hipHeight": 0.66,
+      "legSpread": 0.16,
+      "legCount": 2,
+      "thighLength": 0.42,
+      "shinLength": 0.42,
+      "legThickness": 0.028,
+      "footRadius": 0.08,
+      "stepLength": 0.28,
+      "stepHeight": 0.13,
+      "stepDuration": 0.22,
+      "membraneColor": "#e8b27f",
+      "middleColor": "#f4d5b6",
+      "coreColor": "#c6803e",
+      "bubbleColor": "#fff3ea",
+      "inkColor": "#362615",
+      "shadowColor": "#5a411e",
+      "legColor": "#141210",
+      "jointColor": "#141210",
+      "footShadowColor": "#6f6f6f"
+    }
+  }
+}

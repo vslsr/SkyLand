@@ -334,10 +334,42 @@ test('ActorCatalog 净化骨骼腿史莱姆并要求腿够得到站姿落脚点'
   fractionalLegs.components.render.legCount = 2.5;
   await assert.rejects(loadSingleActor(fractionalLegs), /legCount 必须是整数/);
 
-  const withoutMovement = structuredClone(legged);
-  withoutMovement.id = 'probe-legged-slime';
-  delete withoutMovement.components.playerMovement;
-  delete withoutMovement.components.playerJump;
-  delete withoutMovement.components.pickupDrop;
-  await assert.rejects(loadSingleActor(withoutMovement), /line-art-legged-slime 需要 playerMovement/);
+  // 同一个外壳两头都能用：带 playerMovement 是玩家，不带就是服务端推着走的生物。
+  const npcShell = structuredClone(legged);
+  npcShell.id = 'probe-legged-slime';
+  delete npcShell.components.playerMovement;
+  delete npcShell.components.playerJump;
+  delete npcShell.components.pickupDrop;
+  delete npcShell.components.inventory;
+  const npcCatalog = await loadSingleActor(npcShell);
+  assert.equal(npcCatalog.require('probe-legged-slime').components.playerMovement, undefined);
+});
+
+test('ActorCatalog 净化巡逻路线，并拒绝与玩家移动并存', async () => {
+  const catalog = await ActorCatalog.load();
+  const walker = catalog.require('legged-slime-walker');
+  assert.equal(walker.components.patrolPath.speed, 1.6);
+  assert.equal(walker.components.patrolPath.waitSeconds, 0.6);
+  assert.equal(walker.components.patrolPath.mode, 'ping-pong');
+  assert.deepEqual(walker.components.patrolPath.waypoints, [[0, 0, -4], [0, 0, 4]]);
+
+  // 巡逻是服务端推着走，玩家移动是玩家自己走：同时存在就有两个人抢方向盘。
+  const controlled = structuredClone(walker);
+  controlled.id = 'probe-walker';
+  controlled.components.playerMovement = {
+    walkSpeed: 3.2,
+    sprintMultiplier: 1.65,
+    maximumStepHeight: 0.2,
+  };
+  await assert.rejects(loadSingleActor(controlled), /不能与 playerMovement 并存/);
+
+  const stuck = structuredClone(walker);
+  stuck.id = 'probe-walker';
+  stuck.components.patrolPath.waypoints = [[0, 0, 2], [0, 0, 2]];
+  await assert.rejects(loadSingleActor(stuck), /至少要有两个不重合的路点/);
+
+  const single = structuredClone(walker);
+  single.id = 'probe-walker';
+  single.components.patrolPath.waypoints = [[0, 0, 2]];
+  await assert.rejects(loadSingleActor(single), /必须是 2 到 16 个路点/);
 });

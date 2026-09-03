@@ -78,6 +78,12 @@ export {
   MAX_GUIDE_PATH_POINTS,
 } from './components/GuidePathComponent.mjs';
 export {
+  PATROL_PATH_COMPONENT,
+  MAX_PATROL_WAYPOINTS,
+  MAX_PATROL_LOCAL_COORDINATE,
+  PatrolPathComponent,
+} from './components/PatrolPathComponent.mjs';
+export {
   LIFETIME_COMPONENT,
   LifetimeComponent,
 } from './components/LifetimeComponent.mjs';

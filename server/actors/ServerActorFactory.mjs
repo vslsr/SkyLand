@@ -35,6 +35,7 @@ import {
   PLAYER_MOVEMENT_COMPONENT,
   PlayerMovementComponent,
   PlayerJumpComponent,
+  PatrolPathComponent,
   PICKUP_DROP_COMPONENT,
   PickupDropComponent,
   REPLICATION_POLICY_COMPONENT,
@@ -62,6 +63,7 @@ import { ElasticDetachSystem } from './ElasticDetachSystem.mjs';
 import { TemperatureSystem } from './TemperatureSystem.mjs';
 import { HighCountActorSystem } from './HighCountActorSystem.mjs';
 import { GuidePathSystem } from './GuidePathSystem.mjs';
+import { PatrolPathSystem } from './PatrolPathSystem.mjs';
 import { CHUNK_SIZE } from '../../shared/world/worldConfig.mjs';
 
 export function createServerActor(spawn, archetype, runtime = {}) {
@@ -121,6 +123,9 @@ export function createServerActor(spawn, archetype, runtime = {}) {
       runtime.generatedProp,
     ));
   }
+  if (archetype.components.patrolPath) {
+    actor.addComponent(new PatrolPathComponent(archetype.components.patrolPath));
+  }
   if (archetype.components.guidePath) {
     actor.addComponent(new GuidePathComponent({
       ...archetype.components.guidePath,
@@ -171,6 +176,9 @@ export function createServerActorWorld(sceneDefinition, options = {}) {
   world.addSystem(new GameAbilitySystem());
   world.addSystem(new BuoyancySystem());
   world.addSystem(new VesselMotorSystem());
+  // 巡逻要排在 colliderIndex 之前：它移动的是权威 Transform，碰撞体必须跟上，
+  // 否则玩家会撞在这只史莱姆上一帧之前的位置上。
+  world.addSystem(new PatrolPathSystem());
   world.addSystem(colliderIndex);
   world.addSystem(new ActorSimpleCollisionSystem());
   world.addSystem(new ElasticTetherSystem());
