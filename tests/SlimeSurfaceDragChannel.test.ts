@@ -77,8 +77,11 @@ function createDeferredSurface() {
       endSlimeSurfaceDrag: (id: ProxyId) => commands.push(`end:${id}`),
       setSlimeSurfaceDragListener: (next?: SlimeSurfaceDragListener) => { listener = next; },
     },
-    deliver(id: ProxyId, dragging: boolean): void {
-      listener?.(id, dragging);
+    deliver(id: ProxyId, dragging: boolean, pullX = 0): void {
+      listener?.({
+        id, dragging,
+        contactX: 0, contactY: 0, contactZ: 0, pullX, pullY: 0, pullZ: 0,
+      });
     },
     get hasListener(): boolean {
       return listener !== undefined;

@@ -31,10 +31,21 @@ export interface ItemDefinitionLike {
   readonly coinValue?: number;
   readonly contraband: boolean;
   readonly pooled: boolean;
+  readonly holdable?: boolean;
+  /** 手持交互配置；不写表示只能拿着，按键没反应。见 `config/items` 的 `use`。 */
+  readonly use?: {
+    readonly action: 'tool' | 'throw';
+    readonly input: 'primary' | 'secondary';
+    readonly mode: 'tap' | 'charge';
+    readonly chargeSeconds: number;
+    readonly value: number;
+  };
 }
 
 export interface ItemCatalogLike {
   get(itemType: string): ItemDefinitionLike | undefined;
+  /** 目录顺序即界面里的稳定排序依据；测试可以只给 `get`，那时退化成存放顺序。 */
+  list?(): readonly ItemDefinitionLike[];
 }
 
 /** 背包 Component 里视图关心的部分；`InventoryComponent` 天然满足这个形状。 */
@@ -44,6 +55,12 @@ export interface InventoryModelLike {
   readonly revision: number;
   readonly slots: readonly { readonly itemType: string; readonly quantity: number }[];
   readonly pooled: readonly { readonly itemType: string; readonly quantity: number }[];
+  /** 快捷栏配置；旧快照没有这一段时界面只是不画那一排。 */
+  readonly hotbar?: readonly (string | null)[];
+  readonly activeHotbarIndex?: number;
+  readonly heldItemType?: string;
+  /** 交互键按住多久算「收回背包」。来自玩家原型，两端读同一份。 */
+  readonly stowHoldSeconds?: number;
 }
 
 export interface InventoryStackView {
@@ -62,6 +79,28 @@ export interface InventoryStackView {
   readonly full: boolean;
   readonly coinValue?: number;
   readonly contraband: boolean;
+  /** 能不能拿到手上；界面据此决定这一格点不点得动。 */
+  readonly holdable: boolean;
+}
+
+/** 分类页。第一页固定是「全部」，其余按物品目录的分类顺序，空分类不出现。 */
+export interface InventoryPageView {
+  readonly id: 'all' | ItemCategory;
+  readonly label: string;
+  readonly stacks: readonly InventoryStackView[];
+}
+
+/** 快捷栏一格。配置着但没货时 `quantity` 为 0——格子还在，手上是空的。 */
+export interface HotbarSlotView {
+  readonly index: number;
+  readonly itemType?: string;
+  readonly displayName?: string;
+  readonly iconId?: string;
+  readonly tint?: string;
+  readonly quantity: number;
+  readonly active: boolean;
+  /** 有没有使用方式；界面据此决定要不要提示「按住蓄力」。 */
+  readonly usable: boolean;
 }
 
 export interface InventoryView {
@@ -76,6 +115,11 @@ export interface InventoryView {
   readonly cargoValue: number;
   /** 携带中的违禁品件数；不为 0 时位置会被公开。 */
   readonly contrabandCount: number;
+  /** 分类页，第一页是全部。 */
+  readonly pages: readonly InventoryPageView[];
+  readonly hotbar: readonly HotbarSlotView[];
+  /** 真正握在手上的那一种；配置还在但货用光了时是 undefined。 */
+  readonly heldItemType?: string;
   readonly revision: number;
 }
 
@@ -102,6 +146,8 @@ function toStackView(
     full: entry.quantity >= definition.stackLimit,
     coinValue: definition.coinValue,
     contraband: definition.contraband,
+    // 目录没写就按可手持处理，和 ItemCatalog 的默认一致（弹药那类显式写了 false）。
+    holdable: definition.holdable ?? true,
   };
 }
 
@@ -145,6 +191,185 @@ export function buildInventoryView(
     pooled,
     cargoValue,
     contrabandCount,
+    pages: buildPages([...slots, ...pooled], catalog),
+    hotbar: buildHotbar(inventory, catalog),
+    heldItemType: inventory.heldItemType,
     revision: inventory.revision,
+  };
+}
+
+/**
+ * 自动分类。
+ *
+ * 「整理」在这套设计里不是一个按钮，是没有东西需要整理：顺序既然每次都从物品目录
+ * 重新推导，就不会乱。账本那一层按「谁先进来谁在前」存放并原样复制，排序只发生在
+ * 这里，所以服务端不需要为了界面好看而维护任何顺序。
+ */
+function buildPages(
+  stacks: readonly InventoryStackView[],
+  catalog: ItemCatalogLike,
+): InventoryPageView[] {
+  const order = catalogOrder(catalog);
+  const categories = Object.keys(ITEM_CATEGORY_LABELS) as ItemCategory[];
+  const sorted = [...stacks].sort((left, right) => (
+    categories.indexOf(left.category) - categories.indexOf(right.category)
+    || (order.get(left.itemType) ?? 0) - (order.get(right.itemType) ?? 0)
+  ));
+  const pages: InventoryPageView[] = [{ id: 'all', label: '全部', stacks: sorted }];
+  for (const category of categories) {
+    const owned = sorted.filter((stack) => stack.category === category);
+    // 空分类不出现：一排点不开的页签只会让人以为界面坏了。
+    if (owned.length > 0) {
+      pages.push({ id: category, label: ITEM_CATEGORY_LABELS[category], stacks: owned });
+    }
+  }
+  return pages;
+}
+
+function catalogOrder(catalog: ItemCatalogLike): Map<string, number> {
+  const order = new Map<string, number>();
+  const definitions = catalog.list?.() ?? [];
+  definitions.forEach((definition, index) => order.set(definition.id, index));
+  return order;
+}
+
+function buildHotbar(
+  inventory: InventoryModelLike,
+  catalog: ItemCatalogLike,
+): HotbarSlotView[] {
+  const slots = inventory.hotbar ?? [];
+  const activeIndex = inventory.activeHotbarIndex ?? -1;
+  return slots.map((itemType, index) => {
+    const definition = itemType ? catalog.get(itemType) : undefined;
+    const quantity = definition
+      ? quantityOf(inventory, definition.id) + (inventory.heldItemType === definition.id ? 1 : 0)
+      : 0;
+    return {
+      index,
+      itemType: definition?.id,
+      displayName: definition?.displayName,
+      iconId: definition?.iconId,
+      tint: definition?.tint,
+      quantity,
+      active: index === activeIndex,
+      usable: Boolean(definition?.use),
+    };
+  });
+}
+
+/**
+ * 快捷栏上显示的数量要把「已经拿在手上那一个」算回去。
+ *
+ * 手持物在世界里是一个真 Actor，为了不让同一件东西同时存在于账本和世界里，账上
+ * 那一个是被扣掉的。界面上不加回来的话，拿起最后一个木材时那一格会显示 0。
+ */
+function quantityOf(inventory: InventoryModelLike, itemType: string): number {
+  let total = 0;
+  for (const entry of inventory.slots) if (entry.itemType === itemType) total += entry.quantity;
+  for (const entry of inventory.pooled) if (entry.itemType === itemType) total += entry.quantity;
+  return total;
+}
+
+/** 容器界面里的一行：同一种物品，箱内和身上的数量并排。 */
+export interface ContainerRowView {
+  readonly itemType: string;
+  readonly displayName: string;
+  readonly iconId: string;
+  readonly tint: string;
+  /** 身上有多少（可以存进去）。 */
+  readonly carried: number;
+  /** 箱内有多少（可以取出来）。 */
+  readonly stored: number;
+}
+
+export interface ContainerView {
+  readonly actorId: string;
+  readonly label: string;
+  readonly slotCapacity: number;
+  readonly usedSlots: number;
+  /** 除自己以外还有几个人开着这个箱子；不为 0 时东西会在眼前变化。 */
+  readonly otherViewerCount: number;
+  readonly rows: readonly ContainerRowView[];
+  readonly revision: number;
+}
+
+/** 容器 Component 里视图关心的部分；`ContainerComponent` 天然满足这个形状。 */
+export interface ContainerModelLike {
+  readonly label: string;
+  readonly slotCapacity: number;
+  readonly usedSlots: number;
+  readonly viewerCount: number;
+  readonly revision: number;
+  readonly slots: readonly { readonly itemType: string; readonly quantity: number }[];
+  readonly pooled: readonly { readonly itemType: string; readonly quantity: number }[];
+}
+
+/**
+ * 把容器和背包并成界面能直接画的一张表。
+ *
+ * 一行 = 一种物品，箱内和身上并排——这是「存 / 取」两个按钮能成立的前提：玩家要
+ * 决定搬哪一边，就得同时看见两边。分成两个面板再让人拖来拖去，是把这个判断拆散
+ * 之后再要求玩家自己拼回去。
+ *
+ * 行的顺序和背包界面用的是同一套（分类序、目录序），所以同一件东西在两个界面里
+ * 的相对位置一致。
+ */
+export function buildContainerView(
+  actorId: string,
+  container: ContainerModelLike,
+  inventory: InventoryModelLike | undefined,
+  catalog: ItemCatalogLike = itemCatalog as unknown as ItemCatalogLike,
+): ContainerView {
+  const order = catalogOrder(catalog);
+  const categories = Object.keys(ITEM_CATEGORY_LABELS) as ItemCategory[];
+  const totals = new Map<string, { carried: number; stored: number }>();
+  const accumulate = (
+    entries: readonly { readonly itemType: string; readonly quantity: number }[],
+    key: 'carried' | 'stored',
+  ): void => {
+    for (const entry of entries) {
+      const row = totals.get(entry.itemType) ?? { carried: 0, stored: 0 };
+      row[key] += entry.quantity;
+      totals.set(entry.itemType, row);
+    }
+  };
+  accumulate(container.slots, 'stored');
+  accumulate(container.pooled, 'stored');
+  if (inventory) {
+    accumulate(inventory.slots, 'carried');
+    accumulate(inventory.pooled, 'carried');
+  }
+
+  const rows: ContainerRowView[] = [];
+  for (const [itemType, counts] of totals) {
+    const definition = catalog.get(itemType);
+    // 目录里没有的物品不画：它进不了权威账本，出现在这里说明配置漏了登记。
+    if (!definition) continue;
+    rows.push({
+      itemType: definition.id,
+      displayName: definition.displayName,
+      iconId: definition.iconId,
+      tint: definition.tint,
+      carried: counts.carried,
+      stored: counts.stored,
+    });
+  }
+  rows.sort((left, right) => {
+    const leftCategory = catalog.get(left.itemType)?.category ?? '';
+    const rightCategory = catalog.get(right.itemType)?.category ?? '';
+    return categories.indexOf(leftCategory as ItemCategory)
+      - categories.indexOf(rightCategory as ItemCategory)
+      || (order.get(left.itemType) ?? 0) - (order.get(right.itemType) ?? 0);
+  });
+
+  return {
+    actorId,
+    label: container.label,
+    slotCapacity: container.slotCapacity,
+    usedSlots: container.usedSlots,
+    // 自己也算在服务端那个计数里，所以减掉自己才是「另有几个人」。
+    otherViewerCount: Math.max(0, container.viewerCount - 1),
+    rows,
+    revision: container.revision,
   };
 }

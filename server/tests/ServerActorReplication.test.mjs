@@ -353,6 +353,8 @@ test('混合软体测试场景按连接生成新的可操控史莱姆 Actor', as
       'pbf-collision-dummy-center',
       'pbf-collision-obelisk-left',
       'pbf-collision-obelisk-right',
+      'legged-slime-walker-near',
+      'legged-slime-walker-far',
     ],
   );
   assert.equal(scene.createSnapshot().players[0].id, 'pbf-player');

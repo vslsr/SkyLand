@@ -46,10 +46,26 @@ export {
   HeatEmitterComponent,
 } from './components/HeatEmitterComponent.mjs';
 export {
+  DEFAULT_HOTBAR_CAPACITY,
   DEFAULT_SLOT_CAPACITY,
+  DEFAULT_STOW_HOLD_SECONDS,
   INVENTORY_COMPONENT,
   InventoryComponent,
+  NO_HOTBAR_SLOT,
 } from './components/InventoryComponent.mjs';
+export {
+  CONTAINER_COMPONENT,
+  ContainerComponent,
+  DEFAULT_CONTAINER_CAPACITY,
+  DEFAULT_CONTAINER_REACH,
+} from './components/ContainerComponent.mjs';
+export { ItemLedger } from './ItemLedger.mjs';
+export {
+  ACTOR_ACTION_IDS,
+  chargeRatio,
+  resolveActorAction,
+  resolveHeldItemAction,
+} from './ActorActionTable.mjs';
 export {
   INTERACTABLE_COMPONENT,
   InteractableComponent,
@@ -63,6 +79,11 @@ export {
   PickupDropComponent,
 } from './components/PickupDropComponent.mjs';
 export {
+  SOFT_BODY_DEFORMATION_COMPONENT,
+  SoftBodyDeformationComponent,
+} from './components/SoftBodyDeformationComponent.mjs';
+export { BITE_COMPONENT, BiteComponent } from './components/BiteComponent.mjs';
+export {
   GENERATED_PROP_COMPONENT,
   GeneratedPropComponent,
 } from './components/GeneratedPropComponent.mjs';
@@ -72,6 +93,12 @@ export {
   MAX_GUIDE_LOCAL_COORDINATE,
   MAX_GUIDE_PATH_POINTS,
 } from './components/GuidePathComponent.mjs';
+export {
+  PATROL_PATH_COMPONENT,
+  MAX_PATROL_WAYPOINTS,
+  MAX_PATROL_LOCAL_COORDINATE,
+  PatrolPathComponent,
+} from './components/PatrolPathComponent.mjs';
 export {
   LIFETIME_COMPONENT,
   LifetimeComponent,

@@ -7,8 +7,15 @@ import type {
 import type { FillMaterialEnvironment } from '../../materials/createFillMaterial';
 import type { OceanVisualDefinition } from '../../scenes/data/SceneDefinition';
 import { createActorVisualModel } from '../../models/actors/createActorVisualModel';
-import type { ActorVisualModel } from '../../models/actors/ActorVisualModel';
+import type {
+  ActorVisualModel,
+  SlimeLegVisualRig,
+} from '../../models/actors/ActorVisualModel';
 import { createPbfSlimeModel } from '../../models/actors/createPbfSlimeModel';
+import {
+  createLeggedSlimeModel,
+  type LeggedSlimeRenderDefinition,
+} from '../../models/actors/createLeggedSlimeModel';
 import { createPlayerSlimeModel, createSlimePalette } from '../../models/playerSlime';
 import {
   NULL_PROXY_ID,
@@ -28,6 +35,21 @@ import {
 } from '../RenderSlimeMotion';
 import type { RenderInstanceBuffer } from '../RenderInstanceBuffer';
 import { EMPTY_ARCHETYPE_TABLE, type ArchetypeTable } from '../propInstanceLayout';
+import {
+  SLIME_DRAG_AT_REST,
+  readSlimeDragParams,
+  type SlimeDragParams,
+} from '../RenderSlimeDrag';
+import {
+  createSlimeBiteParams,
+  readSlimeBiteParams,
+  type SlimeBiteParams,
+} from '../RenderSlimeBite';
+import {
+  SLIME_GROUND_PROBE_AT_REST,
+  readSlimeGroundProbeParams,
+  type SlimeGroundProbeParams,
+} from '../RenderSlimeLegs';
 import type { RenderTransform, RenderTransformBuffer } from '../RenderTransformBuffer';
 import { PARAM_SLIME_SPEED, PARAM_TEMPERATURE } from '../RenderVisualParams';
 import { ThreeFireVisual } from './ThreeFireVisual';
@@ -36,7 +58,9 @@ import { ThreeHybridSlimeVisual } from './ThreeHybridSlimeVisual';
 import { ThreeAbilityLabVisual } from './ThreeAbilityLabVisual';
 import { ThreeFruitBatchVisual } from './ThreeFruitBatchVisual';
 import { ThreeHighCountBatchVisual } from './ThreeHighCountBatchVisual';
+import { ThreeSlimeLegVisual } from './ThreeSlimeLegVisual';
 import { ThreeAttachmentVisual } from './ThreeAttachmentVisual';
+import { ThreeContainerLidVisual } from './ThreeContainerLidVisual';
 import { ThreeDropRollVisual } from './ThreeDropRollVisual';
 import { ThreeElasticTetherVisual } from './ThreeElasticTetherVisual';
 import { ThreeMeshProxy } from './ThreeMeshProxy';
@@ -113,21 +137,34 @@ export class ThreeRenderScene implements RenderScene {
   private readonly guidePathStyles = new Map<ProxyId, GuidePathStyle>();
   /** proxyId → 软体蒙皮表现。只有 PBF 史莱姆有，所以用 Map 而不是按槽位的数组。 */
   private readonly slimeVisuals = new Map<ProxyId, ThreeHybridSlimeVisual>();
-  /** proxyId → 老式挤压动画。`line-art-player-slime` 那条路径用。 */
+  /** proxyId → 软体挤压动画。贴地的 `line-art-player-slime` 与长腿的都用它。 */
   private readonly slimeAnimators = new Map<ProxyId, ThreeSlimeAnimator>();
+  /** proxyId → 骨骼腿的步态与 IK。只有 `line-art-legged-slime` 有。 */
+  private readonly slimeLegs = new Map<ProxyId, ThreeSlimeLegVisual>();
   /** proxyId → 蒙皮拖拽。只有玩家 proxy 会建。 */
   private readonly slimeDrags = new Map<ProxyId, ThreeSlimeSurfaceDrag>();
-  /** 上一次回报出去的拖拽状态，用来只在真的翻转时发通知。 */
+  /** 上一次回报出去的拖拽状态，用来在松手那一下只发一次通知。 */
   private readonly reportedSlimeDrag = new Map<ProxyId, boolean>();
+  /** 回报用的那一份，逐帧复用不分配。 */
+  private readonly slimeDragReport = {
+    id: NULL_PROXY_ID as ProxyId, dragging: false,
+    contactX: 0, contactY: 0, contactZ: 0, pullX: 0, pullY: 0, pullZ: 0,
+  };
   private slimeDragListener?: SlimeSurfaceDragListener;
   /** 逐帧复用的参数读出缓冲，避免每个史莱姆每帧分配一个对象。 */
   private readonly slimeMotion: SlimeMotionParams = { ...SLIME_MOTION_AT_REST };
+  private readonly slimeDrag: SlimeDragParams = { ...SLIME_DRAG_AT_REST };
+  private readonly slimeBite: SlimeBiteParams = createSlimeBiteParams();
+  private readonly slimeGroundProbe: SlimeGroundProbeParams = { ...SLIME_GROUND_PROBE_AT_REST };
+  /** 腿部步态每帧要读的世界 transform；和 world/parentWorld 一样是复用的读出缓冲。 */
+  private readonly legWorld: RenderTransform = { x: 0, y: 0, z: 0, yaw: 0 };
   /** proxyId → 客户端波面浮动的模式。没有海的地图上这张表永远是空的。 */
   private readonly waterMotions = new Map<ProxyId, WaterMotionMode>();
   private readonly waterMotionVisual?: ThreeWaterMotionVisual;
   /** proxyId → 弹性拉伸 / 脱落翻滚。两者都只有弹性蘑菇那种模型才有。 */
   private readonly elasticTethers = new Map<ProxyId, ThreeElasticTetherVisual>();
   private readonly dropRolls = new Map<ProxyId, ThreeDropRollVisual>();
+  private readonly containerLids = new Map<ProxyId, ThreeContainerLidVisual>();
   private readonly attachmentVisual = new ThreeAttachmentVisual();
   /**
    * 能力实验室的表现（引擎迁移路线图 第 3 步）。
@@ -206,6 +243,9 @@ export class ThreeRenderScene implements RenderScene {
         new ThreeHybridSlimeVisual(model.pbfSlimeVisualRig, desc.render),
       );
     }
+    if (desc.render?.model === 'line-art-legged-slime' && model.slimeLegVisualRig) {
+      this.#adoptLegs(proxy.id, model.slimeLegVisualRig, desc.render);
+    }
     // 没有海的地图上这两条表现不存在，模式给了也忽略。
     if (desc.waterMotion && this.waterMotionVisual) {
       this.waterMotions.set(proxy.id, desc.waterMotion);
@@ -217,6 +257,9 @@ export class ThreeRenderScene implements RenderScene {
     }
     if (model.dropRollRig) {
       this.dropRolls.set(proxy.id, new ThreeDropRollVisual(proxy.id, model.dropRollRig));
+    }
+    if (model.containerLidRig) {
+      this.containerLids.set(proxy.id, new ThreeContainerLidVisual(proxy.id, model.containerLidRig));
     }
   }
 
@@ -234,7 +277,22 @@ export class ThreeRenderScene implements RenderScene {
       );
       model.root.name = desc.name;
       const proxy = this.#adopt(id, model);
-      this.slimeAnimators.set(proxy.id, new ThreeSlimeAnimator(model, desc.walkSpeed));
+      this.slimeAnimators.set(
+        proxy.id,
+        new ThreeSlimeAnimator(model, { referenceSpeed: desc.walkSpeed, shadow: model.shadow }),
+      );
+      return;
+    }
+    if (desc.render.model === 'line-art-legged-slime') {
+      const model = createLeggedSlimeModel(
+        desc.render,
+        desc.paletteSeed === undefined ? undefined : createSlimePalette(desc.paletteSeed),
+      );
+      const rig = model.slimeLegVisualRig;
+      if (!rig) throw new Error(`骨骼腿史莱姆缺少 VisualRig：${desc.name}`);
+      model.root.name = desc.name;
+      const proxy = this.#adopt(id, model);
+      this.#adoptLegs(proxy.id, rig, desc.render, desc.walkSpeed);
       return;
     }
     const model = createPbfSlimeModel(desc.render);
@@ -249,6 +307,26 @@ export class ThreeRenderScene implements RenderScene {
       slime.simulation,
       desc.surfaceDrag ?? createDefaultSlimeSurfaceDragDefinition(desc.render.radius),
     ));
+  }
+
+  /**
+   * 长腿史莱姆的两套表现：身体的软体挤压和腿的步态。
+   *
+   * 身体复用 `ThreeSlimeAnimator`——它就是 `line-art-player-slime` 的那套软体，
+   * 只是 `restHeightRatio` 给 0：中心停在髋点上，高度交给腿。身体阴影也不给，
+   * 灰色接触阴影画在每个落脚点上。
+   */
+  #adoptLegs(
+    id: ProxyId,
+    rig: SlimeLegVisualRig,
+    render: LeggedSlimeRenderDefinition,
+    walkSpeed?: number,
+  ): void {
+    this.slimeAnimators.set(id, new ThreeSlimeAnimator(rig.softBody, {
+      referenceSpeed: walkSpeed,
+      restHeightRatio: 0,
+    }));
+    this.slimeLegs.set(id, new ThreeSlimeLegVisual(rig, render));
   }
 
   /**
@@ -283,9 +361,11 @@ export class ThreeRenderScene implements RenderScene {
     this.reportedSlimeDrag.delete(id);
     this.slimeVisuals.delete(id);
     this.slimeAnimators.delete(id);
+    this.slimeLegs.delete(id);
     this.waterMotions.delete(id);
     this.elasticTethers.delete(id);
     this.dropRolls.delete(id);
+    this.containerLids.delete(id);
     this.attachmentVisual.forget(id);
     proxy.dispose();
   }
@@ -388,6 +468,7 @@ export class ThreeRenderScene implements RenderScene {
       tether.update(transforms, deltaSeconds, elapsedSeconds);
     }
     for (const drop of this.dropRolls.values()) drop.update(transforms);
+    for (const lid of this.containerLids.values()) lid.update(transforms, deltaSeconds);
     this.fireVisual.update(live, transforms, deltaSeconds, elapsedSeconds);
     for (const proxy of live) {
       proxy.markers.setTemperature(transforms.readParam(proxy.id, PARAM_TEMPERATURE));
@@ -398,6 +479,13 @@ export class ThreeRenderScene implements RenderScene {
     for (const [id, slime] of this.slimeVisuals) {
       const proxy = this.resolve(id);
       if (!proxy) continue;
+      // 外力必须赶在这一帧求解之前写进去，否则复制过来的形变会晚一帧，
+      // 看上去就是别人的史莱姆比他的鼠标慢半拍。
+      this.slimeDrags.get(id)?.applyReplicated(
+        readSlimeDragParams(transforms, id, this.slimeDrag),
+      );
+      // 咬住的尖是静止外形的一项，不走拖拽那条抓取/权重的路；几张嘴就是几个向量。
+      slime.simulation.setBiteTips(readSlimeBiteParams(transforms, id, this.slimeBite));
       slime.update(
         deltaSeconds,
         elapsedSeconds,
@@ -405,8 +493,27 @@ export class ThreeRenderScene implements RenderScene {
         readSlimeMotionParams(transforms, id, this.slimeMotion),
       );
     }
+    // 腿排在身体之前：它解出的水平速率是身体挤压动画的输入。两者写的不是同一个
+    // 节点（腿写 `bodyRoot` 的高度，软体在 `bodyRoot` 下面原地挤压），所以这个
+    // 顺序只为了那一个标量。
+    for (const [id, legs] of this.slimeLegs) {
+      if (!this.resolve(id)) continue;
+      legs.update(
+        deltaSeconds,
+        transforms.readTransform(id, this.legWorld),
+        readSlimeMotionParams(transforms, id, this.slimeMotion),
+        readSlimeGroundProbeParams(transforms, id, this.slimeGroundProbe),
+      );
+    }
     for (const [id, animator] of this.slimeAnimators) {
-      animator.update(deltaSeconds, elapsedSeconds, transforms.readParam(id, PARAM_SLIME_SPEED));
+      // 服务端推着走的 Replica 在参数段里速度是 0（它不复制运动演示），
+      // 但腿已经从它被摆到哪儿差分出了速率——身体的挤压该跟着那一个走。
+      const legs = this.slimeLegs.get(id);
+      animator.update(
+        deltaSeconds,
+        elapsedSeconds,
+        legs ? legs.presentationSpeed : transforms.readParam(id, PARAM_SLIME_SPEED),
+      );
     }
   }
 
@@ -429,9 +536,17 @@ export class ThreeRenderScene implements RenderScene {
     this.#reportSlimeSurfaceDrag(id, drag.isDragging);
   }
 
-  /** 命中与否只影响这一侧：拖不动就是不动，没什么可回话的。 */
+  /**
+   * 命中与否只影响这一侧：拖不动就是不动，没什么可回话的。
+   *
+   * 但**手势变了要回报**：拉扯量是这一步算出来的，而玩法侧要把它上报给房间。
+   * 这条调用的节奏就是手势本身的节奏（指针动一次、每帧一次），不需要额外的扫描。
+   */
   public updateSlimeSurfaceDrag(id: ProxyId, ray: SlimeSurfaceDragRay): void {
-    this.slimeDrags.get(id)?.updateDrag(ray);
+    const drag = this.slimeDrags.get(id);
+    if (!drag) return;
+    drag.updateDrag(ray);
+    this.#reportSlimeSurfaceDrag(id, drag.isDragging);
   }
 
   public endSlimeSurfaceDrag(id: ProxyId): void {
@@ -454,10 +569,26 @@ export class ThreeRenderScene implements RenderScene {
     return this.slimeDrags.get(id)?.isDragging ?? false;
   }
 
+  /**
+   * 回报一次拖拽状态。
+   *
+   * 拖着的时候**每帧都报**：手势本身（六个本地坐标）要上行给房间，其他客户端才
+   * 重放得出同一次形变。曾经这一步是玩法侧回头调 `readSlimeSurfaceDrag`——
+   * 那是一次跨线程阻塞查询。改成回报之后，收报的一侧把最后一次缓存下来就够了。
+   * 没在拖的时候只在状态翻转那一下报一次。
+   */
   #reportSlimeSurfaceDrag(id: ProxyId, dragging: boolean): void {
-    if (this.reportedSlimeDrag.get(id) === dragging) return;
+    if (!dragging && this.reportedSlimeDrag.get(id) === false) return;
     this.reportedSlimeDrag.set(id, dragging);
-    this.slimeDragListener?.(id, dragging);
+    if (!this.slimeDragListener) return;
+    const report = this.slimeDragReport;
+    report.id = id;
+    report.dragging = dragging;
+    if (!dragging || !this.slimeDrags.get(id)?.captureState(report)) {
+      report.contactX = 0; report.contactY = 0; report.contactZ = 0;
+      report.pullX = 0; report.pullY = 0; report.pullZ = 0;
+    }
+    this.slimeDragListener(report);
   }
 
   /** 渲染侧查找软体表现（能力实验室与测试用）。 */
@@ -499,13 +630,16 @@ export class ThreeRenderScene implements RenderScene {
   /**
    * 选中哪一个交互目标。`NULL_PROXY_ID` 表示没有选中——生成物件带
    * InteractableComponent 却没有 proxy，所以「目标没有 proxyId」必须是合法输入。
+   *
+   * `opacity` 是交互提示的淡入淡出进度，只落在选中的那一块牌子上：没选中的牌子
+   * 本来就不可见，跟着每帧变一遍不透明度是白写。
    */
-  public setInteractionMarker(id: ProxyId, label: string): void {
+  public setInteractionMarker(id: ProxyId, label: string, opacity = 1): void {
     this.selectedInteractionProxy = id;
     for (const proxy of this.proxies) {
       if (!proxy?.markers.hasInteraction) continue;
       const selected = proxy.id === id && label.length > 0;
-      proxy.markers.setInteraction(label, selected);
+      proxy.markers.setInteraction(label, selected, selected ? opacity : 1);
     }
   }
 
@@ -645,6 +779,7 @@ export class ThreeRenderScene implements RenderScene {
     this.waterMotions.clear();
     this.elasticTethers.clear();
     this.dropRolls.clear();
+    this.containerLids.clear();
     for (const proxy of this.proxies) proxy?.dispose();
     this.proxies.length = 0;
   }

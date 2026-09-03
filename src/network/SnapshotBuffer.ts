@@ -1,6 +1,33 @@
 import { lerpAngle } from '../../shared/playerMovement.mjs';
 import { INTERPOLATION_DELAY_MS, SNAPSHOT_BUFFER_SIZE } from '../../shared/networkTuning.mjs';
-import type { InterpolatedPlayerState, RoomSnapshot, SnapshotPlayer } from './protocol';
+import type {
+  InterpolatedPlayerState,
+  RoomSnapshot,
+  SnapshotPlayer,
+  SnapshotSlimeDrag,
+} from './protocol';
+
+/**
+ * 拖拽只在同一次抓取内插值。revision 变了说明玩家松手后重新抓了别的位置，
+ * 在两个命中点之间求平均会得到一个谁也没抓过的假位置，所以直接跳到新的一次。
+ */
+function blendSlimeDrag(
+  from: SnapshotSlimeDrag | undefined,
+  to: SnapshotSlimeDrag | undefined,
+  amount: number,
+): SnapshotSlimeDrag | undefined {
+  if (!to || !from || from.revision !== to.revision) return to;
+  return {
+    revision: to.revision,
+    // 命中点是抓取身份的一部分，只在换抓取时变；插值它没有意义。
+    contactX: to.contactX,
+    contactY: to.contactY,
+    contactZ: to.contactZ,
+    pullX: from.pullX + (to.pullX - from.pullX) * amount,
+    pullY: from.pullY + (to.pullY - from.pullY) * amount,
+    pullZ: from.pullZ + (to.pullZ - from.pullZ) * amount,
+  };
+}
 
 function toState(player: SnapshotPlayer): InterpolatedPlayerState {
   return {
@@ -15,10 +42,14 @@ function toState(player: SnapshotPlayer): InterpolatedPlayerState {
     velocityX: player.velocityX,
     velocityZ: player.velocityZ,
     grounded: player.grounded,
+    ...(player.slimeDrag ? { slimeDrag: player.slimeDrag } : {}),
+    ...(player.bitingPlayerId ? { bitingPlayerId: player.bitingPlayerId } : {}),
+    ...(player.leash ? { leash: player.leash } : {}),
   };
 }
 
 function blend(from: SnapshotPlayer, to: SnapshotPlayer, amount: number): InterpolatedPlayerState {
+  const slimeDrag = blendSlimeDrag(from.slimeDrag, to.slimeDrag, amount);
   return {
     id: to.id,
     name: to.name,
@@ -39,6 +70,12 @@ function blend(from: SnapshotPlayer, to: SnapshotPlayer, amount: number): Interp
       ? from.velocityZ! + (to.velocityZ! - from.velocityZ!) * amount
       : to.velocityZ ?? from.velocityZ,
     grounded: amount < 0.5 ? from.grounded : to.grounded,
+    ...(slimeDrag ? { slimeDrag } : {}),
+    // 咬没咬着是离散状态，跟 grounded 一样只取更近的那一份，不插值。
+    ...(to.bitingPlayerId ? { bitingPlayerId: to.bitingPlayerId } : {}),
+    // 缰绳同样取最新的那一份：它进的是本地预测，插值出来的中间锚点不对应
+    // 服务端重放时用过的任何一个值。
+    ...(to.leash ? { leash: to.leash } : {}),
   };
 }
 

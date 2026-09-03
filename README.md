@@ -5,7 +5,7 @@
 当前包含：
 
 - Three.js 淡色填充与 `EdgesGeometry` 线稿场景
-- 512 × 512 米的大世界：2 米网格台地、四向直坡、两类四向角坡、凹地水域与物件按 chunk 流式加载
+- 走不到头的大世界：2 米网格台地、四向直坡、两类四向角坡、凹地水域与物件按 chunk 流式加载
 - Rust 编译的 WebAssembly 生成后端，附行为一致的纯 JS 降级实现
 - `Scene` / `SceneManager` 场景生命周期
 - 每个 Scene 独立的 `CommonUIManager` 栈
@@ -143,6 +143,20 @@ npm run dev
 - 开发房间服务端：`http://127.0.0.1:3090`
 - 生产预览：`http://127.0.0.1:4180`
 
+### 帧率与耗时
+
+开发运行时左上角常驻一块 `stats-gl` 面板（`src/debug/FrameStatsPanel.ts`），三列
+分别是 FPS、CPU 毫秒和 **GPU 毫秒**。GPU 那一列走
+`EXT_disjoint_timer_query_webgl2`，量的是显卡真正画完的时间——`performance.now()`
+只能量到命令提交为止，所以「主线程很闲、帧率却上不去」只有这一列看得见。
+面板走动态 import 且由 `isDevelopmentRuntime()` 把门，生产构建会把它切成一个
+永不请求的独立 chunk，玩家下载不到。
+
+它和控制台里每 10 秒一份的 `[frame]` 报表是两件事：报表来自
+`src/platform/FrameTimeline.ts`，给的是主线程各阶段自耗时的 p50/p95/max，回头
+定位是哪个阶段慢；面板给的是此刻的整帧现状。先看面板判断瓶颈在 CPU 还是 GPU，
+再翻报表找是哪个阶段。
+
 测试与构建：
 
 ```bash
@@ -229,20 +243,47 @@ bindings.resetAllBindings();
 竖屏分别应用缩放与边距。桌面调试时在地址后添加 `?virtual-controls=1`；进入
 `topdown` 场景后即可用鼠标检查摇杆和按钮，正式桌面布局仍保持隐藏。
 
+### 屏幕层级：UI 先吃掉指针
+
+摇杆热区是一整块透明矩形，覆盖屏幕左下角将近半屏，因此**它排在哪一层就决定了
+左侧的 UI 还能不能点**。`src/style.css` 的 `:root` 里写着这份顺序，从下往上是：
+
+```text
+世界画布 → --layer-hud → --layer-game-input → --layer-game-ui → --layer-common-ui → --layer-fatal-error
+```
+
+浏览器的命中测试就是这份顺序的倒序，规则因此直接落在层级上：
+
+- 点在地形编辑栏、菜单入口这类可交互 UI 上 → UI 消耗事件 → **不产生摇杆事件**；
+- 点在左侧空处 → 没有 UI 接手 → 落到游戏层输入，生成摇杆事件。
+
+只读 HUD（房间标识、准星、交互提示、木筏状态）是 `pointer-events: none`，排在
+游戏层输入之下只影响绘制顺序：手指按住的摇杆始终画在 HUD 之上。新增可交互 UI
+一律用 `--layer-game-ui` 或更高，不要再写裸 `z-index`；`tests/ScreenLayerOrder.test.ts`
+会盯住这份顺序、变量用法和 `index.html` 里的书写次序。
+
 ## 大世界与 Chunk 系统
 
 场景配置里出现 `renderer.world` 就表示这张地图是流式大世界：地面与物件不再是
 摆好的固定内容，而是由世界种子确定性生成、按 chunk 加载。`open-world` 与 `orchard`
 是内置的两张流式地图，`grassland` 与 `open-meadow` 保持原来的固定场景。
 
-世界是 16 × 16 个 chunk，每个 chunk 32 米见方，合计 512 × 512 米。世界尺寸是
-生成算法的固有属性，写在 `shared/world/worldConfig.mjs` 里，对所有流式场景都一样；
-场景配置只决定加载半径、保留半径和岩石配色。
+世界没有地图边框：chunk 完全由世界种子确定性生成，加载集合只跟着玩家走，
+所以玩家可以一直朝一个方向走下去，地块就一直在前面长出来。常驻集合的上界是
+`玩家数 × (2 × keepRadius + 1)²`，与走了多远无关。
 
-玩家的活动范围比生成范围向内收两个 chunk（384 × 384 米），因此永远走不到没有
-内容的世界边缘旁边。`SceneCatalog` 在启动时校验这两条约束：
+因此 `shared/world/worldConfig.mjs` 里的 `WORLD_CHUNK_RADIUS` 不是玩法尺寸，而是
+**数值精度的护栏**：放置算法跑在毫米整数域上（WASM 侧是 i32），chunk 的顶点、
+渲染 transform 镜像和 Rapier 物理都是 f32。取 1024（世界 65 × 65 公里，边缘处
+f32 分辨率约 4 毫米）是三者都还宽裕的一档；直线跑到边界要一个多小时，玩家实际
+碰不到它。要真正无限，需要把几何体改成 chunk 局部坐标加浮动原点，而不是调大
+这个常数。
 
-- `gameplay.bounds` 必须落在这个安全区内；
+流式场景的 `gameplay.bounds` 因此可以省略：省略时活动范围取整个世界（生成范围
+向内收两个 chunk，玩家永远走不到没有内容的边缘旁边）。写死 bounds 仍然允许，
+用来做有意围起来的小地图。`SceneCatalog` 在启动时校验：
+
+- 写死的 `gameplay.bounds` 必须落在这个安全区内；固定尺寸场景必须写；
 - `renderer.fog.far` 必须不大于 `loadRadius × 32`，否则视野会越过最近的未加载
   chunk，玩家会直接看到地块凭空出现。
 

@@ -12,7 +12,14 @@
       "bobAmplitude": 0.22,
       "bobFrequency": 0.55,
       "parts": [
-        { "id": "body", "mass": 40, "buoyancy": 80, "integrity": 1, "localX": 0, "localZ": 0 }
+        {
+          "id": "body",
+          "mass": 40,
+          "buoyancy": 80,
+          "integrity": 1,
+          "localX": 0,
+          "localZ": 0
+        }
       ]
     },
     "playerMovement": {
@@ -31,7 +38,9 @@
       "airControl": 0.85
     },
     "inventory": {
-      "slotCapacity": 8
+      "slotCapacity": 8,
+      "hotbarCapacity": 4,
+      "stowHoldSeconds": 0.6
     },
     "pickupDrop": {
       "mouthLocalX": 0,

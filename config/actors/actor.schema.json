@@ -88,6 +88,31 @@
             "airControl": { "type": "number", "minimum": 0, "maximum": 1 }
           }
         },
+        "softBodyDeformation": {
+          "type": "object",
+          "description": "可被外力捏变形的软体外壳；形变本身不改玩法状态",
+          "additionalProperties": false,
+          "required": ["breakDistance"],
+          "properties": {
+            "breakDistance": { "type": "number", "exclusiveMinimum": 0, "maximum": 12 },
+            "selfReportTimeoutMs": { "type": "number", "exclusiveMinimum": 0, "maximum": 5000 }
+          }
+        },
+        "bite": {
+          "type": "object",
+          "description": "能咬住别的软体的一张嘴；挂点复用 pickupDrop 的口部",
+          "additionalProperties": false,
+          "required": ["range"],
+          "properties": {
+            "range": { "type": "number", "exclusiveMinimum": 0, "maximum": 8 },
+            "facingDot": { "type": "number", "minimum": -1, "maximum": 1 },
+            "gripDepth": { "type": "number", "minimum": 0, "maximum": 2 },
+            "leashSlack": { "type": "number", "minimum": 0, "maximum": 8 },
+            "leashStiffness": { "type": "number", "minimum": 0, "maximum": 120 },
+            "leashDamping": { "type": "number", "minimum": 0, "maximum": 60 },
+            "leashCarry": { "type": "number", "minimum": 0, "maximum": 60 }
+          }
+        },
         "slimeSurfaceDrag": {
           "type": "object",
           "description": "仅客户端使用的混合史莱姆鼠标表面拖拽参数",
@@ -151,7 +176,7 @@
           "additionalProperties": false,
           "required": ["action", "label", "maximumDistance"],
           "properties": {
-            "action": { "enum": ["cargo-toggle", "mushroom-bite", "pickup-stack", "harvest-prop"] },
+            "action": { "enum": ["cargo-toggle", "mushroom-bite", "pickup-stack", "harvest-prop", "container-open"] },
             "label": { "type": "string", "minLength": 1, "maxLength": 32 },
             "maximumDistance": { "type": "number", "minimum": 0.5, "maximum": 12 }
           }
@@ -255,6 +280,34 @@
               "type": "integer",
               "minimum": 1,
               "maximum": 64
+            },
+            "hotbarCapacity": {
+              "description": "快捷栏格数。界面按这个数画底部那一排；不写用默认 4。",
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 9
+            },
+            "stowHoldSeconds": {
+              "description": "交互键按住多久算「收回背包」而不是「放下」。客户端的转盘用同一个数。",
+              "type": "number",
+              "minimum": 0.1,
+              "maximum": 5
+            }
+          }
+        },
+        "container": {
+          "description": "可存取的容器：箱子、船舱。和背包共用同一套堆叠与货位规则，区别是容量更大、归世界所有。",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["slotCapacity", "label", "reach"],
+          "properties": {
+            "slotCapacity": { "type": "integer", "minimum": 1, "maximum": 256 },
+            "label": { "type": "string", "minLength": 1, "maxLength": 32 },
+            "reach": {
+              "description": "离开这个距离服务端替玩家关掉界面。",
+              "type": "number",
+              "minimum": 0.5,
+              "maximum": 8
             }
           }
         },
@@ -350,6 +403,27 @@
             }
           }
         },
+        "patrolPath": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["waypoints", "speed"],
+          "properties": {
+            "waypoints": {
+              "type": "array",
+              "minItems": 2,
+              "maxItems": 16,
+              "items": {
+                "type": "array",
+                "minItems": 3,
+                "maxItems": 3,
+                "items": { "type": "number", "minimum": -64, "maximum": 64 }
+              }
+            },
+            "speed": { "type": "number", "exclusiveMinimum": 0, "maximum": 20 },
+            "waitSeconds": { "type": "number", "minimum": 0, "maximum": 60 },
+            "mode": { "enum": ["ping-pong", "loop"] }
+          }
+        },
         "render": {
           "oneOf": [
             {
@@ -421,6 +495,54 @@
             {
               "type": "object",
               "additionalProperties": false,
+              "required": [
+                "model",
+                "radius",
+                "hipHeight",
+                "legSpread",
+                "legCount",
+                "thighLength",
+                "shinLength",
+                "legThickness",
+                "footLength",
+                "stepLength",
+                "stepHeight",
+                "stepDuration",
+                "membraneColor",
+                "middleColor",
+                "coreColor",
+                "bubbleColor",
+                "inkColor",
+                "shadowColor",
+                "legColor",
+                "footShadowColor"
+              ],
+              "properties": {
+                "model": { "const": "line-art-legged-slime" },
+                "radius": { "type": "number", "exclusiveMinimum": 0, "maximum": 2 },
+                "hipHeight": { "type": "number", "exclusiveMinimum": 0, "maximum": 4 },
+                "legSpread": { "type": "number", "exclusiveMinimum": 0, "maximum": 2 },
+                "legCount": { "type": "integer", "minimum": 2, "maximum": 6 },
+                "thighLength": { "type": "number", "exclusiveMinimum": 0, "maximum": 3 },
+                "shinLength": { "type": "number", "exclusiveMinimum": 0, "maximum": 3 },
+                "legThickness": { "type": "number", "exclusiveMinimum": 0, "maximum": 0.3 },
+                "footLength": { "type": "number", "exclusiveMinimum": 0, "maximum": 0.6 },
+                "stepLength": { "type": "number", "exclusiveMinimum": 0, "maximum": 3 },
+                "stepHeight": { "type": "number", "minimum": 0, "maximum": 2 },
+                "stepDuration": { "type": "number", "exclusiveMinimum": 0, "maximum": 2 },
+                "membraneColor": { "$ref": "#/$defs/color" },
+                "middleColor": { "$ref": "#/$defs/color" },
+                "coreColor": { "$ref": "#/$defs/color" },
+                "bubbleColor": { "$ref": "#/$defs/color" },
+                "inkColor": { "$ref": "#/$defs/color" },
+                "shadowColor": { "$ref": "#/$defs/color" },
+                "legColor": { "$ref": "#/$defs/color" },
+                "footShadowColor": { "$ref": "#/$defs/color" }
+              }
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
               "required": ["model", "foamColor", "length", "width"],
               "properties": {
                 "model": { "const": "line-art-raft" },
@@ -435,6 +557,19 @@
               "required": ["model", "color", "accentColor", "length", "width", "height"],
               "properties": {
                 "model": { "const": "line-art-cargo-crate" },
+                "color": { "$ref": "#/$defs/color" },
+                "accentColor": { "$ref": "#/$defs/color" },
+                "length": { "type": "number", "exclusiveMinimum": 0 },
+                "width": { "type": "number", "exclusiveMinimum": 0 },
+                "height": { "type": "number", "exclusiveMinimum": 0 }
+              }
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["model", "color", "accentColor", "length", "width", "height"],
+              "properties": {
+                "model": { "const": "line-art-storage-chest" },
                 "color": { "$ref": "#/$defs/color" },
                 "accentColor": { "$ref": "#/$defs/color" },
                 "length": { "type": "number", "exclusiveMinimum": 0 },

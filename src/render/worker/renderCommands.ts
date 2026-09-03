@@ -9,6 +9,7 @@ import type {
   ProxyId,
   RenderScene,
   SlimeSurfaceDragListener,
+  SlimeSurfaceDragReport,
   SlimeSurfaceDragRay,
 } from '../RenderScene';
 import type { GrassBendImpulse } from '../../grass';
@@ -45,7 +46,12 @@ export type RenderCommand =
     readonly state: GuidePathState;
     readonly pathChanged: boolean;
   }
-  | { readonly kind: 'setInteractionMarker'; readonly id: ProxyId; readonly label: string }
+  | {
+      readonly kind: 'setInteractionMarker';
+      readonly id: ProxyId;
+      readonly label: string;
+      readonly opacity?: number;
+    }
   | { readonly kind: 'setHoveredProxy'; readonly id: ProxyId }
   | { readonly kind: 'setAbilityLabTarget'; readonly id: ProxyId }
   | {
@@ -191,8 +197,8 @@ export class RenderCommandQueue implements RenderScene, ChunkViewSink, RenderWor
     this.#commands.push({ kind: 'setGuidePath', id, state, pathChanged });
   }
 
-  public setInteractionMarker(id: ProxyId, label: string): void {
-    this.#commands.push({ kind: 'setInteractionMarker', id, label });
+  public setInteractionMarker(id: ProxyId, label: string, opacity?: number): void {
+    this.#commands.push({ kind: 'setInteractionMarker', id, label, opacity });
   }
 
   public setHoveredProxy(id: ProxyId): void {
@@ -374,8 +380,8 @@ export class RenderCommandQueue implements RenderScene, ChunkViewSink, RenderWor
   }
 
   /** worker 报告某个 proxy 的蒙皮拖拽开始或结束。 */
-  public slimeSurfaceDragChanged(id: ProxyId, dragging: boolean): void {
-    this.#slimeDragListener?.(id, dragging);
+  public slimeSurfaceDragChanged(report: SlimeSurfaceDragReport): void {
+    this.#slimeDragListener?.(report);
   }
 
   /**
@@ -426,7 +432,7 @@ export function applyRenderCommand(
       target.scene.setGuidePath(command.id, command.state, command.pathChanged);
       return;
     case 'setInteractionMarker':
-      target.scene.setInteractionMarker(command.id, command.label);
+      target.scene.setInteractionMarker(command.id, command.label, command.opacity);
       return;
     case 'setHoveredProxy':
       target.scene.setHoveredProxy(command.id);

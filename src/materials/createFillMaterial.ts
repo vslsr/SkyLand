@@ -141,8 +141,10 @@ const FRAGMENT_SHADER = /* glsl */ `
     // 太阳越低，直射项的对比越强：清晨与黄昏因此有明确的受光面和背光面，
     // 而不是只换一个整体色调。
     float grazing = 1.0 - clamp(lightDirection.y, 0.0, 1.0);
-    float directional = (0.10 + uDaylight * 0.18) * (1.0 + grazing * 0.85);
-    float softLight = (0.76 - grazing * 0.06) + diffuse * directional;
+    float directional = (0.14 + uDaylight * 0.30) * (1.0 + grazing * 0.85);
+    // 受光面与背光面拉开到近 1.7:1：物件因此有明确的体积，不再是一块与
+    // 地面同值的色斑——朝上的地面几乎全在受光端，立着的树、石、菇则读得出侧面。
+    float softLight = (0.68 - grazing * 0.06) + diffuse * directional;
 
     #ifdef USE_VERTEX_TINT
       vec3 baseColor = vTint;

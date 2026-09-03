@@ -1,9 +1,17 @@
 import type { Actor, ActorWorld } from '../../../shared/actor/index.mjs';
+import {
+  TRANSFORM_COMPONENT,
+  type TransformComponent,
+} from '../../../shared/actor/components/TransformComponent.mjs';
 import type { RenderTransformBuffer } from '../../render/RenderTransformBuffer';
 import {
   SLIME_MOTION_AT_REST,
   writeSlimeMotionParams,
 } from '../../render/RenderSlimeMotion';
+import {
+  SLIME_GROUND_PROBE_AT_REST,
+  writeSlimeGroundProbeParams,
+} from '../../render/RenderSlimeLegs';
 import {
   PARAM_BUOYANCY_DRAFT,
   PARAM_BUOYANCY_STATIC_PITCH,
@@ -20,6 +28,7 @@ import {
   PARAM_ELASTIC_TARGET_X,
   PARAM_ELASTIC_TARGET_Y,
   PARAM_ELASTIC_TARGET_Z,
+  PARAM_CONTAINER_OPEN_TARGET,
   PARAM_FIRE_TARGET_INTENSITY,
   PARAM_TEMPERATURE,
   RENDER_VISUAL_PARAM_COUNT,
@@ -29,12 +38,18 @@ import {
   type RenderProxyComponent,
 } from '../components/RenderProxyComponent';
 import {
+  LEG_GROUND_PROBE_COMPONENT,
+  type LegGroundProbeComponent,
+} from '../components/LegGroundProbeComponent';
+import {
   FIRE_VISUAL_COMPONENT,
   type FireVisualComponent,
 } from '../components/FireVisualComponent';
 import {
   BUOYANCY_COMPONENT,
   type BuoyancyComponent,
+  CONTAINER_COMPONENT,
+  type ContainerComponent,
   DROP_MOTION_COMPONENT,
   type DropMotionComponent,
   ELASTIC_DETACH_COMPONENT,
@@ -78,15 +93,42 @@ export class ActorVisualParamSystem {
         PARAM_TEMPERATURE,
         temperature ? temperature.temperature : 0,
       );
+      // 盖子开不开看「有几个人开着」而不是「我开着没有」：别人翻这个箱子时，
+      // 我也该看见盖子掀起来。回弹在渲染侧积分，这里只给 0 / 1 的目标。
+      const container = actor.getComponent(CONTAINER_COMPONENT) as ContainerComponent | undefined;
+      this.transforms.writeParam(
+        proxy.proxyId,
+        PARAM_CONTAINER_OPEN_TARGET,
+        container && container.viewerCount > 0 ? 1 : 0,
+      );
       // Replica 的史莱姆不自己走路——服务端不复制运动演示，它们静止在原地
       // 摆动。运动参数由玩家实体自己写（它们不是 Replica，不经过这个 System），
       // 所以这里写的是静止值，而不是「跳过不写」：槽位会被复用，上一个玩家
       // 留下的速度会让新 proxy 一出生就在滑行。
       writeSlimeMotionParams(this.transforms, proxy.proxyId, SLIME_MOTION_AT_REST);
+      this.writeGroundProbe(actor, proxy);
       this.writeBuoyancy(actor, proxy);
       this.writeElastic(actor, proxy);
       this.writeDropMotion(actor, proxy);
     }
+  }
+
+  /**
+   * 腿部落脚的地面窗口。只有带 `LegGroundProbeComponent` 的 Actor 会真的去采地形，
+   * 因此每帧的地形采样次数正比于「长腿的 Actor 数」，而不是全部 Replica。
+   * 其余槽位写静止值（radius=0，渲染侧据此退回自己的兜底平面）。
+   */
+  private writeGroundProbe(actor: Actor, proxy: RenderProxyComponent): void {
+    const legs = actor.getComponent(
+      LEG_GROUND_PROBE_COMPONENT,
+    ) as LegGroundProbeComponent | undefined;
+    if (!legs) {
+      writeSlimeGroundProbeParams(this.transforms, proxy.proxyId, SLIME_GROUND_PROBE_AT_REST);
+      return;
+    }
+    const transform = actor.getComponent(TRANSFORM_COMPONENT) as TransformComponent | undefined;
+    if (transform) legs.refresh(transform.x, transform.y, transform.z);
+    writeSlimeGroundProbeParams(this.transforms, proxy.proxyId, legs.probe);
   }
 
   /** 船体波动只要三个静态偏置；浪高由渲染侧自己采。 */

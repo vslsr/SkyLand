@@ -136,6 +136,14 @@ process.on('message', (message) => {
       if (!scene) break;
       scene.applyInput(message.playerId, message.input ?? {});
       break;
+    case 'player:slime-drag':
+      if (!scene) break;
+      scene.applySlimeDrag(message.playerId, message.drag);
+      break;
+    case 'player:bite':
+      if (!scene) break;
+      scene.toggleBite(message.playerId);
+      break;
     case 'debug:transform-log:start':
       if (!scene || !scene.players.has(message.playerId)) break;
       transformRecordings.set(message.sessionId, { playerId: message.playerId });
@@ -186,6 +194,10 @@ process.on('message', (message) => {
     case 'actor:interact':
       if (!scene) break;
       scene.interactWithActor(message.playerId, message.interaction ?? {});
+      break;
+    case 'inventory:command':
+      if (!scene) break;
+      scene.applyInventoryCommand(message.playerId, message.command ?? {});
       break;
     case 'terrain:edit': {
       if (!scene) break;

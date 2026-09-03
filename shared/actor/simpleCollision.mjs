@@ -10,6 +10,8 @@
 /** @typedef {{ collision: SimpleCollisionDefinition, transform: CollisionTransform }} SimpleCollisionInstance */
 /** @typedef {{ minimumY: number, maximumY: number, maximumStepHeight?: number }} CollisionVerticalProfile */
 
+import { leggedSlimeTopY } from './leggedSlimeShape.mjs';
+
 const COLLISION_EPSILON = 1e-7;
 
 function finiteNumber(value, fallback = 0) {
@@ -66,6 +68,19 @@ export function createSimpleCollisionFromRender(render, dropMotion) {
       maximumY: positiveNumber(render.collisionHeight, radius * 0.76),
     });
   }
+  if (model === 'line-art-legged-slime') {
+    const radius = positiveNumber(render.radius, 0.42);
+    const hipHeight = positiveNumber(render.hipHeight, radius * 1.8);
+    return createSimpleCollisionDefinition({
+      shape: 'cylinder',
+      // 腿不参与碰撞：它们是贴着地面采样点摆出来的表现，两根细杆挡住玩家只会
+      // 让这只史莱姆卡在自己的脚上。权威圆柱仍然从地面一直包到身体顶部。
+      halfWidth: radius,
+      halfLength: radius,
+      minimumY: 0,
+      maximumY: leggedSlimeTopY(hipHeight, radius),
+    });
+  }
   if (model === 'line-art-raft') {
     return createSimpleCollisionDefinition({
       halfWidth: positiveNumber(render.width, 1) * 0.5,
@@ -84,6 +99,20 @@ export function createSimpleCollisionFromRender(render, dropMotion) {
       halfLength: (positiveNumber(render.length, 0.5) + 0.08) * 0.5,
       minimumY: 0,
       maximumY: height * 0.88,
+    });
+  }
+  if (model === 'line-art-storage-chest') {
+    const width = positiveNumber(render.width, 0.5);
+    const length = positiveNumber(render.length, 0.5);
+    const height = positiveNumber(render.height, 0.5);
+    // 盖沿与束带比箱体各向外探出一个板厚；碰撞包住模型的最外沿。
+    const thickness = Math.min(width, length) * 0.075;
+    return createSimpleCollisionDefinition({
+      halfWidth: (width + thickness) * 0.5,
+      halfLength: (length + thickness) * 0.5,
+      minimumY: 0,
+      // 只包到箱体加盖板，不含掀开后翻到背面去的那一块：盖子开着时人不该被挡住。
+      maximumY: height * 0.86,
     });
   }
   if (model === 'line-art-reef') {

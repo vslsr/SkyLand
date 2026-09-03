@@ -2,6 +2,10 @@ import { readdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { MAX_GUIDE_LOCAL_COORDINATE } from '../../shared/actor/components/GuidePathComponent.mjs';
+import {
+  MAX_PATROL_LOCAL_COORDINATE,
+  MAX_PATROL_WAYPOINTS,
+} from '../../shared/actor/components/PatrolPathComponent.mjs';
 import { itemCatalog } from '../../shared/items/index.mjs';
 
 export const DEFAULT_ACTOR_DIRECTORY = fileURLToPath(new URL('../../config/actors/', import.meta.url));
@@ -16,7 +20,19 @@ const PILE_RENDER_MODELS = new Set([
   'line-art-fruit-pile',
 ]);
 const COLOR_PATTERN = /^#[0-9a-f]{6}$/i;
-const PLAYER_RENDER_MODELS = new Set(['line-art-player-slime', 'line-art-pbf-slime']);
+/**
+ * 能当玩家外壳的 render 模型。导出是有意的：场景校验与房间 DS 都要问同一个
+ * 问题，各自写一串 `!==` 会让新增一种玩家外壳变成三处独立的改动。
+ */
+export const PLAYER_RENDER_MODELS = new Set([
+  'line-art-player-slime',
+  'line-art-pbf-slime',
+  'line-art-legged-slime',
+]);
+
+export function isPlayerRenderModel(model) {
+  return PLAYER_RENDER_MODELS.has(model);
+}
 
 function requireObject(value, path) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
@@ -139,7 +155,7 @@ function validatePlayerMovement(raw, filename) {
 function validateInteractable(raw, filename) {
   const path = `${filename}.components.interactable`;
   const definition = requireObject(raw, path);
-  if (!['cargo-toggle', 'mushroom-bite', 'pickup-stack', 'harvest-prop'].includes(definition.action)) {
+  if (!['cargo-toggle', 'mushroom-bite', 'pickup-stack', 'harvest-prop', 'container-open'].includes(definition.action)) {
     throw new TypeError(`${path}.action 暂不支持：${definition.action}`);
   }
   return {
@@ -245,7 +261,30 @@ function validateInventory(raw, filename) {
   const definition = requireObject(raw, path);
   const slotCapacity = requireNumber(definition.slotCapacity, `${path}.slotCapacity`, 1, 64);
   if (!Number.isInteger(slotCapacity)) throw new TypeError(`${path}.slotCapacity 必须是整数`);
-  return { slotCapacity };
+  const validated = { slotCapacity };
+  if (definition.hotbarCapacity !== undefined) {
+    const hotbarCapacity = requireNumber(definition.hotbarCapacity, `${path}.hotbarCapacity`, 1, 9);
+    if (!Number.isInteger(hotbarCapacity)) throw new TypeError(`${path}.hotbarCapacity 必须是整数`);
+    validated.hotbarCapacity = hotbarCapacity;
+  }
+  if (definition.stowHoldSeconds !== undefined) {
+    validated.stowHoldSeconds = requireNumber(
+      definition.stowHoldSeconds, `${path}.stowHoldSeconds`, 0.1, 5,
+    );
+  }
+  return validated;
+}
+
+function validateContainer(raw, filename) {
+  const path = `${filename}.components.container`;
+  const definition = requireObject(raw, path);
+  const slotCapacity = requireNumber(definition.slotCapacity, `${path}.slotCapacity`, 1, 256);
+  if (!Number.isInteger(slotCapacity)) throw new TypeError(`${path}.slotCapacity 必须是整数`);
+  return {
+    slotCapacity,
+    label: requireString(definition.label, `${path}.label`, 32),
+    reach: requireNumber(definition.reach, `${path}.reach`, 0.5, 8),
+  };
 }
 
 function validateItemStack(raw, filename) {
@@ -334,6 +373,50 @@ function validatePlayerJump(raw, filename) {
   };
 }
 
+function validateSoftBodyDeformation(raw, filename) {
+  const path = `${filename}.components.softBodyDeformation`;
+  const definition = requireObject(raw, path);
+  return {
+    breakDistance: requireNumber(definition.breakDistance, `${path}.breakDistance`, Number.EPSILON, 12),
+    ...(definition.selfReportTimeoutMs !== undefined ? {
+      selfReportTimeoutMs: requireNumber(
+        definition.selfReportTimeoutMs,
+        `${path}.selfReportTimeoutMs`,
+        Number.EPSILON,
+        5000,
+      ),
+    } : {}),
+  };
+}
+
+function validateBite(raw, filename) {
+  const path = `${filename}.components.bite`;
+  const definition = requireObject(raw, path);
+  return {
+    range: requireNumber(definition.range, `${path}.range`, Number.EPSILON, 8),
+    ...(definition.facingDot !== undefined ? {
+      facingDot: requireNumber(definition.facingDot, `${path}.facingDot`, -1, 1),
+    } : {}),
+    // 捏起来的那块皮再深也不该超过外壳本身：过了求解器的可见量程，每次咬都长一样。
+    ...(definition.gripDepth !== undefined ? {
+      gripDepth: requireNumber(definition.gripDepth, `${path}.gripDepth`, 0, 2),
+    } : {}),
+    ...(definition.leashSlack !== undefined ? {
+      leashSlack: requireNumber(definition.leashSlack, `${path}.leashSlack`, 0, 8),
+    } : {}),
+    // 刚度乘固定步长超过 2 这个弹簧就会自激振荡；固定步是 1/60，所以卡在 120。
+    ...(definition.leashStiffness !== undefined ? {
+      leashStiffness: requireNumber(definition.leashStiffness, `${path}.leashStiffness`, 0, 120),
+    } : {}),
+    ...(definition.leashDamping !== undefined ? {
+      leashDamping: requireNumber(definition.leashDamping, `${path}.leashDamping`, 0, 60),
+    } : {}),
+    ...(definition.leashCarry !== undefined ? {
+      leashCarry: requireNumber(definition.leashCarry, `${path}.leashCarry`, 0, 60),
+    } : {}),
+  };
+}
+
 function validateSlimeSurfaceDrag(raw, filename) {
   const path = `${filename}.components.slimeSurfaceDrag`;
   const definition = requireObject(raw, path);
@@ -382,6 +465,49 @@ function validateReplicationPolicy(raw, filename) {
   const radiusChunks = requireNumber(definition.radiusChunks, `${path}.radiusChunks`, 0, 8);
   if (!Number.isInteger(radiusChunks)) throw new TypeError(`${path}.radiusChunks 必须是整数`);
   return { mode: definition.mode, radiusChunks };
+}
+
+function validatePatrolPath(raw, filename) {
+  const path = `${filename}.components.patrolPath`;
+  const definition = requireObject(raw, path);
+  const knownKeys = new Set(['waypoints', 'speed', 'waitSeconds', 'mode']);
+  for (const key of Object.keys(definition)) {
+    if (!knownKeys.has(key)) throw new TypeError(`${path} 包含未知字段：${key}`);
+  }
+  const raws = definition.waypoints;
+  if (!Array.isArray(raws) || raws.length < 2 || raws.length > MAX_PATROL_WAYPOINTS) {
+    throw new TypeError(`${path}.waypoints 必须是 2 到 ${MAX_PATROL_WAYPOINTS} 个路点`);
+  }
+  const waypoints = raws.map((point, index) => {
+    const pointPath = `${path}.waypoints[${index}]`;
+    if (!Array.isArray(point) || point.length !== 3) {
+      throw new TypeError(`${pointPath} 必须是 [x, y, z]`);
+    }
+    return point.map((value, axis) => requireNumber(
+      value,
+      `${pointPath}[${axis}]`,
+      -MAX_PATROL_LOCAL_COORDINATE,
+      MAX_PATROL_LOCAL_COORDINATE,
+    ));
+  });
+  // 全部重合的路线走不动，也就没有巡逻可言；早点报错好过在场景里盯着它发呆。
+  const moves = waypoints.some((point) => (
+    Math.hypot(point[0] - waypoints[0][0], point[1] - waypoints[0][1], point[2] - waypoints[0][2])
+      > 1e-6
+  ));
+  if (!moves) throw new TypeError(`${path}.waypoints 至少要有两个不重合的路点`);
+  const mode = definition.mode ?? 'ping-pong';
+  if (mode !== 'ping-pong' && mode !== 'loop') {
+    throw new TypeError(`${path}.mode 必须是 ping-pong 或 loop`);
+  }
+  return {
+    waypoints,
+    speed: requireNumber(definition.speed, `${path}.speed`, Number.EPSILON, 20),
+    waitSeconds: definition.waitSeconds === undefined
+      ? 0
+      : requireNumber(definition.waitSeconds, `${path}.waitSeconds`, 0, 60),
+    mode,
+  };
 }
 
 function validateGuidePath(raw, filename) {
@@ -562,6 +688,52 @@ function validateRender(raw, filename) {
       shadowColor: requireColor(render.shadowColor, `${path}.shadowColor`),
     };
   }
+  if (render.model === 'line-art-legged-slime') {
+    const legCount = requireNumber(render.legCount, `${path}.legCount`, 2, 6);
+    if (!Number.isInteger(legCount)) {
+      throw new TypeError(`${path}.legCount 必须是整数`);
+    }
+    const radius = requireNumber(render.radius, `${path}.radius`, Number.EPSILON, 2);
+    const hipHeight = requireNumber(render.hipHeight, `${path}.hipHeight`, Number.EPSILON, 4);
+    const thighLength = requireNumber(render.thighLength, `${path}.thighLength`, Number.EPSILON, 3);
+    const shinLength = requireNumber(render.shinLength, `${path}.shinLength`, Number.EPSILON, 3);
+    const legSpread = requireNumber(render.legSpread, `${path}.legSpread`, Number.EPSILON, 2);
+    // 站姿下脚就够不到地的话，IK 每帧都在把落脚点往回收，腿会绷成一条直线并且
+    // 一直打滑——「骨骼有关节」这件事在画面上直接消失。
+    const standingReach = Math.hypot(hipHeight, legSpread);
+    if (thighLength + shinLength <= standingReach) {
+      throw new TypeError(
+        `${path} 的 thighLength + shinLength 必须够到站姿落脚点（> ${standingReach.toFixed(3)}）`,
+      );
+    }
+    return {
+      model: render.model,
+      radius,
+      hipHeight,
+      legSpread,
+      legCount,
+      thighLength,
+      shinLength,
+      legThickness: requireNumber(
+        render.legThickness,
+        `${path}.legThickness`,
+        Number.EPSILON,
+        0.3,
+      ),
+      footLength: requireNumber(render.footLength, `${path}.footLength`, Number.EPSILON, 0.6),
+      stepLength: requireNumber(render.stepLength, `${path}.stepLength`, Number.EPSILON, 3),
+      stepHeight: requireNumber(render.stepHeight, `${path}.stepHeight`, 0, 2),
+      stepDuration: requireNumber(render.stepDuration, `${path}.stepDuration`, Number.EPSILON, 2),
+      membraneColor: requireColor(render.membraneColor, `${path}.membraneColor`),
+      middleColor: requireColor(render.middleColor, `${path}.middleColor`),
+      coreColor: requireColor(render.coreColor, `${path}.coreColor`),
+      bubbleColor: requireColor(render.bubbleColor, `${path}.bubbleColor`),
+      inkColor: requireColor(render.inkColor, `${path}.inkColor`),
+      shadowColor: requireColor(render.shadowColor, `${path}.shadowColor`),
+      legColor: requireColor(render.legColor, `${path}.legColor`),
+      footShadowColor: requireColor(render.footShadowColor, `${path}.footShadowColor`),
+    };
+  }
   if (render.model === 'line-art-raft') {
     return {
       model: render.model,
@@ -571,6 +743,16 @@ function validateRender(raw, filename) {
     };
   }
   if (render.model === 'line-art-cargo-crate') {
+    return {
+      model: render.model,
+      color: requireColor(render.color, `${path}.color`),
+      accentColor: requireColor(render.accentColor, `${path}.accentColor`),
+      length: requireNumber(render.length, `${path}.length`, Number.EPSILON, 10),
+      width: requireNumber(render.width, `${path}.width`, Number.EPSILON, 10),
+      height: requireNumber(render.height, `${path}.height`, Number.EPSILON, 10),
+    };
+  }
+  if (render.model === 'line-art-storage-chest') {
     return {
       model: render.model,
       color: requireColor(render.color, `${path}.color`),
@@ -697,6 +879,8 @@ function validateActorArchetype(raw, filename) {
     'playerMovement',
     'playerJump',
     'slimeSurfaceDrag',
+    'softBodyDeformation',
+    'bite',
     'buoyancy',
     'vesselMotor',
     'interactable',
@@ -709,6 +893,7 @@ function validateActorArchetype(raw, filename) {
     'combustible',
     'heatEmitter',
     'inventory',
+    'container',
     'itemStack',
     'actorResidency',
     'dropMotion',
@@ -716,6 +901,7 @@ function validateActorArchetype(raw, filename) {
     'replicationPolicy',
     'generatedProp',
     'guidePath',
+    'patrolPath',
     'render',
   ]);
   for (const componentName of Object.keys(components)) {
@@ -730,6 +916,9 @@ function validateActorArchetype(raw, filename) {
   const guidePath = components.guidePath
     ? validateGuidePath(components.guidePath, filename)
     : undefined;
+  const patrolPath = components.patrolPath
+    ? validatePatrolPath(components.patrolPath, filename)
+    : undefined;
   if (!render && !generatedProp && !guidePath) {
     throw new TypeError(`${filename}.components 至少需要 render、generatedProp 或 guidePath`);
   }
@@ -742,6 +931,10 @@ function validateActorArchetype(raw, filename) {
   const slimeSurfaceDrag = components.slimeSurfaceDrag
     ? validateSlimeSurfaceDrag(components.slimeSurfaceDrag, filename)
     : undefined;
+  const softBodyDeformation = components.softBodyDeformation
+    ? validateSoftBodyDeformation(components.softBodyDeformation, filename)
+    : undefined;
+  const bite = components.bite ? validateBite(components.bite, filename) : undefined;
   const interactable = components.interactable
     ? validateInteractable(components.interactable, filename)
     : undefined;
@@ -778,6 +971,11 @@ function validateActorArchetype(raw, filename) {
   if (render?.model === 'line-art-player-slime' && !playerMovement) {
     throw new TypeError(`${filename}.components.render line-art-player-slime 需要 playerMovement`);
   }
+  // line-art-legged-slime 两头都能用：带 playerMovement 是玩家外壳，不带就是
+  // 服务端推着走的生物（见 patrolPath）。所以这里**不**强制要 playerMovement。
+  if (patrolPath && playerMovement) {
+    throw new TypeError(`${filename}.components.patrolPath 不能与 playerMovement 并存`);
+  }
   if (slimeSurfaceDrag && render?.model !== 'line-art-pbf-slime') {
     throw new TypeError(`${filename}.components.slimeSurfaceDrag 需要 line-art-pbf-slime render`);
   }
@@ -791,6 +989,7 @@ function validateActorArchetype(raw, filename) {
     ? validateHeatEmitter(components.heatEmitter, filename)
     : undefined;
   const inventory = components.inventory ? validateInventory(components.inventory, filename) : undefined;
+  const container = components.container ? validateContainer(components.container, filename) : undefined;
   const itemStack = components.itemStack ? validateItemStack(components.itemStack, filename) : undefined;
   const actorResidency = components.actorResidency
     ? validateActorResidency(components.actorResidency, filename)
@@ -811,6 +1010,10 @@ function validateActorArchetype(raw, filename) {
   }
   if (interactable?.action === 'pickup-stack' && !itemStack) {
     throw new TypeError(`${filename}.components.interactable pickup-stack 需要 itemStack`);
+  }
+  // 一个开不了的箱子和一个没有内容的「打开」提示都是死配置，两边互为前提。
+  if ((interactable?.action === 'container-open') !== Boolean(container)) {
+    throw new TypeError(`${filename}.components.container 与 container-open interactable 必须成对出现`);
   }
   if (itemStack && (!actorResidency || !dropMotion || !lifetime || !replicationPolicy)) {
     throw new TypeError(`${filename}.components.itemStack 需要 actorResidency、dropMotion、lifetime 和 replicationPolicy`);
@@ -844,6 +1047,8 @@ function validateActorArchetype(raw, filename) {
       ...(playerMovement ? { playerMovement } : {}),
       ...(playerJump ? { playerJump } : {}),
       ...(slimeSurfaceDrag ? { slimeSurfaceDrag } : {}),
+      ...(softBodyDeformation ? { softBodyDeformation } : {}),
+      ...(bite ? { bite } : {}),
       ...(components.buoyancy ? { buoyancy: validateBuoyancy(components.buoyancy, filename) } : {}),
       ...(components.vesselMotor ? { vesselMotor: validateVesselMotor(components.vesselMotor, filename) } : {}),
       ...(interactable ? { interactable } : {}),
@@ -856,6 +1061,7 @@ function validateActorArchetype(raw, filename) {
       ...(combustible ? { combustible } : {}),
       ...(heatEmitter ? { heatEmitter } : {}),
       ...(inventory ? { inventory } : {}),
+      ...(container ? { container } : {}),
       ...(itemStack ? { itemStack } : {}),
       ...(actorResidency ? { actorResidency } : {}),
       ...(dropMotion ? { dropMotion } : {}),
@@ -863,6 +1069,7 @@ function validateActorArchetype(raw, filename) {
       ...(replicationPolicy ? { replicationPolicy } : {}),
       ...(generatedProp ? { generatedProp } : {}),
       ...(guidePath ? { guidePath } : {}),
+      ...(patrolPath ? { patrolPath } : {}),
       ...(render ? { render } : {}),
     },
   };

@@ -1,0 +1,53 @@
+{
+  "$schema": "./actor.schema.json",
+  "schemaVersion": 1,
+  "id": "legged-slime",
+  "components": {
+    "playerMovement": {
+      "walkSpeed": 3.2,
+      "sprintMultiplier": 1.65,
+      "maximumStepHeight": 0.24,
+      "acceleration": 26,
+      "deceleration": 22,
+      "airAcceleration": 8,
+      "airDrag": 0.6
+    },
+    "playerJump": {
+      "impulse": 6.6,
+      "gravity": 22,
+      "maximumFallSpeed": 20,
+      "airControl": 0.85
+    },
+    "inventory": {
+      "slotCapacity": 8
+    },
+    "pickupDrop": {
+      "mouthLocalX": 0,
+      "mouthLocalY": 0.9,
+      "mouthLocalZ": 0.36,
+      "mouthLocalYaw": 0
+    },
+    "render": {
+      "model": "line-art-legged-slime",
+      "radius": 0.44,
+      "hipHeight": 0.66,
+      "legSpread": 0.16,
+      "legCount": 2,
+      "thighLength": 0.42,
+      "shinLength": 0.42,
+      "legThickness": 0.028,
+      "footLength": 0.13,
+      "stepLength": 0.28,
+      "stepHeight": 0.13,
+      "stepDuration": 0.22,
+      "membraneColor": "#7fd4e8",
+      "middleColor": "#b6e9f4",
+      "coreColor": "#3ea9c6",
+      "bubbleColor": "#eafaff",
+      "inkColor": "#152c36",
+      "shadowColor": "#1e4a5a",
+      "legColor": "#141210",
+      "footShadowColor": "#6f6f6f"
+    }
+  }
+}

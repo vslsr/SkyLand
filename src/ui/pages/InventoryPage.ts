@@ -17,8 +17,13 @@ export class InventoryPage extends ModalWindow {
   private readonly pooledSection: HTMLElement;
   private readonly pooledGrid: HTMLElement;
   private readonly emptyNotice: HTMLElement;
+  private readonly tabBar: HTMLElement;
   private closeHintText = 'Esc 关闭';
   private readonly closeHint: HTMLElement;
+  /** 当前页签。分类空掉时自动落回「全部」，不会停在一个打不开的页上。 */
+  private activePageId: string = 'all';
+  private view?: InventoryView;
+  private holdHandler?: (itemType: string) => void;
 
   public constructor() {
     super({
@@ -49,6 +54,11 @@ export class InventoryPage extends ModalWindow {
     this.emptyNotice.textContent = '进入房间后才有随身物品。';
     this.emptyNotice.hidden = true;
 
+    this.tabBar = document.createElement('div');
+    this.tabBar.className = 'inventory__tabs';
+    this.tabBar.setAttribute('role', 'tablist');
+    this.tabBar.setAttribute('aria-label', '物品分类');
+
     const slotSection = document.createElement('section');
     slotSection.className = 'inventory__section';
     const slotHeading = document.createElement('h3');
@@ -71,7 +81,7 @@ export class InventoryPage extends ModalWindow {
     this.pooledGrid.setAttribute('role', 'list');
     this.pooledSection.append(pooledHeading, pooledNote, this.pooledGrid);
 
-    this.bodyElement.append(summary, this.emptyNotice, slotSection, this.pooledSection);
+    this.bodyElement.append(summary, this.emptyNotice, this.tabBar, slotSection, this.pooledSection);
 
     this.closeHint = document.createElement('p');
     this.closeHint.className = 'inventory__hint';
@@ -87,13 +97,20 @@ export class InventoryPage extends ModalWindow {
     this.closeHint.textContent = this.closeHintText;
   }
 
+  /** 点一下某件物品会做什么：放上快捷栏并握在手上。由 Controller 接出去发意图。 */
+  public onHold(handler: (itemType: string) => void): void {
+    this.holdHandler = handler;
+  }
+
   /** 画一份背包；传 undefined 表示还没有权威数据（没进房间或角色已销毁）。 */
   public setInventory(view: InventoryView | undefined): void {
+    this.view = view;
     this.emptyNotice.hidden = view !== undefined;
     if (!view) {
       this.capacityText.textContent = '货位 —';
       this.setMeter(0);
       this.ledgerText.textContent = '';
+      this.tabBar.replaceChildren();
       this.slotGrid.replaceChildren();
       this.pooledSection.hidden = true;
       this.pooledGrid.replaceChildren();
@@ -103,15 +120,46 @@ export class InventoryPage extends ModalWindow {
     this.capacityText.textContent = `货位 ${view.usedSlots} / ${view.slotCapacity}`;
     this.setMeter(view.slotCapacity > 0 ? view.usedSlots / view.slotCapacity : 0);
     this.ledgerText.textContent = this.describeLedger(view);
+    // 上一次停留的分类可能已经空了（东西用完或存进了箱子）；落回全部而不是留白。
+    if (!view.pages.some((page) => page.id === this.activePageId)) this.activePageId = 'all';
+    this.renderTabs(view);
+    this.renderPage(view);
+  }
 
-    const cells = view.slots.map((stack) => this.createStackCell(stack));
-    for (let index = 0; index < view.freeSlots; index += 1) {
-      cells.push(this.createEmptyCell());
+  private renderTabs(view: InventoryView): void {
+    this.tabBar.replaceChildren(...view.pages.map((page) => {
+      const tab = document.createElement('button');
+      tab.type = 'button';
+      tab.className = 'inventory__tab';
+      tab.setAttribute('role', 'tab');
+      const selected = page.id === this.activePageId;
+      tab.classList.toggle('is-active', selected);
+      tab.setAttribute('aria-selected', String(selected));
+      tab.textContent = `${page.label} ${page.stacks.length}`;
+      tab.addEventListener('click', () => {
+        if (this.activePageId === page.id || !this.view) return;
+        this.activePageId = page.id;
+        this.renderTabs(this.view);
+        this.renderPage(this.view);
+      });
+      return tab;
+    }));
+  }
+
+  private renderPage(view: InventoryView): void {
+    const page = view.pages.find((entry) => entry.id === this.activePageId) ?? view.pages[0];
+    const stacks = page?.stacks ?? [];
+    const cells = stacks.map((stack) => this.createStackCell(stack, view.heldItemType === stack.itemType));
+    // 空格只在「全部」页补：分类页补空格会让人以为那个分类有独立容量。
+    if (this.activePageId === 'all') {
+      for (let index = 0; index < view.freeSlots; index += 1) cells.push(this.createEmptyCell());
     }
     this.slotGrid.replaceChildren(...cells);
-
-    this.pooledSection.hidden = view.pooled.length === 0;
-    this.pooledGrid.replaceChildren(...view.pooled.map((stack) => this.createStackCell(stack)));
+    // 「不占货位」原来是一个独立分区。分类页签接管这件事之后，它会把弹药和工具
+    // 画第二遍——同一堆货出现在两个地方，数量还同步变化，玩家没法理解那是一件东西。
+    // 这条信息改由格子上的「不占格」标记承担，位置就在它自己那一格上。
+    this.pooledSection.hidden = true;
+    this.pooledGrid.replaceChildren();
   }
 
   private describeLedger(view: InventoryView): string {
@@ -134,16 +182,31 @@ export class InventoryPage extends ModalWindow {
     return cell;
   }
 
-  private createStackCell(stack: InventoryStackView): HTMLElement {
+  private createStackCell(stack: InventoryStackView, held: boolean): HTMLElement {
     const cell = document.createElement('li');
     cell.className = 'inventory__cell';
+    // 不做拖拽：一次点击就是这个界面的全部交互，所以格子本身是按钮。
+    // 拿不到手上的东西（弹药）保持成普通格子，点了没反应比点了没提示好。
+    if (stack.holdable) {
+      cell.classList.add('inventory__cell--actionable');
+      cell.tabIndex = 0;
+      cell.setAttribute('role', 'button');
+      cell.addEventListener('click', () => this.holdHandler?.(stack.itemType));
+      cell.addEventListener('keydown', (event) => {
+        if (event.key !== 'Enter' && event.key !== ' ') return;
+        event.preventDefault();
+        this.holdHandler?.(stack.itemType);
+      });
+    }
+    cell.classList.toggle('is-held', held);
     cell.dataset.itemType = stack.itemType;
     cell.dataset.category = stack.category;
     if (stack.contraband) cell.dataset.contraband = 'true';
     cell.setAttribute('title', `${stack.displayName}　${stack.summary}`);
     cell.setAttribute(
       'aria-label',
-      `${stack.categoryLabel} ${stack.displayName}，${stack.quantity} 个，上限 ${stack.stackLimit}`,
+      `${stack.categoryLabel} ${stack.displayName}，${stack.quantity} 个，上限 ${stack.stackLimit}`
+      + (stack.holdable ? (held ? '，正拿在手上' : '，点击拿到手上') : ''),
     );
 
     const swatch = document.createElement('span');
@@ -167,6 +230,11 @@ export class InventoryPage extends ModalWindow {
       cost.className = 'inventory__badge';
       cost.textContent = `${stack.slotCost} 格`;
       cell.append(cost);
+    } else if (stack.slotCost === 0) {
+      const pooledBadge = document.createElement('span');
+      pooledBadge.className = 'inventory__badge inventory__badge--pooled';
+      pooledBadge.textContent = '不占格';
+      cell.append(pooledBadge);
     }
     if (stack.coinValue !== undefined) {
       const value = document.createElement('span');

@@ -15,22 +15,33 @@ import {
 import { SceneControlRouter } from '../controllers/SceneControlRouter';
 import { ActorInteractionController } from '../controllers/ActorInteractionController';
 import { InventoryController } from '../controllers/InventoryController';
+import { HotbarController } from '../controllers/HotbarController';
+import { ContainerController } from '../controllers/ContainerController';
+import { ContainerPage } from '../ui/pages/ContainerPage';
+import { HotbarBar } from '../ui/HotbarBar';
+import { buildInventoryView } from '../inventory/index';
 import { TerrainEditController } from '../controllers/TerrainEditController';
 import { VesselControlController } from '../controllers/VesselControlController';
 import { RoomClient, type JoinedRoom, type RoomSummary } from '../network/RoomClient';
 import { SnapshotBuffer } from '../network/SnapshotBuffer';
-import type { RoomSnapshot } from '../network/protocol';
+import type { InterpolatedPlayerState, RoomSnapshot } from '../network/protocol';
 import { frameTimeline } from '../platform/index';
 import { PlayerEntity } from '../player/PlayerEntity';
 import { SlimeSurfaceDragController } from '../controllers/SlimeSurfaceDragController';
 import { RemotePlayerGroup } from '../player/RemotePlayerGroup';
+import { collectBiters, resolveBiteTips } from '../player/slimeBiteTip';
+import { createSlimeBiteParams, type SlimeBiteParams } from '../render/RenderSlimeBite';
+import type { SlimeSurfaceDragState } from '../render/RenderScene';
 import { SceneRenderer } from '../rendering/SceneRenderer';
 import { connectRenderWorldInWorker } from '../render/worker/connectRenderWorldInWorker';
 import { SceneCompositionHost } from '../scene/SceneCompositionHost';
 import { SceneWorld } from '../scene/SceneWorld';
 import type { SceneUpdateContext } from '../scene/SceneVisualSystem';
 import { createSceneRuntimeComponent, SceneComponentHost } from '../scene/components';
-import { INPUT_SEND_INTERVAL_SECONDS } from '../../shared/networkTuning.mjs';
+import {
+  INPUT_SEND_INTERVAL_SECONDS,
+  SLIME_DRAG_SEND_INTERVAL_SECONDS,
+} from '../../shared/networkTuning.mjs';
 import {
   INVENTORY_COMPONENT,
   type InventoryComponent,
@@ -80,17 +91,36 @@ export class GrasslandScene extends Scene {
   private readonly gameMenuPage = new GameMenuPage();
   private readonly inventoryPage = new InventoryPage();
   private readonly inventory: InventoryController;
+  private readonly hotbarBar = new HotbarBar();
+  private readonly hotbar: HotbarController;
+  private readonly containerPage = new ContainerPage();
+  private readonly container: ContainerController;
   private readonly debugMenuPage?: DebugMenuPage;
   private readonly playerTransformLog?: PlayerTransformLogRecorder;
   private disposeDebugMenuShortcut?: () => void;
   private disposeInventoryShortcut?: () => void;
   private readonly snapshots = new SnapshotBuffer();
   private readonly remotePlayers: RemotePlayerGroup;
+  /** 当前场景的玩家原型：算被咬住的那个尖要用它的半径、嘴挂点与抓握深度。 */
+  private playerArchetype?: ActorArchetypeDefinition;
+  /** 每帧复用的突起向量缓冲。 */
+  private readonly biteTips: SlimeBiteParams = createSlimeBiteParams();
+  /** 「谁被哪几张嘴咬着」：一帧算一次，本地玩家与远端玩家共用。 */
+  private readonly biters = new Map<string, InterpolatedPlayerState[]>();
   private joinedRoom?: JoinedRoom;
   private availableScenes: SceneSummary[] = [];
   private player?: PlayerEntity;
   private slimeSurfaceDrag?: SlimeSurfaceDragController;
   private timeSinceInputSent = 0;
+  private timeSinceSlimeDragSent = 0;
+  /** 上一次成功上报的拖拽是否处于按住状态；决定松手后要不要补发一次结束。 */
+  private slimeDragReplicated = false;
+  /** 本地玩家正咬着别人；交互键这时说的是「松口」。权威状态来自快照。 */
+  private localPlayerBiting = false;
+  /** 复用的上报缓冲：拖拽每帧都可能被读一次，不该每次都分配一个对象。 */
+  private readonly slimeDragState: SlimeSurfaceDragState = {
+    contactX: 0, contactY: 0, contactZ: 0, pullX: 0, pullY: 0, pullZ: 0,
+  };
 
   /** 暴露当前场景的实时绑定方案，供设置页或调试面板调用 rebind/reset。 */
   public get inputBindings(): InputSchemeRuntime {
@@ -171,15 +201,11 @@ export class GrasslandScene extends Scene {
       device: virtualInput,
       config: this.inputScheme.virtualControls,
     });
-    this.hud.setInputPromptResolver((mode, deviceKind, state) => (
-      this.inputScheme.getPrompt(mode, deviceKind, state)
-    ));
     this.inputScheme.onBindingsChanged(() => {
       this.input.replaceMappingContexts(this.inputScheme.contexts);
       keyboardInput.setPreventDefaultControls(this.inputScheme.getPreventDefaultControls());
       this.refreshDebugMenuShortcut();
       this.refreshInventoryShortcut();
-      this.hud.refreshInputPrompt();
     });
     // 渲染那一侧只在这一行里被决定。整个渲染循环跑在另一条线程上：
     // 画布经 `transferControlToOffscreen` 转移过去，相机与 transform SoA 是两块
@@ -227,11 +253,13 @@ export class GrasslandScene extends Scene {
         return control ? this.inputScheme.getControlLabel(control) : undefined;
       },
       setHoveredActorId: (actorId) => this.world.setHoveredActorId(actorId),
-      setInteractionMarkerActorId: (actorId, inputLabel) => {
-        this.world.setInteractionMarkerActorId(actorId, inputLabel);
+      setInteractionMarkerActorId: (actorId, inputLabel, opacity) => {
+        this.world.setInteractionMarkerActorId(actorId, inputLabel, opacity);
       },
       sendInteraction: (actorId) => { this.roomClient.interactWithActor(actorId); },
-      setPrompt: (text) => this.hud.setInteractionPrompt(text),
+      setPrompt: (text, opacity) => this.hud.setInteractionPrompt(text, opacity),
+      isBiting: () => this.localPlayerBiting,
+      sendBite: () => { this.roomClient.toggleBite(); },
     });
     this.inventory = new InventoryController(this.inventoryPage, this.input, {
       getInventory: () => this.player?.getComponent(INVENTORY_COMPONENT) as
@@ -244,8 +272,39 @@ export class GrasslandScene extends Scene {
       // 只在没有别的页面盖着时开，背包因此永远是栈顶那一页。
       canOpen: () => Boolean(this.joinedRoom && this.player) && this.commonUI.size === 0,
     });
+    this.hotbar = new HotbarController(this.input, {
+      getInventory: () => this.player?.getComponent(INVENTORY_COMPONENT) as
+        InventoryComponent | undefined,
+      // 界面盖着时不响应：背包开着按 1 应该翻页而不是换手。
+      isActive: () => Boolean(this.joinedRoom && this.player) && this.commonUI.allowsGameInteraction,
+      send: (command) => { this.roomClient.sendInventoryCommand(command); },
+      setProgress: (progress) => this.hotbarBar.setProgress(progress),
+    });
+    this.container = new ContainerController(this.containerPage, {
+      getInventory: () => this.player?.getComponent(INVENTORY_COMPONENT) as
+        InventoryComponent | undefined,
+      getContainer: (actorId) => this.world.getContainer?.(actorId),
+      findOpenContainerActorId: () => this.world.findOpenContainerActorId?.(),
+      isOpen: () => this.commonUI.top === this.containerPage,
+      setOpen: (open) => {
+        if (open) this.commonUI.push(this.containerPage);
+        else this.commonUI.pop(this.containerPage);
+      },
+      send: (command) => { this.roomClient.sendInventoryCommand(command); },
+    });
+    this.containerPage.onRequestClose(() => this.container.requestClose());
+    // 点一下快捷栏那一格 = 切到它；点一下背包里那件东西 = 放上快捷栏并握住。
+    // 两条都只发意图，握没握上以下一帧快照为准。
+    // 快捷栏挂在 HUD 层而不是 CommonUI 栈里：它在游戏进行中一直可见可点，
+    // 不参与页面压栈，也不该被背包盖住。
+    document.getElementById('hotbar-root')?.append(this.hotbarBar.element);
+    this.hotbarBar.onSelect((slotIndex) => {
+      this.roomClient.sendInventoryCommand({ kind: 'select', slotIndex });
+    });
+    this.inventoryPage.onHold((itemType) => {
+      this.roomClient.sendInventoryCommand({ kind: 'hold', itemType });
+    });
     this.controls.onModeChange((mode) => this.hud.setControlMode(mode));
-    this.input.onActiveDeviceChanged((deviceKind) => this.hud.setInputDevice(deviceKind));
 
     this.commonUI.onStackChange(() => {
       const allowsGameInteraction = this.commonUI.allowsGameInteraction;
@@ -288,9 +347,29 @@ export class GrasslandScene extends Scene {
     this.slimeSurfaceDrag?.update();
     // 「sim」= 第 2 步要搬进 Sim Worker 的那一半：本地预测与远端插值。
     frameTimeline.measure('sim-player', () => {
+      const localPlayerId = this.joinedRoom?.player.id;
+      const states = localPlayerId ? this.snapshots.sample() : [];
+      // 自己也可能正被别人咬着。那份形变由服务端按两边位姿推出来，本地不预测，
+      // 所以和远端玩家走同一条路：读快照，写参数段，重放在渲染侧。
+      const own = states.find((state) => state.id === localPlayerId);
+      this.localPlayerBiting = own?.bitingPlayerId !== undefined;
+      this.player?.setReplicatedSlimeDrag(own?.slimeDrag);
+      // 被咬住的尖不过网络：快照里只有「谁咬着谁」，两边的位置又都是权威的，
+      // 所以这里按**这一帧插值后的**位置当场算，尖因此始终贴着那张嘴。
+      collectBiters(states, this.biters);
+      if (own && this.playerArchetype) {
+        this.player?.setBiteTips(resolveBiteTips(
+          own,
+          this.biters.get(own.id),
+          this.playerArchetype,
+          this.biteTips,
+        ));
+      }
+      // 缰绳要在这一帧的预测步之前落到 characterParams 上，重放才和权威一致。
+      this.player?.setLeash(own?.leash);
       this.player?.update(deltaSeconds);
-      if (this.joinedRoom?.scene.camera.mode === 'topdown') {
-        this.remotePlayers.sync(this.snapshots.sample(), this.joinedRoom.player.id);
+      if (localPlayerId && this.joinedRoom?.scene.camera.mode === 'topdown') {
+        this.remotePlayers.sync(states, localPlayerId, this.biters);
         this.remotePlayers.update(deltaSeconds);
       } else {
         this.remotePlayers.clear();
@@ -305,14 +384,17 @@ export class GrasslandScene extends Scene {
       // 编辑模式独占 WorldInteract：同一次点击不能既改地形又去交互 Actor。
       this.terrainEdits.update(this.controls.frame);
       this.actorInteractions.reset();
+    this.hotbar.reset();
     } else {
       this.terrainEdits.update(this.controls.frame);
-      this.actorInteractions.update(this.controls.frame);
+      this.actorInteractions.update(this.controls.frame, deltaSeconds);
+      this.hotbar.update();
     }
     const playerId = this.joinedRoom?.player.id;
     this.hud.setVesselStatus(playerId ? this.world.getVesselHudState(playerId) : undefined);
     this.sceneComponents.update(deltaSeconds, elapsedSeconds);
     this.sendPlayerInput(deltaSeconds);
+    this.sendSlimeDrag(deltaSeconds);
   }
 
   public render(): void {
@@ -421,6 +503,7 @@ export class GrasslandScene extends Scene {
     this.snapshots.clear();
     this.vesselControls.reset();
     this.actorInteractions.reset();
+    this.hotbar.reset();
     // 装配归 SceneCompositionHost；渲染器只接住渲染那一半。
     this.renderer.resetEnvironment(joined.scene);
     this.composition.load(joined.scene, joined.room.worldSeed);
@@ -432,6 +515,7 @@ export class GrasslandScene extends Scene {
       throw new Error(`场景缺少玩家 Actor 原型：${joined.scene.gameplay.playerActor.archetypeId}`);
     }
     this.remotePlayers.configure(playerArchetype);
+    this.playerArchetype = playerArchetype;
     if (joined.scene.camera.mode === 'topdown') {
       this.createPlayer(
         joined.player.id,
@@ -550,9 +634,17 @@ export class GrasslandScene extends Scene {
     }
     // 背包是纯权威状态：本地这份只跟随快照，拾取成功与否由服务端说了算。
     const inventory = player.getComponent(INVENTORY_COMPONENT) as InventoryComponent | undefined;
-    if (inventory?.applySnapshot(own.inventory ?? [], own.inventoryRevision ?? inventory.revision)) {
+    if (inventory?.applySnapshot(
+      own.inventory ?? [],
+      own.inventoryRevision ?? inventory.revision,
+      own.hotbar,
+    )) {
       this.inventory.sync();
+      this.hotbarBar.setSlots(buildInventoryView(inventory).hotbar);
     }
+    // 容器界面跟随服务端的开合：走远、箱子被拆、掉线都由服务端把人移出，客户端
+    // 不各自判一遍距离，也就不会出现「服务端已经关了但界面还开着」。
+    this.container.sync();
     const pickupDrop = player.getComponent(PICKUP_DROP_COMPONENT) as PickupDropComponent | undefined;
     if (pickupDrop) {
       pickupDrop.heldActorId = own.heldActorId ?? null;
@@ -670,8 +762,11 @@ export class GrasslandScene extends Scene {
     this.snapshots.clear();
     this.vesselControls.reset();
     this.actorInteractions.reset();
+    this.hotbar.reset();
     this.remotePlayers.setRenderWorld(undefined);
     this.slimeSurfaceDrag?.dispose();
+    this.hotbar.dispose();
+    this.hotbarBar.dispose();
     this.slimeSurfaceDrag = undefined;
     if (this.player) {
       this.controls.setPlayerController(undefined);
@@ -703,5 +798,22 @@ export class GrasslandScene extends Scene {
       lastInput,
       transform: this.player.captureTransformDebugState(),
     });
+  }
+
+  /**
+   * 拖拽形变按快照频率上行：服务端只转发不重放，报得比快照还密只会白占输入
+   * 令牌桶，把真正需要重放的移动输入挤掉。拖拽期间必须持续续期，服务端才不会
+   * 按超时清掉它；松手那一刻不等节流，立刻补发一次 null，其他玩家不用等超时
+   * 就能看到史莱姆弹回去。
+   */
+  private sendSlimeDrag(deltaSeconds: number): void {
+    if (!this.slimeSurfaceDrag || !this.joinedRoom) return;
+    this.timeSinceSlimeDragSent += deltaSeconds;
+    const dragging = this.slimeSurfaceDrag.captureReplicationState(this.slimeDragState);
+    if (!dragging && !this.slimeDragReplicated) return;
+    if (dragging && this.timeSinceSlimeDragSent < SLIME_DRAG_SEND_INTERVAL_SECONDS) return;
+    if (!this.roomClient.sendSlimeDrag(dragging ? this.slimeDragState : null)) return;
+    this.timeSinceSlimeDragSent = 0;
+    this.slimeDragReplicated = dragging;
   }
 }

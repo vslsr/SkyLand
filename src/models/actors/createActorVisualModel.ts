@@ -3,6 +3,7 @@ import type { ActorRenderDefinition } from '../../scenes/data/SceneDefinition';
 import { createBuoyancyRaftModel } from '../ocean/createBuoyancyRaftModel';
 import type { ActorVisualModel } from './ActorVisualModel';
 import { createCargoCrateModel } from './createCargoCrateModel';
+import { createStorageChestModel } from './createStorageChestModel';
 import { createReefModel } from './createReefModel';
 import { createElasticMushroomModel } from './createElasticMushroomModel';
 import { createFloorPlaqueModel } from './createFloorPlaqueModel';
@@ -16,6 +17,7 @@ import { createStonePileModel } from './createStonePileModel';
 import { createWoodPileModel } from './createWoodPileModel';
 import { createWoodLogModel } from './createWoodLogModel';
 import { createPbfSlimeModel } from './createPbfSlimeModel';
+import { createLeggedSlimeModel } from './createLeggedSlimeModel';
 
 export function createActorVisualModel(
   environment: FillMaterialEnvironment,
@@ -27,8 +29,14 @@ export function createActorVisualModel(
   if (definition.model === 'line-art-pbf-slime') {
     return createPbfSlimeModel(definition);
   }
+  if (definition.model === 'line-art-legged-slime') {
+    return createLeggedSlimeModel(definition);
+  }
   if (definition.model === 'line-art-raft') {
     return createBuoyancyRaftModel(environment, definition);
+  }
+  if (definition.model === 'line-art-storage-chest') {
+    return createStorageChestModel(environment, definition);
   }
   if (definition.model === 'line-art-cargo-crate') {
     return createCargoCrateModel(environment, definition);

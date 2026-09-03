@@ -59,7 +59,7 @@ export function connectRenderWorldInWorker(
   worker.addEventListener('message', (event: MessageEvent<RenderWorkerToMain>) => {
     const message = event.data;
     if (message.kind === 'slimeSurfaceDrag') {
-      port.slimeSurfaceDragChanged(message.id, message.dragging);
+      port.slimeSurfaceDragChanged(message.report);
       return;
     }
     if (message.kind === 'generatorReady') {

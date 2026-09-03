@@ -182,11 +182,17 @@ test('两条反向通知都不进命令队列', () => {
   const queue = new RenderCommandQueue();
   const seen: string[] = [];
   queue.onGeneratorReady((kind) => seen.push(`generator:${kind}`));
-  queue.setSlimeSurfaceDragListener((id, dragging) => seen.push(`drag:${id}:${dragging}`));
+  queue.setSlimeSurfaceDragListener(
+    (report) => seen.push(`drag:${report.id}:${report.dragging}:${report.pullX}`),
+  );
 
   queue.generatorReady('wasm');
-  queue.slimeSurfaceDragChanged(toProxyId(2), true);
+  queue.slimeSurfaceDragChanged({
+    id: toProxyId(2), dragging: true,
+    contactX: 0, contactY: 0, contactZ: 0, pullX: 1.5, pullY: 0, pullZ: 0,
+  });
 
-  assert.deepEqual(seen, ['generator:wasm', 'drag:2:true']);
+  // 手势本身（六个本地坐标）也走这条回报——上报房间读的是它缓存下来的那一份。
+  assert.deepEqual(seen, ['generator:wasm', 'drag:2:true:1.5']);
   assert.equal(queue.flush(), undefined, '反向通知一条命令都不该产生');
 });

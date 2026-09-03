@@ -66,9 +66,11 @@ function start(
       transforms,
     );
     // 两条反向通知：都是只有这一侧知道的事实，走 postMessage，不进命令队列。
-    runtime.setSlimeSurfaceDragListener((id, dragging) => {
-      post({ kind: 'slimeSurfaceDrag', id, dragging });
-    });
+    // 回报里的那份逐帧复用，`postMessage` 会结构化克隆，所以摊平成一条报文。
+    runtime.setSlimeSurfaceDragListener((report) => post({
+      kind: 'slimeSurfaceDrag',
+      report: { ...report },
+    }));
     runtime.setGeneratorReadyListener((generator) => post({ kind: 'generatorReady', generator }));
     post({ kind: 'ready' });
     (self as unknown as Window).requestAnimationFrame(frame);

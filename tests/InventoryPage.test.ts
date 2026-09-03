@@ -11,12 +11,33 @@ class FakeElement extends EventTarget {
   public id = '';
   public textContent = '';
   public innerHTML = '';
+  public tabIndex = 0;
+  public type = '';
   public readonly dataset: Record<string, string> = {};
   public children: FakeElement[] = [];
   private readonly attributes = new Map<string, string>();
+  private readonly classes = new Set<string>();
 
   public constructor(public readonly tagName: string) {
     super();
+  }
+
+  /** 只实现界面真正用到的三个方法；className 与它保持同步，断言两种写法都读得到。 */
+  public readonly classList = {
+    add: (name: string) => { this.classes.add(name); this.syncClassName(); },
+    remove: (name: string) => { this.classes.delete(name); this.syncClassName(); },
+    toggle: (name: string, force?: boolean) => {
+      const next = force ?? !this.classes.has(name);
+      if (next) this.classes.add(name);
+      else this.classes.delete(name);
+      this.syncClassName();
+    },
+    contains: (name: string) => this.classes.has(name) || this.className.split(' ').includes(name),
+  };
+
+  private syncClassName(): void {
+    const base = this.className.split(' ').filter((name) => name && !this.classes.has(name));
+    this.className = [...base, ...this.classes].join(' ');
   }
 
   public append(...children: FakeElement[]): void {
@@ -160,18 +181,48 @@ test('格子带上物品分类、数量与售价，违禁品单独标记', () =>
   });
 });
 
-test('不占货位的物品单独分区，没有时整段收起来', () => {
+test('不占货位的物品和别的物品排在一起，靠标记区分而不是靠分区', () => {
   withFakeDocument(() => {
     const page = new InventoryPage();
-    page.setInventory(inventoryView(4, [['wood', 3]]));
-    const pooledGrid = cellsOf(page, 'inventory__grid--pooled')[0];
-    assert.equal(pooledGrid.children.length, 0);
-
     page.setInventory(inventoryView(4, [['wood', 3], ['light-ammo', 60]]));
-    assert.equal(pooledGrid.children.length, 1);
-    assert.equal(pooledGrid.children[0].dataset.itemType, 'light-ammo');
-    // 弹药不占货位，所以随身格子还是「一格有货 + 三格空」。
-    assert.equal(cellsOf(page, 'inventory__cell').length, 4 + 1);
+
+    // 分类页签接管了分组，所以不再有第二个网格把同一堆货画两遍。
+    assert.equal(cellsOf(page, 'inventory__grid--pooled')[0].children.length, 0);
+    // 全部页：木材 + 弹药 + 三个空货位。弹药不吃格数，空格仍然是三个。
+    assert.equal(cellsOf(page, 'inventory__cell').length, 2 + 3);
+
+    const ammo = cellsOf(page, 'inventory__cell')
+      .find((cell) => cell.dataset.itemType === 'light-ammo');
+    assert.ok(ammo, '弹药出现在全部页里');
+    assert.ok(ammo.text.includes('不占格'), '靠格子上的标记说明它不吃货位');
+  });
+});
+
+test('分类页签第一页是全部，空分类不出现', () => {
+  withFakeDocument(() => {
+    const page = new InventoryPage();
+    page.setInventory(inventoryView(6, [['wood', 3], ['light-ammo', 60]]));
+    const tabs = cellsOf(page, 'inventory__tab');
+    assert.deepEqual(
+      tabs.map((tab) => tab.text.replace(/\s*\d+$/, '')),
+      ['全部', '材料', '弹药'],
+      '只有身上真有的分类才给页签',
+    );
+    assert.ok(tabs[0].className.includes('is-active'), '默认停在全部页');
+  });
+});
+
+test('可手持的格子点一下就交出物品种类，拿不到手上的不响应', () => {
+  withFakeDocument(() => {
+    const page = new InventoryPage();
+    const held: string[] = [];
+    page.onHold((itemType) => held.push(itemType));
+    page.setInventory(inventoryView(6, [['wood', 3], ['light-ammo', 60]]));
+
+    for (const cell of cellsOf(page, 'inventory__cell')) {
+      cell.dispatchEvent(new Event('click'));
+    }
+    assert.deepEqual(held, ['wood'], '弹药拿不到手上，点了不该有反应');
   });
 });
 

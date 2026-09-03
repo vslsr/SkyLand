@@ -30,6 +30,22 @@ import {
   type SlimeMotionParams,
 } from '../render/RenderSlimeMotion';
 import {
+  SLIME_DRAG_AT_REST,
+  writeSlimeDragParams,
+  type SlimeDragParams,
+} from '../render/RenderSlimeDrag';
+import {
+  createSlimeBiteParams,
+  writeSlimeBiteParams,
+  type SlimeBiteParams,
+} from '../render/RenderSlimeBite';
+import {
+  SLIME_GROUND_PROBE_AT_REST,
+  resolveSlimeLegGroundProbeLayout,
+  writeSlimeGroundProbeParams,
+} from '../render/RenderSlimeLegs';
+import { LegGroundProbeComponent } from '../actors/components/LegGroundProbeComponent';
+import {
   isPlayerRenderDefinition,
   resolvePlayerVisualShape,
   type PlayerVisualShape,
@@ -41,7 +57,11 @@ import {
   createPlayerMovementAttributes,
 } from '../../shared/abilities/playerMovementEffects.mjs';
 import type { PhysicsWorld } from '../../shared/physics/PhysicsWorld.mjs';
-import type { PlayerInputStep } from '../network/protocol';
+import type {
+  PlayerInputStep,
+  SnapshotLeash,
+  SnapshotSlimeDrag,
+} from '../network/protocol';
 import {
   MAXIMUM_PENDING_INPUT_STEPS,
   SIMULATION_STEP_SECONDS,
@@ -102,9 +122,16 @@ export class PlayerEntity extends Actor {
     rotation: { y: 0 },
   };
   private readonly motion: SlimeMotionParams = { ...SLIME_MOTION_AT_REST };
+  /** 服务端推给自己的形变；今天只有「被别人咬住」一种。 */
+  private readonly replicatedDrag: SlimeDragParams = { ...SLIME_DRAG_AT_REST };
+
+  /** 自己正被谁咬着捏出来的那些尖。由 `GrasslandScene` 按两边位置当场算。 */
+  private readonly biteTips: SlimeBiteParams = createSlimeBiteParams();
   private readonly visual: PlayerVisualShape;
   private readonly reconciler = new PlayerReconciler();
   private readonly grassDisplacement: GrassDisplacementComponent;
+  /** 只有长腿外壳才有：每帧采身体脚下的五个点，供渲染侧的步态落脚。 */
+  private readonly legGroundProbe?: LegGroundProbeComponent;
   private readonly gameAbility: GameAbilityComponent;
   private readonly waterMovementEffect: WaterMovementEffectController;
   private readonly jumpAbility: PlayerJumpComponent;
@@ -167,6 +194,12 @@ export class PlayerEntity extends Actor {
     this.isWaterAt = grassInteraction.isWaterAt?.bind(grassInteraction);
     const samplePlayerHeight = sampleBasePlayerHeight;
     const raycastGround = grassInteraction.raycastGround?.bind(grassInteraction);
+    if (render.model === 'line-art-legged-slime') {
+      this.legGroundProbe = this.addComponent(new LegGroundProbeComponent(
+        sampleGroundHeight,
+        resolveSlimeLegGroundProbeLayout(render),
+      )) as LegGroundProbeComponent;
+    }
     this.transform.position.x = spawn.x;
     this.transform.position.y = samplePlayerHeight?.(spawn.x, spawn.z) ?? 0;
     this.transform.position.z = spawn.z;
@@ -239,6 +272,30 @@ export class PlayerEntity extends Actor {
   /** 尚未被服务端确认的输入；上行包会重复携带它们来抵抗丢包。 */
   public get unacknowledgedInputSteps(): readonly PlayerInputStep[] {
     return this.pendingInputSteps;
+  }
+
+  /**
+   * 服务端推给自己的形变——今天只有「被别人咬住」一种。自己的鼠标拖拽不走这里，
+   * 而且渲染侧规定一块外壳只有一个所有者：自己正拖着时，复制过来的会被忽略。
+   */
+  /** 被外力拴住时的缰绳，转交本地预测；见 TopDownController.setLeash。 */
+  public setLeash(leash: SnapshotLeash | undefined): void {
+    this.controller.setLeash(leash);
+  }
+
+  public setReplicatedSlimeDrag(drag: SnapshotSlimeDrag | undefined): void {
+    this.replicatedDrag.revision = drag?.revision ?? 0;
+    this.replicatedDrag.contactX = drag?.contactX ?? 0;
+    this.replicatedDrag.contactY = drag?.contactY ?? 0;
+    this.replicatedDrag.contactZ = drag?.contactZ ?? 0;
+    this.replicatedDrag.pullX = drag?.pullX ?? 0;
+    this.replicatedDrag.pullY = drag?.pullY ?? 0;
+    this.replicatedDrag.pullZ = drag?.pullZ ?? 0;
+  }
+
+  /** 没人咬着就传零向量：不驱动这项表现的槽位每帧写 0。 */
+  public setBiteTips(tips: ArrayLike<number>): void {
+    this.biteTips.set(tips);
   }
 
   public captureTransformDebugState(): PlayerTransformDebugState {
@@ -362,6 +419,32 @@ export class PlayerEntity extends Actor {
       this.transform.rotation.y,
     );
     writeSlimeMotionParams(this.transforms, this.proxyId, this.motion);
+    // 本地玩家的拖拽整个在渲染侧完成，不经过这条复制通道；但槽位仍要每帧写，
+    // 否则回收来的槽位会带着上一位玩家的残留把自己的外壳拉出去。
+    // 自己的鼠标拖拽整个在渲染侧完成，不经过这条复制通道；走这里的只有被别人
+    // 咬住那一份。没有的时候也要每帧写，否则回收来的槽位会带着上一位玩家的
+    // 残留把自己的外壳拉出去。
+    writeSlimeDragParams(this.transforms, this.proxyId, this.replicatedDrag);
+    writeSlimeBiteParams(this.transforms, this.proxyId, this.biteTips);
+    this.publishGroundProbe();
+  }
+
+  /**
+   * 长腿外壳脚下那一小片地面。没有腿的外壳也要每帧写静止值——槽位会被回收，
+   * 上一位玩家留下的采样窗口会让新 proxy 的腿一出生就踩在别处的地面上。
+   */
+  private publishGroundProbe(): void {
+    const legs = this.legGroundProbe;
+    if (!legs) {
+      writeSlimeGroundProbeParams(
+        this.transforms,
+        this.proxyId,
+        SLIME_GROUND_PROBE_AT_REST,
+      );
+      return;
+    }
+    legs.refresh(this.transform.position.x, this.transform.position.y, this.transform.position.z);
+    writeSlimeGroundProbeParams(this.transforms, this.proxyId, legs.probe);
   }
 
   public override dispose(): void {

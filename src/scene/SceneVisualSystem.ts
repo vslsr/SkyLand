@@ -1,3 +1,4 @@
+import type { ContainerModelLike } from '../inventory/index';
 import type * as THREE from 'three';
 import type { Actor } from '../../shared/actor/Actor.mjs';
 import type { CollisionWorld } from '../../shared/collision/index.mjs';
@@ -77,8 +78,12 @@ export interface ActorSnapshotTarget {
   ): ActorInteractionCandidate | undefined;
   /** 这名玩家正拉着或叼着的那一株；它不靠就近搜索，交互键要能直接指向它。 */
   findHeldInteractableActor(playerId: string): ActorInteractionCandidate | undefined;
+  /** 这个 Actor 上的容器状态；界面据此画箱内内容。 */
+  getContainer?(actorId: string): ContainerModelLike | undefined;
+  /** 服务端认为我正开着哪个容器；开合不是本地状态，见 ContainerController。 */
+  findOpenContainerActorId?(): string | undefined;
   setHoveredActorId(actorId?: string): void;
-  setInteractionMarkerActorId(actorId?: string, inputLabel?: string): void;
+  setInteractionMarkerActorId(actorId?: string, inputLabel?: string, opacity?: number): void;
   getVesselHudState(playerId: string): VesselHudState | undefined;
   /** 把 Actor 当前的碰撞盒登记进场景碰撞世界。查询前调用，每帧最多兑现一次。 */
   refreshColliders(): void;
@@ -89,11 +94,13 @@ export interface ActorSnapshotTarget {
 export interface ActorInteractionCandidate {
   actorId: string;
   label: string;
-  action: 'cargo-toggle' | 'mushroom-bite' | 'pickup-stack' | 'harvest-prop';
+  action: 'cargo-toggle' | 'mushroom-bite' | 'pickup-stack' | 'harvest-prop' | 'container-open';
   carrierActorId: string | null;
   holderPlayerId: string | null;
   pickupHolderActorId: string | null;
   quantity?: number;
+  /** 这个容器我开着没有；开着时交互键说的是「关上」。 */
+  containerOpen?: boolean;
 }
 
 export interface VesselHudState {

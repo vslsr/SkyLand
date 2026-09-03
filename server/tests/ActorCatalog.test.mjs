@@ -247,6 +247,46 @@ test('ActorCatalog 拒绝缺少温度的可燃物和倒置的点燃阈值', asyn
   await assert.rejects(loadSingleActor(reversedThreshold), /必须小于 ignitionTemperature/);
 });
 
+test('ActorCatalog 保留软体形变与咬合参数，并拒绝越界值', async () => {
+  const catalog = await ActorCatalog.load();
+  const pbfSlime = catalog.require('pbf-slime');
+  assert.deepEqual(pbfSlime.components.softBodyDeformation, {
+    breakDistance: 3.0,
+    selfReportTimeoutMs: 600,
+  });
+  assert.deepEqual(pbfSlime.components.bite, {
+    range: 1.8,
+    facingDot: 0.15,
+    gripDepth: 0.35,
+    leashSlack: 0.2,
+    leashStiffness: 90,
+    leashDamping: 14,
+    leashCarry: 40,
+  });
+
+  // 刚度乘固定步长超过 2 就会自激振荡，目录必须挡在这条线之前。
+  const springy = structuredClone(pbfSlime);
+  springy.id = 'probe-leash';
+  springy.components.bite.leashStiffness = 200;
+  await assert.rejects(loadSingleActor(springy), /leashStiffness 数值范围无效/);
+
+  const noBreak = structuredClone(pbfSlime);
+  noBreak.id = 'probe-soft-body';
+  noBreak.components.softBodyDeformation.breakDistance = 0;
+  await assert.rejects(loadSingleActor(noBreak), /breakDistance 数值范围无效/);
+
+  const wideFacing = structuredClone(pbfSlime);
+  wideFacing.id = 'probe-bite';
+  wideFacing.components.bite.facingDot = 1.5;
+  await assert.rejects(loadSingleActor(wideFacing), /facingDot 数值范围无效/);
+
+  // 捏起来的那块皮比外壳还深就没有意义了：过了求解器的可见量程，每次咬都长一样。
+  const deepGrip = structuredClone(pbfSlime);
+  deepGrip.id = 'probe-grip';
+  deepGrip.components.bite.gripDepth = 5;
+  await assert.rejects(loadSingleActor(deepGrip), /gripDepth 数值范围无效/);
+});
+
 test('ActorCatalog 拒绝未知原型', async () => {
   const catalog = await ActorCatalog.load();
   assert.throws(() => catalog.require('missing'), /未知 Actor 原型/);
@@ -290,4 +330,66 @@ test('ActorCatalog 拒绝越界的玩家台阶高度和错误的玩家渲染组�
   outsideSkin.id = 'probe-hybrid-slime';
   outsideSkin.components.render.collisionHeight = outsideSkin.components.render.radius;
   await assert.rejects(loadSingleActor(outsideSkin), /collisionHeight 必须低于外部蒙皮顶部/);
+});
+
+test('ActorCatalog 净化骨骼腿史莱姆并要求腿够得到站姿落脚点', async () => {
+  const catalog = await ActorCatalog.load();
+  const legged = catalog.require('legged-slime');
+  assert.equal(legged.components.render.model, 'line-art-legged-slime');
+  assert.equal(legged.components.render.legCount, 2);
+  assert.equal(legged.components.render.hipHeight, 0.66);
+  assert.equal(legged.components.render.legColor, '#141210');
+  assert.equal(legged.components.render.footShadowColor, '#6f6f6f');
+  // 长腿外壳也是一种玩家外壳，所以它必须带 playerMovement。
+  assert.ok(legged.components.playerMovement);
+
+  const tooShort = structuredClone(legged);
+  tooShort.id = 'probe-legged-slime';
+  tooShort.components.render.thighLength = 0.3;
+  tooShort.components.render.shinLength = 0.3;
+  await assert.rejects(loadSingleActor(tooShort), /必须够到站姿落脚点/);
+
+  const fractionalLegs = structuredClone(legged);
+  fractionalLegs.id = 'probe-legged-slime';
+  fractionalLegs.components.render.legCount = 2.5;
+  await assert.rejects(loadSingleActor(fractionalLegs), /legCount 必须是整数/);
+
+  // 同一个外壳两头都能用：带 playerMovement 是玩家，不带就是服务端推着走的生物。
+  const npcShell = structuredClone(legged);
+  npcShell.id = 'probe-legged-slime';
+  delete npcShell.components.playerMovement;
+  delete npcShell.components.playerJump;
+  delete npcShell.components.pickupDrop;
+  delete npcShell.components.inventory;
+  const npcCatalog = await loadSingleActor(npcShell);
+  assert.equal(npcCatalog.require('probe-legged-slime').components.playerMovement, undefined);
+});
+
+test('ActorCatalog 净化巡逻路线，并拒绝与玩家移动并存', async () => {
+  const catalog = await ActorCatalog.load();
+  const walker = catalog.require('legged-slime-walker');
+  assert.equal(walker.components.patrolPath.speed, 1.6);
+  assert.equal(walker.components.patrolPath.waitSeconds, 0.6);
+  assert.equal(walker.components.patrolPath.mode, 'ping-pong');
+  assert.deepEqual(walker.components.patrolPath.waypoints, [[0, 0, -4], [0, 0, 4]]);
+
+  // 巡逻是服务端推着走，玩家移动是玩家自己走：同时存在就有两个人抢方向盘。
+  const controlled = structuredClone(walker);
+  controlled.id = 'probe-walker';
+  controlled.components.playerMovement = {
+    walkSpeed: 3.2,
+    sprintMultiplier: 1.65,
+    maximumStepHeight: 0.2,
+  };
+  await assert.rejects(loadSingleActor(controlled), /不能与 playerMovement 并存/);
+
+  const stuck = structuredClone(walker);
+  stuck.id = 'probe-walker';
+  stuck.components.patrolPath.waypoints = [[0, 0, 2], [0, 0, 2]];
+  await assert.rejects(loadSingleActor(stuck), /至少要有两个不重合的路点/);
+
+  const single = structuredClone(walker);
+  single.id = 'probe-walker';
+  single.components.patrolPath.waypoints = [[0, 0, 2]];
+  await assert.rejects(loadSingleActor(single), /必须是 2 到 16 个路点/);
 });

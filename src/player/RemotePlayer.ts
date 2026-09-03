@@ -16,6 +16,22 @@ import {
   type SlimeMotionParams,
 } from '../render/RenderSlimeMotion';
 import {
+  SLIME_DRAG_AT_REST,
+  writeSlimeDragParams,
+  type SlimeDragParams,
+} from '../render/RenderSlimeDrag';
+import {
+  createSlimeBiteParams,
+  writeSlimeBiteParams,
+  type SlimeBiteParams,
+} from '../render/RenderSlimeBite';
+import {
+  SLIME_GROUND_PROBE_AT_REST,
+  resolveSlimeLegGroundProbeLayout,
+  writeSlimeGroundProbeParams,
+} from '../render/RenderSlimeLegs';
+import { LegGroundProbeComponent } from '../actors/components/LegGroundProbeComponent';
+import {
   isPlayerRenderDefinition,
   resolvePlayerVisualShape,
   type PlayerVisualShape,
@@ -32,6 +48,9 @@ export class RemotePlayer extends Actor {
   /** 玩法侧的 f64 权威副本；渲染侧那份是镜像。和本地玩家同一套结构。 */
   private readonly transform = { x: 0, y: 0, z: 0, yaw: 0 };
   private readonly motion: SlimeMotionParams = { ...SLIME_MOTION_AT_REST };
+  /** 快照里那一次拖拽；玩法侧只是把它从网络搬到参数段，重放在渲染侧。 */
+  private readonly drag: SlimeDragParams = { ...SLIME_DRAG_AT_REST };
+  private readonly biteTips: SlimeBiteParams = createSlimeBiteParams();
   private readonly visual: PlayerVisualShape;
   private readonly buoyancy?: BuoyancyComponent;
   private speed = 0;
@@ -39,6 +58,8 @@ export class RemotePlayer extends Actor {
   private grounded = true;
 
   private readonly grassDisplacement: GrassDisplacementComponent;
+  /** 只有长腿外壳才有；和本地玩家同一套采样窗口。 */
+  private readonly legGroundProbe?: LegGroundProbeComponent;
 
   public constructor(
     state: InterpolatedPlayerState,
@@ -74,6 +95,12 @@ export class RemotePlayer extends Actor {
       paletteSeed: state.id,
       walkSpeed: movement.walkSpeed,
     });
+    if (render.model === 'line-art-legged-slime') {
+      this.legGroundProbe = this.addComponent(new LegGroundProbeComponent(
+        grassInteraction.sampleGroundHeight?.bind(grassInteraction),
+        resolveSlimeLegGroundProbeLayout(render),
+      )) as LegGroundProbeComponent;
+    }
     this.transform.x = state.x;
     this.transform.y = state.y ?? this.sampleHeight(state.x, state.z);
     this.transform.z = state.z;
@@ -112,6 +139,19 @@ export class RemotePlayer extends Actor {
     this.speed = state.speed;
     this.verticalVelocity = state.verticalVelocity ?? 0;
     this.grounded = state.grounded ?? (state.y === undefined);
+    // 松手后快照不再带这个字段，revision 回到 0 就是「没有人在拖」。
+    this.drag.revision = state.slimeDrag?.revision ?? 0;
+    this.drag.contactX = state.slimeDrag?.contactX ?? 0;
+    this.drag.contactY = state.slimeDrag?.contactY ?? 0;
+    this.drag.contactZ = state.slimeDrag?.contactZ ?? 0;
+    this.drag.pullX = state.slimeDrag?.pullX ?? 0;
+    this.drag.pullY = state.slimeDrag?.pullY ?? 0;
+    this.drag.pullZ = state.slimeDrag?.pullZ ?? 0;
+  }
+
+  /** 正被谁咬着捏出来的那些尖，由 `RemotePlayerGroup` 按两边位置当场算。 */
+  public setBiteTips(tips: ArrayLike<number>): void {
+    this.biteTips.set(tips);
   }
 
   public update(deltaSeconds: number): void {
@@ -135,6 +175,19 @@ export class RemotePlayer extends Actor {
       this.transform.yaw,
     );
     writeSlimeMotionParams(this.transforms, this.proxyId, this.motion);
+    writeSlimeDragParams(this.transforms, this.proxyId, this.drag);
+    writeSlimeBiteParams(this.transforms, this.proxyId, this.biteTips);
+    const legs = this.legGroundProbe;
+    if (legs) {
+      legs.refresh(this.transform.x, this.transform.y, this.transform.z);
+    }
+    // 没有腿的外壳也要每帧写静止值：槽位会被回收，残留的采样窗口会让下一位
+    // 玩家的腿踩在别处的地面上。
+    writeSlimeGroundProbeParams(
+      this.transforms,
+      this.proxyId,
+      legs ? legs.probe : SLIME_GROUND_PROBE_AT_REST,
+    );
   }
 
   private sampleHeight(x: number, z: number): number {

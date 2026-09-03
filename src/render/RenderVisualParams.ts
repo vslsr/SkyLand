@@ -1,3 +1,5 @@
+import { MAX_SOFT_BODY_HOLDERS } from '../../shared/softBodyDeformation.mjs';
+
 /**
  * 跨边界的定长表现参数（引擎迁移路线图 第 1.5 步）。
  *
@@ -82,5 +84,63 @@ export const PARAM_DROP_ROTATION_Y = 21;
 export const PARAM_DROP_ROTATION_Z = 22;
 export const PARAM_DROP_ROTATION_W = 23;
 
+/**
+ * 从快照复制过来的拖拽形变（见 `RenderSlimeDrag.ts`）。本地玩家的拖拽不走这里：
+ * 指针、相机和外壳都在渲染侧，那条路径整个在渲染世界内部。
+ *
+ * **revision 为 0 表示没有拖拽。** 和 AIRBORNE 同一个道理：「不驱动这项表现的
+ * 槽位每帧写 0」是参数段的通用规则，所以静止值必须是 0，而服务端的抓取计数从 1 起。
+ */
+export const PARAM_SLIME_DRAG_REVISION = 24;
+export const PARAM_SLIME_DRAG_CONTACT_X = 25;
+export const PARAM_SLIME_DRAG_CONTACT_Y = 26;
+export const PARAM_SLIME_DRAG_CONTACT_Z = 27;
+export const PARAM_SLIME_DRAG_PULL_X = 28;
+export const PARAM_SLIME_DRAG_PULL_Y = 29;
+export const PARAM_SLIME_DRAG_PULL_Z = 30;
+
+/**
+ * 被咬住时的那些突起向量：**每张嘴一个**，方向是「被咬者身体中心 → 那张嘴」，
+ * 长度是这个尖有多长。求解器把它们各自长成一个锥，位移相加。
+ * 外壳坐标（Actor 原点 + 世界轴向），和求解器的顶点同一套。
+ *
+ * **它不过网络。** 快照里只有「谁咬着谁」这一个离散状态（`bitingPlayerId`），
+ * 两边的位置本来就是权威复制过来的，所以每个客户端自己按位置算这三个数：算的是
+ * **当前渲染帧**的插值位置，尖因此始终贴着嘴，而不是慢一个快照。
+ */
+export const PARAM_SLIME_BITE_TIPS = 31;
+/** 每张嘴一个尖 × 三个分量。零向量的槽位表示那一格没人咬。 */
+export const PARAM_SLIME_BITE_TIP_COUNT = MAX_SOFT_BODY_HOLDERS;
+export const PARAM_SLIME_BITE_TIP_STRIDE = 3;
+
+/**
+ * 腿部落脚用的地面采样窗口（见 `RenderSlimeLegs.ts`）。
+ *
+ * 过边界的是身体脚下那一小片地面，不是每只脚的高度：脚落在哪里由渲染侧的步态
+ * 决定，玩法侧要按脚采样就得先回读渲染世界。窗口是常数大小的五个探针，
+ * 所以每个 Actor 每帧的采样次数与世界尺寸无关。
+ *
+ * **PROBE_RADIUS 为 0 表示没有地面采样。** 和 AIRBORNE 同一个道理：不驱动这项
+ * 表现的槽位每帧写 0，所以静止值必须是「没有」——否则那五个 0 会被当成
+ * 「地面在世界 Y=0」，让远处的腿一齐插进虚空。
+ */
+export const PARAM_SLIME_GROUND_CENTER_Y = 40;
+export const PARAM_SLIME_GROUND_EAST_Y = 41;
+export const PARAM_SLIME_GROUND_WEST_Y = 42;
+export const PARAM_SLIME_GROUND_SOUTH_Y = 43;
+export const PARAM_SLIME_GROUND_NORTH_Y = 44;
+export const PARAM_SLIME_GROUND_PROBE_RADIUS = 45;
+
+/**
+ * 容器盖子的目标开合度：**1 表示有人正开着它**。
+ *
+ * 过边界的是目标而不是当前角度：开盖的那段弹簧回弹属于表现，让它在渲染侧积分，
+ * 玩法侧就不必每帧写一个连续量，掉帧或快照抖动也不会把盖子拽回去。
+ *
+ * 目标取的是「有几个人开着」而不是「我开着没有」：别人翻这个箱子时，我也该看见
+ * 盖子是掀起来的。
+ */
+export const PARAM_CONTAINER_OPEN_TARGET = 46;
+
 /** 每个 proxy 槽位的参数个数。新增参数就在上面加常量并把这里加一。 */
-export const RENDER_VISUAL_PARAM_COUNT = 24;
+export const RENDER_VISUAL_PARAM_COUNT = 47;

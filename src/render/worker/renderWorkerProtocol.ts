@@ -1,4 +1,4 @@
-import type { ProxyId } from '../RenderScene';
+import type { SlimeSurfaceDragReport } from '../RenderScene';
 import type { RenderCommandBatch } from './renderCommands';
 
 /**
@@ -31,7 +31,7 @@ export type RenderWorkerToMain =
   | { readonly kind: 'ready' }
   | { readonly kind: 'failed'; readonly message: string }
   /** 蒙皮拖拽抓住了没有。判据只有渲染侧有，所以它必须自己开口。 */
-  | { readonly kind: 'slimeSurfaceDrag'; readonly id: ProxyId; readonly dragging: boolean }
+  | { readonly kind: 'slimeSurfaceDrag'; readonly report: SlimeSurfaceDragReport }
   /**
    * chunk 生成后端（WASM 还是 JS）就位了。
    *

@@ -47,6 +47,8 @@ import {
 } from '../src/actors/components/FireVisualComponent';
 import type { SnapshotActor } from '../src/network/protocol';
 import { RenderTransformBuffer } from '../src/render/RenderTransformBuffer';
+import { SLIME_DRAG_AT_REST, writeSlimeDragParams } from '../src/render/RenderSlimeDrag';
+import { createSlimeBiteParams, writeSlimeBiteParams } from '../src/render/RenderSlimeBite';
 import { resolvePlayerVisualShape } from '../src/player/playerVisualShape';
 import { RenderProxyTable } from '../src/render/RenderProxyTable';
 import { ThreeRenderScene } from '../src/render/three/ThreeRenderScene';
@@ -1147,6 +1149,280 @@ test('无模型 GuidePath Actor 只在快照存在时创建客户端 Three.js �
   system.dispose();
 });
 
+test('咬住按一个向量把静止外形拔出一个尖：连续、对称、不需要命中点', () => {
+  const render = pbfSlimeArchetype.components.render;
+  assert.ok(render?.model === 'line-art-pbf-slime');
+  const scene = new ThreeRenderScene(new THREE.Group(), RENDER_ENVIRONMENT);
+  const transforms = new RenderTransformBuffer(4);
+  const proxyId = new RenderProxyTable(scene).acquire();
+  scene.createPlayerProxy(proxyId, { name: 'bitten-player', render, walkSpeed: 3.2 });
+  const slime = scene.resolveSlimeVisual(proxyId)!;
+  const bite = createSlimeBiteParams();
+  const step = (frames: number, from = 0): void => {
+    for (let frame = 0; frame < frames; frame += 1) {
+      writeSlimeBiteParams(transforms, proxyId, bite);
+      transforms.publish();
+      scene.submitTransforms(transforms);
+      scene.updateVisuals(transforms, 1 / 60, (from + frame) / 60);
+    }
+  };
+  step(90);
+  const rest = Float32Array.from(slime.simulation.positions);
+
+  // 向量：方向是「身体中心 → 牙」，长度是尖有多长。没有命中点，也没有抓取计数。
+  const amount = 0.6;
+  bite[2] = amount;
+  step(180, 90);
+
+  const bitten = slime.simulation.positions;
+  const directions = slime.rig.surfaceDirections;
+  let tipOffset = 0;
+  let tipAlignment = -Infinity;
+  for (let offset = 0; offset < directions.length; offset += 3) {
+    if (directions[offset + 2] <= tipAlignment) continue;
+    tipAlignment = directions[offset + 2];
+    tipOffset = offset;
+  }
+  const tip = bitten[tipOffset + 2] - rest[tipOffset + 2];
+  assert.ok(tip > amount * 0.7, `轴向那一头要真的被拔出去，实际 ${tip} / ${amount}`);
+
+  // 侧面必须是连续的：位移随「顶点方向与轴的夹角」单调下降，而不是某一圈突然归零。
+  // 之前那版按一块皮做加权位移，影响圈边缘那一圈就是画面上那道裂缝。
+  const rings = new Map<number, { total: number; count: number }>();
+  let outsideMaximum = 0;
+  for (let offset = 0; offset < directions.length; offset += 3) {
+    const alignment = directions[offset + 2];
+    const moved = Math.hypot(
+      bitten[offset] - rest[offset],
+      bitten[offset + 1] - rest[offset + 1],
+      bitten[offset + 2] - rest[offset + 2],
+    );
+    if (alignment < 0.2) outsideMaximum = Math.max(outsideMaximum, moved);
+    const bucket = Math.round(alignment * 10) / 10;
+    const ring = rings.get(bucket) ?? { total: 0, count: 0 };
+    ring.total += moved;
+    ring.count += 1;
+    rings.set(bucket, ring);
+  }
+  const profile = [...rings.entries()]
+    .filter(([alignment]) => alignment >= 0.3)
+    .sort((left, right) => right[0] - left[0])
+    .map(([alignment, ring]) => [alignment, ring.total / ring.count] as const);
+  assert.ok(profile.length >= 4, '锥里要有好几圈顶点，只有一圈动的是一根针');
+  for (let index = 1; index < profile.length; index += 1) {
+    assert.ok(
+      profile[index][1] <= profile[index - 1][1] + 1e-3,
+      `位移必须随夹角单调下降，实际 ${JSON.stringify(profile)}`,
+    );
+  }
+  assert.ok(
+    outsideMaximum < tip * 0.25,
+    `背对轴的那一半不该跟着走，实际 ${outsideMaximum}`,
+  );
+
+  // 松口：外形自己收回去，不需要额外的回弹路径。
+  bite[2] = 0;
+  step(240, 270);
+  const released = Math.abs(
+    slime.simulation.positions[tipOffset + 2] - rest[tipOffset + 2],
+  );
+  assert.ok(released < tip * 0.2, `松口后应回到静止外形，实际 ${released}`);
+  scene.dispose();
+});
+
+test('几张嘴一起咬：每张一个向量，位移相加，两个尖同时在', () => {
+  const render = pbfSlimeArchetype.components.render;
+  assert.ok(render?.model === 'line-art-pbf-slime');
+  const scene = new ThreeRenderScene(new THREE.Group(), RENDER_ENVIRONMENT);
+  const transforms = new RenderTransformBuffer(4);
+  const proxyId = new RenderProxyTable(scene).acquire();
+  scene.createPlayerProxy(proxyId, { name: 'double-bitten', render, walkSpeed: 3.2 });
+  const slime = scene.resolveSlimeVisual(proxyId)!;
+  const bite = createSlimeBiteParams();
+  const step = (frames: number, from = 0): void => {
+    for (let frame = 0; frame < frames; frame += 1) {
+      writeSlimeBiteParams(transforms, proxyId, bite);
+      transforms.publish();
+      scene.submitTransforms(transforms);
+      scene.updateVisuals(transforms, 1 / 60, (from + frame) / 60);
+    }
+  };
+  step(90);
+  const rest = Float32Array.from(slime.simulation.positions);
+
+  const directions = slime.rig.surfaceDirections;
+  const extremeAlong = (axis: readonly [number, number, number]): number => {
+    let best = 0;
+    let bestAlignment = -Infinity;
+    for (let offset = 0; offset < directions.length; offset += 3) {
+      const alignment = directions[offset] * axis[0]
+        + directions[offset + 1] * axis[1]
+        + directions[offset + 2] * axis[2];
+      if (alignment <= bestAlignment) continue;
+      bestAlignment = alignment;
+      best = offset;
+    }
+    return best;
+  };
+  const frontOffset = extremeAlong([0, 0, 1]);
+  const sideOffset = extremeAlong([1, 0, 0]);
+
+  // 先只有一张嘴：量一个尖的长度作为基准。
+  bite[2] = 0.6;
+  step(180, 90);
+  const single = slime.simulation.positions[frontOffset + 2] - rest[frontOffset + 2];
+  assert.ok(single > 0.4, `单张嘴要先拔出一个尖，实际 ${single}`);
+
+  // 第二张嘴从 +X 咬上来：两个尖同时在，各自朝各自那张嘴。
+  bite[3] = 0.6;
+  step(180, 270);
+  const bitten = slime.simulation.positions;
+  const front = bitten[frontOffset + 2] - rest[frontOffset + 2];
+  const side = bitten[sideOffset] - rest[sideOffset];
+  assert.ok(
+    Math.abs(front - single) < single * 0.35,
+    `第一个尖不该被第二张嘴吃掉，实际 ${front} vs ${single}`,
+  );
+  assert.ok(side > 0.4, `第二个尖也要长出来，实际 ${side}`);
+
+  // 松开第二张：它自己收回去，第一个尖还在。
+  bite[3] = 0;
+  step(240, 450);
+  const released = slime.simulation.positions[sideOffset] - rest[sideOffset];
+  assert.ok(released < side * 0.25, `松开的那张嘴的尖要收回去，实际 ${released}`);
+  assert.ok(
+    slime.simulation.positions[frontOffset + 2] - rest[frontOffset + 2] > single * 0.7,
+    '还咬着的那个尖不受影响',
+  );
+  scene.dispose();
+});
+
+test('远端玩家的拖拽形变从参数段复现，松手后回弹', () => {
+  const render = pbfSlimeArchetype.components.render;
+  const dragDefinition = pbfSlimeArchetype.components.slimeSurfaceDrag;
+  assert.ok(render?.model === 'line-art-pbf-slime');
+  assert.ok(dragDefinition);
+  const scene = new ThreeRenderScene(new THREE.Group(), RENDER_ENVIRONMENT);
+  const transforms = new RenderTransformBuffer(4);
+  const proxyId = new RenderProxyTable(scene).acquire();
+  scene.createPlayerProxy(proxyId, {
+    name: 'remote-drag-player',
+    render,
+    walkSpeed: 3.2,
+    surfaceDrag: dragDefinition,
+  });
+  const slime = scene.resolveSlimeVisual(proxyId)!;
+  const drag = { ...SLIME_DRAG_AT_REST };
+  const step = (frames: number): void => {
+    for (let frame = 0; frame < frames; frame += 1) {
+      writeSlimeDragParams(transforms, proxyId, drag);
+      transforms.publish();
+      scene.submitTransforms(transforms);
+      scene.updateVisuals(transforms, 1 / 60, frame / 60);
+    }
+  };
+  step(60);
+  const initialSurface = Float32Array.from(slime.simulation.positions);
+  let topOffset = 0;
+  for (let offset = 3; offset < initialSurface.length; offset += 3) {
+    if (initialSurface[offset + 1] > initialSurface[topOffset + 1]) topOffset = offset;
+  }
+
+  // 快照每 100ms 才到一份，同一次抓取会被连续应用很多帧；重复应用不能把起始
+  // 位置刷成当前的已形变外壳，否则拉伸永远累积不起来。
+  drag.revision = 1;
+  drag.contactX = initialSurface[topOffset];
+  drag.contactY = initialSurface[topOffset + 1];
+  drag.contactZ = initialSurface[topOffset + 2];
+  drag.pullX = 0.9;
+  step(150);
+
+  const pulledSurface = slime.simulation.positions;
+  const selectedExtension = pulledSurface[topOffset] - initialSurface[topOffset];
+  assert.equal(slime.simulation.stats().surfaceDragActive, true);
+  assert.ok(
+    selectedExtension > render.radius * 0.2,
+    `远端应复现出明显形变，实际 ${selectedExtension}`,
+  );
+  assert.ok(
+    selectedExtension <= dragDefinition.maximumDistance + 1e-5,
+    '复制过来的位移同样受 maximumDistance 约束',
+  );
+
+  let equatorMaximumDelta = 0;
+  for (let offset = 0; offset < pulledSurface.length; offset += 3) {
+    if (Math.abs(slime.rig.surfaceDirections[offset + 1]) >= 0.25) continue;
+    equatorMaximumDelta = Math.max(
+      equatorMaximumDelta,
+      Math.abs(pulledSurface[offset] - initialSurface[offset]),
+    );
+  }
+  assert.ok(
+    equatorMaximumDelta > selectedExtension * 0.3,
+    '整团跟随同样要复制到远端，不只是命中处鼓一个包',
+  );
+
+  // 松手后快照不再带该字段，玩法侧写回静止值；revision 归零就是「没有人在拖」。
+  drag.revision = 0;
+  step(360);
+  assert.equal(slime.simulation.stats().surfaceDragActive, false);
+  assert.ok(
+    Math.abs(slime.simulation.positions[topOffset] - initialSurface[topOffset])
+      < selectedExtension * 0.2,
+    '松开后应回到静止外壳',
+  );
+  scene.dispose();
+});
+
+test('一次手势只有一个所有者：本地正在拖的外壳不接受复制过来的拖拽', () => {
+  const render = pbfSlimeArchetype.components.render;
+  const dragDefinition = pbfSlimeArchetype.components.slimeSurfaceDrag;
+  assert.ok(render?.model === 'line-art-pbf-slime');
+  const visual = createPlayerVisualHarness('owned-drag-player', render, 3.2, dragDefinition);
+  // 手势本身由渲染侧回报，不是玩法侧回头去读——收在这里当作那一侧的缓存。
+  let reported = { contactX: 0, contactY: 0, contactZ: 0, pullX: 0, pullY: 0, pullZ: 0 };
+  let dragging = false;
+  visual.scene.setSlimeSurfaceDragListener((report) => {
+    dragging = report.dragging;
+    if (report.dragging) reported = { ...report };
+  });
+  visual.scene.beginSlimeSurfaceDrag(visual.proxyId, {
+    origin: [0, 3, 0],
+    direction: [0, -1, 0],
+  });
+  assert.equal(dragging, true, '抓住了要回报一条 true');
+  visual.scene.updateSlimeSurfaceDrag(visual.proxyId, {
+    origin: [3, 3, 0],
+    direction: [0, -1, 0],
+  });
+  for (let frame = 0; frame < 60; frame += 1) {
+    visual.update(1 / 60, frame / 60, 0, 0, { velocityX: 0, velocityZ: 0 });
+  }
+  const owned = Float32Array.from(visual.slime.simulation.positions);
+
+  // 本地玩家每帧都会把静止值写进自己的槽位；那不能把自己手上的拖拽掐掉。
+  const transforms = new RenderTransformBuffer(4);
+  writeSlimeDragParams(transforms, visual.proxyId, SLIME_DRAG_AT_REST);
+  transforms.publish();
+  visual.scene.updateVisuals(transforms, 1 / 60, 1);
+  assert.equal(visual.slime.simulation.stats().surfaceDragActive, true);
+
+  // 本地手势期间收到别人的一次抓取也不能改写拾取点。
+  writeSlimeDragParams(transforms, visual.proxyId, {
+    revision: 7, contactX: 0, contactY: -0.4, contactZ: 0.5,
+    pullX: -1, pullY: 0, pullZ: 0,
+  });
+  transforms.publish();
+  visual.scene.updateVisuals(transforms, 1 / 60, 1);
+  assert.equal(visual.scene.isSlimeSurfaceDragging(visual.proxyId), true);
+  assert.ok(reported.pullX > 0, `本地手势仍朝原方向，实际 ${reported.pullX}`);
+  assert.ok(
+    visual.slime.simulation.positions[0] * owned[0] >= 0,
+    '复制过来的反向拉力没有被应用',
+  );
+  visual.dispose();
+});
+
 test('史莱姆表面拖拽带动整团软体，命中处最强，接近上限时衰减并在释放后回弹', () => {
   const render = pbfSlimeArchetype.components.render;
   const dragDefinition = pbfSlimeArchetype.components.slimeSurfaceDrag;
@@ -1164,7 +1440,9 @@ test('史莱姆表面拖拽带动整团软体，命中处最强，接近上限�
   visual.rig.surface.raycast = () => undefined;
   // beginSlimeSurfaceDrag 返回 void：抓没抓住由反向通知回报，也照样能直接问渲染侧。
   const dragReports: Array<[number, boolean]> = [];
-  visual.scene.setSlimeSurfaceDragListener((id, dragging) => dragReports.push([id, dragging]));
+  visual.scene.setSlimeSurfaceDragListener(
+    (report) => dragReports.push([report.id, report.dragging]),
+  );
   visual.scene.beginSlimeSurfaceDrag(visual.proxyId, {
     origin: [0, 3, 0],
     direction: [0, -1, 0],

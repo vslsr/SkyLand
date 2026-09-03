@@ -22,6 +22,7 @@ import {
 } from '../src/input/index';
 import { BufferedInputDevice } from '../src/input/devices/BufferedInputDevice';
 import type { SnapshotActor } from '../src/network/protocol';
+import { INTERACTION_PROMPT_FADE_DEFAULTS } from '../src/interaction/InteractionPromptFade';
 import type { ActorInteractionCandidate } from '../src/scene/SceneVisualSystem';
 import type { SceneDefinition } from '../src/scenes/data/SceneDefinition';
 
@@ -401,6 +402,21 @@ test('弹性蘑菇 Replica 拉长并在释放后回弹，标记组件始终可�
   const glyph = markerRoot.getObjectByName('actor-interaction-marker-glyph');
   assert.ok(glyph instanceof THREE.Mesh);
 
+  // 淡入淡出只调材质：牌子淡到全透明时整块收掉，淡回来不用重画字形贴图。
+  const border = markerRoot.getObjectByName('actor-interaction-marker-border');
+  assert.ok(border instanceof THREE.Mesh);
+  const borderMaterial = border.material as THREE.MeshBasicMaterial;
+  system.setInteractionMarkerActorId('mushroom-1', 'E', 0.5);
+  assert.equal(markers.interactionVisible, true);
+  assert.equal(markers.interactionLabel, 'E');
+  assert.equal(borderMaterial.opacity, 0.5);
+  system.setInteractionMarkerActorId('mushroom-1', 'E', 0);
+  assert.equal(markers.interactionVisible, false);
+  assert.equal(markers.interactionLabel, 'E', '淡出不该丢掉标签');
+  system.setInteractionMarkerActorId('mushroom-1', 'E');
+  assert.equal(markers.interactionVisible, true);
+  assert.equal(borderMaterial.opacity, 1);
+
   now = 1_100;
   system.syncSnapshots([{
     ...mushroomSnapshot,
@@ -536,3 +552,147 @@ test('方向向量不必是单位长度，射程按米算而不是按它的长�
   system.dispose();
 });
 
+
+test('咬人是没有提示的彩蛋：抢不走正经交互，咬着时交互键归松口', () => {
+  let now = 0;
+  let candidate: ActorInteractionCandidate | undefined;
+  let biting = false;
+  const sent: string[] = [];
+  const bites: number[] = [];
+  const prompts: Array<string | undefined> = [];
+  const markers: Array<string | undefined> = [];
+  const device = new TestKeyboardDevice(() => now);
+  const scheme = createPlayerInputScheme({ storage: null });
+  const input = new InputSubsystem({
+    actions: scheme.actions, config: scheme.config, contexts: scheme.contexts,
+    devices: [device], now: () => now,
+  });
+  const controller = new ActorInteractionController(input, {
+    getPlayerId: () => 'player-1',
+    findOwnedActorId: () => undefined,
+    pick: () => candidate,
+    getInputLabel: (tag) => {
+      const control = input.getMappedControls(tag)[0];
+      return control ? scheme.getControlLabel(control) : undefined;
+    },
+    setHoveredActorId: () => {},
+    setInteractionMarkerActorId: (actorId) => markers.push(actorId),
+    sendInteraction: (actorId) => sent.push(actorId),
+    setPrompt: (text) => prompts.push(text),
+    isBiting: () => biting,
+    sendBite: () => bites.push(now),
+  });
+  const frame = {
+    position: [0, 1, 5],
+    axes: { right: [1, 0, 0], up: [0, 1, 0], forward: [0, 0, -1] },
+  } as const;
+  const pressInteract = (): void => {
+    now += 10;
+    device.emit('Keyboard.KeyE', true);
+    input.update();
+    controller.update(frame);
+    now += 10;
+    device.emit('Keyboard.KeyE', false);
+    input.update();
+  };
+
+  // 没有任何候选：交互键落到彩蛋上，而且既不出提示也不出标记。
+  pressInteract();
+  assert.equal(bites.length, 1);
+  assert.deepEqual(sent, []);
+  assert.equal(prompts.at(-1), undefined);
+  assert.equal(markers.at(-1), undefined);
+
+  // 面前有正经交互时，彩蛋不能抢：它排在所有候选之后。
+  candidate = {
+    actorId: 'stack-1', label: '木材', action: 'pickup-stack',
+    carrierActorId: null, holderPlayerId: null, quantity: 3,
+  };
+  pressInteract();
+  assert.deepEqual(sent, ['stack-1']);
+  assert.equal(bites.length, 1, '有候选时不该再咬人');
+
+  // 咬着的时候交互键先归松口，和「手上已经有一株」同一条规矩：
+  // 一个已经建立的持续状态必须有确定的退出入口，哪怕面前站着别的东西。
+  biting = true;
+  pressInteract();
+  assert.equal(bites.length, 2);
+  assert.deepEqual(sent, ['stack-1'], '松口不能顺手把面前的东西也捡了');
+
+  controller.dispose();
+  input.dispose();
+});
+
+test('交互提示只在玩家停手之后淡入，任何操作都让它淡出，HUD 与世界标记同步', () => {
+  const { idleDelaySeconds, fadeInSeconds, fadeOutSeconds } = INTERACTION_PROMPT_FADE_DEFAULTS;
+  let now = 0;
+  const prompts: Array<{ text?: string; opacity?: number }> = [];
+  const markers: Array<{ actorId?: string; opacity?: number }> = [];
+  const device = new TestKeyboardDevice(() => now);
+  const scheme = createPlayerInputScheme({ storage: null });
+  const input = new InputSubsystem({
+    actions: scheme.actions, config: scheme.config, contexts: scheme.contexts,
+    devices: [device], now: () => now,
+  });
+  const candidate: ActorInteractionCandidate = {
+    actorId: 'mushroom-1', label: '弹弹菇', action: 'mushroom-bite',
+    carrierActorId: null, holderPlayerId: null, pickupHolderActorId: null,
+  };
+  const controller = new ActorInteractionController(input, {
+    getPlayerId: () => 'player-1',
+    getPlayerPosition: () => ({ x: 0.4, z: 0 }),
+    findOwnedActorId: () => undefined,
+    pick: () => undefined,
+    findNearby: () => candidate,
+    getInputLabel: () => 'E',
+    setHoveredActorId: () => {},
+    setInteractionMarkerActorId: (actorId, _inputLabel, opacity) => {
+      markers.push({ actorId, opacity });
+    },
+    sendInteraction: () => {},
+    setPrompt: (text, opacity) => prompts.push({ text, opacity }),
+  });
+  const frame = {
+    position: [0, 5, 8],
+    axes: { right: [1, 0, 0], up: [0, 1, 0], forward: [0, -0.5, -1] },
+  } as const;
+  const step = (deltaSeconds: number): number => {
+    now += deltaSeconds * 1_000;
+    input.update();
+    controller.update(frame, deltaSeconds);
+    return prompts.at(-1)?.opacity ?? Number.NaN;
+  };
+  const assertClose = (actual: number, expected: number, message: string): void => {
+    assert.ok(Math.abs(actual - expected) < 1e-6, `${message}：期望 ${expected}，实际 ${actual}`);
+  };
+
+  // 刚进场景：提示的文字已经算好了，但安静期没走完之前不现身。
+  assert.equal(step(idleDelaySeconds * 0.5), 0);
+  assert.equal(prompts.at(-1)?.text, 'E · 叼住「弹弹菇」');
+  assert.equal(step(idleDelaySeconds * 0.4), 0);
+  // 熬过安静期才开始淡入，一直涨到全不透明。
+  const fadingIn = step(fadeInSeconds * 0.5);
+  assert.ok(fadingIn > 0 && fadingIn < 1, `应当正在淡入，实际 ${fadingIn}`);
+  assert.equal(step(fadeInSeconds), 1);
+  assert.deepEqual(markers.at(-1), { actorId: 'mushroom-1', opacity: 1 });
+
+  // 玩家一动就淡出。按住不放只在按下那一刻有事件，之后靠控制值继续算操作。
+  device.emit('Keyboard.KeyW', true);
+  const fadingOut = step(fadeOutSeconds * 0.5);
+  assert.ok(fadingOut > 0 && fadingOut < 1, `应当正在淡出，实际 ${fadingOut}`);
+  assertClose(step(fadeOutSeconds * 0.4), fadingOut - 0.4, '按住不放要一直淡下去');
+
+  // 松开之后先在安静期里停住：轻点一下不该让提示消失再重来。
+  device.emit('Keyboard.KeyW', false);
+  assertClose(
+    step(idleDelaySeconds * 0.9),
+    fadingOut - 0.4,
+    '安静期内既不继续淡出也不抢跑',
+  );
+  assert.equal(step(fadeInSeconds), 1);
+  // 世界里那块按键牌和 HUD 那条文字读的是同一个值。
+  assert.equal(markers.at(-1)?.opacity, prompts.at(-1)?.opacity);
+
+  controller.dispose();
+  input.dispose();
+});

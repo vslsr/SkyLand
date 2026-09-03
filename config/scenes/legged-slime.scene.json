@@ -1,0 +1,62 @@
+{
+  "$schema": "./scene.schema.json",
+  "schemaVersion": 1,
+  "id": "legged-slime",
+  "displayName": "骨骼腿史莱姆",
+  "description": "圆球软体身体由两条带膝关节的粗线腿撑起，落脚点来自地面采样并各自画一枚灰色接触阴影。",
+  "capacity": 8,
+  "sceneComponents": [],
+  "environment": {
+    "weather": {
+      "initial": "sunny",
+      "cycle": {
+        "enabled": true,
+        "minimumSeconds": 120,
+        "maximumSeconds": 300,
+        "candidates": ["sunny", "cloudy"]
+      }
+    },
+    "dayNight": {
+      "enabled": true,
+      "startHour": 8.2,
+      "dayLengthSeconds": 900
+    }
+  },
+  "actors": [],
+  "renderer": {
+    "type": "line-art",
+    "background": "#fdfbf6",
+    "fog": { "color": "#fdfbf6", "near": 26, "far": 60 },
+    "content": { "ground": true, "trees": true, "grass": true, "ocean": false },
+    "palette": {
+      "ground": "#e0dbc6",
+      "grass": "#c1d7a6",
+      "treeTrunk": "#d6bea3",
+      "treeNeedles": "#cbdcbc"
+    },
+    "world": {
+      "loadRadius": 2,
+      "keepRadius": 3,
+      "rockColor": "#d4d0c6"
+    }
+  },
+  "gameplay": {
+    "playerActor": { "archetype": "legged-slime" },
+    "worldProps": {
+      "tree": [
+        { "archetype": "generated-tree", "weight": 1 }
+      ],
+      "rock": [
+        { "archetype": "large-rock", "weight": 1 }
+      ]
+    },
+    "spawn": { "centerX": 0, "centerZ": 0, "radius": 5, "slots": 8 }
+  },
+  "camera": {
+    "mode": "topdown",
+    "position": [5.5, 7.5, 8.5],
+    "yaw": 0,
+    "pitch": -0.12,
+    "moveSpeed": 6.5
+  }
+}

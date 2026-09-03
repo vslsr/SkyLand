@@ -95,7 +95,7 @@ export interface GuidePathStyle {
  */
 export type PlayerRenderDefinition = Extract<
   ActorRenderDefinition,
-  { model: 'line-art-player-slime' | 'line-art-pbf-slime' }
+  { model: 'line-art-player-slime' | 'line-art-pbf-slime' | 'line-art-legged-slime' }
 >;
 
 export type SlimeSurfaceDragDefinition = NonNullable<
@@ -135,13 +135,37 @@ export interface SlimeSurfaceDragRay {
 }
 
 /**
- * 渲染世界回报「哪个 proxy 的蒙皮正被拖着」。
+ * 一次拖拽手势本身，全部是 proxy 本地坐标的标量。
  *
- * 这是**边界上唯一一条反向通知**（另一条是 `ChunkViewSink.onGeneratorReady`）。
- * 它存在的理由很具体：抓没抓住外壳的判据只有渲染侧有——命中测试打的是每帧被求解器
- * 改写的软体网格。玩法侧发命令，渲染侧回报事实，两边都不用等对方。
+ * 射线不跨边界，这个结构却要：玩法侧得把本地玩家的手势发给房间，其他客户端
+ * 才能复现同一次形变。过去的是**六个数字**，不是外壳的四百多个顶点——接收端
+ * 用自己那套参数在自己的求解器上重放。
  */
-export type SlimeSurfaceDragListener = (id: ProxyId, dragging: boolean) => void;
+export interface SlimeSurfaceDragState {
+  contactX: number;
+  contactY: number;
+  contactZ: number;
+  pullX: number;
+  pullY: number;
+  pullZ: number;
+}
+
+/**
+ * 渲染世界回报「哪个 proxy 的蒙皮正被拖着，拖成什么样」。
+ *
+ * 这是**边界上仅有的两条反向通知之一**（另一条是 `ChunkViewSink.onGeneratorReady`）。
+ * 它存在的理由很具体：抓没抓住外壳、抓在哪一点，判据只有渲染侧有——命中测试打的是
+ * 每帧被求解器改写的软体网格。玩法侧发命令，渲染侧回报事实，两边都不用等对方。
+ *
+ * 手势本身（六个本地坐标）也走这条回报，而不是让玩法侧回头去读：那是一次跨线程
+ * 阻塞查询，正是这条边界不做的事。玩法侧把最后一次回报缓存下来，上报房间时读缓存。
+ */
+export interface SlimeSurfaceDragReport extends SlimeSurfaceDragState {
+  readonly id: ProxyId;
+  readonly dragging: boolean;
+}
+
+export type SlimeSurfaceDragListener = (report: SlimeSurfaceDragReport) => void;
 
 /**
  * 引导路径每帧可能变的那部分。**变长**，所以它走命令而不是参数段。
@@ -209,7 +233,7 @@ export interface RenderScene extends RenderCommandSink {
    * 标记牌与高亮盒整个在渲染世界里建与释放，玩法侧只说「是哪一个」——
    * 没有 proxy 的 Actor（生成物件、合批掉落物）和「没有选中」是同一种输入。
    */
-  setInteractionMarker(id: ProxyId, label: string): void;
+  setInteractionMarker(id: ProxyId, label: string, opacity?: number): void;
   setHoveredProxy(id: ProxyId): void;
   /**
    * 能力实验室的三条命令（只有开发用的实验室地图会发）。

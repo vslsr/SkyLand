@@ -4,6 +4,8 @@ import type { PhysicsWorld } from '../../shared/physics/PhysicsWorld.mjs';
 import type { ActorArchetypeDefinition } from '../scenes/data/SceneDefinition';
 import type { RenderWorldHandle } from '../render/RenderProxyTable';
 import { RemotePlayer } from './RemotePlayer';
+import { collectBiters, resolveBiteTips } from './slimeBiteTip';
+import { createSlimeBiteParams, type SlimeBiteParams } from '../render/RenderSlimeBite';
 import {
   RemotePlayerColliders,
   type RemotePlayerColliderState,
@@ -18,6 +20,10 @@ import {
  */
 export class RemotePlayerGroup {
   private readonly players = new Map<string, RemotePlayer>();
+  /** 每帧复用的突起向量缓冲，算完就写进各自的参数段。 */
+  private readonly biteTips: SlimeBiteParams = createSlimeBiteParams();
+  /** 调用方没给「谁咬着谁」时自己建一张，同样复用不重新分配。 */
+  private readonly biters = new Map<string, InterpolatedPlayerState[]>();
   private archetype?: ActorArchetypeDefinition;
   private colliders?: RemotePlayerColliders;
   private renderWorld?: RenderWorldHandle;
@@ -46,22 +52,31 @@ export class RemotePlayerGroup {
     this.archetype = archetype;
   }
 
-  public sync(states: InterpolatedPlayerState[], localPlayerId?: string): void {
+  public sync(
+    states: InterpolatedPlayerState[],
+    localPlayerId?: string,
+    biters?: ReadonlyMap<string, InterpolatedPlayerState[]>,
+  ): void {
     const archetype = this.archetype;
     const renderWorld = this.renderWorld;
     if (!archetype || !renderWorld) return;
     const seen = new Set<string>();
+    // 「谁咬着谁」是快照里唯一和咬有关的字段；尖是各客户端按这一帧的插值位置
+    // 自己算的，所以不用多下发六个数，也不会比位置慢一个快照。
+    const biterOf = biters ?? collectBiters(states, this.biters);
 
     for (const state of states) {
       if (state.id === localPlayerId) continue;
       seen.add(state.id);
-      const existing = this.players.get(state.id);
-      if (existing) {
-        existing.applyState(state);
-        continue;
-      }
-      const created = new RemotePlayer(state, this.grassInteraction, archetype, renderWorld);
-      this.players.set(state.id, created);
+      const existing = this.players.get(state.id) ?? new RemotePlayer(
+        state,
+        this.grassInteraction,
+        archetype,
+        renderWorld,
+      );
+      if (this.players.has(state.id)) existing.applyState(state);
+      else this.players.set(state.id, existing);
+      existing.setBiteTips(resolveBiteTips(state, biterOf.get(state.id), archetype, this.biteTips));
     }
 
     for (const [id, player] of this.players) {

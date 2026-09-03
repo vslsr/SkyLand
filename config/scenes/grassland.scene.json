@@ -6,12 +6,18 @@
   "description": "树木、草丛与纸张色雾气构成的经典 SkyLand 草地。",
   "capacity": 8,
   "sceneComponents": [
-    { "type": "mouse-grass-interaction" },
+    {
+      "type": "mouse-grass-interaction"
+    },
     {
       "type": "interactive-particle-effect",
       "id": "grassland-leaves",
       "preset": "line-art-leaves",
-      "position": [0, 0, 1.5],
+      "position": [
+        0,
+        0,
+        1.5
+      ],
       "particleCount": 180,
       "clusterRadius": 8,
       "seed": 139732,
@@ -23,7 +29,9 @@
     }
   ],
   "environment": {
-    "weather": { "initial": "sunny" },
+    "weather": {
+      "initial": "sunny"
+    },
     "dayNight": {
       "enabled": true,
       "startHour": 9,
@@ -34,29 +42,73 @@
     {
       "id": "elastic-mushroom-01",
       "archetype": "elastic-mushroom",
-      "localTransform": { "position": [0, 0, 5], "yaw": -0.18 }
+      "localTransform": {
+        "position": [
+          0,
+          0,
+          5
+        ],
+        "yaw": -0.18
+      }
+    },
+    {
+      "id": "storage-chest-01",
+      "archetype": "storage-chest",
+      "localTransform": {
+        "position": [
+          2.4,
+          0,
+          4.2
+        ],
+        "yaw": -1.2
+      }
     }
   ],
   "renderer": {
     "type": "line-art",
     "background": "#fdfbf6",
-    "fog": { "color": "#fdfbf6", "near": 22, "far": 52 },
-    "content": { "ground": true, "trees": true, "grass": true, "ocean": false },
+    "fog": {
+      "color": "#fdfbf6",
+      "near": 26,
+      "far": 60
+    },
+    "content": {
+      "ground": true,
+      "trees": true,
+      "grass": true,
+      "ocean": false
+    },
     "palette": {
-      "ground": "#f1eddf",
+      "ground": "#e0dbc6",
       "grass": "#c1d7a6",
       "treeTrunk": "#d6bea3",
       "treeNeedles": "#cbdcbc"
     }
   },
   "gameplay": {
-    "playerActor": { "archetype": "player-slime" },
-    "bounds": { "minimumX": -16, "maximumX": 16, "minimumZ": -21, "maximumZ": 11 },
-    "spawn": { "centerX": 0, "centerZ": 4.5, "radius": 1.8, "slots": 8 }
+    "playerActor": {
+      "archetype": "player-slime"
+    },
+    "bounds": {
+      "minimumX": -16,
+      "maximumX": 16,
+      "minimumZ": -21,
+      "maximumZ": 11
+    },
+    "spawn": {
+      "centerX": 0,
+      "centerZ": 4.5,
+      "radius": 1.8,
+      "slots": 8
+    }
   },
   "camera": {
     "mode": "topdown",
-    "position": [5.5, 7.5, 8.5],
+    "position": [
+      5.5,
+      7.5,
+      8.5
+    ],
     "yaw": 0,
     "pitch": -0.12,
     "moveSpeed": 6.5

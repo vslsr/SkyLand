@@ -1,5 +1,52 @@
 import type { WeatherType } from '../weather/index';
 
+/**
+ * 鼠标拖拽史莱姆的复制状态，坐标全部在 Actor 本地空间。
+ * 服务端不模拟它，只净化、超时并转发，供其他客户端复现同一次形变。
+ */
+export interface SlimeDragState {
+  /** 命中点，Actor 本地坐标。 */
+  contactX: number;
+  contactY: number;
+  contactZ: number;
+  /** 命中点到指针目标的位移，Actor 本地坐标。 */
+  pullX: number;
+  pullY: number;
+  pullZ: number;
+}
+
+/** 快照里的形变状态：revision 变化表示重新抓取，接收端需要重建影响权重。 */
+export interface SnapshotSlimeDrag extends SlimeDragState {
+  revision: number;
+  /**
+   * 这一次抓取有多「尖」。0 是外壳主人自己的鼠标拖拽，整团跟着走；
+   * 1 是被牙齿之类的外力咬住，只在命中处拔出一个尖。由施力方决定。
+   */
+}
+
+/**
+ * 被外力拴住时的缰绳，世界坐标。
+ *
+ * 它必须过网而不是只在服务端加力：客户端预测跑的是同一份 `stepCharacter`，
+ * 只有权威一侧收着，客户端就会一路走出去再被快照拽回来，变成持续的橡皮筋。
+ */
+export interface SnapshotLeash {
+  anchorX: number;
+  anchorZ: number;
+  /** 绳长。以内完全自由，出了这个半径每多走一米就多拽回一分。 */
+  slack: number;
+  stiffness: number;
+  /** 径向阻尼。没有它人会在绳长附近来回荡，而不是停在绳边上。 */
+  damping: number;
+  /**
+   * 拖带强度。绳绷紧时被拖者的速度按它收敛到锚点速度上，所以拖拽赢过被拖者
+   * 自己的驱动。不动的外力（地上的倒刺）锚点速度是 0，只拴不拖。
+   */
+  carry: number;
+  anchorVelocityX: number;
+  anchorVelocityZ: number;
+}
+
 /** 房间快照里的单名玩家，坐标由服务端权威计算。 */
 export interface SnapshotPlayer {
   id: string;
@@ -18,11 +65,20 @@ export interface SnapshotPlayer {
   velocityX?: number;
   velocityZ?: number;
   grounded?: boolean;
+  /** 背包只发给本人：别人包里有什么不是这名玩家该知道的。 */
   inventory?: Array<{ itemType: string; quantity: number }>;
   inventoryRevision?: number;
+  /** 快捷栏配置与选中格；同样只发给本人。 */
+  hotbar?: { slots: Array<string | null>; activeIndex: number };
   /** PickupDrop Component 的运行态；口部挂点来自玩家 Actor 原型。 */
   heldActorId?: string | null;
   pickupDropRevision?: number;
+  /** 正在进行的形变：自己的鼠标拖拽，或被别人咬住那一处。没有就不下发。 */
+  slimeDrag?: SnapshotSlimeDrag;
+  /** 正被这名玩家咬着。只有咬人的一方带，用来让交互键知道该松口了。 */
+  bitingPlayerId?: string;
+  /** 正被外力拴着；客户端预测必须用同一份，否则会持续橡皮筋。 */
+  leash?: SnapshotLeash;
 }
 
 export type ActorFloatState = 'afloat' | 'overloaded' | 'flooding' | 'sinking';
@@ -68,7 +124,7 @@ export interface SnapshotActor {
     revision: number;
   };
   interactable?: {
-    action: 'cargo-toggle' | 'mushroom-bite' | 'pickup-stack' | 'harvest-prop';
+    action: 'cargo-toggle' | 'mushroom-bite' | 'pickup-stack' | 'harvest-prop' | 'container-open';
     label: string;
     enabled: boolean;
     revision: number;
@@ -102,6 +158,20 @@ export interface SnapshotActor {
     displayName: string;
     quantity: number;
     maximumQuantity: number;
+    revision: number;
+  };
+  /**
+   * 容器的公开状态。`entries` 只发给正开着它的人——没开箱子的玩家不需要知道里面
+   * 有什么，一屋子箱子也不会每帧把全部库存推给所有人。开着的人每帧都收到，所以
+   * 别人存进去的东西会立刻出现在自己的界面上。
+   */
+  container?: {
+    label: string;
+    slotCapacity: number;
+    usedSlots: number;
+    viewerCount: number;
+    open: boolean;
+    entries?: Array<{ itemType: string; quantity: number }>;
     revision: number;
   };
   residency?: {
@@ -172,4 +242,7 @@ export interface InterpolatedPlayerState {
   velocityX?: number;
   velocityZ?: number;
   grounded?: boolean;
+  slimeDrag?: SnapshotSlimeDrag;
+  bitingPlayerId?: string;
+  leash?: SnapshotLeash;
 }

@@ -26,10 +26,10 @@
   "renderer": {
     "type": "line-art",
     "background": "#fdfaf2",
-    "fog": { "color": "#fdfaf2", "near": 22, "far": 52 },
+    "fog": { "color": "#fdfaf2", "near": 26, "far": 60 },
     "content": { "ground": true, "trees": true, "grass": true, "ocean": true },
     "palette": {
-      "ground": "#f3ecd9",
+      "ground": "#e4dabf",
       "grass": "#c7d79f",
       "treeTrunk": "#cbb094",
       "treeNeedles": "#b9d2a4"
@@ -61,7 +61,6 @@
       "tree": [{ "archetype": "fruit-tree", "weight": 1 }],
       "rock": [{ "archetype": "generated-rock", "weight": 1 }]
     },
-    "bounds": { "minimumX": -192, "maximumX": 192, "minimumZ": -192, "maximumZ": 192 },
     "spawn": { "centerX": 0, "centerZ": 0, "radius": 6, "slots": 16 },
     "water": { "seaLevel": -0.4 }
   },

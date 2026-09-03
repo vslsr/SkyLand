@@ -25,6 +25,8 @@ import {
   GuidePathComponent,
   INTERACTABLE_COMPONENT,
   InteractableComponent,
+  CONTAINER_COMPONENT,
+  ContainerComponent,
   ITEM_STACK_COMPONENT,
   ItemStackComponent,
   LifetimeComponent,
@@ -58,6 +60,7 @@ import {
 import { toWorldSeed } from '../../shared/world/worldConfig.mjs';
 import { selectWorldPropVariant } from '../../shared/world/worldPropVariants.mjs';
 import { NULL_PROXY_ID, type RenderScene } from '../render/RenderScene';
+import { resolveSlimeLegGroundProbeLayout } from '../render/RenderSlimeLegs';
 import { frameTimeline } from '../platform/index';
 import { RenderTransformBuffer } from '../render/RenderTransformBuffer';
 import type { SnapshotActor, SnapshotPlayer } from '../network/protocol';
@@ -68,6 +71,10 @@ import type {
   VesselHudState,
 } from '../scene/SceneVisualSystem';
 import { ActorSnapshotBuffer } from './ActorSnapshotBuffer';
+import {
+  LegGroundProbeComponent,
+  type GroundHeightSampler,
+} from './components/LegGroundProbeComponent';
 import {
   REPLICATION_COMPONENT,
   ReplicationComponent,
@@ -146,6 +153,11 @@ export interface ClientActorSystemOptions {
   spawnBudgetMilliseconds?: number;
   /** 单调时钟。和 `now` 分开：`now` 是快照用的时间轴，测试里不会在一帧内推进。 */
   spawnClock?: () => number;
+  /**
+   * 地形高度查询。只有长腿的 Actor 会用到——它每帧采五个点决定脚落在哪儿。
+   * 不传时腿退回 Actor 自己脚下的平面，单独跑这个 System 的测试因此不需要地形。
+   */
+  sampleGroundHeight?: GroundHeightSampler;
 }
 
 type PropStateSnapshot = {
@@ -291,6 +303,8 @@ export class ClientActorSystem implements SceneFrameSystem {
   private readonly worldSeed: number;
   private readonly spawnBudgetMilliseconds: number;
   private readonly spawnClock: () => number;
+  /** 地形高度查询；只有长腿 Actor 的落脚采样会用到。 */
+  private readonly sampleGroundHeight?: GroundHeightSampler;
 
   public constructor(options: ClientActorSystemOptions) {
     this.archetypes = new Map(
@@ -317,6 +331,7 @@ export class ClientActorSystem implements SceneFrameSystem {
     this.spawnBudgetMilliseconds = options.spawnBudgetMilliseconds ?? REPLICA_SPAWN_BUDGET_MILLISECONDS;
     this.spawnClock = options.spawnClock
       ?? (() => (globalThis.performance ?? Date).now());
+    this.sampleGroundHeight = options.sampleGroundHeight;
     this.transforms = options.transforms;
     this.renderScene = options.renderScene;
     this.proxyIds = new RenderProxyTable(this.renderScene);
@@ -797,12 +812,20 @@ export class ClientActorSystem implements SceneFrameSystem {
     return undefined;
   }
 
-  public setInteractionMarkerActorId(actorId?: string, inputLabel?: string): void {
+  public setInteractionMarkerActorId(
+    actorId?: string,
+    inputLabel?: string,
+    opacity = 1,
+  ): void {
     // 生成物件带 InteractableComponent 却没有 proxy，所以「目标没有 proxyId」
     // 与「没有选中」都是合法输入，统一退化成 NULL_PROXY_ID。
     const actor = actorId ? this.world.getActor(actorId) as Actor | undefined : undefined;
     const proxy = actor?.getComponent(RENDER_PROXY_COMPONENT) as RenderProxyComponent | undefined;
-    this.renderScene.setInteractionMarker(proxy?.proxyId ?? NULL_PROXY_ID, inputLabel ?? '');
+    this.renderScene.setInteractionMarker(
+      proxy?.proxyId ?? NULL_PROXY_ID,
+      inputLabel ?? '',
+      opacity,
+    );
   }
 
   public setHoveredActorId(actorId?: string): void {
@@ -904,6 +927,9 @@ export class ClientActorSystem implements SceneFrameSystem {
     if (archetype.components.heatEmitter) {
       actor.addComponent(new HeatEmitterComponent(archetype.components.heatEmitter));
     }
+    if (archetype.components.container) {
+      actor.addComponent(new ContainerComponent(archetype.components.container));
+    }
     if (archetype.components.itemStack) {
       actor.addComponent(new ItemStackComponent({
         ...archetype.components.itemStack,
@@ -993,6 +1019,13 @@ export class ClientActorSystem implements SceneFrameSystem {
       // RenderProxyComponent 必须先于所有表现 Component 加入：Actor.endPlay 是插入
       // 顺序的逆序，marker 要先释放自己的子树，proxy 的 disposeSubtree 才能最后跑。
       actor.addComponent(new RenderProxyComponent(proxyId, this.proxyIds));
+      // 腿的步态整段在渲染侧，玩法侧只负责「脚下的地面有多高」这一项查询。
+      if (archetype.components.render.model === 'line-art-legged-slime') {
+        actor.addComponent(new LegGroundProbeComponent(
+          this.sampleGroundHeight,
+          resolveSlimeLegGroundProbeLayout(archetype.components.render),
+        ));
+      }
       // 软体蒙皮不再挂在 Actor 上：createMeshProxy 认出 PBF 史莱姆就在渲染世界里
       // 自己建一份表现，玩法侧只写 SlimeMotionParams 那几个 f32（§1.5）。
       //
@@ -1103,6 +1136,12 @@ export class ClientActorSystem implements SceneFrameSystem {
       const fire = actor.getComponent(FIRE_VISUAL_COMPONENT) as FireVisualComponent | undefined;
       if (fire) fire.targetIntensity = snapshot.thermal.burning ? 1 : 0;
     }
+    if (snapshot.container) {
+      // 容器是纯权威状态：内容、谁开着、开了几个，全跟随快照。别人存进去的东西
+      // 因此会直接出现在自己的界面上，不需要本地做任何预测。
+      const container = actor.requireComponent(CONTAINER_COMPONENT) as ContainerComponent;
+      container.applySnapshot(snapshot.container);
+    }
     if (snapshot.itemStack) {
       const stack = actor.requireComponent(ITEM_STACK_COMPONENT) as ItemStackComponent;
       stack.quantity = snapshot.itemStack.quantity;
@@ -1135,6 +1174,7 @@ export class ClientActorSystem implements SceneFrameSystem {
       ELASTIC_TETHER_COMPONENT,
     ) as ElasticTetherComponent | undefined;
     const stack = actor.getComponent(ITEM_STACK_COMPONENT) as ItemStackComponent | undefined;
+    const container = actor.getComponent(CONTAINER_COMPONENT) as ContainerComponent | undefined;
     return {
       actorId: actor.id,
       label: interactable.label,
@@ -1143,7 +1183,28 @@ export class ClientActorSystem implements SceneFrameSystem {
       holderPlayerId: tether?.holderPlayerId ?? null,
       pickupHolderActorId: this.externalParentActorIds.get(actor.id) ?? null,
       quantity: stack?.quantity,
+      // 我开着没有：开着的时候交互键说的是「关上」。
+      containerOpen: container?.openForViewer ?? false,
     };
+  }
+
+  getContainer(actorId: string): ContainerComponent | undefined {
+    return this.world.getActor(actorId)?.getComponent(CONTAINER_COMPONENT) as
+      ContainerComponent | undefined;
+  }
+
+  /**
+   * 服务端认为我正开着哪个容器。
+   *
+   * 权威侧同时只允许开一个（`container:open` 会先关掉旧的），所以第一个命中的就是
+   * 答案；找不到就是没开着——走远被移出时这里自然变成 undefined，界面跟着关。
+   */
+  findOpenContainerActorId(): string | undefined {
+    for (const actor of this.world.query(CONTAINER_COMPONENT)) {
+      const container = actor.getComponent(CONTAINER_COMPONENT) as ContainerComponent;
+      if (container.openForViewer) return actor.id;
+    }
+    return undefined;
   }
 
   private rememberGeneratedPropState(

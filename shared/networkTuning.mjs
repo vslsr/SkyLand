@@ -17,6 +17,12 @@ export const TICKS_PER_SNAPSHOT = Math.max(1, Math.round(SERVER_TICK_RATE / SNAP
 /** 客户端上行输入的最小间隔（秒），与渲染帧率解耦。 */
 export const INPUT_SEND_INTERVAL_SECONDS = 0.05;
 
+/**
+ * 拖拽形变的上行间隔（秒）。它只被服务端转发，不参与重放，而快照本来就只有
+ * SNAPSHOT_RATE 次每秒，报得更密只会白占同一个输入令牌桶。
+ */
+export const SLIME_DRAG_SEND_INTERVAL_SECONDS = 1 / SNAPSHOT_RATE;
+
 /** 玩家预测与权威模拟唯一允许使用的固定步长。 */
 export const SIMULATION_STEP_SECONDS = 1 / 60;
 

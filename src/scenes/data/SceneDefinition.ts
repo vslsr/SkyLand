@@ -89,6 +89,37 @@ export type ActorRenderDefinition =
       shadowColor: string;
     }
   | {
+      model: 'line-art-legged-slime';
+      /** 软体身体的半径；身体本身沿用 `line-art-player-slime` 的那套外壳。 */
+      radius: number;
+      /** 静止站立时髋点离地高度。腿把身体撑到这里，软体不再贴地。 */
+      hipHeight: number;
+      /** 两条腿髋点的半间距。 */
+      legSpread: number;
+      legCount: number;
+      thighLength: number;
+      shinLength: number;
+      /** 粗线的半径——腿是圆柱，不是 LineSegments：WebGL 忽略 linewidth。 */
+      legThickness: number;
+      /** 脚那一小段折角的长度。膝盖不单画节点，两节骨头的夹角就是关节。 */
+      footLength: number;
+      /** 落脚点离理想位置多远就迈一步。 */
+      stepLength: number;
+      /** 迈步时脚抬起的弧高。 */
+      stepHeight: number;
+      /** 一次迈步的时长，秒。 */
+      stepDuration: number;
+      membraneColor: string;
+      middleColor: string;
+      coreColor: string;
+      bubbleColor: string;
+      inkColor: string;
+      shadowColor: string;
+      legColor: string;
+      /** 落脚点那枚灰色贴地椭圆。它是画出来的接触提示，不是光照阴影。 */
+      footShadowColor: string;
+    }
+  | {
       model: 'line-art-raft';
       foamColor: string;
       length: number;
@@ -96,6 +127,15 @@ export type ActorRenderDefinition =
     }
   | {
       model: 'line-art-cargo-crate';
+      color: string;
+      accentColor: string;
+      length: number;
+      width: number;
+      height: number;
+    }
+  | {
+      /** 储物箱：箱体加一块绕后沿翻起的盖子，开合由 container Component 决定。 */
+      model: 'line-art-storage-chest';
       color: string;
       accentColor: string;
       length: number;
@@ -207,6 +247,16 @@ export interface ActorArchetypeDefinition {
       enabled: boolean;
       currentPointIndex: number;
     };
+    /**
+     * 服务端权威的固定巡逻路线；路点在 Actor 局部空间。客户端不读它——位置整段
+     * 由快照插值而来——列在这里是为了让原型的形状在两侧对得上。
+     */
+    patrolPath?: {
+      waypoints: Array<[number, number, number]>;
+      speed: number;
+      waitSeconds: number;
+      mode: 'ping-pong' | 'loop';
+    };
     playerMovement?: {
       walkSpeed: number;
       sprintMultiplier: number;
@@ -223,6 +273,22 @@ export interface ActorArchetypeDefinition {
       airControl: number;
     };
     /** 仅客户端使用：鼠标拖拽混合史莱姆蒙皮时的局部软体参数。 */
+    /** 可被外力捏变形的软体外壳；形变本身不改玩法状态。 */
+    softBodyDeformation?: {
+      breakDistance: number;
+      selfReportTimeoutMs?: number;
+    };
+    /** 能咬住别的软体的一张嘴；挂点复用 pickupDrop 的口部。 */
+    bite?: {
+      range: number;
+      facingDot?: number;
+      /** 牙齿捏起来的那块皮有多深（米）：贴身咬时尖的保底长度，客户端算突起向量要用。 */
+      gripDepth?: number;
+      leashSlack?: number;
+      leashStiffness?: number;
+      leashDamping?: number;
+      leashCarry?: number;
+    };
     slimeSurfaceDrag?: {
       maximumDistance: number;
       pullForce: number;
@@ -270,6 +336,16 @@ export interface ActorArchetypeDefinition {
     /** 角色能带走的货位数；不写按 DEFAULT_SLOT_CAPACITY。 */
     inventory?: {
       slotCapacity: number;
+      hotbarCapacity?: number;
+      /** 交互键按住多久算「收回背包」；客户端的转盘用同一个数。 */
+      stowHoldSeconds?: number;
+    };
+    /** 可存取的容器：箱子、船舱。和背包共用同一套堆叠与货位规则。 */
+    container?: {
+      slotCapacity: number;
+      label: string;
+      /** 离开这个距离服务端替玩家关掉界面。 */
+      reach: number;
     };
     pickupDrop?: {
       mouthLocalX: number;

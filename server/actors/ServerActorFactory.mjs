@@ -28,6 +28,8 @@ import {
   AttachmentSystem,
   INTERACTABLE_COMPONENT,
   InteractableComponent,
+  CONTAINER_COMPONENT,
+  ContainerComponent,
   ITEM_STACK_COMPONENT,
   ItemStackComponent,
   LIFETIME_COMPONENT,
@@ -35,6 +37,7 @@ import {
   PLAYER_MOVEMENT_COMPONENT,
   PlayerMovementComponent,
   PlayerJumpComponent,
+  PatrolPathComponent,
   PICKUP_DROP_COMPONENT,
   PickupDropComponent,
   REPLICATION_POLICY_COMPONENT,
@@ -57,10 +60,12 @@ import { GameAbilitySystem } from '../../shared/abilities/index.mjs';
 import { VesselHazardSystem } from './VesselHazardSystem.mjs';
 import { VesselMotorSystem } from './VesselMotorSystem.mjs';
 import { ElasticTetherSystem } from './ElasticTetherSystem.mjs';
+import { SoftBodyBiteSystem } from './SoftBodyBiteSystem.mjs';
 import { ElasticDetachSystem } from './ElasticDetachSystem.mjs';
 import { TemperatureSystem } from './TemperatureSystem.mjs';
 import { HighCountActorSystem } from './HighCountActorSystem.mjs';
 import { GuidePathSystem } from './GuidePathSystem.mjs';
+import { PatrolPathSystem } from './PatrolPathSystem.mjs';
 import { CHUNK_SIZE } from '../../shared/world/worldConfig.mjs';
 
 export function createServerActor(spawn, archetype, runtime = {}) {
@@ -92,6 +97,9 @@ export function createServerActor(spawn, archetype, runtime = {}) {
   if (archetype.components.temperature) actor.addComponent(new TemperatureComponent(archetype.components.temperature));
   if (archetype.components.combustible) actor.addComponent(new CombustibleComponent(archetype.components.combustible));
   if (archetype.components.heatEmitter) actor.addComponent(new HeatEmitterComponent(archetype.components.heatEmitter));
+  if (archetype.components.container) {
+    actor.addComponent(new ContainerComponent(archetype.components.container));
+  }
   if (archetype.components.itemStack) {
     actor.addComponent(new ItemStackComponent({ ...archetype.components.itemStack, ...runtime.itemStack }));
   }
@@ -119,6 +127,9 @@ export function createServerActor(spawn, archetype, runtime = {}) {
       archetype.components.generatedProp,
       runtime.generatedProp,
     ));
+  }
+  if (archetype.components.patrolPath) {
+    actor.addComponent(new PatrolPathComponent(archetype.components.patrolPath));
   }
   if (archetype.components.guidePath) {
     actor.addComponent(new GuidePathComponent({
@@ -170,9 +181,13 @@ export function createServerActorWorld(sceneDefinition, options = {}) {
   world.addSystem(new GameAbilitySystem());
   world.addSystem(new BuoyancySystem());
   world.addSystem(new VesselMotorSystem());
+  // 巡逻要排在 colliderIndex 之前：它移动的是权威 Transform，碰撞体必须跟上，
+  // 否则玩家会撞在这只史莱姆上一帧之前的位置上。
+  world.addSystem(new PatrolPathSystem());
   world.addSystem(colliderIndex);
   world.addSystem(new ActorSimpleCollisionSystem());
   world.addSystem(new ElasticTetherSystem());
+  world.addSystem(new SoftBodyBiteSystem());
   const elasticDetachSystem = new ElasticDetachSystem();
   world.context.syncDetachedPhysics = () => elasticDetachSystem.syncTransforms(world);
   world.addSystem(elasticDetachSystem);
@@ -246,6 +261,7 @@ export function createActorSnapshots(world, options = {}) {
     const hazard = actor.getComponent(HAZARD_COMPONENT);
     const temperature = actor.getComponent(TEMPERATURE_COMPONENT);
     const combustible = actor.getComponent(COMBUSTIBLE_COMPONENT);
+    const container = actor.getComponent(CONTAINER_COMPONENT);
     const itemStack = actor.getComponent(ITEM_STACK_COMPONENT);
     const residency = actor.getComponent(ACTOR_RESIDENCY_COMPONENT);
     const generatedProp = actor.getComponent(GENERATED_PROP_COMPONENT);
@@ -368,6 +384,7 @@ export function createActorSnapshots(world, options = {}) {
           revision: Math.max(temperature.revision, combustible?.revision ?? 0),
         },
       } : {}),
+      ...(container ? { container: container.snapshot(viewer?.id) } : {}),
       ...(itemStack ? {
         itemStack: {
           itemType: itemStack.itemType,
