@@ -48,6 +48,7 @@ import {
   type HybridSlimeVisualComponent,
 } from '../src/actors/components/HybridSlimeVisualComponent';
 import { SlimeSurfaceDragComponent } from '../src/actors/components/SlimeSurfaceDragComponent';
+import { ReplicatedSlimeDragComponent } from '../src/actors/components/ReplicatedSlimeDragComponent';
 import {
   GUIDE_PATH_VISUAL_COMPONENT,
   type GuidePathVisualComponent,
@@ -1112,6 +1113,77 @@ test('史莱姆表面拖拽带动整团软体，命中处最强，接近上限�
   );
   assert.equal(hybrid.simulation.stats().surfaceDragActive, false);
   assert.ok(releasedExtension < selectedExtension * 0.2, '松开后应由原有胡克弹簧平滑回弹');
+  visual.dispose();
+});
+
+test('远端玩家按快照复现同一次拖拽形变，松手后回弹', () => {
+  const render = pbfSlimeArchetype.components.render;
+  const dragDefinition = pbfSlimeArchetype.components.slimeSurfaceDrag;
+  assert.ok(render?.model === 'line-art-pbf-slime');
+  assert.ok(dragDefinition);
+  const visual = createPlayerActorVisual('replicated-drag-player', render, 3.2);
+  const hybrid = visual.component!;
+  const replicated = new ReplicatedSlimeDragComponent(hybrid.simulation, dragDefinition);
+  for (let frame = 0; frame < 60; frame += 1) {
+    visual.update(1 / 60, frame / 60, 0, 0, { velocityX: 0, velocityZ: 0 });
+  }
+  const initialSurface = Float32Array.from(hybrid.simulation.positions);
+  let topOffset = 0;
+  for (let offset = 3; offset < initialSurface.length; offset += 3) {
+    if (initialSurface[offset + 1] > initialSurface[topOffset + 1]) topOffset = offset;
+  }
+
+  // 快照每 100ms 才到一份，同一份状态会被连续应用很多帧；重复应用不能把
+  // 起始位置刷成当前的已形变外壳，否则拉伸永远累积不起来。
+  const grab = {
+    revision: 1,
+    contactX: initialSurface[topOffset],
+    contactY: initialSurface[topOffset + 1],
+    contactZ: initialSurface[topOffset + 2],
+    pullX: 0.9,
+    pullY: 0,
+    pullZ: 0,
+  };
+  for (let frame = 0; frame < 150; frame += 1) {
+    replicated.apply(grab);
+    visual.update(1 / 60, frame / 60, 0, 0, { velocityX: 0, velocityZ: 0 });
+  }
+  const pulledSurface = hybrid.simulation.positions;
+  const selectedExtension = pulledSurface[topOffset] - initialSurface[topOffset];
+  assert.equal(hybrid.simulation.stats().surfaceDragActive, true);
+  assert.ok(
+    selectedExtension > render.radius * 0.2,
+    `远端应复现出明显形变，实际 ${selectedExtension}`,
+  );
+  assert.ok(
+    selectedExtension <= dragDefinition.maximumDistance + 1e-5,
+    '复制过来的位移同样受 maximumDistance 约束',
+  );
+
+  let equatorMaximumDelta = 0;
+  for (let offset = 0; offset < pulledSurface.length; offset += 3) {
+    if (Math.abs(hybrid.rig.surfaceDirections[offset + 1]) >= 0.25) continue;
+    equatorMaximumDelta = Math.max(
+      equatorMaximumDelta,
+      Math.abs(pulledSurface[offset] - initialSurface[offset]),
+    );
+  }
+  assert.ok(
+    equatorMaximumDelta > selectedExtension * 0.3,
+    '整团跟随同样要复制到远端，不只是命中处鼓一个包',
+  );
+
+  // 快照不再带拖拽字段就是松手；远端必须结束拖拽并交回原有胡克弹簧回弹。
+  replicated.apply(undefined);
+  for (let frame = 150; frame < 510; frame += 1) {
+    visual.update(1 / 60, frame / 60, 0, 0, { velocityX: 0, velocityZ: 0 });
+  }
+  assert.equal(hybrid.simulation.stats().surfaceDragActive, false);
+  assert.ok(
+    Math.abs(hybrid.simulation.positions[topOffset] - initialSurface[topOffset])
+      < selectedExtension * 0.2,
+    '松开后应回到静止外壳',
+  );
   visual.dispose();
 });
 

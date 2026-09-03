@@ -5,6 +5,8 @@ import {
   PlayerMovementComponent,
 } from '../../shared/actor/index.mjs';
 import { GrassDisplacementComponent } from '../actors/components/GrassDisplacementComponent';
+import { ReplicatedSlimeDragComponent } from '../actors/components/ReplicatedSlimeDragComponent';
+import { createDefaultSlimeSurfaceDragDefinition } from '../actors/components/SlimeSurfaceDragComponent';
 import type { GrassInteractionTarget } from '../grass';
 import type { ActorVisualModel } from '../models/actors/ActorVisualModel';
 import { createSlimePalette } from '../models/playerSlime';
@@ -27,6 +29,7 @@ export class RemotePlayer extends Actor {
   private grounded = true;
 
   private readonly grassDisplacement: GrassDisplacementComponent;
+  private readonly slimeDrag?: ReplicatedSlimeDragComponent;
 
   public constructor(
     state: InterpolatedPlayerState,
@@ -56,6 +59,15 @@ export class RemotePlayer extends Actor {
     );
     this.model = this.visual.model;
     if (this.visual.component) this.addComponent(this.visual.component);
+    // 拖拽形变是别人在自己客户端上做的手势；本机只按同一份参数复现，
+    // 旧房间下发的原型缺少该字段时回退到与当前 JSON 等价的比例值。
+    this.slimeDrag = this.visual.component
+      ? this.addComponent(new ReplicatedSlimeDragComponent(
+        this.visual.component.simulation,
+        archetype.components.slimeSurfaceDrag
+          ?? createDefaultSlimeSurfaceDragDefinition(this.visual.radius),
+      )) as ReplicatedSlimeDragComponent
+      : undefined;
     this.model.root.name = `remote-player-${state.id}`;
     this.model.root.position.set(
       state.x,
@@ -100,6 +112,7 @@ export class RemotePlayer extends Actor {
     this.speed = state.speed;
     this.verticalVelocity = state.verticalVelocity ?? 0;
     this.grounded = state.grounded ?? (state.y === undefined);
+    this.slimeDrag?.apply(state.slimeDrag);
   }
 
   public update(deltaSeconds: number, elapsedSeconds: number): void {

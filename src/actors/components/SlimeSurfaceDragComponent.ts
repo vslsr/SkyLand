@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { ActorComponent } from '../../../shared/actor/ActorComponent.mjs';
 import type { PbfSlimeVisualRig } from '../../models/actors/ActorVisualModel';
+import type { SlimeDragState } from '../../network/protocol';
 import type { ActorArchetypeDefinition } from '../../scenes/data/SceneDefinition';
 import type { HybridSlimeSimulation } from '../../slime/hybrid/HybridSlimeSimulation';
 
@@ -46,6 +47,7 @@ export class SlimeSurfaceDragComponent extends ActorComponent {
   private readonly fallbackVertexWorld = new THREE.Vector3();
   private readonly fallbackBestWorld = new THREE.Vector3();
   private readonly surfaceWorldScale = new THREE.Vector3();
+  private readonly pullLocal = new THREE.Vector3();
   private dragging = false;
 
   public constructor(
@@ -58,6 +60,22 @@ export class SlimeSurfaceDragComponent extends ActorComponent {
 
   public get isDragging(): boolean {
     return this.dragging;
+  }
+
+  /**
+   * 供网络复制的当前拖拽。命中点与位移都在 Actor 本地空间，因此接收端不需要
+   * 知道拖拽者的世界坐标或相机，只要用同一份参数在自己的求解器上重放即可。
+   */
+  public get replicationState(): SlimeDragState | undefined {
+    if (!this.dragging) return undefined;
+    return {
+      contactX: this.contactLocal.x,
+      contactY: this.contactLocal.y,
+      contactZ: this.contactLocal.z,
+      pullX: this.pullLocal.x,
+      pullY: this.pullLocal.y,
+      pullZ: this.pullLocal.z,
+    };
   }
 
   /** 鼠标按下时只拾取连续外壳，核心、气泡、脸和阴影都不会抢走命中。 */
@@ -92,17 +110,15 @@ export class SlimeSurfaceDragComponent extends ActorComponent {
     this.rig.root.updateWorldMatrix(true, false);
     this.dragTargetLocal.copy(this.dragTargetWorld);
     this.rig.root.worldToLocal(this.dragTargetLocal);
-    this.simulation.setSurfaceDragPull(
-      this.dragTargetLocal.x - this.contactLocal.x,
-      this.dragTargetLocal.y - this.contactLocal.y,
-      this.dragTargetLocal.z - this.contactLocal.z,
-    );
+    this.pullLocal.subVectors(this.dragTargetLocal, this.contactLocal);
+    this.simulation.setSurfaceDragPull(this.pullLocal.x, this.pullLocal.y, this.pullLocal.z);
     return true;
   }
 
   public endDrag(): void {
     if (!this.dragging) return;
     this.dragging = false;
+    this.pullLocal.set(0, 0, 0);
     this.simulation.endSurfaceDrag();
   }
 

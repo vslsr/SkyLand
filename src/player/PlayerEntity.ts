@@ -38,7 +38,7 @@ import {
   createPlayerMovementAttributes,
 } from '../../shared/abilities/playerMovementEffects.mjs';
 import type { PhysicsWorld } from '../../shared/physics/PhysicsWorld.mjs';
-import type { PlayerInputStep } from '../network/protocol';
+import type { PlayerInputStep, SlimeDragState } from '../network/protocol';
 import {
   MAXIMUM_PENDING_INPUT_STEPS,
   SIMULATION_STEP_SECONDS,
@@ -84,6 +84,7 @@ export class PlayerEntity extends Actor {
   private readonly visual: PlayerActorVisual;
   private readonly reconciler = new PlayerReconciler();
   private readonly grassDisplacement: GrassDisplacementComponent;
+  private readonly slimeSurfaceDrag?: SlimeSurfaceDragComponent;
   private readonly slimeSurfaceDragController?: SlimeSurfaceDragController;
   private readonly gameAbility: GameAbilityComponent;
   private readonly waterMovementEffect: WaterMovementEffectController;
@@ -186,6 +187,7 @@ export class PlayerEntity extends Actor {
       const groundY = sampleGroundHeight?.(position.x, position.z);
       if (groundY !== undefined) this.controller.ensureTerrainSupport(groundY);
     });
+    this.slimeSurfaceDrag = slimeSurfaceDrag;
     this.slimeSurfaceDragController = slimeSurfaceDrag
       ? new SlimeSurfaceDragController(
           canvas,
@@ -209,6 +211,11 @@ export class PlayerEntity extends Actor {
   /** 尚未被服务端确认的输入；上行包会重复携带它们来抵抗丢包。 */
   public get unacknowledgedInputSteps(): readonly PlayerInputStep[] {
     return this.pendingInputSteps;
+  }
+
+  /** 正在进行的鼠标拖拽形变，交给场景上报房间；没有拖拽时是 undefined。 */
+  public get slimeDragState(): SlimeDragState | undefined {
+    return this.slimeSurfaceDrag?.replicationState;
   }
 
   public captureTransformDebugState(): PlayerTransformDebugState {

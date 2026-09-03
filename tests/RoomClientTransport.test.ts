@@ -113,6 +113,22 @@ test('RoomClient 按消息用途选择 control 与 realtime 通道', async () =>
     ],
   });
 
+  const drag = {
+    contactX: 0, contactY: 0.9, contactZ: 0,
+    pullX: 0.3, pullY: 0, pullZ: 0,
+  };
+  assert.equal(client.sendSlimeDrag(drag), true);
+  assert.equal(transport.sent.at(-1)?.channel, 'realtime');
+  assert.deepEqual(decodeSent(transport.sent.at(-1)!.payload), {
+    type: 'player:slime-drag',
+    drag,
+  });
+  assert.equal(client.sendSlimeDrag(null), true);
+  assert.deepEqual(decodeSent(transport.sent.at(-1)!.payload), {
+    type: 'player:slime-drag',
+    drag: null,
+  });
+
   assert.equal(client.sendVesselInput('raft-1', { throttle: 1, steering: 0.25 }), 1);
   assert.equal(transport.sent.at(-1)?.channel, 'realtime');
   assert.equal(decodeSent(transport.sent.at(-1)!.payload).type, 'actor:input');

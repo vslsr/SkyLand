@@ -23,7 +23,10 @@ import { PlayerEntity } from '../player/PlayerEntity';
 import { RemotePlayerGroup } from '../player/RemotePlayerGroup';
 import { SceneRenderer } from '../rendering/SceneRenderer';
 import { createSceneRuntimeComponent, SceneComponentHost } from '../scene/components';
-import { INPUT_SEND_INTERVAL_SECONDS } from '../../shared/networkTuning.mjs';
+import {
+  INPUT_SEND_INTERVAL_SECONDS,
+  SLIME_DRAG_SEND_INTERVAL_SECONDS,
+} from '../../shared/networkTuning.mjs';
 import { HudController } from '../ui/HudController';
 import { TerrainEditorPanel } from '../ui/TerrainEditorPanel';
 import { CreateRoomPage, type CreateRoomFormValue } from '../ui/pages/CreateRoomPage';
@@ -71,6 +74,9 @@ export class GrasslandScene extends Scene {
   private availableScenes: SceneSummary[] = [];
   private player?: PlayerEntity;
   private timeSinceInputSent = 0;
+  private timeSinceSlimeDragSent = 0;
+  /** 上一次成功上报的拖拽是否处于按住状态；决定松手后要不要补发一次结束。 */
+  private slimeDragReplicated = false;
 
   /** 暴露当前场景的实时绑定方案，供设置页或调试面板调用 rebind/reset。 */
   public get inputBindings(): InputSchemeRuntime {
@@ -254,6 +260,7 @@ export class GrasslandScene extends Scene {
     this.player?.update(deltaSeconds, elapsedSeconds);
     this.sceneComponents.update(deltaSeconds, elapsedSeconds);
     this.sendPlayerInput(deltaSeconds);
+    this.sendSlimeDrag(deltaSeconds);
     if (this.joinedRoom?.scene.camera.mode === 'topdown') {
       this.remotePlayers.sync(this.snapshots.sample(), this.joinedRoom.player.id);
       this.remotePlayers.update(deltaSeconds, elapsedSeconds);
@@ -593,5 +600,23 @@ export class GrasslandScene extends Scene {
       lastInput,
       transform: this.player.captureTransformDebugState(),
     });
+  }
+
+  /**
+   * 拖拽形变按快照频率上行：服务端只转发不重放，报得比快照还密只会白占
+   * 输入令牌桶，把真正需要重放的移动输入挤掉。拖拽期间必须持续续期，服务端
+   * 才不会按超时清掉它；松手那一刻不等节流，立刻补发一次 null，其他玩家
+   * 不用等超时就能看到史莱姆弹回去。
+   */
+  private sendSlimeDrag(deltaSeconds: number): void {
+    if (!this.player || !this.joinedRoom) return;
+    this.timeSinceSlimeDragSent += deltaSeconds;
+    const drag = this.player.slimeDragState;
+    if (!drag && !this.slimeDragReplicated) return;
+    const released = drag === undefined;
+    if (!released && this.timeSinceSlimeDragSent < SLIME_DRAG_SEND_INTERVAL_SECONDS) return;
+    if (!this.roomClient.sendSlimeDrag(drag ?? null)) return;
+    this.timeSinceSlimeDragSent = 0;
+    this.slimeDragReplicated = !released;
   }
 }
