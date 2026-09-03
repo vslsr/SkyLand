@@ -186,6 +186,53 @@ test('还在 import 渲染侧模块的 Actor Component 只有已知的那几个'
 });
 
 /**
+ * 第 3 步的棘轮（`doc/engine-migration-implementation-plan.md` §3）。
+ *
+ * canvas 交给渲染线程之后，渲染栈跑在**没有 `document`、没有 `window`** 的地方。
+ * 所以这份清单盯的是「渲染侧还有几处伸手摸 DOM」。
+ *
+ * 它只能变短。现在只剩一项，而且那一项是对的：`SceneRenderer` 今天就是持有
+ * canvas 的那一个，`devicePixelRatio` 会跟着 canvas 一起搬走，不是要清理的债。
+ */
+const RENDER_FILES_TOUCHING_DOM = ['SceneRenderer.ts'];
+
+const DOM_ACCESS = /\b(document|window)\s*[.[]/;
+
+test('渲染栈里还摸 DOM 的只有已知的那几个', () => {
+  const roots = ['../src/rendering/', '../src/render/', '../src/models/', '../src/materials/'];
+  const offenders: string[] = [];
+  for (const root of roots) {
+    const directory = new URL(root, import.meta.url);
+    const walk = (folder: URL): void => {
+      for (const entry of readdirSync(folder, { withFileTypes: true })) {
+        if (entry.isDirectory()) {
+          walk(new URL(`${entry.name}/`, folder));
+          continue;
+        }
+        if (!entry.name.endsWith('.ts')) continue;
+        const source = readFileSync(new URL(entry.name, folder), 'utf8');
+        // 注释里提到 document 不算数，只看真正的代码行。
+        const code = source
+          .split('\n')
+          .filter((line) => {
+            const trimmed = line.trimStart();
+            return !trimmed.startsWith('*') && !trimmed.startsWith('//');
+          })
+          .join('\n');
+        if (DOM_ACCESS.test(code)) offenders.push(entry.name);
+      }
+    };
+    walk(directory);
+  }
+
+  assert.deepEqual(
+    offenders.sort(),
+    [...RENDER_FILES_TOUCHING_DOM].sort(),
+    '这份清单只能变短：渲染线程里没有 document，多出一项就是一处以后会崩的地方',
+  );
+});
+
+/**
  * 第 1.75 步的棘轮（`doc/engine-migration-implementation-plan.md` §1.75）。
  *
  * Component 干净了还不够：Actor 世界里跑的 **System** 也得干净，否则第 2 步
@@ -199,6 +246,7 @@ const ACTOR_WORLD_SYSTEMS = [
   'ActorTransformSystem.ts',
   'ActorVisualParamSystem.ts',
   'ActorInstanceSystem.ts',
+  'ActorFruitInstanceSystem.ts',
   'ActorGuidePathSyncSystem.ts',
   'RenderTransformSyncSystem.ts',
 ];

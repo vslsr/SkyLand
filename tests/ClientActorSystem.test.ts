@@ -1751,6 +1751,36 @@ test('高数量物品 Actor 保留交互与碰撞身份，但用批次绘制而�
   system.dispose();
 });
 
+test('准星也拾得到合批掉落物——它们没有 proxy，但有碰撞体', () => {
+  // 合并成一条解析路径之前，「有 proxy 的打场景图、没 proxy 的解析算」是两段
+  // 代码。这条用例钉住合并之后没 proxy 的那一半还在。
+  const system = new ClientActorSystem({
+    definition,
+    environment: { fogColor: '#ffffff', fogNear: 20, fogFar: 60 },
+    now: () => 1_000,
+    spawnBudgetMilliseconds: Number.POSITIVE_INFINITY,
+  });
+  const wood: SnapshotActor = {
+    id: 'drop-wood',
+    archetypeId: 'wood-pile',
+    revision: 2,
+    transform: { x: 0, y: 0, z: -3, yaw: 0 },
+    interactable: { action: 'pickup-stack', label: '木材', enabled: true, revision: 0 },
+    itemStack: { itemType: 'wood', displayName: '木材', quantity: 12, maximumQuantity: 999, revision: 1 },
+    residency: { state: 'sleeping', revision: 1 },
+  };
+  system.syncSnapshots([wood], 1_000, 1_000);
+  system.update(0, 0);
+  assert.equal(system.getActor('drop-wood')?.getComponent(RENDER_PROXY_COMPONENT), undefined);
+  assert.equal(
+    system.pickInteractableActor([0, 0.2, 2], [0, 0, -1])?.actorId,
+    'drop-wood',
+  );
+  // 打偏了同样不算：合批物走的是同一条求交，不是「离得近就算」。
+  assert.equal(system.pickInteractableActor([3, 0.2, 2], [0, 0, -1]), undefined);
+  system.dispose();
+});
+
 test('木堆与石堆各自成批：合批系统按渲染模型分派模板，不是只认木堆', () => {
   const system = new ClientActorSystem({
     definition,

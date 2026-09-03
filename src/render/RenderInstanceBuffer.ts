@@ -1,71 +1,24 @@
 /**
  * 高数量合批内容的实例通道（路线图 §4.5 的 `PropInstances`）。
  *
- * `Meshes[]` 那条路（`ProxyId` + transform SoA）不适用于掉落堆这类内容：它们**没有
- * 单独的 proxy**——`createReplica` 见到 `itemStack` 就提前返回，整批由
- * `HighCountActorBatchSystem` 一次实例化画掉。所以它们需要自己的一条通道。
+ * `Meshes[]` 那条路（`ProxyId` + transform SoA）不适用于掉落堆、树上果子这类内容：
+ * 它们**没有单独的 proxy**——要么 `createReplica` 见到 `itemStack` 就提前返回，
+ * 要么它们根本不是 Actor（果子是从树的放置记录里推出来的）。整批由渲染侧一次
+ * 实例化画掉，所以它们需要自己的一条通道。
  *
  * 形状是**每帧重建的定长记录数组**，不是「谁变了就发谁」：
  *
- * - 掉落堆的数量随捡拾/掉落每帧都可能变，增量的记账成本高于直接重铺；
+ * - 内容每帧都可能变（捡拾、掉落、果子熟没熟），增量的记账成本高于直接重铺；
  * - 定长意味着上 worker 之后这两段字节可以直接是 `SharedArrayBuffer` 视图，
  *   和 transform SoA 同一个套路。
  *
- * 离散字段（原型、驻留态、燃烧、单个还是一堆）走 `Int32Array`，连续量走
- * `Float32Array`。分两段而不是混在一个 f32 里，是因为把整数塞进 f32 再读回来
- * 这种事早晚会在某个边界上咬人一次。
- */
-
-/** 每个实例的离散字段个数，见 `INSTANCE_*` 下标。 */
-export const INSTANCE_INT_STRIDE = 5;
-/** 每个实例的连续字段个数。 */
-export const INSTANCE_FLOAT_STRIDE = 6;
-
-/** 原型在场景原型表里的下标。渲染侧据此找到 render 定义、建材质与模板。 */
-export const INSTANCE_ARCHETYPE = 0;
-/** 驻留态（`ActorResidencyComponent.state`），按注册顺序编号。 */
-export const INSTANCE_RESIDENCY = 1;
-export const INSTANCE_BURNING = 2;
-/** 单个还是一堆：果子与原木在数量为 1 时换一套模板。 */
-export const INSTANCE_SINGLE = 3;
-/**
- * 稳定的实例编号。
+ * 离散字段走 `Int32Array`，连续量走 `Float32Array`。分两段而不是把整数塞进 f32
+ * 再读回来，是因为那种事早晚会在某个边界上咬人一次。
  *
- * 渲染侧的滚动姿态是**从位移累积出来的**，所以必须能把这一帧的实例认成
- * 「上一帧那一个」。Actor id 是字符串，过不了字节边界；玩法侧因此给每个
- * 被合批的 Actor 分一个槽位号，和 `ProxyId` 一个套路——离开视野就还回去复用。
+ * **布局不在这里**：这个类只管字节，字段下标由各自的通道模块定义
+ * （`propInstanceLayout.ts`、`fruitInstanceLayout.ts`）。两条通道形状不同，
+ * 但没必要各写一份扩容与回收。
  */
-export const INSTANCE_ID = 4;
-
-export const INSTANCE_X = 0;
-export const INSTANCE_Y = 1;
-export const INSTANCE_Z = 2;
-export const INSTANCE_YAW = 3;
-export const INSTANCE_QUANTITY = 4;
-/** 刚体半径；> 0 才有滚动姿态。 */
-export const INSTANCE_ROLL_RADIUS = 5;
-
-/**
- * 驻留态的两侧共用编号。字符串过不了字节边界，所以定一份顺序。
- *
- * 放在通道定义里而不是写入方那边：读的一侧要靠它把编号翻回可读的名字
- * （合批的调试对象名就是这么拼的），两边必须是同一份。
- *
- * 只有这两个态：`ActorResidencyComponent.setState` 只认 `active` 与 `sleeping`。
- * dormant 不在这里——它表示这个 Actor **已经离开 ActorWorld**，也就不会有实例记录。
- */
-export const INSTANCE_RESIDENCY_STATES = ['active', 'sleeping'] as const;
-
-export function residencyCode(state: string | undefined): number {
-  const index = INSTANCE_RESIDENCY_STATES.indexOf(
-    state as typeof INSTANCE_RESIDENCY_STATES[number],
-  );
-  return index < 0 ? 0 : index;
-}
-
-export function residencyName(code: number): string {
-  return INSTANCE_RESIDENCY_STATES[code] ?? INSTANCE_RESIDENCY_STATES[0];
-}
 
 const DEFAULT_CAPACITY = 256;
 
@@ -81,9 +34,16 @@ export class RenderInstanceBuffer {
   #floats: Float32Array;
   #count = 0;
 
-  public constructor(capacity = DEFAULT_CAPACITY) {
-    this.#integers = new Int32Array(Math.max(1, capacity) * INSTANCE_INT_STRIDE);
-    this.#floats = new Float32Array(Math.max(1, capacity) * INSTANCE_FLOAT_STRIDE);
+  public constructor(
+    /** 每条记录的离散字段个数。 */
+    public readonly intStride: number,
+    /** 每条记录的连续字段个数。 */
+    public readonly floatStride: number,
+    capacity = DEFAULT_CAPACITY,
+  ) {
+    if (intStride < 0 || floatStride < 0) throw new Error('实例通道的 stride 不能为负');
+    this.#integers = new Int32Array(Math.max(1, capacity) * intStride);
+    this.#floats = new Float32Array(Math.max(1, capacity) * floatStride);
   }
 
   public get count(): number {
@@ -91,45 +51,51 @@ export class RenderInstanceBuffer {
   }
 
   public get capacity(): number {
-    return this.#integers.length / INSTANCE_INT_STRIDE;
+    // stride 为 0 的那一段撑不出容量，用另一段量。
+    if (this.intStride > 0) return this.#integers.length / this.intStride;
+    if (this.floatStride > 0) return this.#floats.length / this.floatStride;
+    return 0;
   }
 
   public beginFrame(): void {
     this.#count = 0;
   }
 
-  public push(
-    integers: readonly [number, number, number, number, number],
-    floats: readonly [number, number, number, number, number, number],
-  ): void {
+  public push(integers: readonly number[], floats: readonly number[]): void {
+    if (integers.length !== this.intStride || floats.length !== this.floatStride) {
+      throw new Error(
+        `实例记录字段数不符：期望 ${this.intStride}／${this.floatStride}，`
+        + `收到 ${integers.length}／${floats.length}`,
+      );
+    }
     this.#ensure(this.#count + 1);
-    const intBase = this.#count * INSTANCE_INT_STRIDE;
-    for (let index = 0; index < INSTANCE_INT_STRIDE; index += 1) {
+    const intBase = this.#count * this.intStride;
+    for (let index = 0; index < this.intStride; index += 1) {
       this.#integers[intBase + index] = integers[index];
     }
-    const floatBase = this.#count * INSTANCE_FLOAT_STRIDE;
-    for (let index = 0; index < INSTANCE_FLOAT_STRIDE; index += 1) {
+    const floatBase = this.#count * this.floatStride;
+    for (let index = 0; index < this.floatStride; index += 1) {
       this.#floats[floatBase + index] = floats[index];
     }
     this.#count += 1;
   }
 
   public readInt(instance: number, field: number): number {
-    return this.#integers[instance * INSTANCE_INT_STRIDE + field];
+    return this.#integers[instance * this.intStride + field];
   }
 
   public readFloat(instance: number, field: number): number {
-    return this.#floats[instance * INSTANCE_FLOAT_STRIDE + field];
+    return this.#floats[instance * this.floatStride + field];
   }
 
   #ensure(count: number): void {
     if (count <= this.capacity) return;
     let capacity = Math.max(1, this.capacity);
     while (capacity < count) capacity *= 2;
-    const integers = new Int32Array(capacity * INSTANCE_INT_STRIDE);
+    const integers = new Int32Array(capacity * this.intStride);
     integers.set(this.#integers);
     this.#integers = integers;
-    const floats = new Float32Array(capacity * INSTANCE_FLOAT_STRIDE);
+    const floats = new Float32Array(capacity * this.floatStride);
     floats.set(this.#floats);
     this.#floats = floats;
   }

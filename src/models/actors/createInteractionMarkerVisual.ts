@@ -1,4 +1,6 @@
 import * as THREE from 'three';
+import { createDrawingSurface } from '../../platform/index';
+import { createSurfaceTexture } from '../../materials/surfaceTexture';
 
 export interface InteractionMarkerVisual {
   readonly root: THREE.Group;
@@ -17,10 +19,11 @@ const LABEL_TEXTURE_HEIGHT = 256;
 const LABEL_FONT_SIZE = 176;
 
 function createLabelTexture(label: string): THREE.CanvasTexture | undefined {
-  if (typeof document === 'undefined') return undefined;
-  const canvas = document.createElement('canvas');
-  const context = canvas.getContext('2d');
-  if (!context) return undefined;
+  // 宽度要先量了才知道，所以开一块最小的、量完再改尺寸——改尺寸会清空画布，
+  // 所以字体要在改完之后重新设一遍（下面那一行不是重复代码）。
+  const surface = createDrawingSurface(1, 1);
+  if (!surface) return undefined;
+  const { canvas, context } = surface;
 
   context.font = `700 ${LABEL_FONT_SIZE}px Arial, sans-serif`;
   const measuredWidth = context.measureText(label).width;
@@ -33,11 +36,7 @@ function createLabelTexture(label: string): THREE.CanvasTexture | undefined {
   context.textBaseline = 'middle';
   context.fillText(label, canvas.width / 2, canvas.height / 2 + 4, canvas.width - 32);
 
-  const texture = new THREE.CanvasTexture(canvas);
-  texture.generateMipmaps = false;
-  texture.minFilter = THREE.LinearFilter;
-  texture.magFilter = THREE.LinearFilter;
-  return texture;
+  return createSurfaceTexture(surface);
 }
 
 /** 线稿风通用输入标记；标签由实时 MappingContext 提供。 */

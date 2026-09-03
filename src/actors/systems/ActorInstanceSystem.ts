@@ -13,13 +13,15 @@ import {
   type TransformComponent,
 } from '../../../shared/actor/index.mjs';
 import {
-  INSTANCE_ARCHETYPE,
-  INSTANCE_BURNING,
-  INSTANCE_ID,
-  INSTANCE_RESIDENCY,
-  INSTANCE_SINGLE,
-  InstanceIdTable,
+  PROP_ARCHETYPE,
+  PROP_BURNING,
+  PROP_ID,
+  PROP_RESIDENCY,
+  PROP_SINGLE,
   residencyCode,
+} from '../../render/propInstanceLayout';
+import {
+  InstanceIdTable,
   type RenderInstanceBuffer,
 } from '../../render/RenderInstanceBuffer';
 
@@ -71,12 +73,12 @@ export class ActorInstanceSystem {
       const motion = actor.getComponent(DROP_MOTION_COMPONENT) as DropMotionComponent | undefined;
       const single = this.catalog.supportsSingle(actor.archetypeId) && stack.quantity === 1;
       this.live.add(actor.id);
-      const integers: [number, number, number, number, number] = [0, 0, 0, 0, 0];
-      integers[INSTANCE_ARCHETYPE] = archetypeIndex;
-      integers[INSTANCE_RESIDENCY] = residencyCode(residency?.state);
-      integers[INSTANCE_BURNING] = combustible?.burning ? 1 : 0;
-      integers[INSTANCE_SINGLE] = single ? 1 : 0;
-      integers[INSTANCE_ID] = this.ids.acquire(actor.id);
+      const integers = [0, 0, 0, 0, 0];
+      integers[PROP_ARCHETYPE] = archetypeIndex;
+      integers[PROP_RESIDENCY] = residencyCode(residency?.state);
+      integers[PROP_BURNING] = combustible?.burning ? 1 : 0;
+      integers[PROP_SINGLE] = single ? 1 : 0;
+      integers[PROP_ID] = this.ids.acquire(actor.id);
       this.instances.push(integers, [
         transform.x,
         transform.y,

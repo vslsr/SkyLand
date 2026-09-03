@@ -1,19 +1,24 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
-  INSTANCE_ARCHETYPE,
-  INSTANCE_FLOAT_STRIDE,
-  INSTANCE_ID,
-  INSTANCE_INT_STRIDE,
-  INSTANCE_QUANTITY,
-  INSTANCE_RESIDENCY,
-  INSTANCE_ROLL_RADIUS,
-  INSTANCE_X,
-  InstanceIdTable,
-  RenderInstanceBuffer,
+  PROP_ARCHETYPE,
+  PROP_FLOAT_STRIDE,
+  PROP_ID,
+  PROP_INT_STRIDE,
+  PROP_QUANTITY,
+  PROP_RESIDENCY,
+  PROP_ROLL_RADIUS,
+  PROP_X,
   residencyCode,
   residencyName,
-} from '../src/render/RenderInstanceBuffer';
+} from '../src/render/propInstanceLayout';
+import {
+  FRUIT_COUNT,
+  FRUIT_FLOAT_STRIDE,
+  FRUIT_INT_STRIDE,
+  FRUIT_X,
+} from '../src/render/fruitInstanceLayout';
+import { InstanceIdTable, RenderInstanceBuffer } from '../src/render/RenderInstanceBuffer';
 
 /**
  * 高数量合批内容的实例通道（实现路径文档 §3 / 路线图 §4.5 的 `PropInstances`）。
@@ -26,11 +31,11 @@ const ints = (
   archetype: number,
   residency = 0,
   id = 0,
-): [number, number, number, number, number] => {
-  const record: [number, number, number, number, number] = [0, 0, 0, 0, 0];
-  record[INSTANCE_ARCHETYPE] = archetype;
-  record[INSTANCE_RESIDENCY] = residency;
-  record[INSTANCE_ID] = id;
+): number[] => {
+  const record = [0, 0, 0, 0, 0];
+  record[PROP_ARCHETYPE] = archetype;
+  record[PROP_RESIDENCY] = residency;
+  record[PROP_ID] = id;
   return record;
 };
 
@@ -38,11 +43,11 @@ const floats = (
   x: number,
   quantity = 1,
   radius = 0,
-): [number, number, number, number, number, number] => {
-  const record: [number, number, number, number, number, number] = [0, 0, 0, 0, 0, 0];
-  record[INSTANCE_X] = x;
-  record[INSTANCE_QUANTITY] = quantity;
-  record[INSTANCE_ROLL_RADIUS] = radius;
+): number[] => {
+  const record = [0, 0, 0, 0, 0, 0];
+  record[PROP_X] = x;
+  record[PROP_QUANTITY] = quantity;
+  record[PROP_ROLL_RADIUS] = radius;
   return record;
 };
 
@@ -59,49 +64,49 @@ test('驻留态只有 active 与 sleeping，两侧靠同一份编号对话', () 
 });
 
 test('beginFrame 之后重新铺一遍，读出来的就是这一帧写进去的', () => {
-  const buffer = new RenderInstanceBuffer(4);
+  const buffer = new RenderInstanceBuffer(PROP_INT_STRIDE, PROP_FLOAT_STRIDE, 4);
   buffer.beginFrame();
   buffer.push(ints(2, 1, 7), floats(1.5, 12, 0.14));
   buffer.push(ints(3, 0, 8), floats(-4, 1));
   assert.equal(buffer.count, 2);
-  assert.equal(buffer.readInt(0, INSTANCE_ARCHETYPE), 2);
-  assert.equal(buffer.readInt(0, INSTANCE_RESIDENCY), 1);
-  assert.equal(buffer.readInt(0, INSTANCE_ID), 7);
-  assert.equal(buffer.readFloat(0, INSTANCE_X), 1.5);
-  assert.equal(buffer.readFloat(0, INSTANCE_QUANTITY), 12);
-  assert.ok(Math.abs(buffer.readFloat(0, INSTANCE_ROLL_RADIUS) - 0.14) < 1e-6);
-  assert.equal(buffer.readInt(1, INSTANCE_ARCHETYPE), 3);
-  assert.equal(buffer.readFloat(1, INSTANCE_X), -4);
+  assert.equal(buffer.readInt(0, PROP_ARCHETYPE), 2);
+  assert.equal(buffer.readInt(0, PROP_RESIDENCY), 1);
+  assert.equal(buffer.readInt(0, PROP_ID), 7);
+  assert.equal(buffer.readFloat(0, PROP_X), 1.5);
+  assert.equal(buffer.readFloat(0, PROP_QUANTITY), 12);
+  assert.ok(Math.abs(buffer.readFloat(0, PROP_ROLL_RADIUS) - 0.14) < 1e-6);
+  assert.equal(buffer.readInt(1, PROP_ARCHETYPE), 3);
+  assert.equal(buffer.readFloat(1, PROP_X), -4);
 
   // 每帧重铺：上一帧的第二条不该留下来。
   buffer.beginFrame();
   buffer.push(ints(5, 0, 9), floats(0.25));
   assert.equal(buffer.count, 1);
-  assert.equal(buffer.readInt(0, INSTANCE_ARCHETYPE), 5);
+  assert.equal(buffer.readInt(0, PROP_ARCHETYPE), 5);
 });
 
 test('超过容量自动扩容，已经写进去的记录一条不丢', () => {
-  const buffer = new RenderInstanceBuffer(2);
+  const buffer = new RenderInstanceBuffer(PROP_INT_STRIDE, PROP_FLOAT_STRIDE, 2);
   buffer.beginFrame();
   for (let index = 0; index < 9; index += 1) buffer.push(ints(index), floats(index));
   assert.equal(buffer.count, 9);
   assert.ok(buffer.capacity >= 9);
   for (let index = 0; index < 9; index += 1) {
-    assert.equal(buffer.readInt(index, INSTANCE_ARCHETYPE), index, `第 ${index} 条丢了`);
-    assert.equal(buffer.readFloat(index, INSTANCE_X), index);
+    assert.equal(buffer.readInt(index, PROP_ARCHETYPE), index, `第 ${index} 条丢了`);
+    assert.equal(buffer.readFloat(index, PROP_X), index);
   }
 });
 
 test('两段字节的步长就是字段个数——布局说错了这条会先炸', () => {
-  const buffer = new RenderInstanceBuffer(1);
+  const buffer = new RenderInstanceBuffer(PROP_INT_STRIDE, PROP_FLOAT_STRIDE, 1);
   buffer.beginFrame();
   buffer.push(ints(1, 1, 1), floats(1, 1, 1));
   buffer.push(ints(2, 0, 2), floats(2, 2, 2));
   // 第二条记录的起点必须落在一整个 stride 之后，混用下标会读到第一条的尾巴。
-  assert.equal(INSTANCE_INT_STRIDE, 5);
-  assert.equal(INSTANCE_FLOAT_STRIDE, 6);
-  assert.equal(buffer.readInt(1, INSTANCE_ARCHETYPE), 2);
-  assert.equal(buffer.readFloat(1, INSTANCE_X), 2);
+  assert.equal(PROP_INT_STRIDE, 5);
+  assert.equal(PROP_FLOAT_STRIDE, 6);
+  assert.equal(buffer.readInt(1, PROP_ARCHETYPE), 2);
+  assert.equal(buffer.readFloat(1, PROP_X), 2);
 });
 
 test('实例号在 Actor 活着期间稳定——渲染侧的滚动姿态就挂在这上面', () => {
@@ -126,4 +131,27 @@ test('离开视野的号码收回去复用，不会一路涨上去', () => {
   table.clear();
   assert.equal(table.size, 0);
   assert.equal(table.acquire('drop-d'), 0, 'clear 之后从头开始编号');
+});
+
+test('离散段长度为 0 也能用——果子那条通道没有任何离散字段', () => {
+  const buffer = new RenderInstanceBuffer(FRUIT_INT_STRIDE, FRUIT_FLOAT_STRIDE, 2);
+  assert.equal(FRUIT_INT_STRIDE, 0);
+  buffer.beginFrame();
+  buffer.push([], [1, 2, 3, 0.5, 1.25, 3]);
+  buffer.push([], [4, 5, 6, 0, 2, 2]);
+  // capacity 得从有长度的那一段量出来，否则会算成 0 而永远扩容。
+  assert.ok(buffer.capacity >= 2);
+  assert.equal(buffer.count, 2);
+  assert.equal(buffer.readFloat(0, FRUIT_X), 1);
+  assert.equal(buffer.readFloat(1, FRUIT_X), 4);
+  assert.equal(buffer.readFloat(1, FRUIT_COUNT), 2);
+});
+
+test('字段数不符当场报错，而不是悄悄写歪一整帧', () => {
+  const buffer = new RenderInstanceBuffer(PROP_INT_STRIDE, PROP_FLOAT_STRIDE, 1);
+  buffer.beginFrame();
+  // 一条通道换了布局、写入方没跟着改，是这类字节接口最容易出的错。
+  assert.throws(() => buffer.push([1, 2, 3], floats(0)), /字段数不符/);
+  assert.throws(() => buffer.push(ints(0), [1, 2]), /字段数不符/);
+  assert.equal(buffer.count, 0, '报错的那一条不该留下半截记录');
 });

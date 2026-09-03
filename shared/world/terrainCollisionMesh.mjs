@@ -68,6 +68,37 @@ export function sampleTerrainChunkCodes(chunkX, chunkZ, cellCodeAt) {
 }
 
 /**
+ * 把稀疏的编辑覆盖包成一个 `cellCodeAt`。
+ *
+ * 地形几何和碰撞网格都只有两个输入：世界种子（程序化底图）和这一小撮被编辑过的
+ * 格子。前者两侧各自推得出来，后者必须传。所以覆盖层过边界的形状是
+ * `[globalCellX, globalCellZ, code, ...]` 这一串数，而不是一个读 patch store 的
+ * 回调——回调过不了线程边界（实现路径文档 §3）。
+ *
+ * 没被编辑过的世界返回空数组，这时查表退化成一次 Map.get(undefined)，
+ * 和直接调程序化函数差不多。
+ *
+ * @param {number} worldSeed
+ * @param {Int32Array | readonly number[]} overrides
+ * @returns {(globalCellX: number, globalCellZ: number) => number}
+ */
+export function createOverrideCellCodeAt(worldSeed, overrides) {
+  if (!overrides || overrides.length === 0) {
+    return (globalCellX, globalCellZ) => terrainCellCodeAt(worldSeed, globalCellX, globalCellZ);
+  }
+  const edits = new Map();
+  for (let offset = 0; offset + 2 < overrides.length; offset += 3) {
+    edits.set(`${overrides[offset]},${overrides[offset + 1]}`, overrides[offset + 2]);
+  }
+  return (globalCellX, globalCellZ) => {
+    const edited = edits.get(`${globalCellX},${globalCellZ}`);
+    return edited === undefined
+      ? terrainCellCodeAt(worldSeed, globalCellX, globalCellZ)
+      : edited;
+  };
+}
+
+/**
  * 只用「世界种子 + 这一窗里的编辑覆盖」推出同一窗格子码。
  *
  * 和 `sampleTerrainChunkCodes` 得到的结果必须逐格相同——那个走的是
