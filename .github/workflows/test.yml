@@ -1,0 +1,39 @@
+# 仓库的唯一门禁：跑 npm test。
+#
+# 它同时守着这个项目最危险的一条不变量——放置与地形算法在
+# shared/world/*.mjs 与 native/chunkgen/ 里有两份实现，签入的 chunkgen.wasm
+# 必须是新的那一份。测试会加载签入的 wasm 并与 JS 参考实现逐位比对，
+# 所以「改了 Rust 却忘了 npm run build:wasm」在这里就会报红，
+# 而不是等到线上有人看见一棵别人看不见的树。
+name: test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# 同一个分支上连着推几次时，只留最后一次的运行。
+concurrency:
+  group: test-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          # 与开发环境同一档 LTS；测试跑在 Node 上，不需要浏览器。
+          node-version: '22'
+          cache: npm
+
+      - run: npm ci
+
+      # 服务端与客户端两套：npm run test:server && npm run test:client
+      - run: npm test

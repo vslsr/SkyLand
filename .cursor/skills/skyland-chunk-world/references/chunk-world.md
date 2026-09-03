@@ -12,6 +12,9 @@
 | `shared/world/hash.mjs` | 整数哈希与定点值噪声。全程不碰浮点。 |
 | `shared/world/chunkKey.mjs` | 世界坐标、chunk 坐标与 chunk key 之间的换算，以及半径查询。 |
 | `shared/world/chunkContent.mjs` | 放置算法的 JS 参考实现。输出整数放置记录。 |
+| `shared/world/terrainConfig.mjs` | 地形格尺寸、表面、形状、群系枚举与格 code 的位布局。 |
+| `shared/world/terrainContent.mjs` | 台阶地形的 JS 参考实现：高度、表面、形状、群系打包成一个 code。 |
+| `shared/world/terrainBiome.mjs` | 群系分区的 JS 参考实现。区块站点 Voronoi + 温度湿度查表。 |
 | `shared/world/chunkStream.mjs` | 加载/卸载计划。纯函数，没有 WASM 对应实现。 |
 | `shared/world/chunkColliders.mjs` | 由放置记录派生静态碰撞盒。纯函数，没有 WASM 对应实现。 |
 | `shared/collision/` | 均匀网格空间划分、场景碰撞世界与扫掠球求交。 |
@@ -19,13 +22,15 @@
 | `shared/world/chunkGenerator.mjs` | 生成后端接口定义 + 纯 JS 后端（参考实现与降级路径）。 |
 | `shared/world/chunkGeneratorWasm.mjs` | WASM 后端包装，负责模板上传与结果切片。 |
 | `shared/world/wasm/chunkgen.wasm` | 签入仓库的编译产物。改了 Rust 必须重新构建并一起提交。 |
-| `native/chunkgen/` | `no_std` Rust crate：放置算法 + 逐顶点合批。 |
+| `native/chunkgen/` | `no_std` Rust crate：放置算法 + 逐顶点合批 + 地形与群系镜像（`terrain.rs`、`biome.rs`）。 |
 | `src/world/ChunkStreamer.ts` | 场景系统的**玩法那一半**。按焦点规划加载、限额构建、收集地形编辑覆盖、注册碰撞体。 |
 | `src/world/ChunkViewHost.ts` | **渲染那一半**。共享材质、海面材质、草地、每个 chunk 的 `ChunkView`。只认挂上／卸掉／清空三条命令，输入全是数据。 |
 | `src/world/ChunkView.ts` | 单个 chunk 的 Three.js 对象与释放。 |
 | `src/world/loadChunkGenerator.ts` | 取生成后端：WASM 优先，失败降级 JS。 |
 | `src/models/chunkTemplates.ts` | 把 `src/models/` 的线稿模型拍平成模板并注册。 |
 | `src/models/chunkMesh.ts` | 合批结果 → BufferGeometry，以及逐场景的填充材质。 |
+| `src/models/terrain/createTerrainChunkGeometry.ts` | 单个 chunk 的台地、断崖、水面与地皮纹理几何体。 |
+| `src/models/terrain/terrainBiomeStyle.ts` | 群系的纸面表现：三级色阶与线稿纹理。纯渲染侧，不参与生成。 |
 
 ## 确定性契约
 
@@ -40,9 +45,10 @@
 `server/tests/chunkGenerator.test.mjs` 在 81 个 chunk 上比对两个后端的放置记录，逐位不一致就报红。**只改一侧、或者忘了 `npm run build:wasm`，都会被它抓住。**
 
 地形另有一层：`server/tests/terrainParity.test.mjs` 在同一片 chunk 上**逐格**比对
-`terrain.rs` 与 `terrainContent.mjs`（20736 格），并断言扫描区里 13 种形状和水面
-全部出现过。那条覆盖率断言是护栏：物件只落在平地上，如果哪天生成参数变得扫不出斜坡，
-必须在这里报错，而不是让比对悄悄退回只覆盖平地。
+`terrain.rs` 与 `terrainContent.mjs`（20736 格），并断言扫描区里 13 种形状、水面和
+5 种群系全部出现过。那条覆盖率断言是护栏：物件只落在平地上，如果哪天生成参数变得扫不出
+斜坡，必须在这里报错，而不是让比对悄悄退回只覆盖平地。群系写在同一个 code 里，所以
+`biome.rs` 与 `terrainBiome.mjs` 的分裂也由这条比对抓。
 
 顶点数值允许有约 1e-6 的差异：Rust 侧用的是自己实现的多项式三角函数（`native/chunkgen/src/math.rs`），与 `Math.sin` 有极小偏差。这只影响朝向的呈现，不影响放置，测试对这一项用的是容差而不是逐位比较。
 
@@ -55,6 +61,9 @@
 | `PROP_KIND` / `PROP_KIND_COUNT` | `KIND_*` / `KIND_COUNT` | 物件种类。数值写进放置记录，不能重排。 |
 | `SCALE_RANGE`（`chunkContent.mjs`） | `SCALE_MINIMUM` / `SCALE_MAXIMUM` | 各种物件的缩放范围（千分数）。 |
 | `PROP_MARGIN_MM`、`DENSITY_SHIFT`、各路 `*_SALT`、`BASE_OCCUPANCY`、`OCCUPANCY_FROM_DENSITY`、`BASE_TREE_SHARE`、`TREE_SHARE_FROM_DENSITY`、`ROCK_SHARE`、`TWO_PI_MRAD` | 同名常量 | 放置算法的全部参数。 |
+| `TERRAIN_BIOME`、`TERRAIN_BIOME_SHIFT` / `TERRAIN_BIOME_MASK`（`terrainConfig.mjs`） | `TERRAIN_BIOME_*`、`TERRAIN_BIOME_SHIFT` / `TERRAIN_BIOME_MASK`（`biome.rs`、`terrain.rs`） | 群系枚举与它在格 code 里的位置。 |
+| `BIOME_REGION_SHIFT`、`BIOME_SITE_MARGIN`、`BIOME_CLIMATE_SHIFT`、三路 `BIOME_*_SALT`、`BIOME_VARIATION_*`、五个气候阈值（`terrainBiome.mjs`） | 同名常量（`biome.rs`） | 群系分区的全部参数。 |
+| `BIOME_PROP_STYLE`（`chunkContent.mjs`） | `BIOME_PROP_STYLE`（`placement.rs`） | 每种地皮的物件产出。逐行逐字段对应。 |
 | `MAXIMUM_FILL_VERTICES` / `MAXIMUM_LINE_VERTICES`（`chunkGenerator.mjs`） | `MAX_FILL_VERTICES` / `MAX_LINE_VERTICES`（`lib.rs`） | 单个 chunk 合批后的顶点上限。 |
 | `TEMPLATE_ARENA_CAPACITY` | `TEMPLATE_ARENA_F32` | 模板顶点暂存区容量。 |
 | `TEMPLATE_FILL_STRIDE` | `TEMPLATE_FILL_STRIDE` | 单个填充顶点占用的 f32 数：位置、法线、颜色各三个。 |
@@ -67,9 +76,12 @@
 每个 chunk 划成 `PROP_GRID × PROP_GRID` 个放置格（当前 8 × 8，每格 4 米）。对每一格：
 
 1. 用**密度噪声**决定这一带是密林还是空地。噪声在全局放置格坐标上取值，格点间距 2⁴ = 16 格，约 64 米一片林子，所以相邻 chunk 的疏密是连续的。
-2. 用一次哈希决定这一格有没有物件，概率随密度上升。
-3. 用同一次哈希的高位选种类：树的占比随密度从 16/255 升到 120/255，岩石固定 32/255，其余是草。
-4. 另外两次哈希给出格内抖动、朝向和缩放。抖动留了 `PROP_MARGIN_MM` 的边距，物件不会骑在 chunk 接缝上。
+2. 用一次哈希抖出格内落点，**先取落点处的地形格**：非平坦或非陆地直接跳过，同时拿到这一格的地皮。落点必须排在掷点之前，因为下面两步都要按地皮缩放。
+3. 用一次哈希决定这一格有没有物件，概率随密度上升，再乘 `BIOME_PROP_STYLE[地皮].occupancy / 255`。
+4. 用同一次哈希的高位选种类：树的占比随密度从 16/255 升到 120/255，岩石固定 32/255，扣掉两者后蘑菇与草按 3:4 分——四项各自再乘地皮的对应缩放，掷点按缩放后的权重总和取模。草原一行全是 255，四项合计恰好 256，掷点因此与引入群系之前逐位相同。
+5. 另一次哈希给出朝向和缩放。抖动留了 `PROP_MARGIN_MM` 的边距，物件不会骑在 chunk 接缝上。
+
+地皮风格表里的缩放全部 ≤ 255（只减不增），所以 `MAXIMUM_PROPS_PER_CHUNK` 与顶点预算不随它变化。
 
 结果写成 `PROP_STRIDE = 5` 的整数记录：`[kind, x_mm, z_mm, rotation_mrad, scale_thousandths]`。缓冲区由调用方复用，避免流式加载过程中持续产生 GC 压力。
 
@@ -122,6 +134,8 @@
 一个 chunk 固定三次 draw call：合批填充、合批轮廓线，以及同场景全部 chunk 共用的地面网格线。视野内 25 个 chunk 合计 75 次。
 
 填充与轮廓的顶点已经是世界坐标，承载它们的对象留在原点，Three.js 自动算出的包围球就落在正确位置，视锥剔除按 chunk 生效。
+
+地形自己再加地面填充与地面网格线两个 pass，含水格时加水面与水线两个。**群系不新增任何一次 draw call**：地皮的颜色走顶面已有的 `tint` 属性，地皮纹理并进地面网格线那一份几何体（实测每 chunk 多 337 条线段，约 +63%）。
 
 实测（约 4700 顶点/chunk）：
 

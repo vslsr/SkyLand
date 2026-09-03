@@ -1,19 +1,23 @@
 import * as THREE from 'three';
 import {
+  terrainCellBiome,
   terrainCellCodeAt,
   terrainCellCornerHeight,
   terrainCellShape,
   terrainCellSurface,
 } from '../../../shared/world/terrainContent.mjs';
 import {
+  TERRAIN_BIOME,
   TERRAIN_CELL_SIZE,
   TERRAIN_GRID,
+  TERRAIN_SHAPE,
   TERRAIN_SURFACE,
 } from '../../../shared/world/terrainConfig.mjs';
 import { terrainCellHasWater } from '../../../shared/world/terrainWater.mjs';
 import { terrainTopTriangles } from '../../../shared/world/terrainCollisionMesh.mjs';
 import type { OceanVisualDefinition } from '../../scenes/data/SceneDefinition';
 import { sampleOceanFaceTint } from '../ocean/oceanFaceting';
+import { appendBiomeMarks, createBiomePalette } from './terrainBiomeStyle';
 import { STREAMED_WATER_SHORE_WIDTH } from './terrainWaterStyle';
 
 export interface TerrainChunkGeometryOptions {
@@ -227,11 +231,9 @@ export function createTerrainChunkGeometry(
   const waterSplashPhases: number[] = [];
   const waterSplashScales: number[] = [];
   const waterSplashDirections: number[] = [];
-  const groundTop = new THREE.Color(options.groundColor);
-  // 台地的水底与侧面比顶面压得更暗：顶面本身没有明暗变化，起伏全靠这两级
-  // 色阶读出来，压得太浅时一整片地会糊成同一块颜色。
-  const groundFloor = groundTop.clone().multiplyScalar(0.84);
-  const groundCliff = groundTop.clone().multiplyScalar(0.70);
+  // 每种地皮一套三级色阶：顶面、水下的河床、断崖侧面。水底与侧面比顶面压得更暗，
+  // 顶面本身没有明暗变化，起伏全靠这两级色阶读出来。
+  const biomePalette = createBiomePalette(options.groundColor);
   const waterPrimary = new THREE.Color(options.oceanDefinition?.surfaceColor ?? 0xc9e6f2);
   const waterSecondary = new THREE.Color(options.oceanDefinition?.secondaryColor ?? 0xb7dbea);
   const waterDeep = new THREE.Color(options.oceanDefinition?.deepColor ?? 0x2f6f96);
@@ -269,9 +271,14 @@ export function createTerrainChunkGeometry(
       const code = cellCodeAt(globalCellX, globalCellZ);
       const corners = cornersAt(globalCellX, globalCellZ);
       const [southWest, southEast, northEast, northWest] = corners;
-      const topTint = terrainCellSurface(code) === TERRAIN_SURFACE.WATER ? groundFloor : groundTop;
+      const shape = terrainCellShape(code);
+      const surface = terrainCellSurface(code);
+      const biome = terrainCellBiome(code);
+      // code 里给群系留了 3 位而只用了 5 种，手写出来的越界值退回草原而不是塌掉。
+      const groundColors = biomePalette[biome] ?? biomePalette[TERRAIN_BIOME.GRASSLAND];
+      const topTint = surface === TERRAIN_SURFACE.WATER ? groundColors.floor : groundColors.top;
 
-      const topTriangles = terrainTopTriangles(terrainCellShape(code), corners) as Corner[];
+      const topTriangles = terrainTopTriangles(shape, corners) as Corner[];
       appendTriangle(
         groundPositions,
         groundNormals,
@@ -287,6 +294,17 @@ export function createTerrainChunkGeometry(
       // 南边与西边拥有共享格线；相邻格/相邻 chunk 不会再叠画一遍加深透明度。
       appendLine(groundLines, southWest, southEast, 0.012);
       appendLine(groundLines, northWest, southWest, 0.012);
+      if (surface === TERRAIN_SURFACE.GROUND && shape === TERRAIN_SHAPE.FLAT) {
+        appendBiomeMarks(
+          groundLines,
+          biome,
+          southWest.x,
+          southWest.z,
+          southWest.y,
+          globalCellX,
+          globalCellZ,
+        );
+      }
 
       // 每条共享边只由西侧或南侧格负责，跨 chunk 也沿用同一所有权规则。
       const east = cornersAt(globalCellX + 1, globalCellZ);
@@ -299,7 +317,7 @@ export function createTerrainChunkGeometry(
           northEast,
           east[3],
           east[0],
-          groundCliff,
+          groundColors.cliff,
         );
         appendLine(groundLines, southEast, east[0], 0.014);
         appendLine(groundLines, northEast, east[3], 0.014);
@@ -315,7 +333,7 @@ export function createTerrainChunkGeometry(
           north[0],
           north[1],
           northEast,
-          groundCliff,
+          groundColors.cliff,
         );
         appendLine(groundLines, northWest, north[0], 0.014);
         appendLine(groundLines, northEast, north[1], 0.014);

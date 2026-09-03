@@ -13,6 +13,7 @@ import {
 } from './terrainConfig.mjs';
 import {
   encodeTerrainCell,
+  terrainCellBiome,
   terrainCellCodeAt,
   terrainCellHeightLevel,
   terrainCellShape,
@@ -54,6 +55,7 @@ function normalizeCellCode(code) {
     terrainCellHeightLevel(code),
     terrainCellSurface(code),
     shape,
+    terrainCellBiome(code),
   );
 }
 

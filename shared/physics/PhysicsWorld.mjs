@@ -25,9 +25,18 @@ function positive(value, fallback) {
   return Math.max(0.0001, finite(value, fallback));
 }
 
+/**
+ * 绕 +Y 轴转 yaw 的四元数。
+ *
+ * 这里**不能**取反。Rapier 与 Three.js 都是右手 Y 上系，正的 Y 旋转是同一个方向：
+ * 线稿物件的合批（`chunkGenerator.mjs`）与 `simpleCollision` 把局部坐标转到世界的
+ * 矩阵都是 [[cos, sin], [-sin, cos]]，与这个四元数一致。取反会让 Rapier 里的盒子
+ * 相对看得见的模型镜像过去——正方形足迹看不出来，长方形（比如流式世界的石头，
+ * 0.48 × 0.40）会偏出最多 0.26 米，玩家被不存在的墙挡住、又能踩进石头里。
+ * 同一个函数里的 centerX/centerZ 平移用的也是不取反的 +yaw。
+ */
 function yawQuaternion(yaw) {
-  // simpleCollision uses the inverse sign of Rapier's conventional positive Y rotation.
-  const half = -finite(yaw) * 0.5;
+  const half = finite(yaw) * 0.5;
   return { x: 0, y: Math.sin(half), z: 0, w: Math.cos(half) };
 }
 
