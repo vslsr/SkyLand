@@ -13,6 +13,8 @@ export class HudController {
   private readonly interactionPrompt: HTMLElement;
   private menuHandler?: () => void;
   private vesselEventRevision = 0;
+  private interactionPromptText = '';
+  private interactionPromptOpacity = 0;
 
   public constructor() {
     this.roomLabel = this.requireElement<HTMLElement>('room-label');
@@ -84,10 +86,25 @@ export class HudController {
     this.vesselEventRevision = state.eventRevision;
   }
 
-  public setInteractionPrompt(text: string | undefined): void {
-    this.interactionPrompt.textContent = text ?? '';
-    this.interactionPrompt.hidden = !text;
-    document.body.classList.toggle('has-interaction-target', Boolean(text));
+  /**
+   * 交互提示的文字与淡入淡出进度。每帧都会被调用，所以两段状态都先比再写：
+   * 改 `textContent` 会让浏览器重排这块 HUD，`opacity` 只是合成，代价差一个量级。
+   *
+   * 准星那圈高亮跟的是「有没有瞄到目标」，不跟淡入淡出——它是瞄准反馈，不是提示。
+   */
+  public setInteractionPrompt(text: string | undefined, opacity = 1): void {
+    const label = text ?? '';
+    // 没有文字就是没有提示：这时不透明度一律按 0 记，`hidden` 才不会漏关。
+    const promptOpacity = label ? Math.min(1, Math.max(0, opacity)) : 0;
+    if (label !== this.interactionPromptText) {
+      this.interactionPromptText = label;
+      this.interactionPrompt.textContent = label;
+      document.body.classList.toggle('has-interaction-target', Boolean(label));
+    }
+    if (promptOpacity === this.interactionPromptOpacity) return;
+    this.interactionPromptOpacity = promptOpacity;
+    this.interactionPrompt.style.opacity = promptOpacity.toFixed(3);
+    this.interactionPrompt.hidden = promptOpacity <= 0;
   }
 
   private requireElement<T extends HTMLElement>(id: string): T {

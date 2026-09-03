@@ -238,11 +238,11 @@ export class GrasslandScene extends Scene {
         return control ? this.inputScheme.getControlLabel(control) : undefined;
       },
       setHoveredActorId: (actorId) => this.world.setHoveredActorId(actorId),
-      setInteractionMarkerActorId: (actorId, inputLabel) => {
-        this.world.setInteractionMarkerActorId(actorId, inputLabel);
+      setInteractionMarkerActorId: (actorId, inputLabel, opacity) => {
+        this.world.setInteractionMarkerActorId(actorId, inputLabel, opacity);
       },
       sendInteraction: (actorId) => { this.roomClient.interactWithActor(actorId); },
-      setPrompt: (text) => this.hud.setInteractionPrompt(text),
+      setPrompt: (text, opacity) => this.hud.setInteractionPrompt(text, opacity),
       isBiting: () => this.localPlayerBiting,
       sendBite: () => { this.roomClient.toggleBite(); },
     });
@@ -359,7 +359,7 @@ export class GrasslandScene extends Scene {
     this.hotbar.reset();
     } else {
       this.terrainEdits.update(this.controls.frame);
-      this.actorInteractions.update(this.controls.frame);
+      this.actorInteractions.update(this.controls.frame, deltaSeconds);
       this.hotbar.update();
     }
     const playerId = this.joinedRoom?.player.id;

@@ -2,6 +2,7 @@ import { resolveActorAction } from '../../shared/actor/index.mjs';
 import type { CameraFrame } from '../camera/CameraTransform';
 import { PlayerInputTags } from '../input/config/playerInput';
 import type { InputSubsystem } from '../input/core/InputSubsystem';
+import { InteractionPromptFade } from '../interaction/InteractionPromptFade';
 import type { ActorInteractionCandidate } from '../scene/SceneVisualSystem';
 import type { TagLike } from '../tags';
 
@@ -14,9 +15,10 @@ export interface ActorInteractionPort {
   findHeld?(playerId: string): ActorInteractionCandidate | undefined;
   getInputLabel(tag: TagLike): string | undefined;
   setHoveredActorId(actorId?: string): void;
-  setInteractionMarkerActorId?(actorId?: string, inputLabel?: string): void;
+  /** `opacity` 是提示的淡入淡出进度，和 HUD 那条文字共用一个值。 */
+  setInteractionMarkerActorId?(actorId?: string, inputLabel?: string, opacity?: number): void;
   sendInteraction(actorId: string): void;
-  setPrompt(text?: string): void;
+  setPrompt(text?: string, opacity?: number): void;
   /** 正咬着别人；这时交互键说的是「松口」。 */
   isBiting?(): boolean;
   /** 咬住 / 松口。目标由服务端按权威位姿判定，这里不指定。 */
@@ -27,6 +29,7 @@ export interface ActorInteractionPort {
 export class ActorInteractionController {
   private candidate?: ActorInteractionCandidate;
   private interactionRequested = false;
+  private readonly promptFade = new InteractionPromptFade();
   private readonly disposeBinding: () => void;
 
   public constructor(
@@ -40,11 +43,17 @@ export class ActorInteractionController {
     );
   }
 
-  public update(frame: CameraFrame): void {
+  /**
+   * `deltaSeconds` 只用于提示的淡入淡出；省略时提示停在当前状态，交互判定不受影响。
+   */
+  public update(frame: CameraFrame, deltaSeconds = 0): void {
     if (!this.input.enabled) {
       this.clearSelection();
       return;
     }
+    // 提示只在玩家停手之后现身。界面操作不算：CommonUI 一开就把整个输入关掉，
+    // 上面那条早退已经先把提示清干净了，这里读到的永远是游戏层的操作。
+    const promptOpacity = this.promptFade.update(deltaSeconds, this.input.hasActiveInput);
     const playerId = this.port.getPlayerId();
     const playerPosition = this.port.getPlayerPosition?.();
     const usesProximity = playerPosition !== undefined;
@@ -61,10 +70,11 @@ export class ActorInteractionController {
         ? this.candidate.actorId
         : undefined,
       worldInteractionLabel,
+      promptOpacity,
     );
     const vesselId = playerId ? this.port.findOwnedActorId(playerId) : undefined;
     const prompt = this.resolvePrompt(this.candidate, vesselId, playerId);
-    this.port.setPrompt(prompt);
+    this.port.setPrompt(prompt, promptOpacity);
     // 咬着人的时候交互键先归松口，和「手上已经有一株」同一条规矩：
     // 一个已经建立的持续状态必须有一个确定的退出入口。
     if (this.interactionRequested && this.port.isBiting?.()) {
@@ -89,6 +99,7 @@ export class ActorInteractionController {
 
   public reset(): void {
     this.interactionRequested = false;
+    this.promptFade.reset();
     this.clearSelection();
   }
 
@@ -149,7 +160,7 @@ export class ActorInteractionController {
   private clearSelection(): void {
     this.candidate = undefined;
     this.port.setHoveredActorId(undefined);
-    this.port.setInteractionMarkerActorId?.(undefined);
-    this.port.setPrompt(undefined);
+    this.port.setInteractionMarkerActorId?.(undefined, undefined, this.promptFade.opacity);
+    this.port.setPrompt(undefined, this.promptFade.opacity);
   }
 }

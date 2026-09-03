@@ -361,3 +361,60 @@ test('输入提示控制路径来自当前生效 Context，并按设备类型筛
   assert.deepEqual(input.getMappedControls('Input.Test.Use', 'gamepad'), []);
   input.dispose();
 });
+
+test('hasActiveInput 覆盖按住不放与一帧内按下即松，输入关掉时恒为假', () => {
+  const { clock, device, input } = createSingleActionInput({
+    id: 'Use',
+    valueType: 'digital',
+  });
+
+  input.update();
+  assert.equal(input.hasActiveInput, false);
+
+  // 按住：只有按下那一刻有事件，之后靠当前控制值继续算活动。
+  device.setDigital('Virtual.Test', true);
+  input.update();
+  assert.equal(input.hasActiveInput, true);
+  clock.value = 100;
+  input.update();
+  assert.equal(input.hasActiveInput, true);
+
+  clock.value = 200;
+  device.setDigital('Virtual.Test', false);
+  input.update();
+  assert.equal(input.hasActiveInput, false);
+
+  // 同一帧里按下又松开：结束状态是静止的，但这一帧确实操作过。
+  clock.value = 300;
+  device.setDigital('Virtual.Test', true, 300);
+  device.setDigital('Virtual.Test', false, 310);
+  clock.value = 320;
+  input.update();
+  assert.equal(input.hasActiveInput, true);
+
+  // 界面接管输入时（CommonUI 打开走的正是这条），界面操作不算游戏操作。
+  clock.value = 400;
+  device.setDigital('Virtual.Test', true);
+  input.setEnabled(false);
+  input.update();
+  assert.equal(input.hasActiveInput, false);
+  input.dispose();
+});
+
+test('失焦取消之后不会留下按住不放的假活动', () => {
+  const { clock, device, input } = createSingleActionInput({
+    id: 'Use',
+    valueType: 'digital',
+  });
+
+  device.setDigital('Virtual.Test', true);
+  input.update();
+  assert.equal(input.hasActiveInput, true);
+
+  // 切走窗口：设备状态被清掉，松手事件永远不会到，活动也必须跟着停。
+  device.cancel();
+  clock.value = 500;
+  input.update();
+  assert.equal(input.hasActiveInput, false);
+  input.dispose();
+});
