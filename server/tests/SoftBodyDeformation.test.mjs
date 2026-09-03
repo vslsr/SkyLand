@@ -182,7 +182,7 @@ test('咬住把形变力挂到被咬者身上，再按一次松口', async () =>
   assert.equal(scene.createSnapshot().players.find((p) => p.id === 'biter').bitingPlayerId, undefined);
 });
 
-test('咬人者绕到另一侧，外壳也只会被往外扯，不会被压出一个凹包', async () => {
+test('咬人者从目标身上越过之后，那块皮跟着牙绕过去，尖不会指向反方向', async () => {
   const clock = createClock();
   const scene = await createSoftBodyScene(clock);
   scene.addPlayer({ id: 'biter', name: '咬人的', slot: 0 });
@@ -190,20 +190,44 @@ test('咬人者绕到另一侧，外壳也只会被往外扯，不会被压出�
   const { biter, victim } = faceOff(scene, 1.2);
   assert.equal(scene.toggleBite('biter'), true);
   const deformation = victim.requireComponent(SOFT_BODY_DEFORMATION_COMPONENT);
+  const grabbed = { contactZ: deformation.contactZ, revision: deformation.revision };
+  assert.ok(grabbed.contactZ < -0.5, '咬住时命中点在咬人者那一面（-Z）');
 
-  // 咬住之后绕到被咬者的另一侧：命中点固定在原来那一面，于是「嘴 − 命中点」
-  // 整个指进身体里。这正是形变方向最容易画反的一刻。
-  place(scene, biter, FIELD_X, FIELD_Z + 2.4);
-  scene.update();
+  // 一路从被咬者身上越过去。每一步都检查形变**朝着嘴那一侧**：这条路径上
+  // 「嘴 − 命中点」会从朝外翻成朝里，法线兜底砍掉朝里那一半之后，如果命中点
+  // 还留在原来那一面，剩下的就只有沿旧法线的一点点——尖指向背对咬人者的方向。
+  for (let step = -12; step <= 12; step += 1) {
+    const offset = step * 0.2;
+    place(scene, biter, FIELD_X, FIELD_Z + 1.2 + offset);
+    scene.update();
+    // 嘴在世界里的位置（咬人者 yaw = 0，嘴在身前 0.42 m），换算到外壳坐标。
+    const mouthZ = (biter.z + 0.42) - victim.z;
+    // 嘴几乎落在身体中轴上时方向本身就不稳，这几帧不做判定。
+    if (Math.abs(mouthZ) < 0.25) continue;
+    const alongMouth = deformation.pullZ * Math.sign(mouthZ);
+    assert.ok(
+      alongMouth > 0,
+      `嘴在 z=${mouthZ.toFixed(2)}，位移却是 ${deformation.pullZ.toFixed(2)}（指向反方向）`,
+    );
+    assert.ok(
+      deformation.contactZ * Math.sign(mouthZ) > 0,
+      `命中点应该跟着牙挪到嘴那一面，实际 ${deformation.contactZ.toFixed(2)}`,
+    );
+    const outward = (
+      deformation.pullX * deformation.normalX
+      + deformation.pullY * deformation.normalY
+      + deformation.pullZ * deformation.normalZ
+    );
+    assert.ok(
+      outward >= deformation.gripDepth - 1e-6,
+      `法线方向至少要保留抓握深度，实际 ${outward}`,
+    );
+  }
 
-  const outward = (
-    deformation.pullX * deformation.normalX
-    + deformation.pullY * deformation.normalY
-    + deformation.pullZ * deformation.normalZ
-  );
+  // 换了一面就是换了一次抓取：接收端得据此重建影响权重，否则尖会留在旧顶点上。
   assert.ok(
-    outward >= deformation.gripDepth - 1e-6,
-    `法线方向至少要保留抓握深度，实际 ${outward}`,
+    deformation.revision > grabbed.revision,
+    '挪过去必须算一次新的抓取（revision 递增）',
   );
   assert.ok(deformation.gripDepth > 0, '牙齿要有抓握深度，否则贴身咬看不见');
 });

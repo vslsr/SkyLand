@@ -76,7 +76,8 @@ Actor 原点 + **世界轴向**，不转 yaw（`worldToShellOffset`）。所以�
 | `breakDistance` / `selfReportTimeoutMs` | 同一份 JSON 的 `softBodyDeformation` | 外力拉多远脱手、自报形变多久过期 |
 | `range` / `facingDot` / `pinch` / `gripDepth` | 同一份 JSON 的 `bite` | 嘴够得着多远、要多正对着、咬出来的尖有多尖、贴身咬也至少捏起多深的一块皮 |
 | `leashSlack` / `leashStiffness` / `leashDamping` | 同一份 JSON 的 `bite` | 能挣多远、拉多紧、会不会来回荡 |
-| `PINCH_INFLUENCE_NARROWING` / `PINCH_CONE_EXPONENT` | `HybridSlimeSimulation.ts` | pinch=1 时影响圈收多少、锥的侧面收敛多快。影响圈比顶点间距（约 0.2 m）还小就只剩命中点自己动，那是一根针不是一个锥 |
+| `REANCHOR_ALIGNMENT` | `SoftBodyDeformationComponent.mjs` | 抓握点偏离命中处法线多少就把那块皮挪过去（cos 值） |
+| `PINCH_INFLUENCE_NARROWING` / `PINCH_CONE_EXPONENT` / `PINCH_GRIP_BLEND_RATE` | `HybridSlimeSimulation.ts` | pinch=1 时影响圈收多少、锥的侧面收敛多快、位置约束淡入多快。影响圈比顶点间距（约 0.2 m）还小就只剩命中点自己动，那是一根针不是一个锥；淡入是为了换抓取时新的尖不要一帧戳出来 |
 | 全局跟随权重、质心跟随比例与速率 | `HybridSlimeSimulation.ts` 顶部常量 | 「整团跟着走」而不是只鼓一个包，全部按半径缩放 |
 
 ## 加一种外力：地上的倒刺
@@ -105,5 +106,10 @@ Actor 原点 + **世界轴向**，不转 yaw（`worldToShellOffset`）。所以�
   自己走开。
 - 沿法线不足 `gripDepth` 的那一段会被抬回去。倒刺和牙齿一样：贴着皮的时候不能把
   外壳往里压——压出来的是个凹包，不是被钩住。
+- 抓握点绕到外壳另一面（偏离命中处法线超过 `REANCHOR_ALIGNMENT`，60°）时，那块皮
+  跟着挪过去，并且**算一次新的抓取**（`revision` 加一，接收端重建影响权重）。
+  没有这一步，从目标身上越过之后位移几乎整条朝里，被上一条砍掉之后只剩沿旧法线的
+  一点点，尖就指向背对施力方的方向。倒刺同理：玩家从它上面走过去，钩住的那块皮
+  也该换到脚下那一面。
 - 倒刺该多尖？牙齿是 `pinch: 1`。钝的东西（吸盘、泥潭）调低它，就会从「拔出一个尖」
   连续过渡到「整团被拽着走」。

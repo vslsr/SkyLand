@@ -108,6 +108,14 @@ const PINCH_INFLUENCE_NARROWING = 0.45;
  * 不是尖。幂函数在 d=0 处有斜率，锥尖才收得住；指数控制侧面收敛得多快。
  */
 const PINCH_CONE_EXPONENT = 2.2;
+/**
+ * 咬住的位置约束淡入速率（约 0.12 秒到 90%）。
+ *
+ * 位置约束本身是一帧到位的：不淡入的话，咬上的那一帧尖就凭空出现，抓握点绕到
+ * 另一面重新抓取时更明显——旧的尖在回弹，新的尖已经戳出来了。淡入只影响这零点
+ * 几秒，稳态还是「那块皮就在牙上」。
+ */
+const PINCH_GRIP_BLEND_RATE = 18;
 
 function clamp(value: number, minimum: number, maximum: number): number {
   return Math.max(minimum, Math.min(maximum, value));
@@ -188,6 +196,7 @@ export class HybridSlimeSimulation {
   private surfaceDragExtensionRatio = 0;
   private surfaceDragForceScale = 0;
   private surfaceDragPinch = 0;
+  private surfaceDragGripBlend = 0;
   private surfaceDragBodyX = 0;
   private surfaceDragBodyY = 0;
   private surfaceDragBodyZ = 0;
@@ -257,6 +266,8 @@ export class HybridSlimeSimulation {
     const pinch = clamp(options.pinch ?? 0, 0, 1);
     const influenceRadius = options.influenceRadius * (1 - PINCH_INFLUENCE_NARROWING * pinch);
     this.surfaceDragPinch = pinch;
+    // 每次抓取都从头淡入，换抓取时尤其要紧：新的一面不能一帧就长出一个尖。
+    this.surfaceDragGripBlend = 0;
     this.surfaceDragStartPositions.set(this.positions);
     this.surfaceDragVertexOffset = nearestOffset;
     this.surfaceDragMaximumDistance = options.maximumDistance;
@@ -325,6 +336,7 @@ export class HybridSlimeSimulation {
     this.surfaceDragExtensionRatio = 0;
     this.surfaceDragForceScale = 0;
     this.surfaceDragPinch = 0;
+    this.surfaceDragGripBlend = 0;
     this.surfaceDragWeights.fill(0);
     // 继续唤醒一段时间，让现有胡克蒙皮把拉出的表面平滑带回锚点。
     this.isActive = true;
@@ -638,6 +650,11 @@ export class HybridSlimeSimulation {
     let targetX = 0;
     let targetY = 0;
     let targetZ = 0;
+    if (this.surfaceDragActive && deltaSeconds > 0) {
+      this.surfaceDragGripBlend += (1 - this.surfaceDragGripBlend) * (
+        1 - Math.exp(-PINCH_GRIP_BLEND_RATE * deltaSeconds)
+      );
+    }
     if (this.surfaceDragActive) {
       // 质心跟随同样按 pinch 让位：被咬住的是一块皮，不是整只史莱姆。
       const offsetRatio = SURFACE_DRAG_BODY_OFFSET_RATIO * (1 - this.surfaceDragPinch);
@@ -722,7 +739,7 @@ export class HybridSlimeSimulation {
       const weight = this.surfaceDragWeights[vertex];
       if (weight <= 1e-5) continue;
       const offset = vertex * 3;
-      const grip = this.surfaceDragPinch * weight;
+      const grip = this.surfaceDragPinch * this.surfaceDragGripBlend * weight;
       if (grip > 1e-5) {
         const gripX = this.surfaceDragStartPositions[offset] + this.surfaceDragPullX * weight;
         const gripY = this.surfaceDragStartPositions[offset + 1] + this.surfaceDragPullY * weight;
