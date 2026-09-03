@@ -300,14 +300,17 @@ test('手上有蘑菇时，交互键指向它并给出放下/松开提示', () =
     ...over,
   });
 
-  // 叼在嘴上：提示放下，按键指向它自己。
+  // 叼在嘴上：提示放下，但**按下这一刻不发**。手上有东西时交互键是按住语义
+  // ——短按放下、长按收进背包——由 HotbarController 在松手那一刻结算。在这里
+  // 按下就发出去，等于永远走短按分支，长按收包一次都到不了。
   held = candidate({ pickupHolderActorId: 'me' });
   trigger();
   controller.update(frame);
   assert.match(prompt ?? '', /放下/);
-  assert.deepEqual(sent, ['m1']);
+  assert.deepEqual(sent, [], '放下归按住路径结算');
 
   // 拉着还没断：提示松开，按键同样指向它，即使它已经被拖出就近搜索半径。
+  // 这一支不是「放下手上那件」，所以仍然按下即发。
   sent.length = 0;
   held = candidate({ holderPlayerId: 'me' });
   nearby = undefined;
@@ -334,7 +337,7 @@ test('手上有蘑菇时，交互键指向它并给出放下/松开提示', () =
   controller.dispose();
 });
 
-test('端到端：快照说我叼着它，按一次交互键就发出放下请求', () => {
+test('端到端：快照说我叼着它，按下交互键不再当场放下', () => {
   const definition = {
     schemaVersion: 1,
     id: 'grassland',
@@ -451,8 +454,10 @@ test('端到端：快照说我叼着它，按一次交互键就发出放下请�
   assert.ok(Math.abs(attachedTransform.x - (2 + Math.sin(0.5) * 0.36)) < 1e-6);
   assert.ok(Math.abs(attachedTransform.y - 0.4) < 1e-6);
   assert.ok(Math.abs(attachedTransform.z - (3 + Math.cos(0.5) * 0.36)) < 1e-6);
+  // 叼在嘴上：按下这一刻**不发**。放下与收进背包由松手时长分派，归按住路径，
+  // 在这里按下就发出去等于永远走短按分支。
   trigger();
   controller.update(frame);
-  assert.deepEqual(sent, ['m1'], '叼着时按 E 没有发出请求');
+  assert.deepEqual(sent, [], '叼着时按下不该立刻发出放下请求');
   controller.dispose();
 });

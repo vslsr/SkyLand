@@ -88,7 +88,12 @@ export class ActorInteractionController {
         this.toActionTarget(this.candidate),
         { playerId, controlledActorId: vesselId },
       );
-      if (action && !action.blocked) this.port.sendInteraction(this.candidate.actorId);
+      // 「放下手上那件」不在这里发。手上有东西时交互键是**按住**语义——短按放下、
+      // 长按收进背包——由 HotbarController 在松手那一刻结算。在按下这一刻就发出去，
+      // 等于永远走短按分支，长按收包一次都到不了。
+      if (action && !action.blocked && action.id !== 'drop-held') {
+        this.port.sendInteraction(this.candidate.actorId);
+      }
     } else if (this.interactionRequested && playerId) {
       // 没有任何候选可按时，交互键落到彩蛋上：咬面前的人。它排在最后，所以永远
       // 抢不走正经交互；也不出提示、不出标记，找得到才有反应，是个藏着的动作。

@@ -19,6 +19,14 @@ export interface HeldItemProgress {
 
 export interface HotbarPort {
   getInventory(): InventoryModelLike | undefined;
+  /**
+   * 手上那个 Actor 的 id；空手时是 undefined。
+   *
+   * 用它而不是 `inventory.heldItemType` 来判断「手上有没有东西」：叼着的蘑菇是个
+   * 世界物件，不在快捷栏里，按 itemType 判断会让它整条漏掉长按计时——那正是
+   * 「按下就掉」的成因。换手的作废检测也用它，因为它对两种手持物都成立。
+   */
+  getHeldActorId(): string | undefined;
   /** 现在能不能操作：界面盖着或没进房间时不能。 */
   isActive(): boolean;
   send(command: InventoryCommand): void;
@@ -29,6 +37,13 @@ export interface HotbarPort {
 /** 一次还没结束的按住。 */
 interface PendingHold {
   readonly kind: 'charge' | 'stow';
+  /**
+   * 按住开始那一刻手上是哪个 Actor。
+   *
+   * 记在这次按住上，而不是靠「和上一帧比」：按下可能发生在第一次 `update()` 之前，
+   * 那时上一帧的记录还是空的，换手就检测不出来。
+   */
+  readonly heldActorId: string | undefined;
   readonly startedAt: number;
   readonly durationSeconds: number;
   readonly label: string;
@@ -46,8 +61,6 @@ interface PendingHold {
 export class HotbarController {
   private pending?: PendingHold;
   private readonly disposers: (() => void)[] = [];
-  /** 上一帧手上是什么；换手时要取消掉正在进行的按住。 */
-  private lastHeldItemType?: string;
 
   public constructor(
     private readonly input: InputSubsystem,
@@ -82,9 +95,7 @@ export class HotbarController {
 
   /** 每帧调用：推进进度圈，并在手上那件变了时作废正在进行的按住。 */
   public update(): void {
-    const heldItemType = this.port.getInventory()?.heldItemType;
-    if (heldItemType !== this.lastHeldItemType) {
-      this.lastHeldItemType = heldItemType;
+    if (this.pending && this.port.getHeldActorId() !== this.pending.heldActorId) {
       // 换手了，这次按住指向的东西已经不在手上，继续算下去会打在新道具头上。
       this.cancelPending();
     }
@@ -102,7 +113,6 @@ export class HotbarController {
 
   public reset(): void {
     this.cancelPending();
-    this.lastHeldItemType = undefined;
   }
 
   public dispose(): void {
@@ -124,17 +134,22 @@ export class HotbarController {
     this.port.send({ kind: 'cycle', direction });
   }
 
-  /** 交互键：手上有东西时短按放下、长按收回背包；空手时这里不参与。 */
+  /**
+   * 交互键：手上有东西时短按放下、长按收回背包；空手时这里不参与。
+   *
+   * 「手上有东西」按嘴上那个 Actor 判，不按快捷栏：叼着的蘑菇也要走这条计时，
+   * 否则它会落回 `ActorInteractionController` 的按下即触发，一按就掉。
+   */
   private handleStow(phase: string): void {
     const inventory = this.port.getInventory();
-    const heldItemType = inventory?.heldItemType;
-    if (!this.port.isActive() || !inventory || !heldItemType) {
+    if (!this.port.isActive() || !inventory || !this.port.getHeldActorId()) {
       if (phase !== 'started') this.cancelPending();
       return;
     }
     if (phase === 'started') {
       this.begin({
         kind: 'stow',
+        heldActorId: this.port.getHeldActorId(),
         startedAt: this.now(),
         durationSeconds: inventory.stowHoldSeconds ?? 0.6,
         label: '收进背包',
@@ -163,6 +178,7 @@ export class HotbarController {
     if (phase === 'started') {
       this.begin({
         kind: 'charge',
+        heldActorId: this.port.getHeldActorId(),
         startedAt: this.now(),
         durationSeconds: use.chargeSeconds,
         label: use.verb,

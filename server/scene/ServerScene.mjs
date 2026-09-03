@@ -57,7 +57,7 @@ import {
 } from '../actors/ElasticTetherMutations.mjs';
 import { dropPickedActor, pickupActor } from '../actors/PickupDropMutations.mjs';
 import {
-  dropHeldItem,
+  dropHeldObject,
   stowHeldItem,
   syncHeldItemActor,
   transferItems,
@@ -633,7 +633,7 @@ export class ServerScene {
         break;
       }
       case 'drop':
-        changed = dropHeldItem(this, player);
+        changed = dropHeldObject(this, player);
         break;
       case 'stow:begin':
         // 交互键按住的起点。和蓄力一样记在服务端：客户端那圈转盘转满那一刻，
@@ -650,9 +650,11 @@ export class ServerScene {
         player.heldItemStowStartedAt = undefined;
         if (startedAt === undefined) return false;
         // 短按放下、长按收回背包，分界来自玩家原型，两端读同一份。
+        // 长按收不进去（背包满了，或这件东西根本揣不走）就回退成放下——按住半秒
+        // 之后什么都不发生，玩家只会以为键失灵了。
         changed = (this.now() - startedAt) / 1000 >= inventory.stowHoldSeconds
-          ? stowHeldItem(this, player)
-          : dropHeldItem(this, player);
+          && stowHeldItem(this, player);
+        if (!changed) changed = dropHeldObject(this, player);
         break;
       }
       case 'container:open':

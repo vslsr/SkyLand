@@ -287,6 +287,19 @@ function validateContainer(raw, filename) {
   };
 }
 
+function validateStowable(raw, filename) {
+  const path = `${filename}.components.stowable`;
+  const definition = requireObject(raw, path);
+  const itemType = requireId(definition.itemType, `${path}.itemType`);
+  if (!itemCatalog.has(itemType)) {
+    throw new TypeError(`${path}.itemType 没有登记进物品目录：${itemType}`);
+  }
+  if (definition.quantity === undefined) return { itemType };
+  const quantity = requireNumber(definition.quantity, `${path}.quantity`, 1, 100_000);
+  if (!Number.isInteger(quantity)) throw new TypeError(`${path}.quantity 必须是整数`);
+  return { itemType, quantity };
+}
+
 function validateItemStack(raw, filename) {
   const path = `${filename}.components.itemStack`;
   const definition = requireObject(raw, path);
@@ -894,6 +907,7 @@ function validateActorArchetype(raw, filename) {
     'heatEmitter',
     'inventory',
     'container',
+    'stowable',
     'itemStack',
     'actorResidency',
     'dropMotion',
@@ -990,6 +1004,7 @@ function validateActorArchetype(raw, filename) {
     : undefined;
   const inventory = components.inventory ? validateInventory(components.inventory, filename) : undefined;
   const container = components.container ? validateContainer(components.container, filename) : undefined;
+  const stowable = components.stowable ? validateStowable(components.stowable, filename) : undefined;
   const itemStack = components.itemStack ? validateItemStack(components.itemStack, filename) : undefined;
   const actorResidency = components.actorResidency
     ? validateActorResidency(components.actorResidency, filename)
@@ -1062,6 +1077,7 @@ function validateActorArchetype(raw, filename) {
       ...(heatEmitter ? { heatEmitter } : {}),
       ...(inventory ? { inventory } : {}),
       ...(container ? { container } : {}),
+      ...(stowable ? { stowable } : {}),
       ...(itemStack ? { itemStack } : {}),
       ...(actorResidency ? { actorResidency } : {}),
       ...(dropMotion ? { dropMotion } : {}),

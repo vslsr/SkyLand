@@ -89,6 +89,23 @@
       }
     },
     {
+      "id": "mushroom",
+      "displayName": "弹弹菇",
+      "category": "material",
+      "stackLimit": 99,
+      "slotCost": 1,
+      "iconId": "item-mushroom",
+      "tint": "#C97868",
+      "summary": "从地里拔出来的弹弹菇，可揣进背包带走。",
+      "use": {
+        "action": "throw",
+        "input": "primary",
+        "mode": "charge",
+        "chargeSeconds": 0.6,
+        "value": 60
+      }
+    },
+    {
       "id": "fruit",
       "displayName": "果实",
       "category": "supply",

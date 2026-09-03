@@ -1,5 +1,6 @@
 import {
   CONTAINER_COMPONENT,
+  STOWABLE_COMPONENT,
   DROP_MOTION_COMPONENT,
   INTERACTABLE_COMPONENT,
   INVENTORY_COMPONENT,
@@ -94,6 +95,25 @@ export function syncHeldItemActor(scene, player) {
 }
 
 /**
+ * 放下嘴上那件东西，不管它是什么。
+ *
+ * 嘴里同时只有一件，但它有两种：快捷栏拿出来的物品堆，和叼着的世界物件（蘑菇）。
+ * 两者的落地方式不同——物品堆只要摆好位置交给掉落物理，蘑菇要建刚体、恢复
+ * 可交互、按碰撞半径推开落点——所以这里只做分派，各自的落法留在原处。
+ *
+ * 分派放在一处，是因为「交互键短按 = 放下」现在对两种手持物都成立：让调用方
+ * 自己判断拿的是哪一种，那个判断迟早会有一处忘了写。
+ *
+ * @returns 是否真的放下了
+ */
+export function dropHeldObject(scene, player) {
+  if (dropHeldItem(scene, player)) return true;
+  const heldId = player?.getComponent(PICKUP_DROP_COMPONENT)?.heldActorId;
+  const actor = heldId ? scene.actorWorld.getActor(heldId) : undefined;
+  return actor ? scene.dropCarriedActor(player, actor) : false;
+}
+
+/**
  * 丢下嘴上那件手持物，落在身前。
  *
  * 落点要推到身体之外：就地松口会把人卡住（嘴只在身前 0.36 米，而玩家半径加物件
@@ -127,6 +147,10 @@ export function dropHeldItem(scene, player) {
 /**
  * 把手上那件收回背包。
  *
+ * 两种手持物都能收：物品堆按自己的 itemType 与数量回账；叼着的世界物件（蘑菇）
+ * 按它 `stowable` 上声明的物品回账——「这个世界物件装进包里算哪种物品」是那个
+ * 物件自己的属性，不是背包该知道的事。没声明就收不了，交给调用方回退成放下。
+ *
  * 收回之后**必须清掉选中格**，否则 `syncHeldItemActor` 会立刻再拿一个出来，长按
  * 等于没发生。「收回背包」的语义就是空手，那一格的配置留着，再按一次数字键还在。
  *
@@ -134,14 +158,22 @@ export function dropHeldItem(scene, player) {
  */
 export function stowHeldItem(scene, player) {
   const world = scene.actorWorld;
-  const actor = heldItemStack(world, player);
   const inventory = player?.getComponent(INVENTORY_COMPONENT);
+  const heldId = player?.getComponent(PICKUP_DROP_COMPONENT)?.heldActorId;
+  const actor = heldId ? world.getActor(heldId) : undefined;
   if (!actor || !inventory) return false;
   const stack = actor.getComponent(ITEM_STACK_COMPONENT);
+  const stowable = actor.getComponent(STOWABLE_COMPONENT);
+  const itemType = stack?.itemType ?? stowable?.itemType;
+  const quantity = stack?.quantity ?? stowable?.quantity ?? 0;
+  if (!itemType || quantity <= 0) return false;
   // 背包正好满了就收不回来：这时不该把东西删掉，让它留在手上比凭空消失好。
-  if (inventory.add(stack.itemType, stack.quantity) !== stack.quantity) return false;
+  if (inventory.add(itemType, quantity) !== quantity) return false;
   dropPickedActor(world, player);
-  scene.removeItemStackActor(actor.id);
+  // 物品堆是临时生成的，收回去就该消失；世界物件（蘑菇）走 ActorWorld 的删除，
+  // 它本来就登记在场景里。
+  if (stack) scene.removeItemStackActor(actor.id);
+  else world.removeActor(actor.id);
   inventory.setActiveHotbarSlot(-1);
   return true;
 }
