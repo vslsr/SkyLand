@@ -807,6 +807,35 @@ worker 已经在传的 `[globalCellX, globalCellZ, code, ...]`。
 
 `ChunkStreamer` 因此不再 import `registerChunkTemplates`，也不再持有生成器。
 
+### 已经做了的：装配劈成两半 ✅
+
+`createLineArtScene` 原来一个函数建完整张地图，玩法与渲染混在一起。现在：
+
+- **`createRenderWorld(definition, worldSeed)`** —— 会跟着 canvas 走的每一样东西：
+  `THREE.Scene`、材质、`ThreeRenderScene`、`ChunkViewHost`、昼夜与天气、
+  固定地图的地面/树/草/海面。**输入只有场景定义和世界种子两个纯数据**，
+  没有碰撞世界、没有物理世界、没有 Actor——那正是「能不能搬进 worker」的判据。
+- **`createLineArtScene`** —— 建玩法那一半（碰撞、物理、地形采样、Actor 世界、
+  流送规划），然后把两半接起来。
+
+两半之间只有三样东西过去：`renderScene`（proxy 命令口）、`chunkViews`（挂载命令口）、
+`transforms`（那段边界字节）。
+
+顺带拆掉一个假字段：`SceneVisualSystem` 要求 `root`，但**渲染器从不碰它**——
+那个字段只是为了让装配 `scene.add(root)`。流送规划、Actor 世界这类东西为了进
+每帧列表得凭空长出一个 `root`。现在分成 `SceneFrameSystem`（每帧被驱动，
+渲染器只要这个）与 `SceneVisualSystem extends`（还往场景图里挂几何）。
+`ChunkStreamer` 因此不再有 `root` 与 `beforeRender`。
+
+**还剩一处反向依赖**，而且是写在签名上的：`createRenderWorld` 收一个
+`sampleGroundHeight`——天气要按地面高度落雨，今天那是一个指向 `TerrainWorld`
+（玩法侧）的回调。修法和 chunk 生成器、地形覆盖是同一个：地面高度是
+`(种子, 编辑覆盖)` 的纯函数，渲染侧自己推得出来。留在参数上是为了让这笔债
+看得见，而不是藏在某个字段里。
+
+**这条缝就是第 3 步要的那条**：把 `createRenderWorld` 换成「在 worker 里建、
+回传三个命令口」，`createLineArtScene` 一个字都不用改。
+
 ### 还没做的
 
 | | 说明 |
@@ -815,6 +844,7 @@ worker 已经在传的 `[globalCellX, globalCellZ, code, ...]`。
 | `getActorRenderProxy` | 玩法侧最后一处 `resolve()`，只有能力实验室那个场景组件在用（它要 `abilityTargetRig`）。它不在 `RenderScene` 接口上——边界接口本身是干净的，这是伸手够到了具体后端 |
 | `faceCameras` / `setGuidePathResolution` | 收的是 `THREE.Camera` 与画布尺寸，是渲染世界**内部**的每帧动作，眼下经由 `ClientActorSystem.beforeRender` 路过。渲染循环进线程之后跟着走，不会出现在边界上 |
 | `GrasslandScene` 的装配归属 | 它同时握着输入、相机、玩家实体和渲染器；canvas 搬走时装配要跟着走 |
+| 天气的 `sampleGroundHeight` | 渲染侧唯一还反向读玩法侧的一处，见上 |
 
 §3 的前置全部落地：渲染栈不碰 DOM、玩法侧不碰 Three、chunk 与 Actor 两条主干都按
 game / render 切开、相机与合批内容都按字节过边界，**而且边界是单向的**。

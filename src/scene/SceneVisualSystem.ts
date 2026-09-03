@@ -27,12 +27,23 @@ export interface SceneUpdateContext {
   focusZ: number;
 }
 
-export interface SceneVisualSystem {
-  readonly root: THREE.Object3D;
+/**
+ * 每帧要被驱动的东西。**渲染器只需要这三样**——它从不碰 `root`。
+ *
+ * 和 `SceneVisualSystem` 分开，是因为流送规划、Actor 世界这类东西也要每帧被驱动，
+ * 但它们不往场景图里挂任何几何。以前它们为了进这张表得凭空长出一个 `root`，
+ * 那个字段除了骗过类型检查没有别的用处（实现路径文档 §3）。
+ */
+export interface SceneFrameSystem {
   update(deltaSeconds: number, elapsedSeconds: number, context?: SceneUpdateContext): void;
   beforeRender?(renderer: THREE.WebGLRenderer, camera: THREE.Camera): void;
   /** 场景被换掉时释放这个系统独占的资源。 */
   dispose?(): void;
+}
+
+/** 还往场景图里挂几何的那些。装配时 `scene.add(root)`。 */
+export interface SceneVisualSystem extends SceneFrameSystem {
+  readonly root: THREE.Object3D;
 }
 
 export interface WeatherVisualTarget {
@@ -96,7 +107,7 @@ export interface VesselHudState {
 
 export interface SceneComposition {
   scene: THREE.Scene;
-  visualSystems: SceneVisualSystem[];
+  visualSystems: SceneFrameSystem[];
   weatherTarget?: WeatherVisualTarget;
   dayNightTarget?: DayNightVisualTarget;
   /** 场景级共享光照/雾 uniform；场景 Component 建的表现也接到同一份上。 */

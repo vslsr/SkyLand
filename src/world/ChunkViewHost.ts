@@ -38,14 +38,27 @@ export interface ChunkViewMountRequest {
   readonly terrainOverrides: Int32Array;
 }
 
+/**
+ * 玩法侧看到的渲染那一半：**只有命令，没有一个方法有返回值**。
+ *
+ * `ChunkStreamer` 持有的是这个接口而不是 `ChunkViewHost` 本身——同一个道理，
+ * 有返回值就要等对面回话，而线程边界上没有「等一下」。
+ * `onGeneratorReady` 是唯一的反向通知，一次性的，不是每帧问一句。
+ */
+export interface ChunkViewSink {
+  mount(request: ChunkViewMountRequest): void;
+  unmount(key: string): void;
+  clear(): void;
+  /** 生成后端就位时回调一次。已经就位则立刻回调。 */
+  onGeneratorReady(listener: (kind: string) => void): void;
+}
+
 export interface ChunkViewHostOptions {
   templates: ChunkTemplateOptions;
   environment: FillMaterialEnvironment;
   ocean?: OceanVisualDefinition;
   seaLevel?: number;
   worldSeed: number;
-  /** 生成后端就位时回调一次。玩法侧在那之前不该开始规划。 */
-  onGeneratorReady?: (kind: string) => void;
 }
 
 /**
@@ -62,7 +75,7 @@ export interface ChunkViewHostOptions {
  * 输入全是数据（类型化数组 + 几个数），所以这一半整体搬进渲染线程时，
  * 命令那一侧不用改。
  */
-export class ChunkViewHost {
+export class ChunkViewHost implements ChunkViewSink {
   public readonly root = new THREE.Group();
   public readonly grassInteraction?: GrassInteractionTarget;
 
@@ -87,6 +100,7 @@ export class ChunkViewHost {
    */
   private generator?: ChunkGenerator;
   private disposed = false;
+  private readonly generatorReadyListeners: ((kind: string) => void)[] = [];
 
   public constructor(options: ChunkViewHostOptions) {
     this.root.name = 'chunk-views';
@@ -126,7 +140,8 @@ export class ChunkViewHost {
       });
       generator.setSeed(this.worldSeed);
       this.generator = generator;
-      options.onGeneratorReady?.(generator.kind);
+      for (const listener of this.generatorReadyListeners) listener(generator.kind);
+      this.generatorReadyListeners.length = 0;
     });
   }
 
@@ -146,6 +161,12 @@ export class ChunkViewHost {
 
   public beforeRender(renderer: THREE.WebGLRenderer): void {
     this.grass?.beforeRender(renderer);
+  }
+
+  public onGeneratorReady(listener: (kind: string) => void): void {
+    // 已经就位就立刻回调：装配顺序不该决定玩法侧收不收得到这一条。
+    if (this.generator) listener(this.generator.kind);
+    else this.generatorReadyListeners.push(listener);
   }
 
   public mount(request: ChunkViewMountRequest): void {

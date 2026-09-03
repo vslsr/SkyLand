@@ -16,7 +16,7 @@ import type {
   ActorSnapshotTarget,
   SceneComposition,
   SceneUpdateContext,
-  SceneVisualSystem,
+  SceneFrameSystem,
   WeatherVisualTarget,
 } from '../scene/SceneVisualSystem';
 import type { ThreeMeshProxy } from '../render/three/ThreeMeshProxy';
@@ -53,7 +53,7 @@ export class SceneRenderer {
   private readonly renderer: THREE.WebGLRenderer;
   private readonly camera = new THREE.PerspectiveCamera(50, 1, 0.1, 100);
   private scene = createEmptyScene();
-  private visualSystems: SceneVisualSystem[] = [];
+  private visualSystems: SceneFrameSystem[] = [];
   private grassInteraction?: GrassInteractionTarget;
   private actorSnapshotTarget?: ActorSnapshotTarget;
   /** 当前地图的渲染世界。整张对象随场景一起换掉，所以引用可以直接比身份。 */
