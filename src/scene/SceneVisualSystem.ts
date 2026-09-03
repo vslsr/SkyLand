@@ -65,7 +65,7 @@ export interface ActorSnapshotTarget {
   /** 这名玩家正拉着或叼着的那一株；它不靠就近搜索，交互键要能直接指向它。 */
   findHeldInteractableActor(playerId: string): ActorInteractionCandidate | undefined;
   setHoveredActorId(actorId?: string): void;
-  setInteractionMarkerActorId(actorId?: string, inputLabel?: string): void;
+  setInteractionMarkerActorId(actorId?: string, inputLabel?: string, opacity?: number): void;
   getVesselHudState(playerId: string): VesselHudState | undefined;
   /** 把 Actor 当前的碰撞盒登记进场景碰撞世界。查询前调用，每帧最多兑现一次。 */
   refreshColliders(): void;

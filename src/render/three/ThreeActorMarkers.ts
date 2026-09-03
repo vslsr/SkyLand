@@ -64,11 +64,17 @@ export class ThreeActorMarkers {
     return String(this.temperature?.root.userData.temperatureLabel ?? '');
   }
 
-  /** 选中态与按键字面量一起给：没选中就是空标签 + 不可见。 */
-  public setInteraction(label: string, visible: boolean): void {
+  /**
+   * 选中态与按键字面量一起给：没选中就是空标签 + 不可见。
+   *
+   * `opacity` 是交互提示的淡入淡出，和 HUD 那条文字同一个值。它只调材质，不碰标签：
+   * 标签一空就会丢掉字形贴图，跟着淡出走的话每淡回来一次都要重画一张。
+   */
+  public setInteraction(label: string, visible: boolean, opacity = 1): void {
     if (!this.interaction) return;
     this.interaction.setLabel(visible ? label : '');
-    this.interaction.root.visible = visible;
+    this.interaction.setOpacity(opacity);
+    this.interaction.root.visible = visible && opacity > 0;
   }
 
   /**

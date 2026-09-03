@@ -201,8 +201,12 @@ export class SceneWorld implements GrassInteractionTarget {
     this.actorSnapshotTarget?.setHoveredActorId(actorId);
   }
 
-  public setInteractionMarkerActorId(actorId?: string, inputLabel?: string): void {
-    this.actorSnapshotTarget?.setInteractionMarkerActorId(actorId, inputLabel);
+  public setInteractionMarkerActorId(
+    actorId?: string,
+    inputLabel?: string,
+    opacity?: number,
+  ): void {
+    this.actorSnapshotTarget?.setInteractionMarkerActorId(actorId, inputLabel, opacity);
   }
 
   public getVesselHudState(playerId: string): VesselHudState | undefined {
