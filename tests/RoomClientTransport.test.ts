@@ -129,6 +129,11 @@ test('RoomClient 按消息用途选择 control 与 realtime 通道', async () =>
     drag: null,
   });
 
+  // 咬住 / 松口不带目标：由谁被咬完全由服务端按权威位姿判定。
+  assert.equal(client.toggleBite(), true);
+  assert.equal(transport.sent.at(-1)?.channel, 'control');
+  assert.deepEqual(decodeSent(transport.sent.at(-1)!.payload), { type: 'player:bite' });
+
   assert.equal(client.sendVesselInput('raft-1', { throttle: 1, steering: 0.25 }), 1);
   assert.equal(transport.sent.at(-1)?.channel, 'realtime');
   assert.equal(decodeSent(transport.sent.at(-1)!.payload).type, 'actor:input');

@@ -62,6 +62,7 @@ export type ClientMessage =
       inputs: PlayerInputStep[];
     }
   | { type: 'player:slime-drag'; drag: SlimeDragState | null }
+  | { type: 'player:bite' }
   | { type: 'debug:transform-log:start' }
   | {
       type: 'debug:transform-log:events';

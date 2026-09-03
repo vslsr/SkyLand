@@ -42,6 +42,7 @@ function toState(player: SnapshotPlayer): InterpolatedPlayerState {
     velocityZ: player.velocityZ,
     grounded: player.grounded,
     ...(player.slimeDrag ? { slimeDrag: player.slimeDrag } : {}),
+    ...(player.bitingPlayerId ? { bitingPlayerId: player.bitingPlayerId } : {}),
   };
 }
 
@@ -68,6 +69,8 @@ function blend(from: SnapshotPlayer, to: SnapshotPlayer, amount: number): Interp
       : to.velocityZ ?? from.velocityZ,
     grounded: amount < 0.5 ? from.grounded : to.grounded,
     ...(slimeDrag ? { slimeDrag } : {}),
+    // 咬没咬着是离散状态，跟 grounded 一样只取更近的那一份，不插值。
+    ...(to.bitingPlayerId ? { bitingPlayerId: to.bitingPlayerId } : {}),
   };
 }
 

@@ -176,6 +176,13 @@ export class RoomClient {
     return this.send({ type: 'player:slime-drag', drag }, 'realtime');
   }
 
+  /**
+   * 咬住 / 松口。一次按键一条消息，不带目标：由谁被咬完全由服务端按权威位姿判定。
+   */
+  public toggleBite(): boolean {
+    return this.send({ type: 'player:bite' }, 'control');
+  }
+
   public startPlayerTransformLog(): boolean {
     return this.send({ type: 'debug:transform-log:start' }, 'control');
   }

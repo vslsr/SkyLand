@@ -529,3 +529,73 @@ test('方向向量不必是单位长度，射程按米算而不是按它的长�
   system.dispose();
 });
 
+
+test('咬人是没有提示的彩蛋：抢不走正经交互，咬着时交互键归松口', () => {
+  let now = 0;
+  let candidate: ActorInteractionCandidate | undefined;
+  let biting = false;
+  const sent: string[] = [];
+  const bites: number[] = [];
+  const prompts: Array<string | undefined> = [];
+  const markers: Array<string | undefined> = [];
+  const device = new TestKeyboardDevice(() => now);
+  const scheme = createPlayerInputScheme({ storage: null });
+  const input = new InputSubsystem({
+    actions: scheme.actions, config: scheme.config, contexts: scheme.contexts,
+    devices: [device], now: () => now,
+  });
+  const controller = new ActorInteractionController(input, {
+    getPlayerId: () => 'player-1',
+    findOwnedActorId: () => undefined,
+    pick: () => candidate,
+    getInputLabel: (tag) => {
+      const control = input.getMappedControls(tag)[0];
+      return control ? scheme.getControlLabel(control) : undefined;
+    },
+    setHoveredActorId: () => {},
+    setInteractionMarkerActorId: (actorId) => markers.push(actorId),
+    sendInteraction: (actorId) => sent.push(actorId),
+    setPrompt: (text) => prompts.push(text),
+    isBiting: () => biting,
+    sendBite: () => bites.push(now),
+  });
+  const frame = {
+    position: [0, 1, 5],
+    axes: { right: [1, 0, 0], up: [0, 1, 0], forward: [0, 0, -1] },
+  } as const;
+  const pressInteract = (): void => {
+    now += 10;
+    device.emit('Keyboard.KeyE', true);
+    input.update();
+    controller.update(frame);
+    now += 10;
+    device.emit('Keyboard.KeyE', false);
+    input.update();
+  };
+
+  // 没有任何候选：交互键落到彩蛋上，而且既不出提示也不出标记。
+  pressInteract();
+  assert.equal(bites.length, 1);
+  assert.deepEqual(sent, []);
+  assert.equal(prompts.at(-1), undefined);
+  assert.equal(markers.at(-1), undefined);
+
+  // 面前有正经交互时，彩蛋不能抢：它排在所有候选之后。
+  candidate = {
+    actorId: 'stack-1', label: '木材', action: 'pickup-stack',
+    carrierActorId: null, holderPlayerId: null, quantity: 3,
+  };
+  pressInteract();
+  assert.deepEqual(sent, ['stack-1']);
+  assert.equal(bites.length, 1, '有候选时不该再咬人');
+
+  // 咬着的时候交互键先归松口，和「手上已经有一株」同一条规矩：
+  // 一个已经建立的持续状态必须有确定的退出入口，哪怕面前站着别的东西。
+  biting = true;
+  pressInteract();
+  assert.equal(bites.length, 2);
+  assert.deepEqual(sent, ['stack-1'], '松口不能顺手把面前的东西也捡了');
+
+  controller.dispose();
+  input.dispose();
+});
