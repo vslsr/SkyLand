@@ -129,7 +129,11 @@ export class VirtualControls {
 
     for (const binding of this.buttons) {
       binding.element.addEventListener('pointerdown', (event) => {
-        if (binding.pointerId !== undefined || (event.pointerType === 'mouse' && event.button !== 0)) return;
+        if (
+          binding.pointerId !== undefined
+          || (event.pointerType === 'mouse' && event.button !== 0)
+          || event.defaultPrevented
+        ) return;
         event.preventDefault();
         event.stopPropagation();
         binding.pointerId = event.pointerId;
@@ -162,6 +166,7 @@ export class VirtualControls {
     if (
       this.joystickPointerId !== undefined
       || (event.pointerType === 'mouse' && event.button !== 0)
+      || !this.ownsPointerDown(event)
     ) return;
     event.preventDefault();
     event.stopPropagation();
@@ -220,6 +225,17 @@ export class VirtualControls {
   private readonly handleVisibilityChange = (): void => {
     if (document.visibilityState !== 'visible') this.reset();
   };
+
+  /**
+   * 摇杆热区是游戏层输入，排在所有可交互 UI 下面：按钮上的那一指由按钮消耗，
+   * 根本不会走到这里。这道判断是同一条规则的兜底——热区里将来嵌了 UI，或者
+   * 某块 UI 忘了写层级时，冒泡上来的事件仍然算别人消耗掉了，不会顺手变成一次移动。
+   */
+  private ownsPointerDown(event: PointerEvent): boolean {
+    if (event.defaultPrevented) return false;
+    const target = event.target as Node | null;
+    return target === this.joystickZone || this.joystick.contains(target);
+  }
 
   private updateJoystick(event: PointerEvent, currentRect?: DOMRect): void {
     const rect = currentRect ?? this.joystickZone.getBoundingClientRect();
