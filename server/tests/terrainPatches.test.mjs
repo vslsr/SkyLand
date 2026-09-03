@@ -3,12 +3,15 @@ import test from 'node:test';
 import {
   encodeTerrainCell,
   sampleTerrain,
+  terrainCellBiome,
   terrainCellCodeAt,
   terrainCellHeightLevel,
   terrainCellShape,
   terrainCellSurface,
 } from '../../shared/world/terrainContent.mjs';
+import { terrainBiomeAt } from '../../shared/world/terrainBiome.mjs';
 import {
+  TERRAIN_BIOME,
   TERRAIN_CELL_SIZE,
   TERRAIN_SHAPE,
   TERRAIN_SURFACE,
@@ -189,4 +192,45 @@ test('稀疏编辑器抬高、下挖和四向斜坡都只改目标字段', () =>
   assert.equal(terrainCellHeightLevel(sample.code), 1);
   assert.equal(terrainCellShape(sample.code), TERRAIN_SHAPE.RAMP_WEST);
   assert.equal(patches.size, 1);
+});
+
+test('编辑不改地皮：挖高、下挖、注水之后仍是同一片群系', () => {
+  const patches = new TerrainPatchStore(DEFAULT_WORLD_SEED);
+  const editor = new TerrainEditor(patches, { seaLevel: 0 });
+  // 覆盖到不止一种地皮，否则这条断言在只有草原的地方是恒真的。
+  const seen = new Set();
+  for (let cellZ = -30; cellZ <= 30; cellZ += 7) {
+    for (let cellX = -30; cellX <= 30; cellX += 7) {
+      const biome = terrainBiomeAt(DEFAULT_WORLD_SEED, cellX, cellZ);
+      seen.add(biome);
+      editor.raise(cellX, cellZ, 2);
+      assert.equal(terrainCellBiome(patches.cellCodeAt(cellX, cellZ)), biome, '抬高改了地皮');
+      editor.lower(cellX, cellZ, 5);
+      assert.equal(terrainCellBiome(patches.cellCodeAt(cellX, cellZ)), biome, '下挖改了地皮');
+      editor.setRamp(cellX, cellZ, TERRAIN_RAMP_DIRECTION.EAST);
+      assert.equal(terrainCellBiome(patches.cellCodeAt(cellX, cellZ)), biome, '改形状改了地皮');
+      editor.flood(cellX, cellZ);
+      assert.equal(terrainCellBiome(patches.cellCodeAt(cellX, cellZ)), biome, '注水改了地皮');
+      assert.equal(editor.readCell(cellX, cellZ).biome, biome);
+    }
+  }
+  assert.ok(seen.size > 1, '扫描点全落在同一种地皮上，这条断言没有意义');
+});
+
+test('覆盖层原样保留写进来的地皮位', () => {
+  const patches = new TerrainPatchStore(DEFAULT_WORLD_SEED);
+  const cellX = 5;
+  const cellZ = -9;
+  for (const biome of Object.values(TERRAIN_BIOME)) {
+    patches.setCellCode(
+      cellX,
+      cellZ,
+      encodeTerrainCell(4, TERRAIN_SURFACE.GROUND, TERRAIN_SHAPE.FLAT, biome),
+    );
+    assert.equal(terrainCellBiome(patches.cellCodeAt(cellX, cellZ)), biome);
+  }
+  // 写回与生成结果完全相同的 code（含地皮）会把 patch 删掉。
+  const baseline = terrainCellCodeAt(DEFAULT_WORLD_SEED, cellX, cellZ);
+  patches.setCellCode(cellX, cellZ, baseline);
+  assert.equal(patches.hasCell(cellX, cellZ), false);
 });

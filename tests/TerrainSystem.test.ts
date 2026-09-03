@@ -8,12 +8,14 @@ import {
   terrainCellSurface,
 } from '../shared/world/terrainContent.mjs';
 import {
+  TERRAIN_BIOME,
   TERRAIN_CELL_SIZE,
   TERRAIN_GRID,
   TERRAIN_SHAPE,
   TERRAIN_SURFACE,
 } from '../shared/world/terrainConfig.mjs';
 import { createTerrainChunkGeometry } from '../src/models/terrain/createTerrainChunkGeometry';
+import { BIOME_MARK_LIFT, createBiomePalette } from '../src/models/terrain/terrainBiomeStyle';
 import {
   STREAMED_WATER_SHORE_CLEARANCE,
   STREAMED_WATER_SHORE_WIDTH,
@@ -400,4 +402,115 @@ test('TerrainWorld 的稀疏编辑会同时驱动采样与 chunk 水面几何，
   terrain.waterGrid?.dispose();
   terrain.waterShore?.dispose();
   terrain.waterSplash?.dispose();
+});
+
+const GROUND_COLOR = '#e0dbc6';
+const CELLS_PER_CHUNK = TERRAIN_GRID * TERRAIN_GRID;
+
+/** 单一地皮铺满一个 chunk 时的几何体，用来把某一种地皮的表现单独拎出来看。 */
+function buildUniformBiomeChunk(biome: number, shape = TERRAIN_SHAPE.FLAT) {
+  const code = encodeTerrainCell(0, TERRAIN_SURFACE.GROUND, shape, biome);
+  return createTerrainChunkGeometry({
+    worldSeed: SEED,
+    chunkX: 0,
+    chunkZ: 0,
+    groundColor: GROUND_COLOR,
+    cellCodeAt: () => code,
+  });
+}
+
+test('五种地皮各自染出一种顶面色，且都还在纸调上', () => {
+  const palette = createBiomePalette(GROUND_COLOR);
+  const base = new THREE.Color(GROUND_COLOR);
+  const seen = new Set<string>();
+  for (const biome of Object.values(TERRAIN_BIOME)) {
+    const terrain = buildUniformBiomeChunk(biome);
+    const tints = terrain.groundFill.getAttribute('tint');
+    const expected = palette[biome].top;
+    for (let index = 0; index < tints.count; index += 1) {
+      assert.ok(Math.abs(tints.getX(index) - expected.r) < 1e-6);
+      assert.ok(Math.abs(tints.getY(index) - expected.g) < 1e-6);
+      assert.ok(Math.abs(tints.getZ(index) - expected.b) < 1e-6);
+    }
+    seen.add(expected.getHexString());
+    // 混色而不是换配色：每种地皮都还看得出场景底色，不会跳成饱和的纯色块。
+    const distance = Math.hypot(
+      expected.r - base.r,
+      expected.g - base.g,
+      expected.b - base.b,
+    );
+    assert.ok(distance > 0.02, `地皮 ${biome} 与底色几乎没有区别`);
+    assert.ok(distance < 0.45, `地皮 ${biome} 离底色太远，纸调断了`);
+    terrain.groundFill.dispose();
+    terrain.groundGrid.dispose();
+  }
+  assert.equal(seen.size, Object.keys(TERRAIN_BIOME).length, '有两种地皮撞了色');
+});
+
+/** 地皮纹理是网格线里抬得最高的那一层，按抬升量把它们数出来。 */
+function countBiomeMarkSegments(geometry: THREE.BufferGeometry): number {
+  const positions = geometry.getAttribute('position');
+  let count = 0;
+  for (let index = 0; index < positions.count; index += 2) {
+    const y = positions.getY(index);
+    if (Math.abs(y - Math.round(y) - BIOME_MARK_LIFT) < 1e-3) count += 1;
+  }
+  return count;
+}
+
+test('地皮纹理只画在平坦陆地上，且并进网格线那一份几何体', () => {
+  const flat = buildUniformBiomeChunk(TERRAIN_BIOME.GRASSLAND);
+  const marks = countBiomeMarkSegments(flat.groundGrid);
+  assert.ok(marks > 0, '草地没有画出任何纹理');
+  // 纹理只是格线之外的一点点：撑破这条上界就要重新算 chunk 的线段预算。
+  assert.ok(
+    marks < CELLS_PER_CHUNK * 2,
+    `草地纹理线段过多（${marks} / ${CELLS_PER_CHUNK} 格）`,
+  );
+
+  // 斜坡格顶面是两个不共面的三角形，纹理会穿地或悬空，所以一条都不画。
+  const ramp = buildUniformBiomeChunk(TERRAIN_BIOME.SNOW, TERRAIN_SHAPE.RAMP_EAST);
+  assert.equal(countBiomeMarkSegments(ramp.groundGrid), 0);
+
+  // 水下的河床同理：纹理会浮在水面下面，看不清也没必要建。
+  const water = createTerrainChunkGeometry({
+    worldSeed: SEED,
+    chunkX: 0,
+    chunkZ: 0,
+    groundColor: GROUND_COLOR,
+    cellCodeAt: () => encodeTerrainCell(
+      -1,
+      TERRAIN_SURFACE.WATER,
+      TERRAIN_SHAPE.FLAT,
+      TERRAIN_BIOME.MUD,
+    ),
+  });
+  assert.equal(countBiomeMarkSegments(water.groundGrid), 0);
+
+  for (const geometry of [flat, ramp, water]) {
+    geometry.groundFill.dispose();
+    geometry.groundGrid.dispose();
+    geometry.waterSurface?.dispose();
+    geometry.waterGrid?.dispose();
+    geometry.waterShore?.dispose();
+    geometry.waterSplash?.dispose();
+  }
+});
+
+test('同一格重建出同一撮纹理，chunk 反复加载不会闪', () => {
+  const first = buildUniformBiomeChunk(TERRAIN_BIOME.SAND).groundGrid.getAttribute('position');
+  const second = buildUniformBiomeChunk(TERRAIN_BIOME.SAND).groundGrid.getAttribute('position');
+  assert.equal(first.count, second.count);
+  for (let index = 0; index < first.count; index += 1) {
+    assert.equal(first.getX(index), second.getX(index));
+    assert.equal(first.getY(index), second.getY(index));
+    assert.equal(first.getZ(index), second.getZ(index));
+  }
+  // 纹理抬离地面，且比格线再高一点：两者叠在一起时纹理在上面。
+  let highest = 0;
+  for (let index = 0; index < first.count; index += 1) {
+    assert.ok(first.getY(index) > 0, '有线段贴在顶面上，会和地面 z-fighting');
+    highest = Math.max(highest, first.getY(index));
+  }
+  assert.ok(Math.abs(highest - BIOME_MARK_LIFT) < 1e-6);
 });

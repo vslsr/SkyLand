@@ -2,12 +2,18 @@
  * 确定性台阶地形。
  *
  * 地形与静态物件一样，是 (worldSeed, globalCellX, globalCellZ) 的纯函数。
- * 浏览器和房间 DS 共用本文件；Rust/WASM 在 native/chunkgen/src/terrain.rs
- * 镜像同一算法，用于给合批物件写入完全一致的 Y。
+ * 一格的高度层、表面、群系与形状压在同一个整数 code 里；群系本身由
+ * terrainBiome.mjs 算出。浏览器和房间 DS 共用本文件；Rust/WASM 在
+ * native/chunkgen/src/terrain.rs 镜像同一算法，用于给合批物件写入完全一致的 Y，
+ * 并让 terrainParity.test.mjs 能逐格比对整个 code。
  */
 
 import { hash32, valueNoise } from './hash.mjs';
+import { terrainBiomeAt } from './terrainBiome.mjs';
 import {
+  TERRAIN_BIOME,
+  TERRAIN_BIOME_MASK,
+  TERRAIN_BIOME_SHIFT,
   TERRAIN_CELL_COUNT,
   TERRAIN_CELL_SIZE,
   TERRAIN_CELL_SIZE_MM,
@@ -46,12 +52,16 @@ const TERRAIN_DIAGONAL_NEIGHBORS = [
 ];
 
 /**
- * 把高度、表面和形状压成一个整数。高度限定在 int8 足以覆盖当前 ±2 层生成器，
+ * 把高度、表面、群系和形状压成一个整数。高度限定在 int8 足以覆盖当前 ±2 层生成器，
  * 同时给之后的稀疏编辑保留 -128..127 层。
+ *
+ * 群系默认草原：手写 code 的旧调用方（测试、编辑器）不必关心这一位，
+ * 而生成与编辑路径一律显式传入，抬高一格雪地不会把它变回草地。
  */
-export function encodeTerrainCell(heightLevel, surface, shape) {
+export function encodeTerrainCell(heightLevel, surface, shape, biome = TERRAIN_BIOME.GRASSLAND) {
   const safeHeight = Math.max(-128, Math.min(127, Math.trunc(heightLevel)));
   return ((safeHeight & 0xff) << TERRAIN_HEIGHT_SHIFT)
+    | ((biome & TERRAIN_BIOME_MASK) << TERRAIN_BIOME_SHIFT)
     | ((surface & 1) << TERRAIN_SURFACE_SHIFT)
     | (shape & TERRAIN_SHAPE_MASK);
 }
@@ -62,6 +72,10 @@ export function terrainCellHeightLevel(code) {
 
 export function terrainCellSurface(code) {
   return (code >>> TERRAIN_SURFACE_SHIFT) & 1;
+}
+
+export function terrainCellBiome(code) {
+  return (code >>> TERRAIN_BIOME_SHIFT) & TERRAIN_BIOME_MASK;
 }
 
 export function terrainCellShape(code) {
@@ -98,8 +112,10 @@ export function terrainBaseLevelAt(worldSeed, globalCellX, globalCellZ) {
  */
 export function terrainCellCodeAt(worldSeed, globalCellX, globalCellZ) {
   const heightLevel = terrainBaseLevelAt(worldSeed, globalCellX, globalCellZ);
+  // 群系与高度互不干涉：水底也带着它所在片区的地皮，抽干之后露出的是同一片地。
+  const biome = terrainBiomeAt(worldSeed, globalCellX, globalCellZ);
   if (heightLevel < 0) {
-    return encodeTerrainCell(heightLevel, TERRAIN_SURFACE.WATER, TERRAIN_SHAPE.FLAT);
+    return encodeTerrainCell(heightLevel, TERRAIN_SURFACE.WATER, TERRAIN_SHAPE.FLAT, biome);
   }
 
   const first = hash32(worldSeed, globalCellX, globalCellZ, TERRAIN_SLOPE_SALT) & 3;
@@ -124,6 +140,7 @@ export function terrainCellCodeAt(worldSeed, globalCellX, globalCellZ) {
         heightLevel,
         TERRAIN_SURFACE.GROUND,
         TERRAIN_LOW_CORNER_SHAPES[direction],
+        biome,
       );
     }
   }
@@ -132,7 +149,7 @@ export function terrainCellCodeAt(worldSeed, globalCellX, globalCellZ) {
     const direction = (first + offset) & 3;
     if ((higherCardinalMask & (1 << direction)) !== 0) {
       const shape = TERRAIN_CARDINAL_NEIGHBORS[direction][2];
-      return encodeTerrainCell(heightLevel, TERRAIN_SURFACE.GROUND, shape);
+      return encodeTerrainCell(heightLevel, TERRAIN_SURFACE.GROUND, shape, biome);
     }
   }
 
@@ -143,10 +160,10 @@ export function terrainCellCodeAt(worldSeed, globalCellX, globalCellZ) {
       terrainBaseLevelAt(worldSeed, globalCellX + deltaX, globalCellZ + deltaZ)
       === heightLevel + 1
     ) {
-      return encodeTerrainCell(heightLevel, TERRAIN_SURFACE.GROUND, shape);
+      return encodeTerrainCell(heightLevel, TERRAIN_SURFACE.GROUND, shape, biome);
     }
   }
-  return encodeTerrainCell(heightLevel, TERRAIN_SURFACE.GROUND, TERRAIN_SHAPE.FLAT);
+  return encodeTerrainCell(heightLevel, TERRAIN_SURFACE.GROUND, TERRAIN_SHAPE.FLAT, biome);
 }
 
 /** 世界毫米坐标对应的格子编码。负坐标必须向下取整。 */
@@ -275,6 +292,7 @@ export function sampleTerrain(worldSeed, x, z, target = {}, cellCodeAt) {
   target.normalY = inverseNormalLength;
   target.normalZ = normalZ * inverseNormalLength;
   target.surface = terrainCellSurface(code);
+  target.biome = terrainCellBiome(code);
   target.shape = shape;
   target.walkable = target.surface === TERRAIN_SURFACE.GROUND;
   return target;

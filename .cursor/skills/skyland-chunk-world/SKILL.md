@@ -24,7 +24,7 @@ Change one and you must change the other, rebuild the WASM, and commit the rebui
 2. Read `shared/world/worldConfig.mjs`. World size, chunk size, the prop grid and the play-area margin all live there and apply to every streaming scene.
 3. For scene-level work, also read `config/scenes/open-world.scene.json` and the `renderer.world` block in `config/scenes/scene.schema.json`.
 4. For streaming runtime work, note that the streamer is split in two: `ChunkStreamer` (planning, terrain overrides, colliders) drives `ChunkViewHost` (materials, `ChunkView`, grass, ocean) through mount/unmount/clear. Anything crossing between them must be data — typed arrays and numbers, never a callback. Terrain edits cross as a sparse `[globalCellX, globalCellZ, code, ...]` array, which `createOverrideCellCodeAt` turns back into a `cellCodeAt` on the far side.
-5. For generation changes, read both `shared/world/chunkContent.mjs` and `native/chunkgen/src/placement.rs` side by side before touching either.
+5. For generation changes, read both `shared/world/chunkContent.mjs` and `native/chunkgen/src/placement.rs` side by side before touching either. The terrain has its own pair — `shared/world/terrainContent.mjs` with `native/chunkgen/src/terrain.rs` — and the biome layer a third — `shared/world/terrainBiome.mjs` with `native/chunkgen/src/biome.rs`. All three feed the same packed cell code, so `server/tests/terrainParity.test.mjs` catches a one-sided edit in any of them.
 
 ## Choose the change scope
 
@@ -34,6 +34,7 @@ Change one and you must change the other, rebuild the WASM, and commit the rebui
 - **Change loading policy** (when chunks load and unload): edit `shared/world/chunkStream.mjs` only. It is pure and has no WASM counterpart.
 - **Change rendering only** (materials, batching, draw calls): edit `src/models/chunkMesh.ts`, `src/models/chunkTemplates.ts`, or `src/world/ChunkViewHost.ts`. Placement is untouched, so no WASM rebuild.
 - **Change streaming runtime, terrain overrides, or collider registration**: edit `src/world/ChunkStreamer.ts`. It is the gameplay half — it applies the plan, collects terrain edits, and registers colliders, then hands the render half **data**. See `skyland-render-boundary`.
+- **Change which biome a tile belongs to** (region size, climate thresholds, adding a sixth biome): edit `shared/world/terrainBiome.mjs` and `native/chunkgen/src/biome.rs` together, rebuild the WASM, commit the binary. Biome lives in bits 5-7 of the cell code, so the parity test compares it. Changing only how a biome *looks* (colours, the line-art marks) is render-side: `src/models/terrain/terrainBiomeStyle.ts`, no WASM rebuild.
 - **Change what blocks the player or the camera**: use `skyland-collision-partition`. Authoring shapes live in `shared/world/chunkColliders.mjs`, then both client and DS map the same shapes into the shared Rapier `PhysicsWorld`; the shapes have no WASM counterpart.
 - **Change terrain collision topology, grounding, slopes, or chunk collider residency**: use `skyland-collision-partition`. Rendering and Rapier must share `shared/world/terrainCollisionMesh.mjs`; this is separate from deterministic prop placement.
 
