@@ -7,6 +7,7 @@ import type { GrassInteractionTarget } from '../grass';
 import type { ThreeMeshProxy } from '../render/three/ThreeMeshProxy';
 import type { ThreeRenderScene } from '../render/three/ThreeRenderScene';
 import type { RenderTransformBuffer } from '../render/RenderTransformBuffer';
+import type { RenderProxyTable } from '../render/RenderProxyTable';
 import type { SnapshotActor, SnapshotPlayer } from '../network/protocol';
 import type { ActorFloatState, ActorEventType } from '../network/protocol';
 import type { WeatherType } from '../weather/index';
@@ -111,6 +112,8 @@ export interface SceneComposition {
    */
   renderScene?: ThreeRenderScene;
   renderTransforms?: RenderTransformBuffer;
+  /** 槽位表在玩法侧；玩家实体要和 Actor 共用同一张。 */
+  renderProxyIds?: RenderProxyTable;
   /**
    * 旧 CollisionWorld 只保留给非玩家 Actor 推出、交互宽相与兼容调试。
    * 玩家和相机均使用下面的 Rapier PhysicsWorld。

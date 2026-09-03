@@ -2,8 +2,7 @@ import type { GrassInteractionTarget } from '../grass';
 import type { InterpolatedPlayerState } from '../network/protocol';
 import type { PhysicsWorld } from '../../shared/physics/PhysicsWorld.mjs';
 import type { ActorArchetypeDefinition } from '../scenes/data/SceneDefinition';
-import type { RenderScene } from '../render/RenderScene';
-import type { RenderTransformBuffer } from '../render/RenderTransformBuffer';
+import type { RenderWorldHandle } from '../render/RenderProxyTable';
 import { RemotePlayer } from './RemotePlayer';
 import {
   RemotePlayerColliders,
@@ -21,7 +20,7 @@ export class RemotePlayerGroup {
   private readonly players = new Map<string, RemotePlayer>();
   private archetype?: ActorArchetypeDefinition;
   private colliders?: RemotePlayerColliders;
-  private renderWorld?: { scene: RenderScene; transforms: RenderTransformBuffer };
+  private renderWorld?: RenderWorldHandle;
 
   public constructor(private readonly grassInteraction: GrassInteractionTarget & {
     sampleGroundHeight?(x: number, z: number): number;
@@ -31,7 +30,7 @@ export class RemotePlayerGroup {
 
   /** 换场景时重新绑定：proxy 属于某一张地图的渲染世界，不能跨地图留着。 */
   public setRenderWorld(
-    renderWorld: { scene: RenderScene; transforms: RenderTransformBuffer } | undefined,
+    renderWorld: RenderWorldHandle | undefined,
   ): void {
     if (this.renderWorld === renderWorld) return;
     this.clear();

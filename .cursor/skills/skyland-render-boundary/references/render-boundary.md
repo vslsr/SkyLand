@@ -32,7 +32,18 @@ Nothing on the left holds a `THREE.Object3D`. Nothing on the right holds an `Act
 
 ### 1. Spawn descriptors — facts fixed at creation
 
-`createMeshProxy(desc)` / `createPlayerProxy(desc)` take a **configuration description**, never an object, and return a `MeshProxyInfo` carrying the `ProxyId` plus a few derived numbers the gameplay side needs (notably `simpleCollision`, derived from the model's real dimensions).
+`createMeshProxy(id, desc)` / `createPlayerProxy(id, desc)` take a slot number and a
+**configuration description**, never an object, and **return nothing**.
+
+The slot comes from `RenderProxyTable` on the gameplay side. This used to be the other
+way round — the render world allocated and returned a `MeshProxyInfo` — and that return
+value was the last thing blocking `transferControlToOffscreen`. `MeshProxyInfo` also
+carried `simpleCollision`, which turned out to be a pure round trip: the render world
+computed it by calling `createSimpleCollisionFromRender(render)`, a shared pure function
+of the archetype JSON that gameplay already holds and the server already calls directly.
+`tests/RenderProxyCollisionParity.test.ts` pins that equivalence for all 15 models, so
+the day someone measures a collision box off real geometry instead, that test fails
+first.
 
 The interface deliberately offers no generic `createProxy(kind, desc)`. A new content class gets a new named entry point, so the boundary stays a fixed set of shapes rather than a variable-length primitive table.
 
@@ -127,9 +138,10 @@ Player entities (local and remote) also write into this SoA, and they run **befo
 
 `tests/RenderSceneBoundary.test.ts` holds three lists that may only shrink:
 
-1. **Actor Components importing render modules** — currently empty.
-2. **ActorWorld Systems** — must equal `ClientActorSystem`'s actual `world.addSystem(...)` calls, and none may import a render implementation. Without the equality check, a new System would slip past the import check unnoticed.
-3. **Render-side files touching `document`/`window`** — currently only `SceneRenderer`, whose `devicePixelRatio` moves with the canvas it owns.
+1. **Every method on `RenderScene` returns `void`** — the boundary is one-way. Checked against the source text, not the types: "returns something nobody uses" type-checks and still breaks on a worker.
+2. **Actor Components importing render modules** — currently empty.
+3. **ActorWorld Systems** — must equal `ClientActorSystem`'s actual `world.addSystem(...)` calls, and none may import a render implementation. Without the equality check, a new System would slip past the import check unnoticed.
+4. **Render-side files touching `document`/`window`** — currently only `SceneRenderer`, whose `devicePixelRatio` moves with the canvas it owns.
 
 `RenderProxyComponent` importing from `src/render/` is intentional and allowed: it references the boundary types (`ProxyId`, the command sink), which is exactly what it should reference. The rule targets render *implementations*.
 

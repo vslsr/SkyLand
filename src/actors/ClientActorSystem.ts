@@ -99,6 +99,7 @@ import {
   type ActorInstanceCatalog,
 } from './systems/ActorInstanceSystem';
 import { RenderInstanceBuffer } from '../render/RenderInstanceBuffer';
+import { RenderProxyTable } from '../render/RenderProxyTable';
 import { PROP_FLOAT_STRIDE, PROP_INT_STRIDE } from '../render/propInstanceLayout';
 import { FRUIT_FLOAT_STRIDE, FRUIT_INT_STRIDE } from '../render/fruitInstanceLayout';
 import { ActorFruitInstanceSystem } from './systems/ActorFruitInstanceSystem';
@@ -218,11 +219,25 @@ export class ClientActorSystem implements SceneVisualSystem {
   private readonly transforms: RenderTransformBuffer;
   private readonly renderScene: ThreeRenderScene;
   /**
+   * 槽位表。**分配在这一侧**——渲染世界回不了话（见 `RenderScene.createMeshProxy`）。
+   * 它同时是发给渲染世界的命令口，所以 `RenderProxyComponent` 拿到的是它，
+   * 销毁 proxy 和回收槽位因此是同一次调用。
+   */
+  private readonly proxyIds: RenderProxyTable;
+  /**
    * 这个 System 往场景图里挂东西的那个节点，就是渲染世界的根。
    *
    * 两者必须是同一个组：proxy 由渲染世界挂载，合批与悬停高亮由这里挂载，
    * 分成两个节点会让其中一个不在场景图里。
    */
+  /**
+   * 玩家实体（本地与远端）要和 Actor 用同一张槽位表——`ProxyId` 是边界上唯一的
+   * 标识，两套编号就没有边界可言了。
+   */
+  public get renderProxyIds(): RenderProxyTable {
+    return this.proxyIds;
+  }
+
   public get root(): THREE.Group {
     return this.renderScene.root;
   }
@@ -311,6 +326,7 @@ export class ClientActorSystem implements SceneVisualSystem {
         options.environment,
         options.definition.renderer.ocean,
       );
+    this.proxyIds = new RenderProxyTable(this.renderScene);
     // 客户端不运行 AttachmentSystem：最终世界坐标来自快照插值，不能被
     // localTransform 再次解算覆盖。
     //
@@ -970,17 +986,19 @@ export class ClientActorSystem implements SceneVisualSystem {
       : undefined;
 
     if (!archetype.components.render && archetype.components.guidePath) {
-      const info = this.renderScene.createMeshProxy({
+      const proxyId = this.proxyIds.acquire();
+      this.renderScene.createMeshProxy(proxyId, {
         name: `actor-${snapshot.id}`,
         guidePath: guidePathStyle,
       });
-      actor.addComponent(new RenderProxyComponent(info.id, this.renderScene));
+      actor.addComponent(new RenderProxyComponent(proxyId, this.proxyIds));
       this.world.addActor(actor);
       return actor;
     }
     if (!archetype.components.render) throw new Error(`可视 Actor ${archetype.id} 缺少 render`);
     // 几何由渲染世界自己从配置生成；Game World 只拿回 proxyId 与几个数值。
-    const info = frameTimeline.measure('render-spawn', () => this.renderScene.createMeshProxy({
+    const proxyId = this.proxyIds.acquire();
+    frameTimeline.measure('render-spawn', () => this.renderScene.createMeshProxy(proxyId, {
       name: `actor-${snapshot.id}`,
       render: archetype.components.render,
       // 「要不要标记」是 spawn 时的一次性事实；锚点本来就产在渲染侧，不必回送。
@@ -999,13 +1017,18 @@ export class ClientActorSystem implements SceneVisualSystem {
     // 挂在场景图上的模型。所以整段装配包在 try 里，失败就把 proxy 还回去。
     let assembled = false;
     try {
-      actor.addComponent(new SimpleCollisionComponent(info.simpleCollision));
+      // 碰撞盒由玩法侧自己从 render 定义算——和渲染侧模型工厂调的是同一个
+      // shared 纯函数，所以这不是「另编一套近似」，是把那次往返省掉。
+      // 注意只传 render：模型工厂也只传它，多传 dropMotion 会走进滚动半径那一支。
+      actor.addComponent(new SimpleCollisionComponent(
+        createSimpleCollisionFromRender(archetype.components.render),
+      ));
       // RenderProxyComponent 必须先于所有表现 Component 加入：Actor.endPlay 是插入
       // 顺序的逆序，marker 要先释放自己的子树，proxy 的 disposeSubtree 才能最后跑。
-      actor.addComponent(new RenderProxyComponent(info.id, this.renderScene));
+      actor.addComponent(new RenderProxyComponent(proxyId, this.proxyIds));
       // 软体蒙皮不再挂在 Actor 上：createMeshProxy 认出 PBF 史莱姆就在渲染世界里
       // 自己建一份表现，玩法侧只写 SlimeMotionParams 那几个 f32（§1.5）。
-      const render = this.renderScene.resolve(info.id) as ThreeMeshProxy;
+      const render = this.renderScene.resolve(proxyId) as ThreeMeshProxy;
       if (render.fireVisualRig) {
         const emitter = actor.getComponent(HEAT_EMITTER_COMPONENT) as HeatEmitterComponent | undefined;
         actor.addComponent(new FireVisualComponent(emitter?.enabled ? 1 : 0));
@@ -1014,7 +1037,7 @@ export class ClientActorSystem implements SceneVisualSystem {
       assembled = true;
     } finally {
       // addActor 成功之后 proxy 归 Actor 管；在那之前失败就由这里回收。
-      if (!assembled) this.renderScene.destroyMeshProxy(info.id);
+      if (!assembled) this.proxyIds.destroyMeshProxy(proxyId);
     }
     return actor;
   }

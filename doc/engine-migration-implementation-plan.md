@@ -720,17 +720,44 @@ worker 已经在传的 `[globalCellX, globalCellZ, code, ...]`。
 顺带修掉一处浪费：地形网格请求不再转移 `overrides` 缓冲区。它几乎总是空的，
 而挂载时地形几何要用同一份；为省一次结构化克隆把它交出去，换来的是再收一次。
 
+### 已经做了的：把边界改成单向的 ✅
+
+上面五项做完之后，边界上还剩**两样线程边界过不去的东西**：`createMeshProxy` 是一个
+**有返回值的函数调用**，`resolve()` 会**递出一个活的 `ThreeMeshProxy`**。
+有返回值就意味着调用方要等对面回话，而线程边界上没有「等一下」。
+
+`MeshProxyInfo` 原来有五个字段，玩法侧只读两个（`length` / `width` /
+`interactionAnchorY` 在渲染世界之外一次都没被读过）：
+
+- **`simpleCollision` 是一次纯粹的往返。** 渲染侧算它的方式就是调
+  `createSimpleCollisionFromRender(render)`——一个输入只有 render 定义的 shared
+  纯函数，玩法侧本来就拿着那份定义，服务端 `ServerActorFactory` 早就直接调它。
+  新增 `tests/RenderProxyCollisionParity.test.ts` 把这条等价关系对**全部 15 种模型**
+  钉住：哪天有人让某个模型按真实几何去量碰撞盒，那条会先炸。
+- **槽位号挪到玩法侧分配。** 新增 `src/render/RenderProxyTable.ts`：自由表 + 命令口。
+  两者合一不是巧合——**销毁 proxy 和回收槽位是同一件事**，拆成两个调用就一定会有人
+  只写一半，然后下一个 Actor 拿到一个还挂着模型的槽位。合在一起之后
+  `RenderProxyComponent` 一个字都不用改，它拿到的仍然只是一个命令口。
+
+于是 `createMeshProxy(id, desc)` / `createPlayerProxy(id, desc)` 都返回 `void`，
+**`RenderScene` 上每一个方法都返回 `void`**。新棘轮按源码文本盯住这一条——
+类型上「`void`」和「返回了但没人用」区分不开，而后者一样会在 worker 上炸。
+
+顺带把重复了五遍的 `{ scene, transforms }` 句柄收成一个 `RenderWorldHandle`
+（它现在多一个 `proxyIds`，玩家实体和 Actor 必须共用同一张槽位表——两套编号就
+没有边界可言了）。
+
 ### 还没做的
 
 | | 说明 |
 | --- | --- |
 | 渲染循环整个进 worker | `SceneRenderer` 的 `root` / `beforeRender` / `WebGLRenderer` 那一层，以及 `transferControlToOffscreen` 本身 |
-| 拆 `ClientActorSystem` 的最外层 | Actor 世界这一侧干净了，但这个类仍同时持有渲染世界与悬停高亮 |
+| `ClientActorSystem` 里剩下的两处 `resolve()` | 一处问「这个模型有没有火焰绑定」（是渲染定义的 spawn 时事实，可以从同一份定义推）；一处是悬停高亮的 `THREE.BoxHelper`，整个该搬进渲染世界。注意 `resolve` 不在 `RenderScene` 接口上——**边界接口本身已经干净**，这两处是伸手够到了具体后端 |
 | `GrasslandScene` 的装配归属 | 它同时握着输入、相机、玩家实体和渲染器；canvas 搬走时装配要跟着走 |
 
-§3 的五项前置全部落地：渲染栈不碰 DOM、玩法侧不碰 Three、chunk 与 Actor 两条
-主干都按 game / render 切开、相机与合批内容都按字节过边界。**剩下的是搬运本身，
-不再是拆解。**
+§3 的前置全部落地：渲染栈不碰 DOM、玩法侧不碰 Three、chunk 与 Actor 两条主干都按
+game / render 切开、相机与合批内容都按字节过边界，**而且边界是单向的**。
+剩下的是搬运本身，不再是拆解。
 
 需要说清楚的是：这五项**一项都不省帧时间**（`render-batches` p50 只有
 0.06–0.17 ms）。它们是第 2 步与第 3 步共同的结构前提。

@@ -21,7 +21,7 @@ import type {
 } from '../scene/SceneVisualSystem';
 import type { ThreeMeshProxy } from '../render/three/ThreeMeshProxy';
 import type { ThreeRenderScene } from '../render/three/ThreeRenderScene';
-import type { RenderTransformBuffer } from '../render/RenderTransformBuffer';
+import type { RenderWorldHandle } from '../render/RenderProxyTable';
 import type { SceneBeforeRenderListener } from '../scene/components';
 import type { SceneDefinition } from '../scenes/data/SceneDefinition';
 import type { SceneWorld } from '../scene/SceneWorld';
@@ -57,7 +57,7 @@ export class SceneRenderer {
   private grassInteraction?: GrassInteractionTarget;
   private actorSnapshotTarget?: ActorSnapshotTarget;
   /** 当前地图的渲染世界。整张对象随场景一起换掉，所以引用可以直接比身份。 */
-  private renderWorldHandle?: { scene: ThreeRenderScene; transforms: RenderTransformBuffer };
+  private renderWorldHandle?: RenderWorldHandle<ThreeRenderScene>;
   private weatherTarget?: WeatherVisualTarget;
   private dayNightTarget?: DayNightVisualTarget;
   private sceneEnvironmentRuntime?: SceneEnvironmentRuntime;
@@ -141,12 +141,10 @@ export class SceneRenderer {
 
   /**
    * 当前地图的渲染世界。玩家实体（本地与远端）经由它建自己的 proxy——
-   * 它们不是 Replica，但必须和 Actor 共用同一个渲染世界和同一段边界字节。
+   * 它们不是 Replica，但必须和 Actor 共用同一个渲染世界、同一段边界字节，
+   * 以及同一张槽位表。
    */
-  public get renderWorld(): {
-    scene: ThreeRenderScene;
-    transforms: RenderTransformBuffer;
-  } | undefined {
+  public get renderWorld(): RenderWorldHandle<ThreeRenderScene> | undefined {
     return this.renderWorldHandle;
   }
 
@@ -300,8 +298,14 @@ export class SceneRenderer {
       fixedWaterWorld: this.fixedWaterWorld,
       fixedWaterLevel: this.fixedWaterLevel,
     });
-    this.renderWorldHandle = composition.renderScene && composition.renderTransforms
-      ? { scene: composition.renderScene, transforms: composition.renderTransforms }
+    this.renderWorldHandle = composition.renderScene
+      && composition.renderTransforms
+      && composition.renderProxyIds
+      ? {
+        scene: composition.renderScene,
+        transforms: composition.renderTransforms,
+        proxyIds: composition.renderProxyIds,
+      }
       : undefined;
     this.collisionWorld = composition.collisionWorld;
     this.terrainWorld = composition.terrainWorld;

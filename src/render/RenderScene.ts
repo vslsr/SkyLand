@@ -1,4 +1,3 @@
-import type { ActorSimpleCollision } from '../models/actors/ActorVisualModel';
 import type {
   ActorArchetypeDefinition,
   ActorRenderDefinition,
@@ -56,7 +55,7 @@ export interface MeshProxyDesc {
    * 这个 proxy 要不要交互标记 / 温度牌。
    *
    * 「要不要」是 spawn 时的一次性事实，所以走 desc 而不是每帧的参数段；
-   * 锚点不在这里——它们由模型自己产出，本来就在渲染侧（见 MeshProxyInfo）。
+   * 锚点不在这里——它们由模型自己产出，本来就在渲染侧，也不回送。
    */
   readonly interactionMarker?: boolean;
   readonly temperatureMarker?: boolean;
@@ -128,18 +127,6 @@ export interface SlimeSurfaceDragRay {
 }
 
 /**
- * `createMeshProxy` 回给 Game World 的东西：**全是数值，没有一个 Object3D**。
- * 这些量本身是玩法数据（碰撞盒、船体长宽），只是恰好和模型 authoring 同时产出。
- */
-export interface MeshProxyInfo {
-  readonly id: ProxyId;
-  readonly length: number;
-  readonly width: number;
-  readonly interactionAnchorY: number;
-  readonly simpleCollision: ActorSimpleCollision;
-}
-
-/**
  * 引导路径每帧可能变的那部分。**变长**，所以它走命令而不是参数段。
  *
  * 路径与索引装在同一条命令里：`GuidePath.setPath` 内部会 `reset()` 把进度归零，
@@ -169,9 +156,21 @@ export interface RenderCommandSink {
 }
 
 export interface RenderScene extends RenderCommandSink {
-  createMeshProxy(desc: MeshProxyDesc): MeshProxyInfo;
+  /**
+   * 在指定槽位建一个 Actor 网格 proxy。
+   *
+   * **槽位号由调用方给，这里不回话**——返回值是 canvas 进渲染线程的阻塞点，
+   * 函数调用要等对面，而线程边界上没有「等一下」。分配在
+   * `RenderProxyTable`（Game World 那一侧）。
+   *
+   * 这里原来还回送碰撞盒与模型尺寸。尺寸玩法侧一次都没读过；碰撞盒是一次纯粹的
+   * 往返——渲染侧算它的方式就是调 `createSimpleCollisionFromRender(render)`，
+   * 一个输入只有 render 定义的 shared 纯函数。见
+   * `tests/RenderProxyCollisionParity.test.ts`。
+   */
+  createMeshProxy(id: ProxyId, desc: MeshProxyDesc): void;
   /** 玩家史莱姆。见 `PlayerProxyDesc`：另一类内容，另一个具名入口。 */
-  createPlayerProxy(desc: PlayerProxyDesc): MeshProxyInfo;
+  createPlayerProxy(id: ProxyId, desc: PlayerProxyDesc): void;
   /**
    * 把这一帧的 transform SoA 兑现到渲染世界。
    *

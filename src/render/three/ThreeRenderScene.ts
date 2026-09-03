@@ -10,12 +10,10 @@ import {
   type GuidePathState,
   type GuidePathStyle,
   type MeshProxyDesc,
-  type MeshProxyInfo,
   type PlayerProxyDesc,
   type ProxyId,
   type RenderScene,
   type SlimeSurfaceDragRay,
-  toProxyId,
 } from '../RenderScene';
 import {
   readSlimeMotionParams,
@@ -77,16 +75,6 @@ function createEmptyModel(name: string): ActorVisualModel {
   };
 }
 
-function describeProxy(proxy: ThreeMeshProxy): MeshProxyInfo {
-  return {
-    id: proxy.id,
-    length: proxy.length,
-    width: proxy.width,
-    interactionAnchorY: proxy.interactionAnchorY,
-    simpleCollision: proxy.simpleCollision,
-  };
-}
-
 function normalizeAngle(value: number): number {
   let angle = value;
   while (angle > Math.PI) angle -= Math.PI * 2;
@@ -97,7 +85,6 @@ function normalizeAngle(value: number): number {
 export class ThreeRenderScene implements RenderScene {
   /** 槽位即 ProxyId，回收后复用；空洞用 undefined 占位，保持下标稳定。 */
   private readonly proxies: (ThreeMeshProxy | undefined)[] = [];
-  private readonly freeSlots: number[] = [];
   private readonly world: RenderTransform = { x: 0, y: 0, z: 0, yaw: 0 };
   private readonly parentWorld: RenderTransform = { x: 0, y: 0, z: 0, yaw: 0 };
   private simpleCollisionVisible = false;
@@ -134,7 +121,7 @@ export class ThreeRenderScene implements RenderScene {
     this.waterMotionVisual = ocean ? new ThreeWaterMotionVisual(ocean) : undefined;
   }
 
-  public createMeshProxy(desc: MeshProxyDesc): MeshProxyInfo {
+  public createMeshProxy(id: ProxyId, desc: MeshProxyDesc): void {
     const model = desc.render
       ? createActorVisualModel(this.environment, desc.render)
       : createEmptyModel(desc.name);
@@ -142,7 +129,7 @@ export class ThreeRenderScene implements RenderScene {
       model.root.name = `${desc.name}-root`;
       model.visualRoot.name = `${desc.name}-visual`;
     }
-    const proxy = this.#adopt(model);
+    const proxy = this.#adopt(id, model);
     if (desc.interactionMarker) proxy.markers.attachInteraction(proxy.interactionAnchorY);
     if (desc.temperatureMarker) {
       proxy.markers.attachTemperature(proxy.temperatureAnchorX, proxy.interactionAnchorY, 0);
@@ -167,7 +154,6 @@ export class ThreeRenderScene implements RenderScene {
     if (model.dropRollRig) {
       this.dropRolls.set(proxy.id, new ThreeDropRollVisual(proxy.id, model.dropRollRig));
     }
-    return describeProxy(proxy);
   }
 
   /**
@@ -176,22 +162,22 @@ export class ThreeRenderScene implements RenderScene {
    * 玩家不是 Replica，但它的 proxy 必须和 Actor 的 proxy 落在同一张槽位表、
    * 同一段 SoA 里——`ProxyId` 是边界上唯一的标识，两套编号就没有边界可言了。
    */
-  public createPlayerProxy(desc: PlayerProxyDesc): MeshProxyInfo {
+  public createPlayerProxy(id: ProxyId, desc: PlayerProxyDesc): void {
     if (desc.render.model === 'line-art-player-slime') {
       const model = createPlayerSlimeModel(
         desc.render,
         desc.paletteSeed === undefined ? undefined : createSlimePalette(desc.paletteSeed),
       );
       model.root.name = desc.name;
-      const proxy = this.#adopt(model);
+      const proxy = this.#adopt(id, model);
       this.slimeAnimators.set(proxy.id, new ThreeSlimeAnimator(model, desc.walkSpeed));
-      return describeProxy(proxy);
+      return;
     }
     const model = createPbfSlimeModel(desc.render);
     const rig = model.pbfSlimeVisualRig;
     if (!rig) throw new Error(`混合软体玩家史莱姆缺少 VisualRig：${desc.name}`);
     model.root.name = desc.name;
-    const proxy = this.#adopt(model);
+    const proxy = this.#adopt(id, model);
     const slime = new ThreeHybridSlimeVisual(rig, desc.render);
     this.slimeVisuals.set(proxy.id, slime);
     this.slimeDrags.set(proxy.id, new ThreeSlimeSurfaceDrag(
@@ -199,14 +185,17 @@ export class ThreeRenderScene implements RenderScene {
       slime.simulation,
       desc.surfaceDrag ?? createDefaultSlimeSurfaceDragDefinition(desc.render.radius),
     ));
-    return describeProxy(proxy);
   }
 
-  /** 分槽位、登记、挂进场景图。两个入口共用同一张槽位表。 */
-  #adopt(model: ActorVisualModel): ThreeMeshProxy {
-    const slot = this.freeSlots.pop() ?? this.proxies.length;
-    const proxy = new ThreeMeshProxy(toProxyId(slot), model);
-    this.proxies[slot] = proxy;
+  /**
+   * 在调用方给的槽位上登记并挂进场景图。
+   *
+   * 槽位不再由这里分配：那需要一个返回值，而返回值过不了线程边界。
+   * 分配在 `RenderProxyTable`（Game World 那一侧），两个入口共用它那一张表。
+   */
+  #adopt(id: ProxyId, model: ActorVisualModel): ThreeMeshProxy {
+    const proxy = new ThreeMeshProxy(id, model);
+    this.proxies[id] = proxy;
     proxy.setSimpleCollisionVisible(this.simpleCollisionVisible);
     this.root.add(proxy.root);
     return proxy;
@@ -216,7 +205,6 @@ export class ThreeRenderScene implements RenderScene {
     const proxy = this.proxies[id];
     if (!proxy) return;
     this.proxies[id] = undefined;
-    this.freeSlots.push(id);
     this.fireVisual.forget(id);
     if (this.selectedInteractionProxy === id) this.selectedInteractionProxy = NULL_PROXY_ID;
     // 引导路径先摘：它的子树挂在 visualRoot 下，要赶在 disposeSubtree 之前
@@ -433,6 +421,5 @@ export class ThreeRenderScene implements RenderScene {
     this.dropRolls.clear();
     for (const proxy of this.proxies) proxy?.dispose();
     this.proxies.length = 0;
-    this.freeSlots.length = 0;
   }
 }

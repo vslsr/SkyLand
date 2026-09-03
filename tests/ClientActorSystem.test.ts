@@ -41,6 +41,7 @@ import {
 import type { SnapshotActor } from '../src/network/protocol';
 import { RenderTransformBuffer } from '../src/render/RenderTransformBuffer';
 import { resolvePlayerVisualShape } from '../src/player/playerVisualShape';
+import { RenderProxyTable } from '../src/render/RenderProxyTable';
 import { ThreeRenderScene } from '../src/render/three/ThreeRenderScene';
 import type { ThreeHybridSlimeVisual } from '../src/render/three/ThreeHybridSlimeVisual';
 import type {
@@ -425,12 +426,14 @@ function createPlayerVisualHarness(
   surfaceDrag?: SlimeSurfaceDragDefinition,
 ) {
   const scene = new ThreeRenderScene(new THREE.Group(), RENDER_ENVIRONMENT);
-  const info = scene.createPlayerProxy({ name, render, walkSpeed, surfaceDrag });
-  const proxy = scene.resolve(info.id)!;
-  const slime = scene.resolveSlimeVisual(info.id) as ThreeHybridSlimeVisual;
+  // 槽位由玩法侧分配：渲染世界不回话（见 RenderScene.createPlayerProxy）。
+  const proxyId = new RenderProxyTable(scene).acquire();
+  scene.createPlayerProxy(proxyId, { name, render, walkSpeed, surfaceDrag });
+  const proxy = scene.resolve(proxyId)!;
+  const slime = scene.resolveSlimeVisual(proxyId) as ThreeHybridSlimeVisual;
   return {
     scene,
-    proxyId: info.id as ProxyId,
+    proxyId: proxyId as ProxyId,
     root: proxy.root,
     get rig() {
       return slime.rig;
@@ -470,7 +473,9 @@ function createPlayerVisualHarness(
 
 test('普通玩家眼睛使用独立的无光照、无雾渲染层', () => {
   const scene = new ThreeRenderScene(new THREE.Group(), RENDER_ENVIRONMENT);
-  const info = scene.createPlayerProxy({
+  // 槽位由玩法侧分配：渲染世界不回话（见 RenderScene.createPlayerProxy）。
+  const proxyId = new RenderProxyTable(scene).acquire();
+  scene.createPlayerProxy(proxyId, {
     name: 'unlit-eye-player',
     walkSpeed: 3.2,
     render: {
@@ -484,7 +489,7 @@ test('普通玩家眼睛使用独立的无光照、无雾渲染层', () => {
       shadowColor: '#1e5a40',
     },
   });
-  const root = scene.resolve(info.id)!.root;
+  const root = scene.resolve(proxyId)!.root;
   const eyes = [
     root.getObjectByName('player-slime-eye-left'),
     root.getObjectByName('player-slime-eye-right'),

@@ -19,6 +19,7 @@ import { RenderTransformSyncSystem } from '../src/actors/systems/RenderTransform
 import { RenderProxyComponent } from '../src/actors/components/RenderProxyComponent';
 import { RenderTransformBuffer } from '../src/render/RenderTransformBuffer';
 import type { ThreeMeshProxy } from '../src/render/three/ThreeMeshProxy';
+import { RenderProxyTable } from '../src/render/RenderProxyTable';
 import { ThreeRenderScene } from '../src/render/three/ThreeRenderScene';
 import { ActorSnapshotBuffer } from '../src/actors/ActorSnapshotBuffer';
 import { ClientActorSystem } from '../src/actors/ClientActorSystem';
@@ -74,9 +75,11 @@ function createMushroom(): {
     radius: DROP_RADIUS,
     settleSpeed: 0.1,
   }));
-  const info = scene.createMeshProxy({ name: 'actor-elastic-mushroom-01', render: RENDER });
-  actor.addComponent(new RenderProxyComponent(info.id, scene));
-  const render = scene.resolve(info.id) as ThreeMeshProxy;
+  const proxyIds = new RenderProxyTable(scene);
+  const proxyId = proxyIds.acquire();
+  scene.createMeshProxy(proxyId, { name: 'actor-elastic-mushroom-01', render: RENDER });
+  actor.addComponent(new RenderProxyComponent(proxyId, scene));
+  const render = scene.resolve(proxyId) as ThreeMeshProxy;
   world.addActor(actor);
   const step = (deltaSeconds: number, elapsedSeconds: number): void => {
     world.update(deltaSeconds, elapsedSeconds);

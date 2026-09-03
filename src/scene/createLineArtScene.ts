@@ -180,6 +180,9 @@ export function createLineArtScene(
     actorSnapshotTarget,
     renderScene,
     renderTransforms,
+    // 槽位表由 ClientActorSystem 建（它是唯一知道渲染世界什么时候就位的那一个），
+    // 从这里递给玩家实体——两边必须是同一张。
+    renderProxyIds: actorSnapshotTarget.renderProxyIds,
     collisionWorld,
     terrainWorld,
     physicsWorld,
