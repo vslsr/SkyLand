@@ -13,6 +13,9 @@ class FakeElement extends EventTarget {
   public innerHTML = '';
   public tabIndex = 0;
   public type = '';
+  public disabled = false;
+  /** 菜单摆位会写 left/top；没有排版引擎，这里只要写得进去。 */
+  public readonly style: Record<string, string> = {};
   public readonly dataset: Record<string, string> = {};
   public children: FakeElement[] = [];
   private readonly attributes = new Map<string, string>();
@@ -44,6 +47,16 @@ class FakeElement extends EventTarget {
     this.children.push(...children);
   }
 
+  public remove(): void {
+    // 这些测试只造一棵树，不需要真的从父节点上摘下来。
+  }
+
+  /** 菜单靠它判断「点的是不是自己」。 */
+  public contains(node: unknown): boolean {
+    if (node === this) return true;
+    return this.children.some((child) => child.contains(node));
+  }
+
   public replaceChildren(...children: FakeElement[]): void {
     this.children = [...children];
   }
@@ -71,7 +84,7 @@ class FakeElement extends EventTarget {
   }
 }
 
-class FakeDocument {
+class FakeDocument extends EventTarget {
   public readonly body = new FakeElement('body');
   private readonly byId = new Map<string, FakeElement>();
 
@@ -106,22 +119,28 @@ class FakeDocument {
   }
 }
 
+/**
+ * 顶掉 `document` 与 `window`。
+ *
+ * `window` 也要有：弹出的动作菜单会在它上面挂一个 resize 关闭监听——菜单是按当时
+ * 的格子位置摆的，窗口一变它就指错地方。
+ */
 function withFakeDocument<T>(run: (document: FakeDocument) => T): T {
-  const previous = globalThis.document;
+  const previousDocument = globalThis.document;
+  const previousWindow = (globalThis as { window?: unknown }).window;
   const fake = new FakeDocument();
-  Object.defineProperty(globalThis, 'document', {
-    value: fake,
+  const define = (name: string, value: unknown) => Object.defineProperty(globalThis, name, {
+    value,
     configurable: true,
     writable: true,
   });
+  define('document', fake);
+  define('window', new EventTarget());
   try {
     return run(fake);
   } finally {
-    Object.defineProperty(globalThis, 'document', {
-      value: previous,
-      configurable: true,
-      writable: true,
-    });
+    define('document', previousDocument);
+    define('window', previousWindow);
   }
 }
 
@@ -233,17 +252,112 @@ test('分类页签第一页是全部，空分类不出现', () => {
   });
 });
 
-test('可手持的格子点一下就交出物品种类，拿不到手上的不响应', () => {
+function menuEntries(page: InventoryPage): FakeElement[] {
+  return cellsOf(page, 'inventory-menu__entry');
+}
+
+function clickCell(page: InventoryPage, itemType: string): void {
+  const cell = cellsOf(page, 'inventory__cell')
+    .find((candidate) => candidate.dataset.itemType === itemType);
+  assert.ok(cell, `没有 ${itemType} 这一格`);
+  cell.dispatchEvent(new Event('click'));
+}
+
+test('可手持的格子点一下弹出动作菜单，拿不到手上的不响应', () => {
   withFakeDocument(() => {
     const page = new InventoryPage();
-    const held: string[] = [];
-    page.onHold((itemType) => held.push(itemType));
     page.setInventory(inventoryView(6, [['wood', 3], ['light-ammo', 60]]));
+    const menu = cellsOf(page, 'inventory-menu')[0];
+    assert.equal(menu.hidden, true, '没点之前菜单是收着的');
 
-    for (const cell of cellsOf(page, 'inventory__cell')) {
-      cell.dispatchEvent(new Event('click'));
-    }
-    assert.deepEqual(held, ['wood'], '弹药拿不到手上，点了不该有反应');
+    clickCell(page, 'wood');
+    assert.equal(menu.hidden, false);
+    assert.deepEqual(
+      menuEntries(page).map((entry) => entry.textContent),
+      ['使用', '装备', '丢弃'],
+    );
+    assert.equal(cellsOf(page, 'inventory-menu__title')[0].textContent, '木材');
+
+    // 弹药拿不到手上，那一格根本不是按钮。
+    clickCell(page, 'light-ammo');
+    assert.equal(cellsOf(page, 'inventory-menu__title')[0].textContent, '木材');
+  });
+});
+
+test('选中菜单里的一条就报出意图，并把菜单收起来', () => {
+  withFakeDocument(() => {
+    const page = new InventoryPage();
+    const actions: [string, string][] = [];
+    page.onItemAction((action, itemType) => actions.push([action, itemType]));
+    page.setInventory(inventoryView(6, [['wood', 3]]));
+
+    clickCell(page, 'wood');
+    const drop = menuEntries(page).find((entry) => entry.dataset.action === 'drop');
+    assert.ok(drop);
+    drop.dispatchEvent(new Event('click'));
+
+    assert.deepEqual(actions, [['drop', 'wood']]);
+    // 先收再兑现：动作会改背包，改完这一格会被重画，菜单挂着的锚点就没了。
+    assert.equal(cellsOf(page, 'inventory-menu')[0].hidden, true);
+  });
+});
+
+test('点别处收起菜单；再点同一格是「我不选了」', () => {
+  withFakeDocument((fakeDocument) => {
+    const page = new InventoryPage();
+    page.setInventory(inventoryView(6, [['wood', 3], ['stone', 1]]));
+    const menu = cellsOf(page, 'inventory-menu')[0];
+
+    clickCell(page, 'wood');
+    assert.equal(menu.hidden, false);
+    // 点在菜单外面：捕获阶段那道监听把它收起来。
+    const elsewhere = new FakeElement('div');
+    const outside = new Event('pointerdown');
+    Object.defineProperty(outside, 'target', { value: elsewhere, configurable: true });
+    fakeDocument.dispatchEvent(outside);
+    assert.equal(menu.hidden, true);
+
+    clickCell(page, 'wood');
+    assert.equal(menu.hidden, false);
+    clickCell(page, 'wood');
+    assert.equal(menu.hidden, true, '同一格再点一次是收起来，而不是重画一遍');
+  });
+});
+
+test('已经配在物品栏上时，「装备」列出来但点不动', () => {
+  withFakeDocument(() => {
+    const inventory = new InventoryComponent({ slotCapacity: 6, hotbarCapacity: 4 });
+    inventory.add('wood', 3);
+    inventory.assignHotbarSlot(0, 'wood');
+    const page = new InventoryPage();
+    const actions: string[] = [];
+    page.onItemAction((action) => actions.push(action));
+    page.setInventory(buildInventoryView(inventory as never));
+
+    clickCell(page, 'wood');
+    const equip = menuEntries(page).find((entry) => entry.dataset.action === 'equip');
+    assert.ok(equip);
+    assert.equal(equip.disabled, true);
+    equip.dispatchEvent(new Event('click'));
+    assert.deepEqual(actions, [], '点不动的那条不该报出意图');
+  });
+});
+
+test('重画与关闭都会收起菜单：锚着的那一格已经不在了', () => {
+  withFakeDocument(() => {
+    const page = new InventoryPage();
+    page.setInventory(inventoryView(6, [['wood', 3]]));
+    const menu = cellsOf(page, 'inventory-menu')[0];
+
+    clickCell(page, 'wood');
+    assert.equal(menu.hidden, false);
+    page.setInventory(inventoryView(6, [['wood', 2]]));
+    assert.equal(menu.hidden, true, '快照一来格子全换了，菜单不能还挂在旧的上面');
+
+    clickCell(page, 'wood');
+    assert.equal(menu.hidden, false);
+    page.onClose('pop');
+    assert.equal(menu.hidden, true);
   });
 });
 

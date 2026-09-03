@@ -11,7 +11,12 @@ import {
   resolveActorAction,
   resolveHeldItemAction,
 } from '../../shared/actor/index.mjs';
-import { dropHeldObject, stowHeldItem, transferItems } from '../actors/InventoryMutations.mjs';
+import {
+  dropHeldObject,
+  dropInventoryItem,
+  stowHeldItem,
+  transferItems,
+} from '../actors/InventoryMutations.mjs';
 
 const player = (inventory) => ({ id: 'p1', getComponent: (name) => (name === 'inventory' ? inventory : undefined) });
 const chest = (container) => ({ getComponent: (name) => (name === 'container' ? container : undefined) });
@@ -280,4 +285,57 @@ test('放下分派：物品堆走物品的落法，世界物件走它自己的',
 
   assert.equal(dropHeldObject(scene, player), true);
   assert.deepEqual(carriedDrops, ['m1'], '没有 itemStack 就交给蘑菇自己的落法');
+});
+
+/** 背包菜单的「丢弃」用的那条路：只认账本和掉落原型，不碰手上那件。 */
+function dropHarness(inventory, { archetypes = new Map([['wood-drop', { components: { itemStack: { itemType: 'wood' } } }]]) } = {}) {
+  const spawned = [];
+  const pickupDrop = { heldActorId: 'held-1', drop() { this.heldActorId = null; return true; } };
+  const player = {
+    id: 'p1',
+    x: 3,
+    y: 1,
+    z: -2,
+    yaw: 0,
+    getComponent: (name) => ({ inventory, pickupDrop }[name]),
+  };
+  const scene = {
+    actorWorld: { context: { archetypes }, getActor: () => undefined },
+    spawnItemStack: (archetypeId, options) => { spawned.push({ archetypeId, ...options }); },
+  };
+  return { player, scene, spawned, pickupDrop };
+}
+
+test('背包里的「丢弃」直接从账本扣，手上那件原样不动', () => {
+  const inventory = new InventoryComponent({ slotCapacity: 8, hotbarCapacity: 4 });
+  inventory.add('wood', 3);
+  inventory.assignHotbarSlot(0, 'stone');
+  const { player, scene, spawned, pickupDrop } = dropHarness(inventory);
+
+  assert.equal(dropInventoryItem(scene, player, 'wood', 1), true);
+  assert.equal(inventory.quantityOf('wood'), 2, '扣掉丢出去的那一个');
+  assert.equal(spawned.length, 1);
+  assert.equal(spawned[0].archetypeId, 'wood-drop');
+  assert.equal(spawned[0].quantity, 1);
+  // 落点推到身前：就地生成会和角色碰撞体重叠，把人卡住。yaw 为 0 时正对 +Z。
+  assert.ok(Math.abs(spawned[0].position[2] - (-2 + 0.85)) < 1e-6, `落点应当在身前：${spawned[0].position}`);
+
+  // 这条命令的全部意义就在这里：手上那件和快捷栏都没被动过。
+  assert.equal(pickupDrop.heldActorId, 'held-1');
+  assert.equal(inventory.hotbar[0], 'stone');
+});
+
+test('包里没有、或者这件东西掉在地上没有原型时，一个都不扣', () => {
+  const inventory = new InventoryComponent({ slotCapacity: 8 });
+  inventory.add('wood', 1);
+
+  const empty = dropHarness(inventory);
+  assert.equal(dropInventoryItem(empty.scene, empty.player, 'stone', 1), false);
+  assert.equal(empty.spawned.length, 0);
+
+  // 没有掉落原型：账要留着，不能先扣了再发现丢不出去。
+  const orphan = dropHarness(inventory, { archetypes: new Map() });
+  assert.equal(dropInventoryItem(orphan.scene, orphan.player, 'wood', 1), false);
+  assert.equal(inventory.quantityOf('wood'), 1, '丢不出去就一个都不扣');
+  assert.equal(orphan.spawned.length, 0);
 });

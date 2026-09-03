@@ -58,6 +58,7 @@ import {
 import { dropPickedActor, pickupActor } from '../actors/PickupDropMutations.mjs';
 import {
   dropHeldObject,
+  dropInventoryItem,
   stowHeldItem,
   syncHeldItemActor,
   transferItems,
@@ -635,6 +636,11 @@ export class ServerScene {
       case 'drop':
         changed = dropHeldObject(this, player);
         break;
+      case 'drop:stack':
+        // 背包里那一堆直接丢一个到地上，不经过手：菜单里的「丢弃」指的是包里
+        // 那件东西，不该顺手把手上握着的换掉。
+        changed = dropInventoryItem(this, player, sanitizeItemType(command.itemType), 1);
+        break;
       case 'stow:begin':
         // 交互键按住的起点。和蓄力一样记在服务端：客户端那圈转盘转满那一刻，
         // 就是这里判定长按那一刻，但判定用的是自己的计时。
@@ -665,7 +671,7 @@ export class ServerScene {
       default:
         return false;
     }
-    if (!['use:release', 'drop', 'stow:release'].includes(command.kind)) {
+    if (!['use:release', 'drop', 'drop:stack', 'stow:release'].includes(command.kind)) {
       // 换手要跟着快捷栏走；使用与丢下已经在各自的变更里对齐过了。
       syncHeldItemActor(this, player);
     }

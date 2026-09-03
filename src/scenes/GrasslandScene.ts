@@ -289,6 +289,7 @@ export class GrasslandScene extends Scene {
       },
       // 只在没有别的页面盖着时开，背包因此永远是栈顶那一页。
       canOpen: () => Boolean(this.joinedRoom && this.player) && this.commonUI.size === 0,
+      send: (command) => { this.roomClient.sendInventoryCommand(command); },
     });
     this.hotbar = new HotbarController(this.input, {
       getInventory: () => this.player?.getComponent(INVENTORY_COMPONENT) as
@@ -321,8 +322,8 @@ export class GrasslandScene extends Scene {
       send: (command) => { this.roomClient.sendInventoryCommand(command); },
     });
     this.containerPage.onRequestClose(() => this.container.requestClose());
-    // 点一下快捷栏那一格 = 切到它；点一下背包里那件东西 = 放上快捷栏并握住。
-    // 两条都只发意图，握没握上以下一帧快照为准。
+    // 点一下快捷栏那一格 = 切到它；点一下背包里那件东西 = 弹出使用/装备/丢弃菜单。
+    // 两条都只发意图，成没成以下一帧快照为准。
     // 快捷栏挂在 HUD 层而不是 CommonUI 栈里：它在游戏进行中一直可见可点，
     // 不参与页面压栈，也不该被背包盖住。
     document.getElementById('hotbar-root')?.append(this.hotbarBar.element);
@@ -330,9 +331,6 @@ export class GrasslandScene extends Scene {
     this.baseLayer.append(this.holdProgress.element);
     this.hotbarBar.onSelect((slotIndex) => {
       this.roomClient.sendInventoryCommand({ kind: 'select', slotIndex });
-    });
-    this.inventoryPage.onHold((itemType) => {
-      this.roomClient.sendInventoryCommand({ kind: 'hold', itemType });
     });
     this.controls.onModeChange((mode) => this.hud.setControlMode(mode));
 
