@@ -86,7 +86,7 @@ test('帧配对单独占一行：两条循环都满帧也能看出画面在哪�
   const lines = formatFrameProfiler([{
     label: '渲染线程',
     report,
-    pacing: { frames: 61, duplicated: 12, skipped: 11, worstMilliseconds: 0, worstSecondsAgo: 0 },
+    pacing: { frames: 61, duplicated: 12, skipped: 11, worstMilliseconds: 0, worstSecondsAgo: 0, motionFrames: 0, motionStalls: 0, motionMedian: 0, motionMaximum: 0 },
   }]);
   const pacing = lines.find((line) => line.includes('帧配对'));
   assert.ok(pacing, '应该有帧配对那一行');
@@ -101,7 +101,7 @@ test('配对完美时不喊「顿」，没有 pacing 时整行不出现', () => 
   const [, clean] = formatFrameProfiler([{
     label: '渲染线程',
     report,
-    pacing: { frames: 60, duplicated: 0, skipped: 0, worstMilliseconds: 0, worstSecondsAgo: 0 },
+    pacing: { frames: 60, duplicated: 0, skipped: 0, worstMilliseconds: 0, worstSecondsAgo: 0, motionFrames: 0, motionStalls: 0, motionMedian: 0, motionMaximum: 0 },
   }]);
   assert.match(clean, /一对一=\s*60/);
   assert.doesNotMatch(clean, /顿/);
@@ -121,6 +121,10 @@ test('近十秒最差帧跨窗口留着——卡顿几秒一次，只看当前�
       skipped: 0,
       worstMilliseconds: 84.2,
       worstSecondsAgo: 6.4,
+      motionFrames: 0,
+      motionStalls: 0,
+      motionMedian: 0,
+      motionMaximum: 0,
     },
   }]);
   const worst = lines.find((line) => line.includes('近十秒最差'));
@@ -132,7 +136,49 @@ test('近十秒最差帧跨窗口留着——卡顿几秒一次，只看当前�
   const quiet = formatFrameProfiler([{
     label: '渲染线程',
     report,
-    pacing: { frames: 60, duplicated: 0, skipped: 0, worstMilliseconds: 0, worstSecondsAgo: 0 },
+    pacing: { frames: 60, duplicated: 0, skipped: 0, worstMilliseconds: 0, worstSecondsAgo: 0, motionFrames: 0, motionStalls: 0, motionMedian: 0, motionMaximum: 0 },
   }]);
   assert.ok(!quiet.some((line) => line.includes('近十秒最差')));
+});
+
+test('画面位移单独一行：帧是匀的但画面不匀时点出来', () => {
+  const report = reportWith({ 'render-draw': [1] }, [2]);
+  const jerky = formatFrameProfiler([{
+    label: '渲染线程',
+    report,
+    pacing: {
+      frames: 60, duplicated: 0, skipped: 0,
+      worstMilliseconds: 0, worstSecondsAgo: 0,
+      motionFrames: 58, motionStalls: 9, motionMedian: 0.052, motionMaximum: 0.147,
+    },
+  }]);
+  const motion = jerky.find((line) => line.includes('画面位移'));
+  assert.ok(motion);
+  assert.match(motion, /每帧中位 5\.2cm/);
+  assert.match(motion, /最大 14\.7cm/);
+  assert.match(motion, /卡住 9\/58 帧/);
+  assert.match(motion, /帧是匀的，画面不匀/);
+
+  const smooth = formatFrameProfiler([{
+    label: '渲染线程',
+    report,
+    pacing: {
+      frames: 60, duplicated: 0, skipped: 0,
+      worstMilliseconds: 0, worstSecondsAgo: 0,
+      motionFrames: 58, motionStalls: 0, motionMedian: 0.052, motionMaximum: 0.061,
+    },
+  }]);
+  assert.doesNotMatch(smooth.find((line) => line.includes('画面位移'))!, /不匀/);
+
+  // 站着不动时这一行不出现。
+  const idle = formatFrameProfiler([{
+    label: '渲染线程',
+    report,
+    pacing: {
+      frames: 60, duplicated: 0, skipped: 0,
+      worstMilliseconds: 0, worstSecondsAgo: 0,
+      motionFrames: 0, motionStalls: 0, motionMedian: 0, motionMaximum: 0,
+    },
+  }]);
+  assert.ok(!idle.some((line) => line.includes('画面位移')));
 });

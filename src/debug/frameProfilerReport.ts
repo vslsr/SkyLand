@@ -76,6 +76,17 @@ export function formatFrameProfiler(
         + `  跳过=${String(skipped).padStart(3)}`
         + `${wasted > 0 ? `  ← 画面在这 ${wasted} 帧上顿` : ''}`,
       );
+      if (thread.pacing.motionFrames > 0) {
+        const { motionFrames, motionStalls, motionMedian, motionMaximum } = thread.pacing;
+        const ratio = motionMedian > 0 ? motionMaximum / motionMedian : 0;
+        lines.push(
+          `   ${'画面位移'.padEnd(13)} 每帧中位 ${(motionMedian * 100).toFixed(1)}cm`
+          + `  最大 ${(motionMaximum * 100).toFixed(1)}cm`
+          + `  ${ratio.toFixed(1)}×`
+          + `  卡住 ${motionStalls}/${motionFrames} 帧`
+          + `${motionStalls > 0 || ratio > 2 ? '  ← 帧是匀的，画面不匀' : ''}`,
+        );
+      }
       if (thread.pacing.worstMilliseconds > 0) {
         lines.push(
           `   ${'近十秒最差'.padEnd(12)} ${milliseconds(thread.pacing.worstMilliseconds)}`

@@ -79,4 +79,19 @@ export interface FramePacing {
    */
   readonly worstMilliseconds: number;
   readonly worstSecondsAgo: number;
+  /**
+   * 画面里的东西**动得匀不匀**。
+   *
+   * 帧发得再准，如果每帧推进的距离忽大忽小，看上去照样是一顿一顿的——固定步模拟
+   * 不插值就是这个毛病：这一帧走了两步、下一帧一步没走，fps 完美，人却在抽搐。
+   * 这里逐帧量相机位移（跟随相机的位移就是眼睛看到的位移）：
+   *
+   * - `motionFrames` 相机确实在动的帧数
+   * - `motionStalls` 其中位移不到中位数一成的帧数——「这一帧画面基本没动」
+   * - `motionMedian` / `motionMaximum` 每帧位移的中位数与最大值（米）
+   */
+  readonly motionFrames: number;
+  readonly motionStalls: number;
+  readonly motionMedian: number;
+  readonly motionMaximum: number;
 }

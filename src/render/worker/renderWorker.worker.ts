@@ -1,5 +1,5 @@
 /// <reference lib="webworker" />
-import { RenderCameraBuffer } from '../RenderCameraBuffer';
+import { createRenderCamera, RenderCameraBuffer } from '../RenderCameraBuffer';
 import { RenderInstanceBuffer } from '../RenderInstanceBuffer';
 import { RenderTransformBuffer } from '../RenderTransformBuffer';
 import { RenderWorldRuntime } from '../RenderWorldRuntime';
@@ -27,6 +27,7 @@ const post = (message: RenderWorkerToMain): void => {
 
 let runtime: RenderWorldRuntime | undefined;
 let transforms: RenderTransformBuffer | undefined;
+let cameraBuffer: RenderCameraBuffer | undefined;
 const propInstances = new RenderInstanceBuffer(PROP_INT_STRIDE, PROP_FLOAT_STRIDE);
 const fruitInstances = new RenderInstanceBuffer(FRUIT_INT_STRIDE, FRUIT_FLOAT_STRIDE);
 /** 上一帧的时刻，用来算这一侧自己的 dt。 */
@@ -47,6 +48,15 @@ let pacingSkipped = 0;
 let worstFrameMilliseconds = 0;
 let worstFrameAt = 0;
 const WORST_FRAME_WINDOW_MS = 10_000;
+
+/** 上一帧的相机位置，用来逐帧量画面到底推进了多少。复用一个读出对象，不每帧新建。 */
+const cameraSample = createRenderCamera();
+let previousCamera: [number, number, number] | undefined;
+const motionSamples: number[] = [];
+/** 位移小于中位数这个比例的帧算「基本没动」。 */
+const MOTION_STALL_RATIO = 0.1;
+/** 低于这个位移就认为相机是静止的，不计入统计（站着不动时没有匀不匀可言）。 */
+const MOTION_IDLE_METERS = 0.0005;
 
 self.addEventListener('message', (event: MessageEvent<RenderWorkerFromMain>) => {
   const message = event.data;
@@ -76,11 +86,8 @@ function start(
 ): void {
   try {
     transforms = RenderTransformBuffer.fromBytes(transformBytes);
-    runtime = new RenderWorldRuntime(
-      canvas,
-      RenderCameraBuffer.fromBytes(cameraBytes),
-      transforms,
-    );
+    cameraBuffer = RenderCameraBuffer.fromBytes(cameraBytes);
+    runtime = new RenderWorldRuntime(canvas, cameraBuffer, transforms);
     // 两条反向通知：都是只有这一侧知道的事实，走 postMessage，不进命令队列。
     // 回报里的那份逐帧复用，`postMessage` 会结构化克隆，所以摊平成一条报文。
     runtime.setSlimeSurfaceDragListener((report) => post({
@@ -120,6 +127,17 @@ function frame(now: number): void {
 
   // 这一帧画的是玩法的第几帧。两条循环各跑各的 rAF，相位一漂就会「同一份画两遍」
   // 接着「有一份没画」——两边都还是满帧，画面却在这对上一顿。
+  // 相机每帧推进了多远。帧再准，位移忽大忽小照样看着顿。
+  const camera = cameraBuffer?.read(cameraSample);
+  if (camera) {
+    const [x, y, z] = camera.position;
+    if (previousCamera) {
+      const moved = Math.hypot(x - previousCamera[0], y - previousCamera[1], z - previousCamera[2]);
+      if (moved > MOTION_IDLE_METERS) motionSamples.push(moved);
+    }
+    previousCamera = [x, y, z];
+  }
+
   const frameId = transforms?.frameId ?? -1;
   if (frameId >= 0) {
     pacingFrames += 1;
@@ -145,13 +163,35 @@ function frame(now: number): void {
         skipped: pacingSkipped,
         worstMilliseconds: worstFrameMilliseconds,
         worstSecondsAgo: Math.max(0, (now - worstFrameAt) / 1000),
+        ...summarizeMotion(),
       },
     });
     frameTimeline.reset();
     pacingFrames = 0;
     pacingDuplicated = 0;
     pacingSkipped = 0;
+    motionSamples.length = 0;
   }
+}
+
+/** 把这一秒的逐帧位移收成四个数。样本量只有几十，直接排序即可。 */
+function summarizeMotion(): {
+  motionFrames: number;
+  motionStalls: number;
+  motionMedian: number;
+  motionMaximum: number;
+} {
+  if (motionSamples.length === 0) {
+    return { motionFrames: 0, motionStalls: 0, motionMedian: 0, motionMaximum: 0 };
+  }
+  const sorted = [...motionSamples].sort((left, right) => left - right);
+  const median = sorted[Math.floor(sorted.length / 2)];
+  return {
+    motionFrames: sorted.length,
+    motionStalls: sorted.filter((value) => value < median * MOTION_STALL_RATIO).length,
+    motionMedian: median,
+    motionMaximum: sorted[sorted.length - 1],
+  };
 }
 
 /**
