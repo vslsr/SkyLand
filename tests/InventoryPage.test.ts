@@ -284,6 +284,21 @@ test('可手持的格子点一下弹出动作菜单，拿不到手上的不响�
   });
 });
 
+test('可点的格子标成 CommonUI 事件接收者，点击不会被栈守卫拦掉', () => {
+  withFakeDocument(() => {
+    const page = new InventoryPage();
+    page.setInventory(inventoryView(6, [['wood', 3], ['light-ammo', 60]]));
+    const cells = cellsOf(page, 'inventory__cell');
+    const wood = cells.find((cell) => cell.dataset.itemType === 'wood');
+    const ammo = cells.find((cell) => cell.dataset.itemType === 'light-ammo');
+    assert.ok(wood && ammo);
+    // 格子是 `<li role="button">`，`CommonUIManager` 只按标签名认接收者，认不出就
+    // 会在捕获阶段把这次点击拦掉——玩家点了毫无反应。
+    assert.equal(wood.dataset.commonUiReceiver, '');
+    assert.equal(ammo.dataset.commonUiReceiver, undefined, '拿不到手上的那格本来就不响应');
+  });
+});
+
 test('选中菜单里的一条就报出意图，并把菜单收起来', () => {
   withFakeDocument(() => {
     const page = new InventoryPage();

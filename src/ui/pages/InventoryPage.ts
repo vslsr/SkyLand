@@ -267,6 +267,10 @@ export class InventoryPage extends ModalWindow {
       cell.tabIndex = 0;
       cell.setAttribute('role', 'button');
       cell.setAttribute('aria-haspopup', 'menu');
+      // 格子是 `<li role="button">`，不是真的 `<button>`。`CommonUIManager` 只按标签名
+      // 认「这次点击是给 DOM 的」，认不出它就会在捕获阶段把事件拦掉——点了格子毫无
+      // 反应、菜单永远弹不出来。这条标记是它给出的显式入口。
+      cell.dataset.commonUiReceiver = '';
       cell.addEventListener('click', () => this.openItemMenu(cell, stack));
       cell.addEventListener('keydown', (event) => {
         if (event.key !== 'Enter' && event.key !== ' ') return;
