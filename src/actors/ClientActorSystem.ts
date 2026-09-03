@@ -821,12 +821,20 @@ export class ClientActorSystem implements SceneVisualSystem {
     return undefined;
   }
 
-  public setInteractionMarkerActorId(actorId?: string, inputLabel?: string): void {
+  public setInteractionMarkerActorId(
+    actorId?: string,
+    inputLabel?: string,
+    opacity = 1,
+  ): void {
     // 生成物件带 InteractableComponent 却没有 proxy，所以「目标没有 proxyId」
     // 与「没有选中」都是合法输入，统一退化成 NULL_PROXY_ID。
     const actor = actorId ? this.world.getActor(actorId) as Actor | undefined : undefined;
     const proxy = actor?.getComponent(RENDER_PROXY_COMPONENT) as RenderProxyComponent | undefined;
-    this.renderScene.setInteractionMarker(proxy?.proxyId ?? NULL_PROXY_ID, inputLabel ?? '');
+    this.renderScene.setInteractionMarker(
+      proxy?.proxyId ?? NULL_PROXY_ID,
+      inputLabel ?? '',
+      opacity,
+    );
   }
 
   public setHoveredActorId(actorId?: string): void {

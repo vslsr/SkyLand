@@ -64,6 +64,7 @@ export class InputSubsystem {
   private effectiveMappings: readonly InputMappingDefinition[] = [];
   private mappingsDirty = true;
   private inputEnabled = true;
+  private inputActiveThisFrame = false;
   private activeInputDevice: InputDeviceKind;
   private lastTimestampMs: number;
 
@@ -87,6 +88,18 @@ export class InputSubsystem {
 
   public get activeDeviceKind(): InputDeviceKind {
     return this.activeInputDevice;
+  }
+
+  /**
+   * 最近一次 `update` 里玩家有没有在操作：这一帧到达过活动事件（按下即松也算），
+   * 或者仍有控制按着不放（按住不放之后不再产生事件，所以还要看当前值）。
+   *
+   * 输入被关掉时恒为 `false`——CommonUI 打开时场景正是这么关的，所以翻页、点按钮
+   * 这类界面操作不会被当成游戏操作。指针锁定下的鼠标视角不经过这条管线（`FlyController`
+   * 自己读 `movementX`），因此也不算在内。
+   */
+  public get hasActiveInput(): boolean {
+    return this.inputActiveThisFrame;
   }
 
   public onActiveDeviceChanged(listener: ActiveDeviceListener): () => void {
@@ -191,6 +204,7 @@ export class InputSubsystem {
 
   public update(timestampMs = this.now()): void {
     const frameTimestamp = Math.max(this.lastTimestampMs, timestampMs);
+    this.inputActiveThisFrame = false;
     if (!this.inputEnabled) {
       for (const device of this.devices) device.reset();
       this.lastTimestampMs = frameTimestamp;
@@ -226,6 +240,7 @@ export class InputSubsystem {
 
     this.advanceTimedTriggers(frameTimestamp);
     for (const runtime of this.actions.values()) runtime.emitOngoing(frameTimestamp);
+    if (!this.inputActiveThisFrame) this.inputActiveThisFrame = this.hasHeldControl();
     this.lastTimestampMs = frameTimestamp;
   }
 
@@ -456,10 +471,22 @@ export class InputSubsystem {
     timestampMs: number,
   ): void {
     if (!inputValueIsActive(value, DEVICE_ACTIVITY_THRESHOLD)) return;
+    this.inputActiveThisFrame = true;
     this.lastDeviceActivityMs.set(deviceKind, timestampMs);
     if (this.activeInputDevice === deviceKind) return;
     this.activeInputDevice = deviceKind;
     for (const listener of [...this.activeDeviceListeners]) listener(deviceKind);
+  }
+
+  /**
+   * 当前是否还有控制按着不放。遍历量是「这条会话里出现过的控制路径数」，
+   * 与世界大小无关；释放后的控制会留在表里，但值是静止的，不会被算成活动。
+   */
+  private hasHeldControl(): boolean {
+    for (const state of this.controlValues.values()) {
+      if (inputValueIsActive(state.value, DEVICE_ACTIVITY_THRESHOLD)) return true;
+    }
+    return false;
   }
 
   private chooseMostRecentDevice(

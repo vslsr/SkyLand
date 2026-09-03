@@ -493,13 +493,16 @@ export class ThreeRenderScene implements RenderScene {
   /**
    * 选中哪一个交互目标。`NULL_PROXY_ID` 表示没有选中——生成物件带
    * InteractableComponent 却没有 proxy，所以「目标没有 proxyId」必须是合法输入。
+   *
+   * `opacity` 是交互提示的淡入淡出进度，只落在选中的那一块牌子上：没选中的牌子
+   * 本来就不可见，跟着每帧变一遍不透明度是白写。
    */
-  public setInteractionMarker(id: ProxyId, label: string): void {
+  public setInteractionMarker(id: ProxyId, label: string, opacity = 1): void {
     this.selectedInteractionProxy = id;
     for (const proxy of this.proxies) {
       if (!proxy?.markers.hasInteraction) continue;
       const selected = proxy.id === id && label.length > 0;
-      proxy.markers.setInteraction(label, selected);
+      proxy.markers.setInteraction(label, selected, selected ? opacity : 1);
     }
   }
 
