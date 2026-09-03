@@ -8,6 +8,9 @@
 
 use crate::hash::{hash32, value_noise};
 
+/// 地皮总数。与 JS 的 `TERRAIN_BIOME_COUNT` 一致，放置算法按它索引风格表。
+pub const TERRAIN_BIOME_COUNT: usize = 5;
+
 pub const TERRAIN_BIOME_GRASSLAND: u32 = 0;
 pub const TERRAIN_BIOME_SAND: u32 = 1;
 pub const TERRAIN_BIOME_MUD: u32 = 2;

@@ -63,6 +63,7 @@
 | `PROP_MARGIN_MM`、`DENSITY_SHIFT`、各路 `*_SALT`、`BASE_OCCUPANCY`、`OCCUPANCY_FROM_DENSITY`、`BASE_TREE_SHARE`、`TREE_SHARE_FROM_DENSITY`、`ROCK_SHARE`、`TWO_PI_MRAD` | 同名常量 | 放置算法的全部参数。 |
 | `TERRAIN_BIOME`、`TERRAIN_BIOME_SHIFT` / `TERRAIN_BIOME_MASK`（`terrainConfig.mjs`） | `TERRAIN_BIOME_*`、`TERRAIN_BIOME_SHIFT` / `TERRAIN_BIOME_MASK`（`biome.rs`、`terrain.rs`） | 群系枚举与它在格 code 里的位置。 |
 | `BIOME_REGION_SHIFT`、`BIOME_SITE_MARGIN`、`BIOME_CLIMATE_SHIFT`、三路 `BIOME_*_SALT`、`BIOME_VARIATION_*`、五个气候阈值（`terrainBiome.mjs`） | 同名常量（`biome.rs`） | 群系分区的全部参数。 |
+| `BIOME_PROP_STYLE`（`chunkContent.mjs`） | `BIOME_PROP_STYLE`（`placement.rs`） | 每种地皮的物件产出。逐行逐字段对应。 |
 | `MAXIMUM_FILL_VERTICES` / `MAXIMUM_LINE_VERTICES`（`chunkGenerator.mjs`） | `MAX_FILL_VERTICES` / `MAX_LINE_VERTICES`（`lib.rs`） | 单个 chunk 合批后的顶点上限。 |
 | `TEMPLATE_ARENA_CAPACITY` | `TEMPLATE_ARENA_F32` | 模板顶点暂存区容量。 |
 | `TEMPLATE_FILL_STRIDE` | `TEMPLATE_FILL_STRIDE` | 单个填充顶点占用的 f32 数：位置、法线、颜色各三个。 |
@@ -75,9 +76,12 @@
 每个 chunk 划成 `PROP_GRID × PROP_GRID` 个放置格（当前 8 × 8，每格 4 米）。对每一格：
 
 1. 用**密度噪声**决定这一带是密林还是空地。噪声在全局放置格坐标上取值，格点间距 2⁴ = 16 格，约 64 米一片林子，所以相邻 chunk 的疏密是连续的。
-2. 用一次哈希决定这一格有没有物件，概率随密度上升。
-3. 用同一次哈希的高位选种类：树的占比随密度从 16/255 升到 120/255，岩石固定 32/255，其余是草。
-4. 另外两次哈希给出格内抖动、朝向和缩放。抖动留了 `PROP_MARGIN_MM` 的边距，物件不会骑在 chunk 接缝上。
+2. 用一次哈希抖出格内落点，**先取落点处的地形格**：非平坦或非陆地直接跳过，同时拿到这一格的地皮。落点必须排在掷点之前，因为下面两步都要按地皮缩放。
+3. 用一次哈希决定这一格有没有物件，概率随密度上升，再乘 `BIOME_PROP_STYLE[地皮].occupancy / 255`。
+4. 用同一次哈希的高位选种类：树的占比随密度从 16/255 升到 120/255，岩石固定 32/255，扣掉两者后蘑菇与草按 3:4 分——四项各自再乘地皮的对应缩放，掷点按缩放后的权重总和取模。草原一行全是 255，四项合计恰好 256，掷点因此与引入群系之前逐位相同。
+5. 另一次哈希给出朝向和缩放。抖动留了 `PROP_MARGIN_MM` 的边距，物件不会骑在 chunk 接缝上。
+
+地皮风格表里的缩放全部 ≤ 255（只减不增），所以 `MAXIMUM_PROPS_PER_CHUNK` 与顶点预算不随它变化。
 
 结果写成 `PROP_STRIDE = 5` 的整数记录：`[kind, x_mm, z_mm, rotation_mrad, scale_thousandths]`。缓冲区由调用方复用，避免流式加载过程中持续产生 GC 压力。
 
