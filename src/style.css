@@ -1335,3 +1335,43 @@ body.is-topdown .virtual-controls.is-desktop-debug {
   font-size: 11px;
   opacity: 0.65;
 }
+
+/*
+ * 帧耗时面板（开发运行时，F8 里开关）。
+ *
+ * 只读，所以和 HUD 一样不吃指针：它经常盖在角色头顶那片区域上，能点穿是必须的。
+ * 等宽字体不是风格选择——分位数要能上下对齐着扫，比例字体会让数字跳来跳去。
+ */
+.frame-profiler {
+  position: fixed;
+  /* 让开左上角那颗菜单按钮：面板不吃指针，但盖住它一样难用。 */
+  top: clamp(72px, 10vw, 128px);
+  left: clamp(22px, 4.6vw, 72px);
+  z-index: var(--layer-hud);
+  pointer-events: none;
+  max-width: min(92vw, 560px);
+  padding: 10px 14px 12px;
+  border: 1px solid #1c1a17;
+  background: rgb(253 251 246 / 88%);
+  color: #1c1a17;
+}
+
+.frame-profiler[hidden] {
+  display: none;
+}
+
+.frame-profiler__title {
+  margin: 0 0 6px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.18em;
+  color: #6f6a5f;
+}
+
+.frame-profiler__body {
+  margin: 0;
+  font-family: "SFMono-Regular", Menlo, Consolas, "Liberation Mono", monospace;
+  font-size: 11px;
+  line-height: 1.5;
+  white-space: pre;
+}

@@ -1,3 +1,4 @@
+import type { FrameTimingReport } from '../../platform/index';
 import type { SlimeSurfaceDragReport } from '../RenderScene';
 import type { RenderCommandBatch } from './renderCommands';
 
@@ -38,4 +39,15 @@ export type RenderWorkerToMain =
    * 同样是渲染侧独有的事实：模板要 THREE，所以生成器住在那一边。`ChunkStreamer`
    * 在收到它之前一个 chunk 都不规划——先规划会注册出「踩得到但看不见」的碰撞体。
    */
-  | { readonly kind: 'generatorReady'; readonly generator: string };
+  | { readonly kind: 'generatorReady'; readonly generator: string }
+  /**
+   * 渲染线程自己那一份帧计时，每秒一条。
+   *
+   * 帧循环搬过来之后，主线程那份报表只剩下「发命令」几十微秒，画面卡不卡在它上面
+   * 完全看不出来——真正的每帧开销（绘制、chunk 几何、草）全在这一侧。所以这条
+   * 通知和另外两条一样，是**只有渲染侧知道的事实**，必须由它主动开口。
+   *
+   * 一秒一条、约两百字节，生产构建里也照发：调试面板一打开就有数，不必等开关
+   * 生效后再攒一秒。
+   */
+  | { readonly kind: 'frameReport'; readonly report: FrameTimingReport };

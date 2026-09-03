@@ -42,11 +42,13 @@ export class DebugMenuPage extends ModalWindow {
   private readonly transformLogStatus: HTMLParagraphElement;
   private readonly collisionButton: HTMLButtonElement;
   private readonly temperatureButton: HTMLButtonElement;
+  private readonly profilerButton: HTMLButtonElement;
   private readonly weatherButtons = new Map<WeatherType, HTMLButtonElement>();
   private readonly dayNightStatus: HTMLParagraphElement;
   private timeOfDaySelectHandler?: (timeOfDay: number) => void;
   private collisionToggleHandler?: (visible: boolean) => void;
   private temperatureToggleHandler?: (visible: boolean) => void;
+  private profilerToggleHandler?: (visible: boolean) => void;
   private weatherSelectHandler?: (weather: WeatherType) => void;
   private transformLogToggleHandler?: (recording: boolean) => void;
   private transformLogState: PlayerTransformLogState = 'inactive';
@@ -54,6 +56,7 @@ export class DebugMenuPage extends ModalWindow {
   private transformLogMessage?: string;
   private collisionVisible = false;
   private temperatureVisible = false;
+  private profilerVisible = false;
 
   public constructor() {
     super({
@@ -106,6 +109,22 @@ export class DebugMenuPage extends ModalWindow {
       this.collisionToggleHandler?.(this.collisionVisible);
     });
     collisionSection.append(collisionHeading, collisionDescription, this.collisionButton);
+
+    const profilerSection = document.createElement('section');
+    profilerSection.className = 'debug-menu__section';
+    const profilerHeading = document.createElement('h3');
+    profilerHeading.textContent = 'FRAME PROFILER';
+    const profilerDescription = document.createElement('p');
+    profilerDescription.textContent = '在画面左上角显示两条线程各自的帧耗时分位数。'
+      + '帧循环在渲染线程上，卡顿要看那一行；主线程只剩发命令。';
+    this.profilerButton = document.createElement('button');
+    this.profilerButton.className = 'paper-button debug-menu__toggle';
+    this.profilerButton.type = 'button';
+    this.profilerButton.addEventListener('click', () => {
+      this.setProfilerVisible(!this.profilerVisible);
+      this.profilerToggleHandler?.(this.profilerVisible);
+    });
+    profilerSection.append(profilerHeading, profilerDescription, this.profilerButton);
 
     const temperatureSection = document.createElement('section');
     temperatureSection.className = 'debug-menu__section';
@@ -179,15 +198,21 @@ export class DebugMenuPage extends ModalWindow {
       dayNightSection,
       weatherSection,
       transformLogSection,
+      profilerSection,
       collisionSection,
       temperatureSection,
     );
     this.setTransformLogState('inactive');
     this.setTransformLogAvailable(false);
+    this.setProfilerVisible(false);
     this.setCollisionVisible(false);
     this.setTemperatureVisible(false);
     this.setWeather(DEFAULT_WEATHER);
     this.setTimeOfDay(DEFAULT_START_HOUR);
+  }
+
+  public onProfilerToggle(handler: (visible: boolean) => void): void {
+    this.profilerToggleHandler = handler;
   }
 
   public onCollisionToggle(handler: (visible: boolean) => void): void {
@@ -235,6 +260,12 @@ export class DebugMenuPage extends ModalWindow {
               : '进入房间并生成玩家角色后可以开始记录。'
     );
     this.updateTransformLogButton();
+  }
+
+  public setProfilerVisible(visible: boolean): void {
+    this.profilerVisible = visible;
+    this.profilerButton.setAttribute('aria-pressed', String(visible));
+    this.profilerButton.textContent = visible ? '关闭帧耗时面板' : '打开帧耗时面板';
   }
 
   public setCollisionVisible(visible: boolean): void {

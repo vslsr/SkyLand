@@ -1,6 +1,7 @@
 import { FlyController } from '../camera/FlyController';
 import { GameInteractionLayer } from '../interaction/GameInteractionLayer';
 import { isDevelopmentRuntime } from '../debug/developmentRuntime';
+import { PerformanceOverlay } from '../debug/PerformanceOverlay';
 import { PlayerTransformLogRecorder } from '../debug/PlayerTransformLogRecorder';
 import {
   createPlayerInputScheme,
@@ -96,6 +97,8 @@ export class GrasslandScene extends Scene {
   private readonly containerPage = new ContainerPage();
   private readonly container: ContainerController;
   private readonly debugMenuPage?: DebugMenuPage;
+  /** 帧耗时面板。只在开发运行时建，F8 里开关。 */
+  private readonly performanceOverlay?: PerformanceOverlay;
   private readonly playerTransformLog?: PlayerTransformLogRecorder;
   private disposeDebugMenuShortcut?: () => void;
   private disposeInventoryShortcut?: () => void;
@@ -148,6 +151,7 @@ export class GrasslandScene extends Scene {
     });
     if (this.developmentRuntime) {
       this.debugMenuPage = new DebugMenuPage();
+      this.performanceOverlay = new PerformanceOverlay(options.baseLayer);
       this.playerTransformLog = new PlayerTransformLogRecorder({
         start: () => this.roomClient.startPlayerTransformLog(),
         append: (sessionId, events) => (
@@ -181,6 +185,9 @@ export class GrasslandScene extends Scene {
           playerName: joinedRoom.player.name,
           initialState: player.captureTransformDebugState(),
         });
+      });
+      this.debugMenuPage.onProfilerToggle((visible) => {
+        this.performanceOverlay?.setVisible(visible);
       });
       this.debugMenuPage.onCollisionToggle((visible) => {
         this.renderer.setSimpleCollisionVisible(visible);
@@ -338,6 +345,8 @@ export class GrasslandScene extends Scene {
   }
 
   public update(deltaSeconds: number, elapsedSeconds: number): void {
+    // 排在最前面：它数的是主线程的帧，晚了会把这一帧自己的耗时也算进去。
+    this.performanceOverlay?.update(deltaSeconds);
     this.input.update();
     this.vesselControls.update(deltaSeconds);
     this.controls.update(deltaSeconds, elapsedSeconds);
@@ -556,6 +565,7 @@ export class GrasslandScene extends Scene {
       this.commonUI.pop(page);
       return;
     }
+    page.setProfilerVisible(this.performanceOverlay?.visible ?? false);
     page.setCollisionVisible(this.renderer.isSimpleCollisionVisible);
     page.setTemperatureVisible(this.renderer.isTemperatureVisible);
     page.setWeather(this.renderer.weather);
@@ -765,6 +775,7 @@ export class GrasslandScene extends Scene {
     this.hotbar.reset();
     this.remotePlayers.setRenderWorld(undefined);
     this.slimeSurfaceDrag?.dispose();
+    this.performanceOverlay?.dispose();
     this.hotbar.dispose();
     this.hotbarBar.dispose();
     this.slimeSurfaceDrag = undefined;

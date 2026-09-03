@@ -6,6 +6,7 @@ import { RenderWorldRuntime } from '../RenderWorldRuntime';
 import { FRUIT_FLOAT_STRIDE, FRUIT_INT_STRIDE } from '../fruitInstanceLayout';
 import { PROP_FLOAT_STRIDE, PROP_INT_STRIDE } from '../propInstanceLayout';
 import { forceJavaScriptChunkGenerator } from '../../world/loadChunkGenerator';
+import { frameTimeline } from '../../platform/index';
 import { applyRenderCommand } from './renderCommands';
 import type { RenderWorkerFromMain, RenderWorkerToMain } from './renderWorkerProtocol';
 
@@ -31,6 +32,11 @@ const fruitInstances = new RenderInstanceBuffer(FRUIT_INT_STRIDE, FRUIT_FLOAT_ST
 /** 上一帧的时刻，用来算这一侧自己的 dt。 */
 let previous = 0;
 let elapsed = 0;
+/** 上一次把帧计时报表发回主线程的时刻。 */
+let reportedAt = 0;
+
+/** 帧计时报表的发送间隔。一秒一条足够看清趋势，又不会把 postMessage 变成负担。 */
+const FRAME_REPORT_INTERVAL_MS = 1000;
 
 self.addEventListener('message', (event: MessageEvent<RenderWorkerFromMain>) => {
   const message = event.data;
@@ -89,8 +95,21 @@ function frame(now: number): void {
   const deltaSeconds = previous === 0 ? 1 / 60 : Math.min((now - previous) / 1000, 0.1);
   previous = now;
   elapsed += deltaSeconds;
-  runtime.update(deltaSeconds, elapsed);
-  runtime.render();
+  // 帧边界打在这里，不在 runtime 里：整帧减去各阶段之和，剩下的就是还没打点的地方。
+  // 帧循环搬进这条线程之后，这才是「一帧到底多久」的唯一现场。
+  frameTimeline.beginFrame();
+  frameTimeline.measure('render-update', () => runtime?.update(deltaSeconds, elapsed));
+  frameTimeline.measure('render-draw', () => runtime?.render());
+  frameTimeline.endFrame();
+
+  if (reportedAt === 0) reportedAt = now;
+  if (now - reportedAt >= FRAME_REPORT_INTERVAL_MS) {
+    reportedAt = now;
+    // 报完就清：面板看的是「最近一秒」，而不是从进图到现在的平均——
+    // 卡顿是一阵一阵的，累计平均会把它抹平。
+    post({ kind: 'frameReport', report: frameTimeline.report() });
+    frameTimeline.reset();
+  }
 }
 
 /**

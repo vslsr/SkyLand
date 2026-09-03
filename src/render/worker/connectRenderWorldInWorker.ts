@@ -1,3 +1,4 @@
+import { publishRenderThreadReport } from '../../debug/renderThreadTimings';
 import { isSharedBytes } from '../../platform/index';
 import { isJavaScriptChunkGeneratorForced } from '../../world/loadChunkGenerator';
 import type { SceneDefinition } from '../../scenes/data/SceneDefinition';
@@ -64,6 +65,12 @@ export function connectRenderWorldInWorker(
     }
     if (message.kind === 'generatorReady') {
       port.generatorReady(message.generator);
+      return;
+    }
+    if (message.kind === 'frameReport') {
+      // 落进那份全局，调试面板从那里读。这里不判断面板开没开：一秒一条报文，
+      // 而「开面板之前的那一秒」恰恰是最想看的那一秒。
+      publishRenderThreadReport(message.report);
       return;
     }
     if (message.kind === 'failed') {

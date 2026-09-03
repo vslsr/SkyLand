@@ -144,3 +144,45 @@ test('F8 调试菜单温度按钮切换文案、无障碍状态并派发回调',
     });
   }
 });
+
+test('F8 调试菜单的帧耗时面板开关切换文案、无障碍状态并派发回调', () => {
+  const previousDocument = globalThis.document;
+  const fakeDocument = new FakeDocument();
+  Object.defineProperty(globalThis, 'document', {
+    value: fakeDocument,
+    configurable: true,
+    writable: true,
+  });
+
+  try {
+    const page = new DebugMenuPage();
+    const profilerButton = fakeDocument.elements.find((element) => (
+      element.tagName === 'button' && element.textContent === '打开帧耗时面板'
+    ));
+    assert.ok(profilerButton, '调试菜单里应该有帧耗时面板的开关');
+    assert.equal(profilerButton.getAttribute('aria-pressed'), 'false');
+
+    const requests: boolean[] = [];
+    page.onProfilerToggle((visible) => requests.push(visible));
+
+    profilerButton.dispatchEvent(new Event('click'));
+    assert.deepEqual(requests, [true]);
+    assert.equal(profilerButton.textContent, '关闭帧耗时面板');
+    assert.equal(profilerButton.getAttribute('aria-pressed'), 'true');
+
+    profilerButton.dispatchEvent(new Event('click'));
+    assert.deepEqual(requests, [true, false]);
+    assert.equal(profilerButton.textContent, '打开帧耗时面板');
+
+    // 场景那边可能已经打开了面板；重开 F8 时按钮要跟着实际状态走。
+    page.setProfilerVisible(true);
+    assert.equal(profilerButton.textContent, '关闭帧耗时面板');
+    assert.deepEqual(requests, [true, false], 'setProfilerVisible 不该反过来触发回调');
+  } finally {
+    Object.defineProperty(globalThis, 'document', {
+      value: previousDocument,
+      configurable: true,
+      writable: true,
+    });
+  }
+});
