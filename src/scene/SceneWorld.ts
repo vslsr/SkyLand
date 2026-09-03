@@ -22,8 +22,9 @@ import type {
  *
  * 所以先按这条线拆开。拆完之后 `SceneRenderer` 只剩渲染核心，这一半留在原地。
  *
- * 值得记一笔的是：这一半几乎**不碰 Three**——地形是纯数据、物理是 Rapier、
- * Actor 查询走的是 Game World。唯一的例外是 `pickActorInteraction`（见下）。
+ * 值得记一笔的是：这一半**完全不碰 Three**——地形是纯数据、物理是 Rapier、
+ * Actor 查询走的是 Game World。最后一个例外（`pickActorInteraction` 曾经拿
+ * `THREE.Raycaster` 打 proxy 场景图）已经改成解析求交，见那个方法的注释。
  */
 export class SceneWorld implements GrassInteractionTarget {
   private terrainWorld?: TerrainWorld;
@@ -173,11 +174,8 @@ export class SceneWorld implements GrassInteractionTarget {
   /**
    * 准星指向的可交互 Actor。
    *
-   * **这是这一半里唯一真正碰 Three 的查询**：`ClientActorSystem` 内部拿
-   * `THREE.Raycaster` 打 proxy 的场景图。第 3 步把渲染世界搬进线程之后它就地做不了，
-   * 而它的调用方（交互控制器）是同步的玩法逻辑——要么让渲染线程每帧回送一个
-   * 「准星命中了谁」，要么在玩法侧用碰撞体重做一次解析求交。这个选择还没定，
-   * 见实现路径文档 §3。
+   * 已经不碰 Three 了：`ClientActorSystem.pickInteractableActor` 改成拿
+   * `SimpleCollision` 解析求交，和相机悬臂共用同一份扫掠实现。理由见那边的注释。
    */
   public pickActorInteraction(frame: {
     position: readonly [number, number, number];

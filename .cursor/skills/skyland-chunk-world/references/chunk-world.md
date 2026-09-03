@@ -20,7 +20,8 @@
 | `shared/world/chunkGeneratorWasm.mjs` | WASM 后端包装，负责模板上传与结果切片。 |
 | `shared/world/wasm/chunkgen.wasm` | 签入仓库的编译产物。改了 Rust 必须重新构建并一起提交。 |
 | `native/chunkgen/` | `no_std` Rust crate：放置算法 + 逐顶点合批。 |
-| `src/world/ChunkStreamer.ts` | 场景系统。按焦点规划加载、限额构建、释放显存。 |
+| `src/world/ChunkStreamer.ts` | 场景系统的**玩法那一半**。按焦点规划加载、限额构建、收集地形编辑覆盖、注册碰撞体。 |
+| `src/world/ChunkViewHost.ts` | **渲染那一半**。共享材质、海面材质、草地、每个 chunk 的 `ChunkView`。只认挂上／卸掉／清空三条命令，输入全是数据。 |
 | `src/world/ChunkView.ts` | 单个 chunk 的 Three.js 对象与释放。 |
 | `src/world/loadChunkGenerator.ts` | 取生成后端：WASM 优先，失败降级 JS。 |
 | `src/models/chunkTemplates.ts` | 把 `src/models/` 的线稿模型拍平成模板并注册。 |
@@ -134,7 +135,11 @@
 
 ## 流式加载策略
 
-`ChunkStreamer` 是一个 `SceneVisualSystem`，随场景创建与销毁。两条纪律：
+`ChunkStreamer` 是一个 `SceneVisualSystem`，随场景创建与销毁。它持有 `ChunkViewHost`
+并向它发挂载命令——几何、材质与草地全在那一侧，因为它们要跟着 canvas 进渲染线程
+（见 `skyland-render-boundary`）。地形几何需要的 `cellCodeAt` 因此不是回调而是数据：
+玩法侧传稀疏的编辑覆盖，渲染侧用 `createOverrideCellCodeAt` 包回一个查询函数，
+程序化底图两侧各自按世界种子推。两条纪律：
 
 1. **只在跨过 chunk 边界时重新规划。** 在同一个 chunk 里走动不做任何集合运算。
 2. **每帧最多构建 `CHUNK_BUILD_BUDGET_PER_FRAME` 个 chunk。** 玩家高速穿越时补齐会晚几帧，但这段延迟被雾效盖住。

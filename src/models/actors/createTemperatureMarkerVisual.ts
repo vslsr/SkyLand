@@ -1,4 +1,6 @@
 import * as THREE from 'three';
+import { createDrawingSurface } from '../../platform/index';
+import { createSurfaceTexture } from '../../materials/surfaceTexture';
 
 export interface TemperatureMarkerVisual {
   readonly root: THREE.Group;
@@ -63,21 +65,9 @@ export function createTemperatureMarkerVisual(): TemperatureMarkerVisual {
   plate.renderOrder = 1011;
   root.add(plate);
 
-  let canvas: HTMLCanvasElement | undefined;
-  let context: CanvasRenderingContext2D | null | undefined;
-  let texture: THREE.CanvasTexture | undefined;
-  if (typeof document !== 'undefined') {
-    canvas = document.createElement('canvas');
-    canvas.width = TEXTURE_WIDTH;
-    canvas.height = TEXTURE_HEIGHT;
-    context = canvas.getContext('2d');
-    if (context) {
-      texture = new THREE.CanvasTexture(canvas);
-      texture.generateMipmaps = false;
-      texture.minFilter = THREE.LinearFilter;
-      texture.magFilter = THREE.LinearFilter;
-    }
-  }
+  const surface = createDrawingSurface(TEXTURE_WIDTH, TEXTURE_HEIGHT);
+  const context = surface?.context;
+  const texture = surface ? createSurfaceTexture(surface) : undefined;
 
   const labelGeometry = new THREE.PlaneGeometry(PLATE_WIDTH - 0.1, PLATE_HEIGHT - 0.1);
   const labelMaterial = new THREE.MeshBasicMaterial({
@@ -104,7 +94,7 @@ export function createTemperatureMarkerVisual(): TemperatureMarkerVisual {
     currentLabel = nextLabel;
     root.userData.temperature = temperature;
     root.userData.temperatureLabel = nextLabel;
-    if (!context || !canvas || !texture) return;
+    if (!context || !texture) return;
 
     context.clearRect(0, 0, TEXTURE_WIDTH, TEXTURE_HEIGHT);
     context.fillStyle = temperatureColor(temperature);

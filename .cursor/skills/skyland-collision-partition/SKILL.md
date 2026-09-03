@@ -30,7 +30,9 @@ Production player movement has one implementation: browser prediction and room a
 | Streamed collider residency | `src/world/ChunkStreamer.ts`, `server/scene/ServerTerrainColliders.mjs`, `server/scene/ServerChunkColliders.mjs` |
 | Non-player simple-collision broad phase | `shared/collision/CollisionWorld.mjs`; keep separate from player physics |
 
-Do not let `SceneRenderer`, `TerrainWorld`, a visual System, or reconciliation smoothing become a second movement authority.
+Do not let `SceneWorld`, `TerrainWorld`, a visual System, or reconciliation smoothing become a second movement authority.
+
+Crosshair Actor picking is also a collision query now, not a render query: `ClientActorSystem.pickInteractableActor` casts the aim ray against `SimpleCollision` via `sweepSphereAgainstSimpleCollision` with radius 0, sharing the implementation with the camera boom. Changing that sweep changes both. See `skyland-render-boundary` for why it stopped being a `Raycaster` against the scene graph.
 
 ## Choose the change scope
 

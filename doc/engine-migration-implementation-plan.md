@@ -19,11 +19,11 @@
 | 第 1 步 · 剥出 Render World 边界 | **已完成** | `src/render/`、`RenderProxyComponent`、`ActorTransformSystem` |
 | §8.2 · GPU 资源所有权表 | **已完成（最小核心）** | `src/core/assets/AssetOwner.ts`、`src/render/renderAssets.ts` |
 | 第 1.5 步 · 表现 Component 脱离 THREE | **已完成** · 棘轮 8 → 0 | 见 §1.5；玩家实体也接到了边界上 |
-| 第 1.75 步 · 拆掉表现 System 的夹心 | **已完成** | 见 §1.75；Actor 世界只剩五个不认识 three 的 System |
+| 第 1.75 步 · 拆掉表现 System 的夹心 | **已完成** | 见 §1.75；Actor 世界只剩六个不认识 three 的 System |
 | 第 2 步 · Sim Worker | **前提被测量推翻** · 已打点、已量、结论见 §2 | 搬进 worker 只能省约 1.2 ms／帧 |
 | §2 第 1 项 · 摊平 `render-spawn` | **已完成** | 进房间那一帧 146 ms → 15 ms，见 §2「已经做了的」 |
 | §2 第 2 项 · 地形碰撞网格进 worker | **已完成** | PlatformLayer 第二块 + chunk 挂载 4.2 → 2.45 ms |
-| 第 3 步 · OffscreenCanvas | **进行中** · 可行性已验证、前置已拆两件 | 见 §3；`SceneWorld` + 合批实例通道 |
+| 第 3 步 · OffscreenCanvas | **进行中** · 五项前置全部落地，剩搬运本身 | 见 §3 |
 | 第 4 步 · 换掉 Three.js | 可无限期推迟 | 见 §4 |
 
 依赖关系没变，仍然是路线图里那条：`0 → 0.5 → 1 → 2 → 3 → 4`，§8.1 / §8.2 与 ToolLayer 可并行。
@@ -549,12 +549,12 @@ headless Chromium + SwiftShader。**所以这一步在这个仓库、这套验�
 
 | 位置 | 用途 | 怎么办 |
 | --- | --- | --- |
-| `createInteractionMarkerVisual.ts` | `document.createElement('canvas')` 画标签贴图 | 换 `OffscreenCanvas` |
-| `createTemperatureMarkerVisual.ts` | 同上 | 换 `OffscreenCanvas` |
+| `createInteractionMarkerVisual.ts` | `document.createElement('canvas')` 画标签贴图 | 换 `OffscreenCanvas` ✅ |
+| `createTemperatureMarkerVisual.ts` | 同上 | 换 `OffscreenCanvas` ✅ |
 | `MouseGrassInteractor.ts` | `getBoundingClientRect` | 它是**输入**适配器，本来就该留在主线程 |
 | `loadChunkGenerator.ts` | `window.location.search` 读 `?chunkgen=js` | 调试开关，加个 guard |
 
-### 真正要做选择的只有一处
+### 真正要做选择的只有一处（已拍板，见下）
 
 `pickActorInteraction`：`ClientActorSystem` 内部拿 `THREE.Raycaster` 打 proxy 的
 场景图，返回「准星指着哪个可交互 Actor」。渲染世界进线程之后它就地做不了，
@@ -563,8 +563,8 @@ headless Chromium + SwiftShader。**所以这一步在这个仓库、这套验�
 1. 渲染线程每帧回送一个「准星命中了谁」（多一帧延迟，但准星本来就跟着相机走）；
 2. 玩法侧用碰撞体重做一次解析求交（不依赖渲染，但和肉眼看到的轮廓会有出入）。
 
-这个还没定。**除它之外，玩法侧问渲染世界的问题一个都没有了**——这正是第 1 / 1.5 /
-1.75 步一路收窄边界的结果。
+**选了 2**，理由见下面「`pickActorInteraction` 拍板」。**除它之外，玩法侧问渲染
+世界的问题一个都没有了**——这正是第 1 / 1.5 / 1.75 步一路收窄边界的结果。
 
 ### 已经做了的：把玩法查询从 `SceneRenderer` 里拆出来 ✅
 
@@ -577,7 +577,8 @@ Actor 查询、草地脉冲入口。`SceneRenderer` 只剩渲染核心、表现�
 渲染侧的查找（`getActorRenderProxy`、`setTerrainHighlight`）。
 
 **这一半几乎不碰 Three**：地形是纯数据、物理是 Rapier、Actor 查询走 Game World。
-唯一的例外就是上面那个 `pickActorInteraction`。
+唯一的例外是上面那个 `pickActorInteraction`——它随后也改成了解析求交，
+所以现在这一半**完全**不碰 Three。
 
 场景组合目前仍由 `SceneRenderer` 装配，所以换场景时由它把玩法那一半交给
 `SceneWorld`；canvas 真搬走的时候装配会跟着走，那条依赖会反过来——现在先把
@@ -618,25 +619,121 @@ Actor **已经离开 ActorWorld**，也就不会有实例记录。`residencyCode
 于是落回 0，休眠的堆被并进 active 批，合批的对象名对不上。已在
 `tests/RenderInstanceBuffer.test.ts` 里钉住这一点。
 
+### 已经做了的：渲染栈脱离 DOM ✅
+
+渲染栈里最后两处 `document.createElement('canvas')`——交互标记与温度标记的文字
+贴图。canvas 交给渲染线程之后它们跑在没有 `document` 的地方。
+
+新增 `src/platform/drawingSurface.ts`（PlatformLayer 第三块）。`OffscreenCanvas`
+主线程和 worker 里都有，所以**不做双路**：拿不到就返回 undefined，标记牌退化成
+没有文字的底板，而不是让整个场景装不起来。原来判的是 `typeof document`，
+现在判的是真正决定成败的那个东西。
+
+`@types/three@0.128` 的 `CanvasTexture` 只认 `HTMLCanvasElement`——那份声明比
+「`OffscreenCanvas` 能当贴图源」这件事要早。断言收在 `materials/surfaceTexture.ts`
+一处；运行时走的是同一条 `texImage2D`，three 自己做贴图缩放时用的也是 `OffscreenCanvas`。
+
+**新棘轮**：渲染栈里还摸 DOM 的文件清单（`tests/RenderSceneBoundary.test.ts`），
+现在只剩 `SceneRenderer`——它持有 canvas，`devicePixelRatio` 会跟着 canvas
+一起搬走，不是要清理的债。
+
+### 已经做了的：`pickActorInteraction` 拍板 ✅
+
+两条路：渲染线程每帧回送「准星命中了谁」，或者在玩法侧用碰撞体重做求交。
+**选后者**，三条理由：
+
+1. **回送会晚一帧。** 准星直接喂 HUD 提示与按键判定，玩家看得见这一帧的延迟；
+   而且那样一来玩法的响应节奏就被渲染帧率绑住了。
+2. **这一半本来就已经这么做了。** 合批掉落物没有独立 `Object3D`，它们的拾取
+   一直是拿权威 Transform 加碰撞半径解析算的。合并之后两个循环变成一个。
+3. **每个可交互 Actor 都带 `SimpleCollisionComponent`**，而且它由渲染世界在建
+   proxy 时按模型尺寸派生（`info.simpleCollision`）——这个盒子本来就是那个模型的
+   紧包围盒，不是另编的一套近似。
+
+实现直接复用 `sweepSphereAgainstSimpleCollision`，半径传 0 就退化成射线：有向盒
+与圆柱、朝向、中心偏移、高度区间全由它负责，和相机悬臂同一份实现。
+`ClientActorSystem` 因此少了那个 `Raycaster` 和六个只为它存在的 `THREE.Vector3`。
+
+代价是精度：射线打三角形，这里打有向盒。对准星拾取这个方向是对的——玩家瞄的是
+轮廓，不是树冠枝叶之间的缝。
+
+**`SceneWorld` 至此完全不碰 Three。**
+
+### 已经做了的：果实系统接到实例通道 ✅
+
+`GeneratedPropFruitSystem` 是最后一个直接扫 `ActorWorld` 的渲染系统，而且它比
+合批那个更过分——它在**写玩法状态**：
+
+```ts
+if (interactable) interactable.enabled = isReady;   // 渲染系统改交互开关
+```
+
+冷却中的树不能采，这是规则不是画法。所以按同一条缝拆开：`ActorFruitInstanceSystem`
+判熟、开关交互提示、写通道；`GeneratedPropFruitSystem` 只剩铺球。挂在哪几个枝头
+由渲染侧按 `selectFruitDropAnchors` 自己推——那份锚点表本来就是两端共用的
+（服务端采摘后也照它抛），没必要再摊进字节里传一遍。
+
+果子和掉落堆是**两条通道**而不是一条：果子没有原型、没有驻留态、没有滚动姿态。
+所以 `RenderInstanceBuffer` 泛化成可配 stride，布局常量搬进各自的
+`propInstanceLayout.ts` / `fruitInstanceLayout.ts`。`push` 现在核对字段数——
+换了布局而写入方没跟着改，是这类字节接口最容易出的错。
+
+### 已经做了的：相机每帧过边界 ✅
+
+相机是玩法侧算出来的（跟随、悬臂避障、模式过渡都要读玩家位置和输入），画面是
+渲染侧出的。`render(frame)` 那种「把 JS 对象递过去」的写法在 canvas 进线程之后
+不成立。
+
+新增 `src/render/RenderCameraBuffer.ts`：双缓冲 + `publish()`，形状和 transform SoA
+一样。
+
+```text
+[ Int32 header ×2 ][ Float32 2×9 ]
+  readBank frameId   x y z  fx fy fz  ux uy uz
+```
+
+**只送对面真正要的九个 f32**。`CameraFrame` 里还有 `right` 和 `viewMatrix`，
+但视图矩阵是后端的事（Three 用 `lookAt`，别的后端未必），送过去等于替它做主。
+
+没有并进 `RenderTransformBuffer`：那一段是**场景的**，换地图就换一个、容量跟着
+proxy 槽位涨；相机比场景活得久（大厅 → 房间 → 大厅 是同一个），而且它是每帧一条
+固定记录。代价是两次 `publish()`，理论上有「相机第 N 帧、世界第 N-1 帧」的撕裂
+窗口——实际不会，两次翻面在同一个 tick 里。真要让它成为不可能而不只是不会发生，
+就把两段字节合成一段，那时那个类整个消失。
+
+缺省值是「站在原点朝 -Z 看」而不是全 0：全 0 的 `forward` 会让 `lookAt` 算出 NaN。
+
+### 已经做了的：拆开 `ChunkStreamer` ✅
+
+三件事合在一个类里：流送规划（玩法）、几何（渲染）、碰撞体注册（物理）。
+新增 `src/world/ChunkViewHost.ts` 收下渲染那一半——共享材质、海面材质、草地系统、
+每个 chunk 的 `ChunkView`。它只认三条命令：挂上、卸掉、清空。
+
+难点是 `cellCodeAt`：地形几何原来收一个读 patch store 的回调，那过不了线程边界。
+但那个回调有个**程序化缺省**（`terrainCellCodeAt(worldSeed, x, z)`），覆盖只是
+为了应用编辑——也就是说过边界的只有那一小撮被改过的格子，而那正是地形碰撞
+worker 已经在传的 `[globalCellX, globalCellZ, code, ...]`。
+
+所以新增 `createOverrideCellCodeAt(worldSeed, overrides)`：把稀疏覆盖包回一个
+`cellCodeAt`，没编辑过的世界直接返回程序化函数。**渲染那一半因此只收数据。**
+
+顺带修掉一处浪费：地形网格请求不再转移 `overrides` 缓冲区。它几乎总是空的，
+而挂载时地形几何要用同一份；为省一次结构化克隆把它交出去，换来的是再收一次。
+
 ### 还没做的
 
 | | 说明 |
 | --- | --- |
-| 拆 `ClientActorSystem` | 它同时跑 Actor 世界（玩法）和持有渲染世界、悬停高亮；合批已经拆开，`GeneratedPropFruitSystem` 还在直接读 `ActorWorld` |
-| 拆 `ChunkStreamer` | 流送规划（玩法）+ 几何（渲染）+ 碰撞体注册（物理）三合一 |
-| 相机每帧过边界 | `CameraFrame` 在主线程按输入算出来，要送到渲染线程 |
-| 两处 `document.createElement('canvas')` | 换 `OffscreenCanvas` |
-| `pickActorInteraction` 的选择 | 见上 |
+| 渲染循环整个进 worker | `SceneRenderer` 的 `root` / `beforeRender` / `WebGLRenderer` 那一层，以及 `transferControlToOffscreen` 本身 |
+| 拆 `ClientActorSystem` 的最外层 | Actor 世界这一侧干净了，但这个类仍同时持有渲染世界与悬停高亮 |
+| `GrasslandScene` 的装配归属 | 它同时握着输入、相机、玩家实体和渲染器；canvas 搬走时装配要跟着走 |
 
-后两项是小活；前三项是这一步的主体，而且**和第 2 步是同一条缝**——
-`ClientActorSystem` 与 `ChunkStreamer` 按 game / render 切开这件事，
-两步都要它。所以先切缝，再决定哪个 worker 先上。
+§3 的五项前置全部落地：渲染栈不碰 DOM、玩法侧不碰 Three、chunk 与 Actor 两条
+主干都按 game / render 切开、相机与合批内容都按字节过边界。**剩下的是搬运本身，
+不再是拆解。**
 
-`SceneRenderer` 目前混着渲染核心（`WebGLRenderer` + camera）与一堆 Game World 查询
-（`sampleGroundHeight` / `raycastGround` / `pickTerrainCell`）。搬 canvas 之前要先按这条线拆开：
-查询留在 Sim 侧，渲染核心进 Render Worker。
-
----
+需要说清楚的是：这五项**一项都不省帧时间**（`render-batches` p50 只有
+0.06–0.17 ms）。它们是第 2 步与第 3 步共同的结构前提。
 
 ## 第 4 步 · 换掉 Three.js（可无限期推迟）
 

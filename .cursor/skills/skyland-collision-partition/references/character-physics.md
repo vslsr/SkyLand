@@ -174,7 +174,7 @@ client snapshot
 
 ## 相机和调试
 
-`SceneRenderer.sweepCameraProbe` 调用 `PhysicsWorld.castCameraSphere`，所以地形与 CAMERA-only authoring 使用同一 Rapier query world。可选 boom 仍遵守：
+`SceneWorld.sweepCameraProbe` 调用 `PhysicsWorld.castCameraSphere`，所以地形与 CAMERA-only authoring 使用同一 Rapier query world。可选 boom 仍遵守：
 
 1. 每帧扫完整期望长度；
 2. 遇遮挡立即收回，解除遮挡平滑伸长；

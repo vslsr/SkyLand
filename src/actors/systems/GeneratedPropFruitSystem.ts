@@ -1,20 +1,18 @@
 import * as THREE from 'three';
 import {
-  GENERATED_PROP_COMPONENT,
-  INTERACTABLE_COMPONENT,
-  TRANSFORM_COMPONENT,
-  type Actor,
-  type ActorWorld,
-  type GeneratedPropComponent,
-  type InteractableComponent,
-  type TransformComponent,
-} from '../../../shared/actor/index.mjs';
-import {
   fruitDropWorldPosition,
   selectFruitDropAnchors,
 } from '../../../shared/world/fruitDrop.mjs';
+import {
+  FRUIT_COUNT,
+  FRUIT_SCALE,
+  FRUIT_X,
+  FRUIT_Y,
+  FRUIT_YAW,
+  FRUIT_Z,
+} from '../../render/fruitInstanceLayout';
+import type { RenderInstanceBuffer } from '../../render/RenderInstanceBuffer';
 import { createFillMaterial, type FillMaterialEnvironment } from '../../materials/createFillMaterial';
-import type { ActorArchetypeDefinition } from '../../scenes/data/SceneDefinition';
 
 const FRUIT_RADIUS = 0.14;
 
@@ -50,10 +48,11 @@ export class GeneratedPropFruitSystem {
   private readonly scale = new THREE.Vector3();
   private readonly point = new THREE.Vector3();
   private signature = '';
+  /** 借给 `fruitDropWorldPosition` 的树姿态，逐棵改字段而不是每棵新建。 */
+  private readonly treePose = { x: 0, y: 0, z: 0, yaw: 0 };
 
   public constructor(
     environment: FillMaterialEnvironment,
-    private readonly archetypes: ReadonlyMap<string, ActorArchetypeDefinition>,
     color: THREE.ColorRepresentation = 0xd4694f,
     inkColor: THREE.ColorRepresentation = 0x5c2f26,
   ) {
@@ -74,32 +73,17 @@ export class GeneratedPropFruitSystem {
   }
 
   /**
-   * @param world 客户端 Actor 世界
-   * @param serverSeconds 换算过的服务端秒数；还没收到快照时传 undefined，
-   *   那时一律按「熟了」处理，避免刚进场的一瞬间满树果子闪一下才出现。
+   * 从果实实例通道重建这一帧的果子（实现路径文档 §3）。
+   *
+   * 这里以前直接扫 `ActorWorld`，还顺手改 `interactable.enabled`——一个渲染系统
+   * 在写玩法状态。现在输入只是一串「树在哪、多大、结几个」，判熟和开关交互提示
+   * 都留在 `ActorFruitInstanceSystem` 那一侧。
+   *
+   * 挂在哪几个枝头由这里按 `selectFruitDropAnchors` 自己推：那份锚点表本来就是
+   * 两端共用的（服务端采摘后也照它抛），没必要再摊进字节里传一遍。
    */
-  public sync(world: ActorWorld, serverSeconds?: number): void {
-    const ready: Array<{ transform: TransformComponent; scale: number; fruitCount: number }> = [];
-    for (const actor of world.query(TRANSFORM_COMPONENT, GENERATED_PROP_COMPONENT) as Actor[]) {
-      const prop = actor.requireComponent(GENERATED_PROP_COMPONENT) as GeneratedPropComponent;
-      if (
-        !this.archetypes.get(actor.archetypeId)?.components.generatedProp?.regrow
-        || prop.dropSpawnPattern !== 'fruit-anchors'
-      ) continue;
-      const isReady = serverSeconds === undefined || prop.isReady(serverSeconds);
-      // 冷却中的树没有可采的东西，交互提示也跟着关掉。
-      const interactable = actor.getComponent(INTERACTABLE_COMPONENT) as
-        | InteractableComponent
-        | undefined;
-      if (interactable) interactable.enabled = isReady;
-      if (!isReady) continue;
-      ready.push({
-        transform: actor.requireComponent(TRANSFORM_COMPONENT) as TransformComponent,
-        scale: prop.scale,
-        fruitCount: prop.dropQuantity,
-      });
-    }
-    this.update(ready);
+  public sync(instances: RenderInstanceBuffer): void {
+    this.update(instances);
   }
 
   /** 当前画出来的果子数。为 0 时调用方可以不把这一层挂进场景。 */
@@ -116,19 +100,18 @@ export class GeneratedPropFruitSystem {
     this.root.parent?.remove(this.root);
   }
 
-  private update(
-    trees: ReadonlyArray<{ transform: TransformComponent; scale: number; fruitCount: number }>,
-  ): void {
-    const signature = trees
-      .map((tree) => `${tree.transform.x.toFixed(2)},${tree.transform.z.toFixed(2)},${tree.fruitCount}`)
-      .join('|');
+  private update(instances: RenderInstanceBuffer): void {
+    let signature = '';
+    let required = 0;
+    for (let index = 0; index < instances.count; index += 1) {
+      const count = instances.readFloat(index, FRUIT_COUNT);
+      signature += `${instances.readFloat(index, FRUIT_X).toFixed(2)},`
+        + `${instances.readFloat(index, FRUIT_Z).toFixed(2)},${count}|`;
+      required += selectFruitDropAnchors(count).length;
+    }
     if (signature === this.signature) return;
     this.signature = signature;
 
-    const required = trees.reduce(
-      (total, tree) => total + selectFruitDropAnchors(tree.fruitCount).length,
-      0,
-    );
     if (required > this.capacity) {
       this.root.remove(this.fill);
       this.fill.dispose();
@@ -142,12 +125,17 @@ export class GeneratedPropFruitSystem {
     const outlinePositions = new Float32Array(source.length * required);
     let instance = 0;
     let output = 0;
-    for (const tree of trees) {
-      const { transform } = tree;
-      for (const anchor of selectFruitDropAnchors(tree.fruitCount)) {
-        const position = fruitDropWorldPosition(transform, tree.scale, anchor);
+    for (let index = 0; index < instances.count; index += 1) {
+      const scale = instances.readFloat(index, FRUIT_SCALE);
+      // fruitDropWorldPosition 要的就是这四个字段，直接借这个对象喂进去。
+      this.treePose.x = instances.readFloat(index, FRUIT_X);
+      this.treePose.y = instances.readFloat(index, FRUIT_Y);
+      this.treePose.z = instances.readFloat(index, FRUIT_Z);
+      this.treePose.yaw = instances.readFloat(index, FRUIT_YAW);
+      for (const anchor of selectFruitDropAnchors(instances.readFloat(index, FRUIT_COUNT))) {
+        const position = fruitDropWorldPosition(this.treePose, scale, anchor);
         this.position.set(position.x, position.y, position.z);
-        this.scale.setScalar(tree.scale);
+        this.scale.setScalar(scale);
         this.matrix.compose(this.position, this.quaternion, this.scale);
         this.fill.setMatrixAt(instance, this.matrix);
         instance += 1;
