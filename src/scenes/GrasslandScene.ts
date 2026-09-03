@@ -261,6 +261,10 @@ export class GrasslandScene extends Scene {
         this.remotePlayers.clear();
       }
     });
+    // 相机在这里过边界，紧挨着 renderer.update 里的那次 transform 翻面：
+    // 两段字节因此是同一个 tick 的，世界不会比机位晚一帧。
+    // 写在 render() 里也能跑，但那时渲染循环已经在另一条线程上了，读不到这个对象。
+    this.renderer.publishCamera(this.controls.frame);
     this.renderer.update(deltaSeconds, elapsedSeconds, this.currentFocus());
     if (this.terrainEdits.active) {
       // 编辑模式独占 WorldInteract：同一次点击不能既改地形又去交互 Actor。
@@ -277,7 +281,7 @@ export class GrasslandScene extends Scene {
   }
 
   public render(): void {
-    frameTimeline.measure('draw', () => this.renderer.render(this.controls.frame));
+    frameTimeline.measure('draw', () => this.renderer.render());
   }
 
   /**

@@ -2,6 +2,10 @@ import * as THREE from 'three';
 import { TERRAIN_CELL_SIZE } from '../../shared/world/terrainConfig.mjs';
 import type { CollisionWorld } from '../../shared/collision/index.mjs';
 import type { CameraFrame } from '../camera/CameraTransform';
+import {
+  createRenderCamera,
+  RenderCameraBuffer,
+} from '../render/RenderCameraBuffer';
 import { type GrassInteractionTarget } from '../grass';
 import { frameTimeline } from '../platform/index';
 import { releaseOwnResources } from '../render/renderAssets';
@@ -69,6 +73,14 @@ export class SceneRenderer {
   private temperatureVisible = false;
   private readonly dynamicWorld = new THREE.Group();
   private readonly lookTarget = new THREE.Vector3();
+  /**
+   * 相机过边界的那一段字节，以及读出来落脚的地方。
+   *
+   * 属于渲染器而不是场景：换地图会换掉整个渲染世界，相机却是一直在的
+   * （大厅 → 房间 → 大厅 都是同一个）。
+   */
+  private readonly cameraChannel = new RenderCameraBuffer();
+  private readonly cameraFrame = createRenderCamera();
   private readonly beforeRenderListeners = new Set<SceneBeforeRenderListener>();
 
   /**
@@ -90,14 +102,34 @@ export class SceneRenderer {
     this.scene.add(this.dynamicWorld);
   }
 
-  public render(frame: CameraFrame): void {
+  /**
+   * 玩法侧每 tick 写一次机位并翻面。
+   *
+   * 收 `CameraFrame` 是因为算相机的那一半（跟随、悬臂、模式过渡）在玩法侧，
+   * 它本来就产出这个结构；这里只负责把其中真正过边界的九个数摊进字节。
+   */
+  public publishCamera(frame: CameraFrame): void {
+    this.cameraChannel.write(frame.position, frame.axes.forward, frame.axes.up);
+    this.cameraChannel.publish();
+  }
+
+  /**
+   * 画一帧。
+   *
+   * 机位**不再由参数传进来**（实现路径文档 §3）：它从 `camera` 那段字节里读。
+   * 玩法侧每 tick 写一次并翻面，这里读的永远是完整的一帧。canvas 交给渲染线程
+   * 之后这个方法跑在那一侧，那时它读的是同一段 `SharedArrayBuffer`，
+   * 调用方不用改。
+   */
+  public render(): void {
     this.resizeToDisplaySize();
+    const frame = this.cameraChannel.read(this.cameraFrame);
     this.camera.position.set(...frame.position);
-    this.camera.up.set(...frame.axes.up);
+    this.camera.up.set(...frame.up);
     this.lookTarget.set(
-      frame.position[0] + frame.axes.forward[0],
-      frame.position[1] + frame.axes.forward[1],
-      frame.position[2] + frame.axes.forward[2],
+      frame.position[0] + frame.forward[0],
+      frame.position[1] + frame.forward[1],
+      frame.position[2] + frame.forward[2],
     );
     this.camera.lookAt(this.lookTarget);
     for (const listener of this.beforeRenderListeners) listener(this.camera);
