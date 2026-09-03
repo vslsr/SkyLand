@@ -99,6 +99,9 @@ import {
   type ActorInstanceCatalog,
 } from './systems/ActorInstanceSystem';
 import { RenderInstanceBuffer } from '../render/RenderInstanceBuffer';
+import { PROP_FLOAT_STRIDE, PROP_INT_STRIDE } from '../render/propInstanceLayout';
+import { FRUIT_FLOAT_STRIDE, FRUIT_INT_STRIDE } from '../render/fruitInstanceLayout';
+import { ActorFruitInstanceSystem } from './systems/ActorFruitInstanceSystem';
 
 /**
  * 一帧最多花在「建 Replica」上的毫秒数（实现路径文档 §2 的第 1 项）。
@@ -239,7 +242,9 @@ export class ClientActorSystem implements SceneVisualSystem {
   private readonly physics?: PhysicsWorld;
   private readonly highCountBatches: HighCountActorBatchSystem;
   /** 合批内容的实例通道，以及渲染侧反查原型用的那张顺序表。 */
-  private readonly instances = new RenderInstanceBuffer();
+  private readonly instances = new RenderInstanceBuffer(PROP_INT_STRIDE, PROP_FLOAT_STRIDE);
+  /** 树上果子走另一条通道：它的记录里没有原型、没有驻留态，形状不一样。 */
+  private readonly fruitInstances = new RenderInstanceBuffer(FRUIT_INT_STRIDE, FRUIT_FLOAT_STRIDE);
   private readonly archetypeOrder: string[];
   private readonly fruit: GeneratedPropFruitSystem;
   /** actorId → 登记进碰撞世界的实例，逐帧复用，避免每帧产生一批临时对象。 */
@@ -295,7 +300,7 @@ export class ClientActorSystem implements SceneVisualSystem {
     this.highCountBatches = new HighCountActorBatchSystem(options.environment, this.archetypes);
     // 两侧共用的原型顺序：玩法侧写下标，渲染侧按同一份表反查 render 定义。
     this.archetypeOrder = [...this.archetypes.keys()];
-    this.fruit = new GeneratedPropFruitSystem(options.environment, this.archetypes);
+    this.fruit = new GeneratedPropFruitSystem(options.environment);
     this.spawnBudgetMilliseconds = options.spawnBudgetMilliseconds ?? REPLICA_SPAWN_BUDGET_MILLISECONDS;
     this.spawnClock = options.spawnClock
       ?? (() => (globalThis.performance ?? Date).now());
@@ -319,10 +324,20 @@ export class ClientActorSystem implements SceneVisualSystem {
     // 都在 publish 之前。这条现在还没有双缓冲（同一帧写完就读），排在这里是为了
     // 等它也跨线程时不用再挪一次。
     this.world.addSystem(new ActorInstanceSystem(this.instances, this.createInstanceCatalog()));
+    this.world.addSystem(new ActorFruitInstanceSystem(
+      this.fruitInstances,
+      // 果子的熟没熟由绝对服务端时间决定，所以喂的是换算过的服务端时钟，
+      // 不是 ActorWorld 的本地 elapsedSeconds。
+      { bearsFruit: (id) => Boolean(this.archetypes.get(id)?.components.generatedProp?.regrow) },
+      () => {
+        const serverTime = this.snapshots.serverTimeAt(this.now());
+        return serverTime === undefined ? undefined : serverTime / 1000;
+      },
+    ));
     this.world.addSystem(new RenderTransformSyncSystem(this.transforms, this.renderScene));
     this.world.addSystem(new ActorGuidePathSyncSystem(this.renderScene));
-    // 到这里 Actor 世界里就只剩五个 System 了，而且**一个都不 import three**：
-    // 三个写字节、一个发命令、一个翻面。船体波动、货箱浮沉、附着继承、弹性拉伸
+    // 到这里 Actor 世界里就只剩六个 System 了，而且**一个都不 import three**：
+    // 四个写字节、一个发命令、一个翻面。船体波动、货箱浮沉、附着继承、弹性拉伸
     // 与脱落翻滚全部搬进了渲染世界（实现路径文档 §1.75）。
   }
 
@@ -457,10 +472,7 @@ export class ClientActorSystem implements SceneVisualSystem {
     });
     frameTimeline.measure('render-batches', () => {
       this.highCountBatches.sync(this.instances, this.archetypeOrder);
-      // 果子的熟没熟由绝对服务端时间决定，所以这里用换算过的服务端时钟，
-      // 而不是本地 Date.now()。
-      const serverTime = this.snapshots.serverTimeAt(this.now());
-      this.fruit.sync(this.world, serverTime === undefined ? undefined : serverTime / 1000);
+      this.fruit.sync(this.fruitInstances);
       // 和高数量批次一样按需挂进场景：没有果树的地图不会多出一层空节点。
       if (this.fruit.instanceCount > 0 && !this.fruit.root.parent) this.root.add(this.fruit.root);
       if (this.highCountBatches.root.children.length > 0 && !this.highCountBatches.root.parent) {

@@ -1,19 +1,19 @@
 import * as THREE from 'three';
 import {
-  INSTANCE_ARCHETYPE,
-  INSTANCE_BURNING,
-  INSTANCE_ID,
-  INSTANCE_QUANTITY,
-  INSTANCE_RESIDENCY,
-  INSTANCE_ROLL_RADIUS,
-  INSTANCE_SINGLE,
-  INSTANCE_X,
-  INSTANCE_Y,
-  INSTANCE_YAW,
-  INSTANCE_Z,
+  PROP_ARCHETYPE,
+  PROP_BURNING,
+  PROP_ID,
+  PROP_QUANTITY,
+  PROP_RESIDENCY,
+  PROP_ROLL_RADIUS,
+  PROP_SINGLE,
+  PROP_X,
+  PROP_Y,
+  PROP_YAW,
+  PROP_Z,
   residencyName,
-  type RenderInstanceBuffer,
-} from '../../render/RenderInstanceBuffer';
+} from '../../render/propInstanceLayout';
+import type { RenderInstanceBuffer } from '../../render/RenderInstanceBuffer';
 import { createFillMaterial, type FillMaterialEnvironment } from '../../materials/createFillMaterial';
 import {
   FRUIT_PILE_PIECES,
@@ -312,16 +312,16 @@ export class HighCountActorBatchSystem {
     const groups = new Map<string, number[]>();
     this.liveRollingInstanceIds.clear();
     for (let index = 0; index < instances.count; index += 1) {
-      const archetypeId = archetypeOrder[instances.readInt(index, INSTANCE_ARCHETYPE)];
+      const archetypeId = archetypeOrder[instances.readInt(index, PROP_ARCHETYPE)];
       const archetype = archetypeId === undefined ? undefined : this.archetypes.get(archetypeId);
       if (!isPileRender(archetype?.components.render)) continue;
-      const single = instances.readInt(index, INSTANCE_SINGLE) === 1;
-      if (instances.readFloat(index, INSTANCE_ROLL_RADIUS) > 0) {
-        this.liveRollingInstanceIds.add(instances.readInt(index, INSTANCE_ID));
+      const single = instances.readInt(index, PROP_SINGLE) === 1;
+      if (instances.readFloat(index, PROP_ROLL_RADIUS) > 0) {
+        this.liveRollingInstanceIds.add(instances.readInt(index, PROP_ID));
       }
       // 编号翻回名字再拼 key：合批的调试对象名要能读。
-      const key = `${archetypeId}:${residencyName(instances.readInt(index, INSTANCE_RESIDENCY))}`
-        + `:${instances.readInt(index, INSTANCE_BURNING) === 1 ? 'burning' : 'normal'}`
+      const key = `${archetypeId}:${residencyName(instances.readInt(index, PROP_RESIDENCY))}`
+        + `:${instances.readInt(index, PROP_BURNING) === 1 ? 'burning' : 'normal'}`
         + `:${single ? 'single' : 'pile'}`;
       let group = groups.get(key);
       if (!group) {
@@ -417,12 +417,12 @@ export class HighCountActorBatchSystem {
       const rotation = roll
         ? `,${roll.x.toFixed(3)},${roll.y.toFixed(3)},${roll.z.toFixed(3)},${roll.w.toFixed(3)}`
         : '';
-      return `${instances.readInt(index, INSTANCE_ID)}`
-        + `,${instances.readFloat(index, INSTANCE_X).toFixed(3)}`
-        + `,${instances.readFloat(index, INSTANCE_Y).toFixed(3)}`
-        + `,${instances.readFloat(index, INSTANCE_Z).toFixed(3)}`
-        + `,${instances.readFloat(index, INSTANCE_YAW).toFixed(3)}`
-        + `,${instances.readFloat(index, INSTANCE_QUANTITY)}${rotation}`;
+      return `${instances.readInt(index, PROP_ID)}`
+        + `,${instances.readFloat(index, PROP_X).toFixed(3)}`
+        + `,${instances.readFloat(index, PROP_Y).toFixed(3)}`
+        + `,${instances.readFloat(index, PROP_Z).toFixed(3)}`
+        + `,${instances.readFloat(index, PROP_YAW).toFixed(3)}`
+        + `,${instances.readFloat(index, PROP_QUANTITY)}${rotation}`;
     }).join('|');
     if (signature === batch.signature) return;
     batch.signature = signature;
@@ -432,18 +432,18 @@ export class HighCountActorBatchSystem {
     let output = 0;
     for (let slot = 0; slot < members.length; slot += 1) {
       const index = members[slot];
-      const quantity = instances.readFloat(index, INSTANCE_QUANTITY);
+      const quantity = instances.readFloat(index, PROP_QUANTITY);
       const roll = rollingQuaternions[slot];
       const visualScale = roll
         ? 1
         : 0.74 + Math.min(0.34, Math.log2(quantity + 1) * 0.065);
       this.position.set(
-        instances.readFloat(index, INSTANCE_X),
-        instances.readFloat(index, INSTANCE_Y),
-        instances.readFloat(index, INSTANCE_Z),
+        instances.readFloat(index, PROP_X),
+        instances.readFloat(index, PROP_Y),
+        instances.readFloat(index, PROP_Z),
       );
       if (roll) this.quaternion.copy(roll);
-      else this.quaternion.setFromAxisAngle(this.up, instances.readFloat(index, INSTANCE_YAW));
+      else this.quaternion.setFromAxisAngle(this.up, instances.readFloat(index, PROP_YAW));
       this.scale.setScalar(visualScale);
       this.matrix.compose(this.position, this.quaternion, this.scale);
       batch.fill.setMatrixAt(slot, this.matrix);
@@ -466,17 +466,17 @@ export class HighCountActorBatchSystem {
     instances: RenderInstanceBuffer,
     index: number,
   ): THREE.Quaternion | undefined {
-    const instanceId = instances.readInt(index, INSTANCE_ID);
+    const instanceId = instances.readInt(index, PROP_ID);
     if (!this.liveRollingInstanceIds.has(instanceId)) return undefined;
-    const radius = instances.readFloat(index, INSTANCE_ROLL_RADIUS);
+    const radius = instances.readFloat(index, PROP_ROLL_RADIUS);
     if (radius <= 0) return undefined;
-    const x = instances.readFloat(index, INSTANCE_X);
-    const z = instances.readFloat(index, INSTANCE_Z);
+    const x = instances.readFloat(index, PROP_X);
+    const z = instances.readFloat(index, PROP_Z);
     let state = this.rollingVisuals.get(instanceId);
     if (!state) {
       state = {
         quaternion: new THREE.Quaternion()
-          .setFromAxisAngle(this.up, instances.readFloat(index, INSTANCE_YAW)),
+          .setFromAxisAngle(this.up, instances.readFloat(index, PROP_YAW)),
         lastX: x,
         lastZ: z,
       };

@@ -246,6 +246,7 @@ const ACTOR_WORLD_SYSTEMS = [
   'ActorTransformSystem.ts',
   'ActorVisualParamSystem.ts',
   'ActorInstanceSystem.ts',
+  'ActorFruitInstanceSystem.ts',
   'ActorGuidePathSyncSystem.ts',
   'RenderTransformSyncSystem.ts',
 ];
