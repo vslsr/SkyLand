@@ -98,14 +98,6 @@ export class ChunkViewHost {
     }
   }
 
-  public has(key: string): boolean {
-    return this.views.has(key);
-  }
-
-  public get mountedCount(): number {
-    return this.views.size;
-  }
-
   /** 每帧：草地与水面的时间量。和流送规划无关，所以留在这一侧。 */
   public update(
     deltaSeconds: number,

@@ -207,7 +207,9 @@ export class ChunkStreamer implements SceneVisualSystem {
   }
 
   public get loadedCount(): number {
-    return this.views.mountedCount;
+    // 数玩法侧那张表，不问渲染那一半——它和 `mounted` 一直是同步的，
+    // 而跨线程之后「问一句」就成了一次往返。
+    return this.mounted.size;
   }
 
   public get pendingCount(): number {
@@ -235,7 +237,7 @@ export class ChunkStreamer implements SceneVisualSystem {
     const next = updatePropSkipMask(previous, propIndex, skipped);
     if (next.low === 0 && next.high === 0) this.skipMasks.delete(key);
     else this.skipMasks.set(key, next);
-    if (this.views.has(key)) this.rebuild(key);
+    if (this.mounted.has(key)) this.rebuild(key);
     return true;
   }
 
@@ -302,7 +304,7 @@ export class ChunkStreamer implements SceneVisualSystem {
     while (this.requestedTerrain.size < TERRAIN_REQUESTS_IN_FLIGHT) {
       const next = this.pending.shift();
       if (!next) return;
-      if (this.views.has(next.key) || this.requestedTerrain.has(next.key)) continue;
+      if (this.mounted.has(next.key) || this.requestedTerrain.has(next.key)) continue;
       this.requestTerrain(next);
     }
   }
