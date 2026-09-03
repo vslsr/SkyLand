@@ -258,6 +258,7 @@ test('ActorCatalog 保留软体形变与咬合参数，并拒绝越界值', asyn
     range: 1.8,
     facingDot: 0.15,
     pinch: 1,
+    gripDepth: 0.35,
     leashSlack: 0.2,
     leashStiffness: 90,
     leashDamping: 14,
@@ -279,6 +280,12 @@ test('ActorCatalog 保留软体形变与咬合参数，并拒绝越界值', asyn
   wideFacing.id = 'probe-bite';
   wideFacing.components.bite.facingDot = 1.5;
   await assert.rejects(loadSingleActor(wideFacing), /facingDot 数值范围无效/);
+
+  // 捏起来的那块皮比外壳还深就没有意义了：过了求解器的可见量程，每次咬都长一样。
+  const deepGrip = structuredClone(pbfSlime);
+  deepGrip.id = 'probe-grip';
+  deepGrip.components.bite.gripDepth = 5;
+  await assert.rejects(loadSingleActor(deepGrip), /gripDepth 数值范围无效/);
 });
 
 test('ActorCatalog 拒绝未知原型', async () => {
