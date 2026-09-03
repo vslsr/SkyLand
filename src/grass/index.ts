@@ -5,5 +5,5 @@ export {
   type GrassInteractionTarget,
   type NormalizedGrassBendImpulse,
 } from './GrassInteraction';
-export { MouseGrassInteractor } from './MouseGrassInteractor';
+export { MouseGrassInteractor, type PointerViewport } from './MouseGrassInteractor';
 export { StreamingGrassSystem } from './StreamingGrassSystem';

@@ -5,7 +5,12 @@ import type { CameraFrame } from '../camera/CameraTransform';
 import {
   createRenderCamera,
   RenderCameraBuffer,
+  type RenderCamera,
 } from '../render/RenderCameraBuffer';
+import type { PointerViewport } from '../grass';
+
+/** 透视相机的视场角（度）。反投影要用同一个值，所以它是个常量而不是字面量。 */
+const CAMERA_FIELD_OF_VIEW = 50;
 import { type GrassInteractionTarget } from '../grass';
 import { frameTimeline } from '../platform/index';
 import { releaseOwnResources } from '../render/renderAssets';
@@ -51,7 +56,7 @@ function disposeScene(scene: THREE.Scene): void {
 
 export class SceneRenderer {
   private readonly renderer: THREE.WebGLRenderer;
-  private readonly camera = new THREE.PerspectiveCamera(50, 1, 0.1, 100);
+  private readonly camera = new THREE.PerspectiveCamera(CAMERA_FIELD_OF_VIEW, 1, 0.1, 100);
   private scene = createEmptyScene();
   private visualSystems: SceneFrameSystem[] = [];
   private grassInteraction?: GrassInteractionTarget;
@@ -111,6 +116,24 @@ export class SceneRenderer {
   public publishCamera(frame: CameraFrame): void {
     this.cameraChannel.write(frame.position, frame.axes.forward, frame.axes.up);
     this.cameraChannel.publish();
+  }
+
+  /**
+   * 主线程这一侧的相机视图：机位朝向 + 投影参数。
+   *
+   * **不是从渲染世界读回来的**——机位是玩法侧每 tick 写进那段字节的，
+   * 视场角是常量，宽高比来自画布。输入适配器（鼠标拖草）要反投影就用这个，
+   * 不需要回调进渲染侧去借一个 `THREE.Camera`。
+   */
+  public getCameraView(): { camera: RenderCamera; viewport: PointerViewport } {
+    // 画布尺寸从渲染器身上问：canvas 搬走之后这一行换成主线程自己记的那份。
+    const element = this.renderer.domElement;
+    const width = Math.max(1, element.clientWidth || element.width);
+    const height = Math.max(1, element.clientHeight || element.height);
+    return {
+      camera: this.cameraChannel.read(this.cameraFrame),
+      viewport: { fovRadians: (CAMERA_FIELD_OF_VIEW * Math.PI) / 180, aspect: width / height },
+    };
   }
 
   /**

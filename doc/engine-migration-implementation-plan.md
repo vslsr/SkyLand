@@ -836,6 +836,39 @@ worker 已经在传的 `[globalCellX, globalCellZ, code, ...]`。
 **这条缝就是第 3 步要的那条**：把 `createRenderWorld` 换成「在 worker 里建、
 回传三个命令口」，`createLineArtScene` 一个字都不用改。
 
+### 已经做了的：渲染命令通道 ✅
+
+新增 `src/render/worker/renderCommands.ts`。`RenderCommandQueue` 同时实现
+`RenderScene` 与 `ChunkViewSink`，所以玩法侧换成跨线程时一个字都不用改。
+
+- **按帧成批**：每帧几百个 proxy 各发一条 `postMessage`，结构化克隆的开销会比渲染
+  本身还贵。所以攒成一批、一帧 `flush()` 一次——和 SoA 的 `publish()` 同一个节奏。
+- **两条命令刻意不带那段字节**：`submitTransforms` 与 `updateVisuals` 只送时间量，
+  worker 一开始就拿到了同一个 SAB。
+- `applyRenderCommand` 的 switch 收尾是 `command satisfies never`：加了命令种类却
+  忘了兑现会变成编译错误。
+
+`RenderTransformBuffer.fromBytes`：容量写在表头里，渲染线程只凭那段字节就能还原
+全部视图。**扩容会让接住的旧段成为孤儿**，这个坑写在方法注释里。
+
+尖刀改成真跨线程驱动：主线程这一侧**一个 Three 对象都没有**，只有命令队列、
+槽位表和那段字节。11 条命令克隆过去，worker 画出 68 次 draw call，货箱正落在主线程
+写进 SAB 的那三个 x 上（`shared=true`）——位置根本没走命令。
+
+### 已经做了的：拿掉最后一条 `onBeforeRender` ✅
+
+鼠标拖草是**输入**适配器（`getBoundingClientRect` 决定它留在主线程），但它原来要一个
+活的 `THREE.Camera` 才能反投影，于是每帧从渲染侧回调一次借。
+
+现在自己算：反投影要的东西主线程本来就有——机位与朝向（那段相机字节正是它写的）、
+视场角、视口宽高比。和准星拾取改成解析求交是同一个道理，**需要的是数，不是那个对象**。
+
+用例拿被替换掉的东西当参照：三种机位（含偏航过的）× 四个屏幕点，落点和
+`THREE.Raycaster` 差在 1e-4 以内；另外钉住了「打不到地面不产生冲量」和
+「退化朝向不算出 NaN」。浏览器里横扫一条正弦轨迹，草沿轨迹压弯。
+
+于是 **`onBeforeRender` 在 `SceneRenderer` 之外一个调用方都没有了**，有棘轮盯着。
+
 ### 还没做的
 
 | | 说明 |
@@ -845,6 +878,8 @@ worker 已经在传的 `[globalCellX, globalCellZ, code, ...]`。
 | `faceCameras` / `setGuidePathResolution` | 收的是 `THREE.Camera` 与画布尺寸，是渲染世界**内部**的每帧动作，眼下经由 `ClientActorSystem.beforeRender` 路过。渲染循环进线程之后跟着走，不会出现在边界上 |
 | `GrasslandScene` 的装配归属 | 它同时握着输入、相机、玩家实体和渲染器；canvas 搬走时装配要跟着走 |
 | 天气的 `sampleGroundHeight` | 渲染侧唯一还反向读玩法侧的一处，见上 |
+| 两个还握着 THREE 的场景组件 | `InteractiveParticleEffectSceneComponent` 与 `AbilityLabSceneComponent` 靠 `addWorldObject` 把自己建的对象塞进场景图。形状和第 1.5 步那八个表现 Component 一样，出路也一样：把建模搬进渲染世界、玩法侧只发描述。已有棘轮，清单只能变短 |
+| `dayNightTarget.timeOfDay` | 调试菜单读它显示时钟。渲染侧回读的一处，但它是 `(服务端时间, 昼夜长度)` 的纯函数，主线程自己算得出来 |
 
 §3 的前置全部落地：渲染栈不碰 DOM、玩法侧不碰 Three、chunk 与 Actor 两条主干都按
 game / render 切开、相机与合批内容都按字节过边界，**而且边界是单向的**。

@@ -273,6 +273,79 @@ test('渲染栈里还摸 DOM 的只有已知的那几个', () => {
 });
 
 /**
+ * 第 3 步的棘轮：**场景组件**（`doc/engine-migration-implementation-plan.md` §3）。
+ *
+ * 这是最后一类还在主线程上握着 `THREE.Object3D` 的东西，形状和第 1.5 步那八个
+ * 表现 Component 一模一样——那一轮把清单从 8 磨到 0，这一轮同理。
+ *
+ * 它们靠 `renderer.addWorldObject(object)` 把自己建的对象塞进场景图。
+ * 渲染循环进线程之后那条路就断了：对象过不了线程边界。出路也和上一轮一样——
+ * 要么把建模搬进渲染世界、玩法侧只发描述，要么整个组件搬过去。
+ *
+ * `SceneComponent.ts` 引的是类型（`THREE.Object3D` 出现在 `addWorldObject` 的签名
+ * 上），不是实现，所以不在清单里。
+ */
+const SCENE_COMPONENTS_STILL_HOLDING_THREE = ['InteractiveParticleEffectSceneComponent.ts'];
+
+test('还在主线程建 THREE 对象的场景组件只有已知的那几个', () => {
+  const directory = new URL('../src/scene/components/', import.meta.url);
+  const offenders = readdirSync(directory)
+    .filter((name) => name.endsWith('.ts') && name !== 'SceneComponent.ts')
+    .filter((name) => {
+      const source = readFileSync(new URL(name, directory), 'utf8');
+      const code = source
+        .split('\n')
+        .filter((line) => {
+          const trimmed = line.trimStart();
+          return !trimmed.startsWith('*') && !trimmed.startsWith('//');
+        })
+        .join('\n');
+      return /from 'three'/.test(code) || /addWorldObject/.test(code);
+    })
+    .sort();
+
+  assert.deepEqual(
+    offenders,
+    [...SCENE_COMPONENTS_STILL_HOLDING_THREE, 'AbilityLabSceneComponent.ts'].sort(),
+    '这份清单只能变短：渲染循环进线程之后，addWorldObject 那条路就断了',
+  );
+});
+
+/**
+ * `onBeforeRender` 是渲染侧往主线程递一个活的 `THREE.Camera`。
+ *
+ * 鼠标拖草曾经靠它反投影；现在它自己按机位、视场角、宽高比构造射线
+ * （见 `tests/MouseGrassUnproject.test.ts`，落点和 `THREE.Raycaster` 一致）。
+ * 于是这条回调**在 `SceneRenderer` 之外一个调用方都没有了**。
+ */
+test('没有人再靠 onBeforeRender 借渲染侧的相机', () => {
+  const roots = ['../src/scene/', '../src/grass/', '../src/abilities/', '../src/ui/'];
+  const offenders: string[] = [];
+  for (const root of roots) {
+    const walk = (folder: URL): void => {
+      for (const entry of readdirSync(folder, { withFileTypes: true })) {
+        if (entry.isDirectory()) {
+          walk(new URL(`${entry.name}/`, folder));
+          continue;
+        }
+        if (!entry.name.endsWith('.ts')) continue;
+        const source = readFileSync(new URL(entry.name, folder), 'utf8');
+        const code = source
+          .split('\n')
+          .filter((line) => {
+            const trimmed = line.trimStart();
+            return !trimmed.startsWith('*') && !trimmed.startsWith('//');
+          })
+          .join('\n');
+        if (/\.onBeforeRender\(/.test(code)) offenders.push(entry.name);
+      }
+    };
+    walk(new URL(root, import.meta.url));
+  }
+  assert.deepEqual(offenders, [], '要相机就用主线程自己那份机位，别回调进渲染侧借');
+});
+
+/**
  * 第 1.75 步的棘轮（`doc/engine-migration-implementation-plan.md` §1.75）。
  *
  * Component 干净了还不够：Actor 世界里跑的 **System** 也得干净，否则第 2 步
