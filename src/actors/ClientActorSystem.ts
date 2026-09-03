@@ -62,7 +62,6 @@ import type { FillMaterialEnvironment } from '../materials/createFillMaterial';
 import { NULL_PROXY_ID } from '../render/RenderScene';
 import { frameTimeline } from '../platform/index';
 import { RenderTransformBuffer } from '../render/RenderTransformBuffer';
-import type { ThreeMeshProxy } from '../render/three/ThreeMeshProxy';
 import { ThreeRenderScene } from '../render/three/ThreeRenderScene';
 import type { SnapshotActor, SnapshotPlayer } from '../network/protocol';
 import type { SceneDefinition } from '../scenes/data/SceneDefinition';
@@ -593,11 +592,6 @@ export class ClientActorSystem implements SceneVisualSystem {
     return this.renderScene;
   }
 
-  public getActorRenderProxy(actorId: string): ThreeMeshProxy | undefined {
-    const actor = this.world.getActor(actorId) as Actor | undefined;
-    return actor ? this.resolveRender(actor) : undefined;
-  }
-
   public findOwnedActorId(playerId: string): string | undefined {
     return (this.world.query(ACTOR_CONTROL_COMPONENT) as Actor[]).find((actor) => (
       (actor.requireComponent(ACTOR_CONTROL_COMPONENT) as ActorControlComponent).ownerPlayerId === playerId
@@ -1035,12 +1029,6 @@ export class ClientActorSystem implements SceneVisualSystem {
       if (!assembled) this.proxyIds.destroyMeshProxy(proxyId);
     }
     return actor;
-  }
-
-  /** 渲染侧查找。拾取、悬停高亮这类仍住在客户端的表现代码经由它取 Object3D。 */
-  private resolveRender(actor: Actor): ThreeMeshProxy | undefined {
-    const proxy = actor.getComponent(RENDER_PROXY_COMPONENT) as RenderProxyComponent | undefined;
-    return proxy ? this.renderScene.resolve(proxy.proxyId) : undefined;
   }
 
   private applySnapshot(actor: Actor, snapshot: SnapshotActor): void {

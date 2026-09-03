@@ -6,7 +6,7 @@ import {
   type RenderCommand,
 } from '../src/render/worker/renderCommands';
 import { RenderTransformBuffer } from '../src/render/RenderTransformBuffer';
-import { toProxyId, type ProxyId } from '../src/render/RenderScene';
+import { NULL_PROXY_ID, toProxyId, type ProxyId } from '../src/render/RenderScene';
 import type { ActorRenderDefinition } from '../src/scenes/data/SceneDefinition';
 
 /**
@@ -35,6 +35,13 @@ function createRecordingTarget() {
     setGuidePath: (id: ProxyId, _s: unknown, changed: boolean) => calls.push(`guide:${id}:${changed}`),
     setInteractionMarker: (id: ProxyId, label: string) => calls.push(`marker:${id}:${label}`),
     setHoveredProxy: (id: ProxyId) => calls.push(`hover:${id}`),
+    setAbilityLabTarget: (id: ProxyId) => calls.push(`labTarget:${id}`),
+    setAbilityLabState: (state: { caster: { health: number } } | undefined, x: number, y: number, z: number) => {
+      calls.push(`labState:${state ? state.caster.health : 'none'}:${x},${y},${z}`);
+    },
+    playAbilityLabAction: (action: string, x: number, y: number, z: number, ok: boolean) => {
+      calls.push(`labAction:${action}:${x},${y},${z}:${ok}`);
+    },
     setTemperatureMarkersVisible: (v: boolean) => calls.push(`temp:${v}`),
     setSimpleCollisionVisible: (v: boolean) => calls.push(`collision:${v}`),
     submitTransforms: (buffer: RenderTransformBuffer) => {
@@ -92,6 +99,37 @@ test('玩法侧调了什么，渲染侧就收到什么，顺序一模一样', ()
     'submit:same-bytes',
     'visuals:0.016:1.25',
     'destroy:0',
+  ]);
+});
+
+/**
+ * 能力实验室曾经是玩法侧最后一处递出活对象的地方：`getActorRenderProxy` 拿到活的
+ * `ThreeMeshProxy`，把 `abilityTargetRig` 交给一个住在主线程的视觉系统。
+ *
+ * 现在它是三条命令。这里盯的就是「它们过得了这条通道」——`AbilityLabViewState`
+ * 是纯数据，施法者位置是三个标量，一条都不需要回话。
+ */
+test('能力实验室的三条命令过得了通道，视图状态原样到对面', () => {
+  const queue = new RenderCommandQueue();
+  const target = createRecordingTarget();
+  const dummy = toProxyId(3);
+  const state = { caster: { health: 72 }, target: { health: 180 }, cooldowns: {}, logs: [] };
+
+  queue.setAbilityLabTarget(dummy);
+  queue.setAbilityLabState(state as never, 1, 2, 3);
+  queue.playAbilityLabAction('arcane', 1, 2, 3, true);
+  queue.playAbilityLabAction('burn', 1, 2, 3, false);
+  queue.setAbilityLabState(undefined, 0, 0, 0);
+  queue.setAbilityLabTarget(NULL_PROXY_ID);
+
+  drain(queue, target);
+  assert.deepEqual(target.calls, [
+    'labTarget:3',
+    'labState:72:1,2,3',
+    'labAction:arcane:1,2,3:true',
+    'labAction:burn:1,2,3:false',
+    'labState:none:0,0,0',
+    `labTarget:${NULL_PROXY_ID}`,
   ]);
 });
 

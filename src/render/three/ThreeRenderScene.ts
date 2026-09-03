@@ -1,4 +1,8 @@
 import * as THREE from 'three';
+import type {
+  AbilityLabAction,
+  AbilityLabViewState,
+} from '../../abilities/lab/AbilityLabSimulation';
 import type { FillMaterialEnvironment } from '../../materials/createFillMaterial';
 import type { OceanVisualDefinition } from '../../scenes/data/SceneDefinition';
 import { createActorVisualModel } from '../../models/actors/createActorVisualModel';
@@ -25,6 +29,7 @@ import { PARAM_SLIME_SPEED, PARAM_TEMPERATURE } from '../RenderVisualParams';
 import { ThreeFireVisual } from './ThreeFireVisual';
 import { ThreeGuidePathVisual } from './ThreeGuidePathVisual';
 import { ThreeHybridSlimeVisual } from './ThreeHybridSlimeVisual';
+import { ThreeAbilityLabVisual } from './ThreeAbilityLabVisual';
 import { ThreeAttachmentVisual } from './ThreeAttachmentVisual';
 import { ThreeDropRollVisual } from './ThreeDropRollVisual';
 import { ThreeElasticTetherVisual } from './ThreeElasticTetherVisual';
@@ -115,6 +120,18 @@ export class ThreeRenderScene implements RenderScene {
   private readonly elasticTethers = new Map<ProxyId, ThreeElasticTetherVisual>();
   private readonly dropRolls = new Map<ProxyId, ThreeDropRollVisual>();
   private readonly attachmentVisual = new ThreeAttachmentVisual();
+  /**
+   * 能力实验室的表现（引擎迁移路线图 第 3 步）。
+   *
+   * 它以前住在主线程：`AbilityLabSceneComponent` 先 `getActorRenderProxy` 拿到活的
+   * proxy，再把 rig 交给一个主线程的视觉系统。那是玩法侧最后一处**递出活对象**。
+   *
+   * 现在整套动画在这一侧，玩法侧只发三条命令：绑谁、这一帧什么状态、放一次技能。
+   * 按需建——绝大多数地图没有能力实验室。
+   */
+  private abilityLab?: ThreeAbilityLabVisual;
+  private abilityLabState?: AbilityLabViewState;
+  private readonly abilityLabCaster = new THREE.Vector3();
 
   public constructor(
     public readonly root: THREE.Group,
@@ -287,6 +304,14 @@ export class ThreeRenderScene implements RenderScene {
     // 悬停盒跟着目标走。放在最前是因为它读的是上一帧摆好的世界矩阵，
     // 和玩法侧原来在 sim-colliders 里调 hoverHelper.update() 的时机等价。
     this.hoverHelper?.update();
+    if (this.abilityLab && this.abilityLabState) {
+      this.abilityLab.update(
+        deltaSeconds,
+        elapsedSeconds,
+        this.abilityLabState,
+        this.abilityLabCaster,
+      );
+    }
     const live = this.liveProxies();
     // 顺序照搬搬迁之前 Actor 世界里的那一段：波动先算（附着要读父级摆好的
     // visualRoot），附着居中，弹性拉伸在脱落翻滚之前（翻滚会覆盖它摆好的姿态）。
@@ -401,6 +426,50 @@ export class ThreeRenderScene implements RenderScene {
    * 现在玩法侧只发一个 `ProxyId`（没有选中就是 `NULL_PROXY_ID`），盒子在这一侧建、
    * 在这一侧释放，和 `setInteractionMarker` 是同一个套路。
    */
+  public setAbilityLabTarget(id: ProxyId): void {
+    if (id === NULL_PROXY_ID) {
+      this.abilityLab?.reset();
+      this.abilityLab?.unbindTarget();
+      this.abilityLabState = undefined;
+      return;
+    }
+    const proxy = this.proxies[id];
+    if (!proxy) return;
+    if (!this.abilityLab) {
+      this.abilityLab = new ThreeAbilityLabVisual();
+      this.root.add(this.abilityLab.root);
+    }
+    // rig 缺失在这一侧当场报错：玩法侧看不见 rig，也就判断不了。
+    this.abilityLab.bindTarget(proxy);
+    this.abilityLab.reset();
+  }
+
+  public setAbilityLabState(
+    state: AbilityLabViewState | undefined,
+    casterX: number,
+    casterY: number,
+    casterZ: number,
+  ): void {
+    this.abilityLabState = state;
+    this.abilityLabCaster.set(casterX, casterY, casterZ);
+  }
+
+  public playAbilityLabAction(
+    action: AbilityLabAction,
+    casterX: number,
+    casterY: number,
+    casterZ: number,
+    succeeded: boolean,
+  ): void {
+    if (!this.abilityLab) return;
+    if (action === 'reset') {
+      this.abilityLab.reset();
+      return;
+    }
+    this.abilityLabCaster.set(casterX, casterY, casterZ);
+    this.abilityLab.play(action, this.abilityLabCaster, succeeded);
+  }
+
   public setHoveredProxy(id: ProxyId): void {
     if (id === this.hoveredProxy) return;
     this.#disposeHoverHelper();
@@ -451,6 +520,9 @@ export class ThreeRenderScene implements RenderScene {
 
   public dispose(): void {
     this.#disposeHoverHelper();
+    this.abilityLab?.dispose();
+    this.abilityLab = undefined;
+    this.abilityLabState = undefined;
     for (const guide of this.guidePaths.values()) guide.dispose();
     this.guidePaths.clear();
     this.guidePathStyles.clear();

@@ -28,7 +28,7 @@ archetype JSON. That round trip is gone.
 
 Both are enforced by `tests/RenderSceneBoundary.test.ts`, which also asserts that its list of ActorWorld Systems **equals** the actual `world.addSystem(...)` calls in `ClientActorSystem`. Adding a System means registering it in that list, and the price of registering is passing the import check.
 
-A third ratchet lists the render-side files still touching `document` or `window`. All three lists may only get shorter.
+Further ratchets list the render-side files still touching `document` or `window`, the scene components still importing `three` or calling `addWorldObject` (empty), and the callers of `onBeforeRender` (only `SceneRenderer` itself). Every list may only get shorter.
 
 ## Read before editing
 

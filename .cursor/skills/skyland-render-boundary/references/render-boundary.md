@@ -136,12 +136,14 @@ Player entities (local and remote) also write into this SoA, and they run **befo
 
 ## The ratchets
 
-`tests/RenderSceneBoundary.test.ts` holds three lists that may only shrink:
+`tests/RenderSceneBoundary.test.ts` holds several lists that may only shrink:
 
 1. **Every method on `RenderScene` returns `void`** — the boundary is one-way. Checked against the source text, not the types: "returns something nobody uses" type-checks and still breaks on a worker.
 2. **Actor Components importing render modules** — currently empty.
 3. **ActorWorld Systems** — must equal `ClientActorSystem`'s actual `world.addSystem(...)` calls, and none may import a render implementation. Without the equality check, a new System would slip past the import check unnoticed.
 4. **Render-side files touching `document`/`window`** — currently only `SceneRenderer`, whose `devicePixelRatio` moves with the canvas it owns.
+5. **Scene components importing `three` or calling `addWorldObject`** — currently empty. A scene component that builds its own `Object3D` and pushes it into the scene graph blocks the worker move exactly like a Component holding one does. The way out is the one the falling leaves and the ability lab took: move the visual into the render world and send it descriptions.
+6. **Callers of `onBeforeRender`** — currently only `SceneRenderer` itself. That callback hands out a live `THREE.Camera`; anything needing the camera takes `RenderCamera` (nine floats) instead.
 
 `RenderProxyComponent` importing from `src/render/` is intentional and allowed: it references the boundary types (`ProxyId`, the command sink), which is exactly what it should reference. The rule targets render *implementations*.
 

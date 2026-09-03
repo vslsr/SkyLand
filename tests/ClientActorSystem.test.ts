@@ -31,6 +31,7 @@ import { formatGeneratedPropId } from '../shared/world/generatedProp.mjs';
 import { DEFAULT_WORLD_SEED, PROP_KIND } from '../shared/world/worldConfig.mjs';
 import { selectWorldPropVariant } from '../shared/world/worldPropVariants.mjs';
 import { ClientActorSystem } from '../src/actors/ClientActorSystem';
+import { renderProxyOf } from './renderProxyProbe';
 import {
   RENDER_PROXY_COMPONENT,
 } from '../src/actors/components/RenderProxyComponent';
@@ -583,7 +584,7 @@ test('客户端收到快照后才创建 Actor Replica 并应用权威 Component 
   const actor = system.getActor(snapshot.id)!;
   const transform = actor.requireComponent(TRANSFORM_COMPONENT) as TransformComponent;
   const buoyancy = actor.requireComponent(BUOYANCY_COMPONENT) as BuoyancyComponent;
-  const render = system.getActorRenderProxy(actor.id)!;
+  const render = renderProxyOf(system, actor.id)!;
   assert.deepEqual([transform.x, transform.y, transform.z, transform.yaw], [2, 0, -3, 0.4]);
   assert.equal(buoyancy.draft, 0.21);
   // 渲染世界拿到的是权威 transform 的 f32 镜像（边界上的 SoA 是 Float32Array），
@@ -625,7 +626,7 @@ test('视觉波动只作用于 VisualRoot，且快照移除会销毁 Replica', (
   system.update(1 / 60, 1.25);
 
   const actor = system.getActor(snapshot.id)!;
-  const render = system.getActorRenderProxy(actor.id)!;
+  const render = renderProxyOf(system, actor.id)!;
   assert.equal(render.root.position.y, snapshot.transform.y);
   assert.ok(Number.isFinite(render.visualRoot.position.y));
   assert.notEqual(render.visualRoot.position.y, render.root.position.y);
@@ -686,13 +687,13 @@ test('能力实验室对象由 Actor 快照创建，训练假人暴露 visualRoo
   system.update(0, 0);
 
   const actor = system.getActor(trainingDummySnapshot.id)!;
-  const render = system.getActorRenderProxy(actor.id)!;
+  const render = renderProxyOf(system, actor.id)!;
   assert.equal(actor.archetypeId, 'training-dummy');
   assert.ok(render.abilityTargetRig);
   assert.equal(render.abilityTargetRig.targetRoot, render.visualRoot);
   assert.equal(render.abilityTargetRig.burningAura.visible, false);
   assert.equal(render.root.position.z, -1.5);
-  const focusRender = system.getActorRenderProxy(focusObeliskSnapshot.id)!;
+  const focusRender = renderProxyOf(system, focusObeliskSnapshot.id)!;
   assert.ok(focusRender.root.getObjectByName('focus-obelisk-crystal'));
   const plaqueCollision = system.getActor(floorPlaqueSnapshot.id)!
     .requireComponent(SIMPLE_COLLISION_COMPONENT) as SimpleCollisionComponent;
@@ -719,8 +720,8 @@ test('客户端离散恢复父子关系，并只插值子 Actor 的权威世界�
 
   const parent = system.getActor(snapshot.id)!;
   const child = system.getActor(childFrom.id)!;
-  const parentRender = system.getActorRenderProxy(parent.id)!;
-  const childRender = system.getActorRenderProxy(child.id)!;
+  const parentRender = renderProxyOf(system, parent.id)!;
+  const childRender = renderProxyOf(system, child.id)!;
   const childTransform = child.requireComponent(TRANSFORM_COMPONENT) as TransformComponent;
   let childGeometry: THREE.BufferGeometry | undefined;
   childRender.root.traverse((object) => {
@@ -807,9 +808,9 @@ test('客户端按权威燃烧状态显示参考 LineLoop 火焰，稳定篝火�
   system.update(1 / 60, 0.5);
 
   // rig 住在渲染世界里；Actor 上的 FireVisualComponent 只剩一个目标强度。
-  const campfireRig = system.getActorRenderProxy(campfire.id)!.fireVisualRig!;
+  const campfireRig = renderProxyOf(system, campfire.id)!.fireVisualRig!;
   const hayActor = system.getActor(coldHay.id)!;
-  const hayRig = system.getActorRenderProxy(hayActor.id)!.fireVisualRig!;
+  const hayRig = renderProxyOf(system, hayActor.id)!.fireVisualRig!;
   const hayFire = hayActor.requireComponent(FIRE_VISUAL_COMPONENT) as FireVisualComponent;
   assert.equal(
     (system.getActor(campfire.id)!
@@ -818,7 +819,7 @@ test('客户端按权威燃烧状态显示参考 LineLoop 火焰，稳定篝火�
     '静态热源的目标强度应当在 spawn 时就是 1',
   );
   assert.equal(hayFire.targetIntensity, 0, '没烧起来时目标强度是 0');
-  const temperatureMarker = system.getActorRenderProxy(hayActor.id)!.markers;
+  const temperatureMarker = renderProxyOf(system, hayActor.id)!.markers;
   assert.equal(campfireRig.root.visible, true);
   assert.equal(hayRig.root.visible, false);
   assert.equal(temperatureMarker.temperatureVisible, false);
@@ -829,7 +830,7 @@ test('客户端按权威燃烧状态显示参考 LineLoop 火焰，稳定篝火�
   system.setTemperatureVisible(true);
   assert.equal(temperatureMarker.temperatureVisible, true);
   assert.equal(temperatureMarker.temperatureLabel, '20.0 °C');
-  assert.ok(system.getActorRenderProxy(hayActor.id)!
+  assert.ok(renderProxyOf(system, hayActor.id)!
     .root.getObjectByName('actor-temperature-marker'));
   const camera = new THREE.PerspectiveCamera();
   camera.position.set(3, 4, 7);
@@ -896,7 +897,7 @@ test('混合史莱姆用单球核心与休眠弹簧蒙皮，且不会改写权�
   system.update(0, 0);
 
   const actor = system.getActor(pbfSlime.id)!;
-  const render = system.getActorRenderProxy(actor.id)!;
+  const render = renderProxyOf(system, actor.id)!;
   const visual = system.getRenderScene().resolveSlimeVisual(render.id)!;
   const initialSurface = Float32Array.from(
     visual.rig.surfacePosition.array as ArrayLike<number>,
@@ -1120,7 +1121,7 @@ test('无模型 GuidePath Actor 只在快照存在时创建客户端 Three.js �
 
   const actor = system.getActor(guideSnapshot.id)!;
   const state = actor.requireComponent(GUIDE_PATH_COMPONENT) as GuidePathComponent;
-  const render = system.getActorRenderProxy(actor.id)!;
+  const render = renderProxyOf(system, actor.id)!;
   // 表现住在渲染世界里；Actor 上只剩 shared/ 的权威 GuidePathComponent。
   const guide = system.getRenderScene().resolveGuidePath(render.id)!.guide;
   assert.equal(actor.hasComponents(SIMPLE_COLLISION_COMPONENT), false);

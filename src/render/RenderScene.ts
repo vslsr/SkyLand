@@ -1,4 +1,8 @@
 import type {
+  AbilityLabAction,
+  AbilityLabViewState,
+} from '../abilities/lab/AbilityLabSimulation';
+import type {
   ActorArchetypeDefinition,
   ActorRenderDefinition,
 } from '../scenes/data/SceneDefinition';
@@ -191,6 +195,31 @@ export interface RenderScene extends RenderCommandSink {
    */
   setInteractionMarker(id: ProxyId, label: string): void;
   setHoveredProxy(id: ProxyId): void;
+  /**
+   * 能力实验室的三条命令（只有开发用的实验室地图会发）。
+   *
+   * 这三条曾经是玩法侧最后一处**递出活对象**：`AbilityLabSceneComponent` 先
+   * `getActorRenderProxy` 拿到活的 `ThreeMeshProxy`，把 `abilityTargetRig` 交给一个
+   * 住在主线程的视觉系统。整套动画现在在渲染世界里，玩法侧只说三件事：
+   * 绑谁（`NULL_PROXY_ID` 即解绑）、这一帧什么状态、放一次技能。
+   *
+   * `AbilityLabViewState` 是纯数据（血量、蓝量、冷却、日志），过得了线程边界；
+   * 施法者位置拆成三个标量，因为 `Vector3` 是 three 的词汇，边界上不认。
+   */
+  setAbilityLabTarget(id: ProxyId): void;
+  setAbilityLabState(
+    state: AbilityLabViewState | undefined,
+    casterX: number,
+    casterY: number,
+    casterZ: number,
+  ): void;
+  playAbilityLabAction(
+    action: AbilityLabAction,
+    casterX: number,
+    casterY: number,
+    casterZ: number,
+    succeeded: boolean,
+  ): void;
   /** 两个调试开关。它们是渲染世界自己的状态，不在 Actor 上镜像。 */
   setTemperatureMarkersVisible(visible: boolean): void;
   setSimpleCollisionVisible(visible: boolean): void;

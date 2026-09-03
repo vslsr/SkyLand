@@ -574,7 +574,7 @@ headless Chromium + SwiftShader。**所以这一步在这个仓库、这套验�
 
 新增 `src/scene/SceneWorld.ts` 收下后三件里属于玩法的部分：地形采样、物理查询、
 Actor 查询、草地脉冲入口。`SceneRenderer` 只剩渲染核心、表现开关，以及两个确实属于
-渲染侧的查找（`getActorRenderProxy`、`setTerrainHighlight`）。
+渲染侧的查找（`setTerrainHighlight`）。
 
 **这一半几乎不碰 Three**：地形是纯数据、物理是 Rapier、Actor 查询走 Game World。
 唯一的例外是上面那个 `pickActorInteraction`——它随后也改成了解析求交，
@@ -869,7 +869,7 @@ worker 已经在传的 `[globalCellX, globalCellZ, code, ...]`。
 
 于是 **`onBeforeRender` 在 `SceneRenderer` 之外一个调用方都没有了**，有棘轮盯着。
 
-### 已经做了的：清掉三笔账里的两笔半 ✅
+### 已经做了的：三笔账清完了 ✅
 
 **天气的 `sampleGroundHeight`**：`createRenderWorld` 原来收一个指向玩法侧
 `TerrainWorld` 的回调——渲染侧每帧反向读一次玩法侧。`TerrainWorld` 是纯数学，
@@ -897,21 +897,45 @@ worker 已经在传的 `[globalCellX, globalCellZ, code, ...]`。
 时没人再打一次，落叶就永远不激活。修法是让 `SceneRenderer` 记住当前的进入状态，
 换组合时补上去——主线程那批场景组件的宿主本来就是这么做的。
 
+**能力实验室搬进渲染世界**（最后半笔）：`AbilityLabSceneComponent` 曾经是玩法侧
+**唯一还能摸到活对象**的地方——先 `getActorRenderProxy(actorId)` 拿到活的
+`ThreeMeshProxy`，检查它身上有没有训练假人的 `abilityTargetRig`，再把这个 rig 交给
+一个住在主线程的视觉系统。整条链上每一环都过不了线程边界。
+
+拆开之后是这样的：`AbilityLabViewState`（血量、蓝量、冷却、日志）本来就是纯数据，
+`ThreeAbilityLabVisual` 本来就是纯表现。于是视觉系统整个搬到渲染侧，改名
+`ThreeAbilityLabVisual`；玩法侧只剩**三条返回 `void` 的命令**：
+
+| 命令 | 说的事 |
+| --- | --- |
+| `setAbilityLabTarget(id)` | 绑谁。`NULL_PROXY_ID` 即解绑，和 `setInteractionMarker` 同一个套路 |
+| `setAbilityLabState(state, x, y, z)` | 这一帧什么状态。施法者位置拆成三个标量——`Vector3` 是 three 的词汇，边界上不认 |
+| `playAbilityLabAction(action, x, y, z, succeeded)` | 放一次技能。成不成由玩法侧判定，渲染侧只管演 |
+
+「rig 缺失」的判断也跟着过去了：玩法侧看不见 rig，判断不了，所以由
+`ThreeAbilityLabVisual.bindTarget` 当场报错。这三条同时上了 `RenderScene` 接口与
+`RenderCommandQueue`——加接口的那一刻命令队列立刻编译不过，正是想要的效果。
+
+于是 `getActorRenderProxy` 从 `SceneVisualSystem`、`SceneRenderer`、
+`ClientActorSystem` 三处一起删掉。测试要断言渲染结果，那条路留在
+`tests/renderProxyProbe.ts` 里，而且走明面上的两步（Actor 上取 `proxyId`，
+再去 `getRenderScene()` 里解析）——「谁在跨边界拿对象」于是在类型上就看得见：只有测试。
+
+**场景组件的棘轮清单现在是空的。**
+
 ### 还没做的
 
 | | 说明 |
 | --- | --- |
 | 渲染循环整个进 worker | `SceneRenderer` 的 `root` / `beforeRender` / `WebGLRenderer` 那一层，以及 `transferControlToOffscreen` 本身 |
-| `getActorRenderProxy` | 玩法侧最后一处 `resolve()`，只有能力实验室那个场景组件在用（它要 `abilityTargetRig`）。它不在 `RenderScene` 接口上——边界接口本身是干净的，这是伸手够到了具体后端 |
 | `faceCameras` / `setGuidePathResolution` | 收的是 `THREE.Camera` 与画布尺寸，是渲染世界**内部**的每帧动作，眼下经由 `ClientActorSystem.beforeRender` 路过。渲染循环进线程之后跟着走，不会出现在边界上 |
 | `GrasslandScene` 的装配归属 | 它同时握着输入、相机、玩家实体和渲染器；canvas 搬走时装配要跟着走 |
-| `AbilityLabSceneComponent` | 最后一个还握着 THREE 的场景组件。它比落叶难：同时要 Actor 查询、UI 与渲染 rig（`getActorRenderProxy` 也只剩它一个调用方），是开发用的能力实验室场景。已有棘轮，清单只能变短 |
 
 §3 的前置全部落地：渲染栈不碰 DOM、玩法侧不碰 Three、chunk 与 Actor 两条主干都按
 game / render 切开、相机与合批内容都按字节过边界，**而且边界是单向的**。
-剩下的是搬运本身，不再是拆解。
+剩下的三项是搬运本身，不再是拆解。
 
-需要说清楚的是：这五项**一项都不省帧时间**（`render-batches` p50 只有
+需要说清楚的是：这三项**一项都不省帧时间**（`render-batches` p50 只有
 0.06–0.17 ms）。它们是第 2 步与第 3 步共同的结构前提。
 
 ## 第 4 步 · 换掉 Three.js（可无限期推迟）
@@ -995,7 +1019,7 @@ three，没有词汇冲突。量下来的结论是**推迟到这一步**，理�
   这一层**不知道资产是什么**（§8.4：CoreLayer 那一格），文件里没有一个 Three 类型。
 - `src/render/renderAssets.ts`：进程级实例 + `releaseOwnResources()`。
   §8.4 把 GPU 资源划在渲染线程一侧，所以实例住在 `src/render/` 下。
-- 四条遍历式释放路径（`SceneRenderer`、`ThreeMeshProxy`、`AbilityLabVisualSystem`、
+- 四条遍历式释放路径（`SceneRenderer`、`ThreeMeshProxy`、`ThreeAbilityLabVisual`、
   `PlayerActorVisual`）改为经由它避让共享资源。
 
 **剩余工作**：这是「谁 acquire 谁 release；遍历场景树永远不 dispose」的过渡形态。

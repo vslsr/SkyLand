@@ -1,6 +1,10 @@
 import * as THREE from 'three';
 import { TERRAIN_CELL_SIZE } from '../../shared/world/terrainConfig.mjs';
 import type { CollisionWorld } from '../../shared/collision/index.mjs';
+import type {
+  AbilityLabAction,
+  AbilityLabViewState,
+} from '../abilities/lab/AbilityLabSimulation';
 import type { CameraFrame } from '../camera/CameraTransform';
 import {
   createRenderCamera,
@@ -24,8 +28,8 @@ import type {
   SceneFrameSystem,
   WeatherVisualTarget,
 } from '../scene/SceneVisualSystem';
-import type { ThreeMeshProxy } from '../render/three/ThreeMeshProxy';
 import type { ThreeRenderScene } from '../render/three/ThreeRenderScene';
+import type { ProxyId } from '../render/RenderScene';
 import type { RenderWorldHandle } from '../render/RenderProxyTable';
 import type { SceneBeforeRenderListener } from '../scene/components';
 import type { SceneDefinition } from '../scenes/data/SceneDefinition';
@@ -230,8 +234,41 @@ export class SceneRenderer {
     this.updatePhysicsDebug();
   }
 
-  public getActorRenderProxy(actorId: string): ThreeMeshProxy | undefined {
-    return this.actorSnapshotTarget?.getActorRenderProxy(actorId);
+  /**
+   * 能力实验室的三条命令，转发给当前渲染世界（引擎迁移路线图 第 3 步）。
+   *
+   * 这里原来是 `getActorRenderProxy`——把渲染世界里活的 `ThreeMeshProxy` 递给
+   * 玩法侧的场景组件。整套动画搬进渲染世界之后，这一层只剩转发，且三个方法
+   * 都返回 `void`：渲染世界搬进 worker 那天，`renderWorld.scene` 换成命令队列，
+   * 这三行一个字都不用改。
+   */
+  public setAbilityLabTarget(id: ProxyId): void {
+    this.renderWorldHandle?.scene.setAbilityLabTarget(id);
+  }
+
+  public setAbilityLabState(
+    state: AbilityLabViewState | undefined,
+    casterX: number,
+    casterY: number,
+    casterZ: number,
+  ): void {
+    this.renderWorldHandle?.scene.setAbilityLabState(state, casterX, casterY, casterZ);
+  }
+
+  public playAbilityLabAction(
+    action: AbilityLabAction,
+    casterX: number,
+    casterY: number,
+    casterZ: number,
+    succeeded: boolean,
+  ): void {
+    this.renderWorldHandle?.scene.playAbilityLabAction(
+      action,
+      casterX,
+      casterY,
+      casterZ,
+      succeeded,
+    );
   }
 
   /** 高亮一格地形；传 undefined 收起高亮。 */

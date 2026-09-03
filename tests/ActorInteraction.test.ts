@@ -8,6 +8,7 @@ import {
   type ElasticTetherComponent,
 } from '../shared/actor/index.mjs';
 import { ClientActorSystem } from '../src/actors/ClientActorSystem';
+import { renderProxyOf } from './renderProxyProbe';
 import { ActorInteractionController } from '../src/controllers/ActorInteractionController';
 import {
   createPlayerInputScheme,
@@ -382,7 +383,7 @@ test('弹性蘑菇 Replica 拉长并在释放后回弹，标记组件始终可�
   system.setInteractionMarkerActorId('mushroom-1', 'E');
   const actor = system.getActor('mushroom-1');
   // 标记住在渲染世界里；Actor 那侧什么都不剩。
-  const markers = system.getActorRenderProxy('mushroom-1')!.markers;
+  const markers = renderProxyOf(system, 'mushroom-1')!.markers;
   assert.equal(markers.interactionVisible, true);
   assert.equal(markers.interactionLabel, 'E');
   const camera = new THREE.PerspectiveCamera();
@@ -406,7 +407,7 @@ test('弹性蘑菇 Replica 拉长并在释放后回弹，标记组件始终可�
   }], 1_100);
   now = 1_230;
   for (let index = 0; index < 90; index += 1) system.update(1 / 60, index / 60);
-  const render = system.getActorRenderProxy(actor!.id)!;
+  const render = renderProxyOf(system, actor!.id)!;
   const stretchedScale = render.elasticTetherRig?.stemRoot.scale.y ?? 1;
   assert.ok(stretchedScale > 2);
   const tether = actor?.requireComponent(ELASTIC_TETHER_COMPONENT) as ElasticTetherComponent;

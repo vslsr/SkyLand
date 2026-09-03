@@ -1,4 +1,8 @@
 import type {
+  AbilityLabAction,
+  AbilityLabViewState,
+} from '../../abilities/lab/AbilityLabSimulation';
+import type {
   GuidePathState,
   MeshProxyDesc,
   PlayerProxyDesc,
@@ -35,6 +39,22 @@ export type RenderCommand =
   }
   | { readonly kind: 'setInteractionMarker'; readonly id: ProxyId; readonly label: string }
   | { readonly kind: 'setHoveredProxy'; readonly id: ProxyId }
+  | { readonly kind: 'setAbilityLabTarget'; readonly id: ProxyId }
+  | {
+      readonly kind: 'setAbilityLabState';
+      readonly state: AbilityLabViewState | undefined;
+      readonly casterX: number;
+      readonly casterY: number;
+      readonly casterZ: number;
+    }
+  | {
+      readonly kind: 'playAbilityLabAction';
+      readonly action: AbilityLabAction;
+      readonly casterX: number;
+      readonly casterY: number;
+      readonly casterZ: number;
+      readonly succeeded: boolean;
+    }
   | { readonly kind: 'setTemperatureMarkersVisible'; readonly visible: boolean }
   | { readonly kind: 'setSimpleCollisionVisible'; readonly visible: boolean }
   /**
@@ -108,6 +128,36 @@ export class RenderCommandQueue implements RenderScene, ChunkViewSink {
 
   public setHoveredProxy(id: ProxyId): void {
     this.#commands.push({ kind: 'setHoveredProxy', id });
+  }
+
+  public setAbilityLabTarget(id: ProxyId): void {
+    this.#commands.push({ kind: 'setAbilityLabTarget', id });
+  }
+
+  public setAbilityLabState(
+    state: AbilityLabViewState | undefined,
+    casterX: number,
+    casterY: number,
+    casterZ: number,
+  ): void {
+    this.#commands.push({ kind: 'setAbilityLabState', state, casterX, casterY, casterZ });
+  }
+
+  public playAbilityLabAction(
+    action: AbilityLabAction,
+    casterX: number,
+    casterY: number,
+    casterZ: number,
+    succeeded: boolean,
+  ): void {
+    this.#commands.push({
+      kind: 'playAbilityLabAction',
+      action,
+      casterX,
+      casterY,
+      casterZ,
+      succeeded,
+    });
   }
 
   public setTemperatureMarkersVisible(visible: boolean): void {
@@ -196,6 +246,26 @@ export function applyRenderCommand(
       return;
     case 'setHoveredProxy':
       target.scene.setHoveredProxy(command.id);
+      return;
+    case 'setAbilityLabTarget':
+      target.scene.setAbilityLabTarget(command.id);
+      return;
+    case 'setAbilityLabState':
+      target.scene.setAbilityLabState(
+        command.state,
+        command.casterX,
+        command.casterY,
+        command.casterZ,
+      );
+      return;
+    case 'playAbilityLabAction':
+      target.scene.playAbilityLabAction(
+        command.action,
+        command.casterX,
+        command.casterY,
+        command.casterZ,
+        command.succeeded,
+      );
       return;
     case 'setTemperatureMarkersVisible':
       target.scene.setTemperatureMarkersVisible(command.visible);

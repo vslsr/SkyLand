@@ -285,9 +285,12 @@ test('渲染栈里还摸 DOM 的只有已知的那几个', () => {
  * `SceneComponent.ts` 引的是类型（`THREE.Object3D` 出现在 `addWorldObject` 的签名
  * 上），不是实现，所以不在清单里。
  *
- * 落叶已经搬走了：它由 `createRenderWorld` 建，挂在渲染世界自己的根下，
- * 收到的只是几个数和一块地形。剩下的 `AbilityLabSceneComponent` 是开发用的能力
- * 实验室场景——它同时要 Actor 查询、UI 与渲染 rig，是这一类里最难拆的一个。
+ * 清单现在是空的。落叶由 `createRenderWorld` 建，挂在渲染世界自己的根下，
+ * 收到的只是几个数和一块地形；能力实验室的整套动画在 `ThreeAbilityLabVisual` 里，
+ * 玩法侧只发三条返回 `void` 的命令（绑谁、这一帧什么状态、放一次技能）。
+ *
+ * 空清单是这条断言最有价值的形态：任何一个新组件只要 `import ... from 'three'`
+ * 或者去碰 `addWorldObject`，这里立刻红。
  */
 const SCENE_COMPONENTS_STILL_HOLDING_THREE: string[] = [];
 
@@ -310,7 +313,7 @@ test('还在主线程建 THREE 对象的场景组件只有已知的那几个', (
 
   assert.deepEqual(
     offenders,
-    [...SCENE_COMPONENTS_STILL_HOLDING_THREE, 'AbilityLabSceneComponent.ts'].sort(),
+    SCENE_COMPONENTS_STILL_HOLDING_THREE,
     '这份清单只能变短：渲染循环进线程之后，addWorldObject 那条路就断了',
   );
 });
