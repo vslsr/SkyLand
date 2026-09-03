@@ -16,6 +16,7 @@ import { createStonePileModel } from './createStonePileModel';
 import { createWoodPileModel } from './createWoodPileModel';
 import { createWoodLogModel } from './createWoodLogModel';
 import { createPbfSlimeModel } from './createPbfSlimeModel';
+import { createLeggedSlimeModel } from './createLeggedSlimeModel';
 
 export function createActorVisualModel(
   environment: FillMaterialEnvironment,
@@ -26,6 +27,9 @@ export function createActorVisualModel(
   }
   if (definition.model === 'line-art-pbf-slime') {
     return createPbfSlimeModel(definition);
+  }
+  if (definition.model === 'line-art-legged-slime') {
+    return createLeggedSlimeModel(definition);
   }
   if (definition.model === 'line-art-raft') {
     return createBuoyancyRaftModel(environment, definition);

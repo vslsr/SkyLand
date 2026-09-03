@@ -1,9 +1,17 @@
 import type { Actor, ActorWorld } from '../../../shared/actor/index.mjs';
+import {
+  TRANSFORM_COMPONENT,
+  type TransformComponent,
+} from '../../../shared/actor/components/TransformComponent.mjs';
 import type { RenderTransformBuffer } from '../../render/RenderTransformBuffer';
 import {
   SLIME_MOTION_AT_REST,
   writeSlimeMotionParams,
 } from '../../render/RenderSlimeMotion';
+import {
+  SLIME_GROUND_PROBE_AT_REST,
+  writeSlimeGroundProbeParams,
+} from '../../render/RenderSlimeLegs';
 import {
   PARAM_BUOYANCY_DRAFT,
   PARAM_BUOYANCY_STATIC_PITCH,
@@ -28,6 +36,10 @@ import {
   RENDER_PROXY_COMPONENT,
   type RenderProxyComponent,
 } from '../components/RenderProxyComponent';
+import {
+  LEG_GROUND_PROBE_COMPONENT,
+  type LegGroundProbeComponent,
+} from '../components/LegGroundProbeComponent';
 import {
   FIRE_VISUAL_COMPONENT,
   type FireVisualComponent,
@@ -83,10 +95,29 @@ export class ActorVisualParamSystem {
       // 所以这里写的是静止值，而不是「跳过不写」：槽位会被复用，上一个玩家
       // 留下的速度会让新 proxy 一出生就在滑行。
       writeSlimeMotionParams(this.transforms, proxy.proxyId, SLIME_MOTION_AT_REST);
+      this.writeGroundProbe(actor, proxy);
       this.writeBuoyancy(actor, proxy);
       this.writeElastic(actor, proxy);
       this.writeDropMotion(actor, proxy);
     }
+  }
+
+  /**
+   * 腿部落脚的地面窗口。只有带 `LegGroundProbeComponent` 的 Actor 会真的去采地形，
+   * 因此每帧的地形采样次数正比于「长腿的 Actor 数」，而不是全部 Replica。
+   * 其余槽位写静止值（radius=0，渲染侧据此退回自己的兜底平面）。
+   */
+  private writeGroundProbe(actor: Actor, proxy: RenderProxyComponent): void {
+    const legs = actor.getComponent(
+      LEG_GROUND_PROBE_COMPONENT,
+    ) as LegGroundProbeComponent | undefined;
+    if (!legs) {
+      writeSlimeGroundProbeParams(this.transforms, proxy.proxyId, SLIME_GROUND_PROBE_AT_REST);
+      return;
+    }
+    const transform = actor.getComponent(TRANSFORM_COMPONENT) as TransformComponent | undefined;
+    if (transform) legs.refresh(transform.x, transform.y, transform.z);
+    writeSlimeGroundProbeParams(this.transforms, proxy.proxyId, legs.probe);
   }
 
   /** 船体波动只要三个静态偏置；浪高由渲染侧自己采。 */

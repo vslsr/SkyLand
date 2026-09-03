@@ -91,7 +91,7 @@ export interface GuidePathStyle {
  */
 export type PlayerRenderDefinition = Extract<
   ActorRenderDefinition,
-  { model: 'line-art-player-slime' | 'line-art-pbf-slime' }
+  { model: 'line-art-player-slime' | 'line-art-pbf-slime' | 'line-art-legged-slime' }
 >;
 
 export type SlimeSurfaceDragDefinition = NonNullable<

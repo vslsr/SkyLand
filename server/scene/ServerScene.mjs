@@ -43,6 +43,7 @@ import {
 } from '../actors/ServerActorFactory.mjs';
 import { ServerGeneratedPropActors } from '../actors/ServerGeneratedPropActors.mjs';
 import { ServerPlayerActor } from '../actors/ServerPlayerActor.mjs';
+import { isPlayerRenderModel } from '../actors/ActorCatalog.mjs';
 import {
   addVesselCargo,
   damageVesselPart,
@@ -144,10 +145,7 @@ function resolvePlayerActorArchetype(definition) {
   }
   const archetype = definition.actorArchetypes?.find((candidate) => candidate.id === configuredId);
   const renderModel = archetype?.components.render.model;
-  if (
-    !archetype?.components.playerMovement
-    || (renderModel !== 'line-art-player-slime' && renderModel !== 'line-art-pbf-slime')
-  ) {
+  if (!archetype?.components.playerMovement || !isPlayerRenderModel(renderModel)) {
     throw new Error(`场景缺少玩家 Actor 原型：${configuredId}`);
   }
   return archetype;

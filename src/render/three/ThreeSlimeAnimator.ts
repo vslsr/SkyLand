@@ -1,17 +1,39 @@
 import * as THREE from 'three';
 import { PLAYER_MOVE_SPEED } from '../../../shared/playerMovement.mjs';
-import type { PlayerSlimeModel } from '../../models/playerSlime';
+import type { ContactShadowMaterial } from '../../materials/createContactShadowMaterial';
+import type { SlimeSoftBody } from '../../models/slimeSoftBody';
 
 const BASE_SQUASH = 0.78;
 
+export type SlimeContactShadow = THREE.Mesh<THREE.CircleGeometry, ContactShadowMaterial>;
+
+export interface SlimeAnimatorOptions {
+  /** 走路动画的参考速度，通常取原型的 walkSpeed。 */
+  readonly referenceSpeed?: number;
+  /**
+   * 静止时身体中心停在 `radius` 的几倍高度上。
+   *
+   * 贴地的史莱姆是 1——底面正好压在 y=0。由腿撑起来的是 0：中心就停在髋点上，
+   * 高度由腿决定，身体只在原地挤压。
+   */
+  readonly restHeightRatio?: number;
+  /** 贴地阴影。长腿的史莱姆没有身体阴影，阴影画在落脚点上。 */
+  readonly shadow?: SlimeContactShadow;
+}
+
 /**
- * `line-art-player-slime` 的挤压/摇摆动画（实现路径文档 §1.5）。
+ * 史莱姆软体的挤压/摇摆动画（实现路径文档 §1.5）。
  *
- * 从 `src/player/` 搬进渲染世界：它每帧改的是模型各节点的 scale 与 rotation，
+ * 从 `src/player/` 搬进渲染世界：它每帧改的是软体各节点的 scale 与 rotation，
  * 玩法侧只需要给一个速度标量。
+ *
+ * 它认识的是 `SlimeSoftBody` 而不是某一个模型，因此贴地的 `line-art-player-slime`
+ * 和由腿撑起来的 `line-art-legged-slime` 共用同一套形变。
  */
 export class ThreeSlimeAnimator {
-  private readonly model: PlayerSlimeModel;
+  private readonly referenceSpeed: number;
+  private readonly restHeightRatio: number;
+  private readonly shadow?: SlimeContactShadow;
   private squash = BASE_SQUASH;
   private squashVelocity = 0;
   private wobble = 0;
@@ -21,10 +43,12 @@ export class ThreeSlimeAnimator {
   private pulse = 2;
 
   public constructor(
-    model: PlayerSlimeModel,
-    private readonly referenceSpeed = PLAYER_MOVE_SPEED,
+    private readonly model: SlimeSoftBody,
+    options: SlimeAnimatorOptions = {},
   ) {
-    this.model = model;
+    this.referenceSpeed = options.referenceSpeed ?? PLAYER_MOVE_SPEED;
+    this.restHeightRatio = options.restHeightRatio ?? 1;
+    this.shadow = options.shadow;
   }
 
   public update(deltaSeconds: number, elapsedSeconds: number, movementSpeed: number): void {
@@ -45,7 +69,7 @@ export class ThreeSlimeAnimator {
     const scaleY = THREE.MathUtils.clamp(this.squash, 0.45, 1.5);
     const scaleXZ = (1 / Math.sqrt(scaleY)) * (1 + this.wobble * 0.1);
     this.model.body.scale.set(scaleXZ, scaleY, scaleXZ);
-    this.model.body.position.y = this.model.radius * scaleY;
+    this.model.body.position.y = this.model.radius * scaleY * this.restHeightRatio;
 
     const targetTilt = Math.min(movementSpeed / Math.max(0.01, this.referenceSpeed), 1) * 0.15;
     this.tiltVelocity += (targetTilt - this.tilt) * 130 * deltaSeconds;
@@ -103,8 +127,10 @@ export class ThreeSlimeAnimator {
       bubble.mesh.scale.setScalar(0.5 + 0.5 * Math.sin(progress * Math.PI));
     }
 
+    const shadow = this.shadow;
+    if (!shadow) return;
     const shadowScale = 1 / Math.sqrt(scaleY);
-    this.model.shadow.scale.set(shadowScale, shadowScale, 1);
-    this.model.shadow.material.setOpacity(0.1 + 0.1 / scaleY);
+    shadow.scale.set(shadowScale, shadowScale, 1);
+    shadow.material.setOpacity(0.1 + 0.1 / scaleY);
   }
 }

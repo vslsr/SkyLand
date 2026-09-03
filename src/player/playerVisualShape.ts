@@ -1,3 +1,4 @@
+import { leggedSlimeTopY } from '../../shared/actor/leggedSlimeShape.mjs';
 import type { PlayerRenderDefinition } from '../render/RenderScene';
 import type { ActorRenderDefinition } from '../scenes/data/SceneDefinition';
 
@@ -19,7 +20,8 @@ export function isPlayerRenderDefinition(
   definition: ActorRenderDefinition | undefined,
 ): definition is PlayerRenderDefinition {
   return definition?.model === 'line-art-player-slime'
-    || definition?.model === 'line-art-pbf-slime';
+    || definition?.model === 'line-art-pbf-slime'
+    || definition?.model === 'line-art-legged-slime';
 }
 
 export function resolvePlayerVisualShape(
@@ -30,6 +32,14 @@ export function resolvePlayerVisualShape(
       radius: definition.radius,
       collisionRadius: definition.radius,
       collisionHeight: definition.radius * 2,
+    };
+  }
+  if (definition.model === 'line-art-legged-slime') {
+    return {
+      radius: definition.radius,
+      // 腿不参与碰撞：权威圆柱从地面一直包到身体顶部，两根细杆只是表现。
+      collisionRadius: definition.radius,
+      collisionHeight: leggedSlimeTopY(definition.hipHeight, definition.radius),
     };
   }
   return {

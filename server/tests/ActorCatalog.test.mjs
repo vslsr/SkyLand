@@ -311,3 +311,33 @@ test('ActorCatalog 拒绝越界的玩家台阶高度和错误的玩家渲染组�
   outsideSkin.components.render.collisionHeight = outsideSkin.components.render.radius;
   await assert.rejects(loadSingleActor(outsideSkin), /collisionHeight 必须低于外部蒙皮顶部/);
 });
+
+test('ActorCatalog 净化骨骼腿史莱姆并要求腿够得到站姿落脚点', async () => {
+  const catalog = await ActorCatalog.load();
+  const legged = catalog.require('legged-slime');
+  assert.equal(legged.components.render.model, 'line-art-legged-slime');
+  assert.equal(legged.components.render.legCount, 2);
+  assert.equal(legged.components.render.hipHeight, 0.66);
+  assert.equal(legged.components.render.legColor, '#141210');
+  assert.equal(legged.components.render.footShadowColor, '#6f6f6f');
+  // 长腿外壳也是一种玩家外壳，所以它必须带 playerMovement。
+  assert.ok(legged.components.playerMovement);
+
+  const tooShort = structuredClone(legged);
+  tooShort.id = 'probe-legged-slime';
+  tooShort.components.render.thighLength = 0.3;
+  tooShort.components.render.shinLength = 0.3;
+  await assert.rejects(loadSingleActor(tooShort), /必须够到站姿落脚点/);
+
+  const fractionalLegs = structuredClone(legged);
+  fractionalLegs.id = 'probe-legged-slime';
+  fractionalLegs.components.render.legCount = 2.5;
+  await assert.rejects(loadSingleActor(fractionalLegs), /legCount 必须是整数/);
+
+  const withoutMovement = structuredClone(legged);
+  withoutMovement.id = 'probe-legged-slime';
+  delete withoutMovement.components.playerMovement;
+  delete withoutMovement.components.playerJump;
+  delete withoutMovement.components.pickupDrop;
+  await assert.rejects(loadSingleActor(withoutMovement), /line-art-legged-slime 需要 playerMovement/);
+});

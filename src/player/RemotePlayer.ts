@@ -20,6 +20,12 @@ import {
   type SlimeDragParams,
 } from '../render/RenderSlimeDrag';
 import {
+  SLIME_GROUND_PROBE_AT_REST,
+  resolveSlimeLegGroundProbeLayout,
+  writeSlimeGroundProbeParams,
+} from '../render/RenderSlimeLegs';
+import { LegGroundProbeComponent } from '../actors/components/LegGroundProbeComponent';
+import {
   isPlayerRenderDefinition,
   resolvePlayerVisualShape,
   type PlayerVisualShape,
@@ -43,6 +49,8 @@ export class RemotePlayer extends Actor {
   private grounded = true;
 
   private readonly grassDisplacement: GrassDisplacementComponent;
+  /** 只有长腿外壳才有；和本地玩家同一套采样窗口。 */
+  private readonly legGroundProbe?: LegGroundProbeComponent;
 
   public constructor(
     state: InterpolatedPlayerState,
@@ -76,6 +84,12 @@ export class RemotePlayer extends Actor {
       paletteSeed: state.id,
       walkSpeed: movement.walkSpeed,
     });
+    if (render.model === 'line-art-legged-slime') {
+      this.legGroundProbe = this.addComponent(new LegGroundProbeComponent(
+        grassInteraction.sampleGroundHeight?.bind(grassInteraction),
+        resolveSlimeLegGroundProbeLayout(render),
+      )) as LegGroundProbeComponent;
+    }
     this.transform.x = state.x;
     this.transform.y = state.y ?? this.sampleHeight(state.x, state.z);
     this.transform.z = state.z;
@@ -146,6 +160,17 @@ export class RemotePlayer extends Actor {
     );
     writeSlimeMotionParams(this.transforms, this.renderProxy.id, this.motion);
     writeSlimeDragParams(this.transforms, this.renderProxy.id, this.drag);
+    const legs = this.legGroundProbe;
+    if (legs) {
+      legs.refresh(this.transform.x, this.transform.y, this.transform.z);
+    }
+    // 没有腿的外壳也要每帧写静止值：槽位会被回收，残留的采样窗口会让下一位
+    // 玩家的腿踩在别处的地面上。
+    writeSlimeGroundProbeParams(
+      this.transforms,
+      this.renderProxy.id,
+      legs ? legs.probe : SLIME_GROUND_PROBE_AT_REST,
+    );
   }
 
   private sampleHeight(x: number, z: number): number {

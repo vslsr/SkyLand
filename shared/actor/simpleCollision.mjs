@@ -10,6 +10,8 @@
 /** @typedef {{ collision: SimpleCollisionDefinition, transform: CollisionTransform }} SimpleCollisionInstance */
 /** @typedef {{ minimumY: number, maximumY: number, maximumStepHeight?: number }} CollisionVerticalProfile */
 
+import { leggedSlimeTopY } from './leggedSlimeShape.mjs';
+
 const COLLISION_EPSILON = 1e-7;
 
 function finiteNumber(value, fallback = 0) {
@@ -64,6 +66,19 @@ export function createSimpleCollisionFromRender(render, dropMotion) {
       halfLength: collisionRadius,
       minimumY: 0,
       maximumY: positiveNumber(render.collisionHeight, radius * 0.76),
+    });
+  }
+  if (model === 'line-art-legged-slime') {
+    const radius = positiveNumber(render.radius, 0.42);
+    const hipHeight = positiveNumber(render.hipHeight, radius * 1.8);
+    return createSimpleCollisionDefinition({
+      shape: 'cylinder',
+      // 腿不参与碰撞：它们是贴着地面采样点摆出来的表现，两根细杆挡住玩家只会
+      // 让这只史莱姆卡在自己的脚上。权威圆柱仍然从地面一直包到身体顶部。
+      halfWidth: radius,
+      halfLength: radius,
+      minimumY: 0,
+      maximumY: leggedSlimeTopY(hipHeight, radius),
     });
   }
   if (model === 'line-art-raft') {

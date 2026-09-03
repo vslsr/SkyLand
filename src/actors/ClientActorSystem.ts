@@ -60,6 +60,7 @@ import { toWorldSeed } from '../../shared/world/worldConfig.mjs';
 import { selectWorldPropVariant } from '../../shared/world/worldPropVariants.mjs';
 import type { FillMaterialEnvironment } from '../materials/createFillMaterial';
 import { NULL_PROXY_ID } from '../render/RenderScene';
+import { resolveSlimeLegGroundProbeLayout } from '../render/RenderSlimeLegs';
 import { frameTimeline } from '../platform/index';
 import { RenderTransformBuffer } from '../render/RenderTransformBuffer';
 import type { ThreeMeshProxy } from '../render/three/ThreeMeshProxy';
@@ -72,6 +73,10 @@ import type {
   VesselHudState,
 } from '../scene/SceneVisualSystem';
 import { ActorSnapshotBuffer } from './ActorSnapshotBuffer';
+import {
+  LegGroundProbeComponent,
+  type GroundHeightSampler,
+} from './components/LegGroundProbeComponent';
 import {
   REPLICATION_COMPONENT,
   ReplicationComponent,
@@ -146,6 +151,11 @@ export interface ClientActorSystemOptions {
   spawnBudgetMilliseconds?: number;
   /** 单调时钟。和 `now` 分开：`now` 是快照用的时间轴，测试里不会在一帧内推进。 */
   spawnClock?: () => number;
+  /**
+   * 地形高度查询。只有长腿的 Actor 会用到——它每帧采五个点决定脚落在哪儿。
+   * 不传时腿退回 Actor 自己脚下的平面，单独跑这个 System 的测试因此不需要地形。
+   */
+  sampleGroundHeight?: GroundHeightSampler;
 }
 
 type PropStateSnapshot = {
@@ -277,6 +287,8 @@ export class ClientActorSystem implements SceneVisualSystem {
   private readonly worldSeed: number;
   private readonly spawnBudgetMilliseconds: number;
   private readonly spawnClock: () => number;
+  /** 地形高度查询；只有长腿 Actor 的落脚采样会用到。 */
+  private readonly sampleGroundHeight?: GroundHeightSampler;
 
   public constructor(options: ClientActorSystemOptions) {
     this.archetypes = new Map(
@@ -304,6 +316,7 @@ export class ClientActorSystem implements SceneVisualSystem {
     this.spawnBudgetMilliseconds = options.spawnBudgetMilliseconds ?? REPLICA_SPAWN_BUDGET_MILLISECONDS;
     this.spawnClock = options.spawnClock
       ?? (() => (globalThis.performance ?? Date).now());
+    this.sampleGroundHeight = options.sampleGroundHeight;
     this.transforms = options.transforms ?? new RenderTransformBuffer();
     this.renderScene = options.renderScene
       ?? new ThreeRenderScene(
@@ -1003,6 +1016,13 @@ export class ClientActorSystem implements SceneVisualSystem {
       // RenderProxyComponent 必须先于所有表现 Component 加入：Actor.endPlay 是插入
       // 顺序的逆序，marker 要先释放自己的子树，proxy 的 disposeSubtree 才能最后跑。
       actor.addComponent(new RenderProxyComponent(info.id, this.renderScene));
+      // 腿的步态整段在渲染侧，玩法侧只负责「脚下的地面有多高」这一项查询。
+      if (archetype.components.render.model === 'line-art-legged-slime') {
+        actor.addComponent(new LegGroundProbeComponent(
+          this.sampleGroundHeight,
+          resolveSlimeLegGroundProbeLayout(archetype.components.render),
+        ));
+      }
       // 软体蒙皮不再挂在 Actor 上：createMeshProxy 认出 PBF 史莱姆就在渲染世界里
       // 自己建一份表现，玩法侧只写 SlimeMotionParams 那几个 f32（§1.5）。
       const render = this.renderScene.resolve(info.id) as ThreeMeshProxy;

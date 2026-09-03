@@ -16,7 +16,19 @@ const PILE_RENDER_MODELS = new Set([
   'line-art-fruit-pile',
 ]);
 const COLOR_PATTERN = /^#[0-9a-f]{6}$/i;
-const PLAYER_RENDER_MODELS = new Set(['line-art-player-slime', 'line-art-pbf-slime']);
+/**
+ * 能当玩家外壳的 render 模型。导出是有意的：场景校验与房间 DS 都要问同一个
+ * 问题，各自写一串 `!==` 会让新增一种玩家外壳变成三处独立的改动。
+ */
+export const PLAYER_RENDER_MODELS = new Set([
+  'line-art-player-slime',
+  'line-art-pbf-slime',
+  'line-art-legged-slime',
+]);
+
+export function isPlayerRenderModel(model) {
+  return PLAYER_RENDER_MODELS.has(model);
+}
 
 function requireObject(value, path) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
@@ -589,6 +601,53 @@ function validateRender(raw, filename) {
       shadowColor: requireColor(render.shadowColor, `${path}.shadowColor`),
     };
   }
+  if (render.model === 'line-art-legged-slime') {
+    const legCount = requireNumber(render.legCount, `${path}.legCount`, 2, 6);
+    if (!Number.isInteger(legCount)) {
+      throw new TypeError(`${path}.legCount 必须是整数`);
+    }
+    const radius = requireNumber(render.radius, `${path}.radius`, Number.EPSILON, 2);
+    const hipHeight = requireNumber(render.hipHeight, `${path}.hipHeight`, Number.EPSILON, 4);
+    const thighLength = requireNumber(render.thighLength, `${path}.thighLength`, Number.EPSILON, 3);
+    const shinLength = requireNumber(render.shinLength, `${path}.shinLength`, Number.EPSILON, 3);
+    const legSpread = requireNumber(render.legSpread, `${path}.legSpread`, Number.EPSILON, 2);
+    // 站姿下脚就够不到地的话，IK 每帧都在把落脚点往回收，腿会绷成一条直线并且
+    // 一直打滑——「骨骼有关节」这件事在画面上直接消失。
+    const standingReach = Math.hypot(hipHeight, legSpread);
+    if (thighLength + shinLength <= standingReach) {
+      throw new TypeError(
+        `${path} 的 thighLength + shinLength 必须够到站姿落脚点（> ${standingReach.toFixed(3)}）`,
+      );
+    }
+    return {
+      model: render.model,
+      radius,
+      hipHeight,
+      legSpread,
+      legCount,
+      thighLength,
+      shinLength,
+      legThickness: requireNumber(
+        render.legThickness,
+        `${path}.legThickness`,
+        Number.EPSILON,
+        0.3,
+      ),
+      footRadius: requireNumber(render.footRadius, `${path}.footRadius`, Number.EPSILON, 0.6),
+      stepLength: requireNumber(render.stepLength, `${path}.stepLength`, Number.EPSILON, 3),
+      stepHeight: requireNumber(render.stepHeight, `${path}.stepHeight`, 0, 2),
+      stepDuration: requireNumber(render.stepDuration, `${path}.stepDuration`, Number.EPSILON, 2),
+      membraneColor: requireColor(render.membraneColor, `${path}.membraneColor`),
+      middleColor: requireColor(render.middleColor, `${path}.middleColor`),
+      coreColor: requireColor(render.coreColor, `${path}.coreColor`),
+      bubbleColor: requireColor(render.bubbleColor, `${path}.bubbleColor`),
+      inkColor: requireColor(render.inkColor, `${path}.inkColor`),
+      shadowColor: requireColor(render.shadowColor, `${path}.shadowColor`),
+      legColor: requireColor(render.legColor, `${path}.legColor`),
+      jointColor: requireColor(render.jointColor, `${path}.jointColor`),
+      footShadowColor: requireColor(render.footShadowColor, `${path}.footShadowColor`),
+    };
+  }
   if (render.model === 'line-art-raft') {
     return {
       model: render.model,
@@ -810,6 +869,9 @@ function validateActorArchetype(raw, filename) {
   }
   if (render?.model === 'line-art-player-slime' && !playerMovement) {
     throw new TypeError(`${filename}.components.render line-art-player-slime 需要 playerMovement`);
+  }
+  if (render?.model === 'line-art-legged-slime' && !playerMovement) {
+    throw new TypeError(`${filename}.components.render line-art-legged-slime 需要 playerMovement`);
   }
   if (slimeSurfaceDrag && render?.model !== 'line-art-pbf-slime') {
     throw new TypeError(`${filename}.components.slimeSurfaceDrag 需要 line-art-pbf-slime render`);

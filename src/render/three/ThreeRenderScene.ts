@@ -2,8 +2,15 @@ import * as THREE from 'three';
 import type { FillMaterialEnvironment } from '../../materials/createFillMaterial';
 import type { OceanVisualDefinition } from '../../scenes/data/SceneDefinition';
 import { createActorVisualModel } from '../../models/actors/createActorVisualModel';
-import type { ActorVisualModel } from '../../models/actors/ActorVisualModel';
+import type {
+  ActorVisualModel,
+  SlimeLegVisualRig,
+} from '../../models/actors/ActorVisualModel';
 import { createPbfSlimeModel } from '../../models/actors/createPbfSlimeModel';
+import {
+  createLeggedSlimeModel,
+  type LeggedSlimeRenderDefinition,
+} from '../../models/actors/createLeggedSlimeModel';
 import { createPlayerSlimeModel, createSlimePalette } from '../../models/playerSlime';
 import {
   NULL_PROXY_ID,
@@ -28,11 +35,17 @@ import {
   readSlimeDragParams,
   type SlimeDragParams,
 } from '../RenderSlimeDrag';
+import {
+  SLIME_GROUND_PROBE_AT_REST,
+  readSlimeGroundProbeParams,
+  type SlimeGroundProbeParams,
+} from '../RenderSlimeLegs';
 import type { RenderTransform, RenderTransformBuffer } from '../RenderTransformBuffer';
 import { PARAM_SLIME_SPEED, PARAM_TEMPERATURE } from '../RenderVisualParams';
 import { ThreeFireVisual } from './ThreeFireVisual';
 import { ThreeGuidePathVisual } from './ThreeGuidePathVisual';
 import { ThreeHybridSlimeVisual } from './ThreeHybridSlimeVisual';
+import { ThreeSlimeLegVisual } from './ThreeSlimeLegVisual';
 import { ThreeAttachmentVisual } from './ThreeAttachmentVisual';
 import { ThreeDropRollVisual } from './ThreeDropRollVisual';
 import { ThreeElasticTetherVisual } from './ThreeElasticTetherVisual';
@@ -118,13 +131,18 @@ export class ThreeRenderScene implements RenderScene {
   private readonly guidePathStyles = new Map<ProxyId, GuidePathStyle>();
   /** proxyId → 软体蒙皮表现。只有 PBF 史莱姆有，所以用 Map 而不是按槽位的数组。 */
   private readonly slimeVisuals = new Map<ProxyId, ThreeHybridSlimeVisual>();
-  /** proxyId → 老式挤压动画。`line-art-player-slime` 那条路径用。 */
+  /** proxyId → 软体挤压动画。贴地的 `line-art-player-slime` 与长腿的都用它。 */
   private readonly slimeAnimators = new Map<ProxyId, ThreeSlimeAnimator>();
+  /** proxyId → 骨骼腿的步态与 IK。只有 `line-art-legged-slime` 有。 */
+  private readonly slimeLegs = new Map<ProxyId, ThreeSlimeLegVisual>();
   /** proxyId → 蒙皮拖拽。只有玩家 proxy 会建。 */
   private readonly slimeDrags = new Map<ProxyId, ThreeSlimeSurfaceDrag>();
   /** 逐帧复用的参数读出缓冲，避免每个史莱姆每帧分配一个对象。 */
   private readonly slimeMotion: SlimeMotionParams = { ...SLIME_MOTION_AT_REST };
   private readonly slimeDrag: SlimeDragParams = { ...SLIME_DRAG_AT_REST };
+  private readonly slimeGroundProbe: SlimeGroundProbeParams = { ...SLIME_GROUND_PROBE_AT_REST };
+  /** 腿部步态每帧要读的世界 transform；和 world/parentWorld 一样是复用的读出缓冲。 */
+  private readonly legWorld: RenderTransform = { x: 0, y: 0, z: 0, yaw: 0 };
   /** proxyId → 客户端波面浮动的模式。没有海的地图上这张表永远是空的。 */
   private readonly waterMotions = new Map<ProxyId, WaterMotionMode>();
   private readonly waterMotionVisual?: ThreeWaterMotionVisual;
@@ -162,6 +180,9 @@ export class ThreeRenderScene implements RenderScene {
         new ThreeHybridSlimeVisual(model.pbfSlimeVisualRig, desc.render),
       );
     }
+    if (desc.render?.model === 'line-art-legged-slime' && model.slimeLegVisualRig) {
+      this.#adoptLegs(proxy.id, model.slimeLegVisualRig, desc.render);
+    }
     // 没有海的地图上这两条表现不存在，模式给了也忽略。
     if (desc.waterMotion && this.waterMotionVisual) {
       this.waterMotions.set(proxy.id, desc.waterMotion);
@@ -191,7 +212,22 @@ export class ThreeRenderScene implements RenderScene {
       );
       model.root.name = desc.name;
       const proxy = this.#adopt(model);
-      this.slimeAnimators.set(proxy.id, new ThreeSlimeAnimator(model, desc.walkSpeed));
+      this.slimeAnimators.set(
+        proxy.id,
+        new ThreeSlimeAnimator(model, { referenceSpeed: desc.walkSpeed, shadow: model.shadow }),
+      );
+      return describeProxy(proxy);
+    }
+    if (desc.render.model === 'line-art-legged-slime') {
+      const model = createLeggedSlimeModel(
+        desc.render,
+        desc.paletteSeed === undefined ? undefined : createSlimePalette(desc.paletteSeed),
+      );
+      const rig = model.slimeLegVisualRig;
+      if (!rig) throw new Error(`骨骼腿史莱姆缺少 VisualRig：${desc.name}`);
+      model.root.name = desc.name;
+      const proxy = this.#adopt(model);
+      this.#adoptLegs(proxy.id, rig, desc.render, desc.walkSpeed);
       return describeProxy(proxy);
     }
     const model = createPbfSlimeModel(desc.render);
@@ -207,6 +243,26 @@ export class ThreeRenderScene implements RenderScene {
       desc.surfaceDrag ?? createDefaultSlimeSurfaceDragDefinition(desc.render.radius),
     ));
     return describeProxy(proxy);
+  }
+
+  /**
+   * 长腿史莱姆的两套表现：身体的软体挤压和腿的步态。
+   *
+   * 身体复用 `ThreeSlimeAnimator`——它就是 `line-art-player-slime` 的那套软体，
+   * 只是 `restHeightRatio` 给 0：中心停在髋点上，高度交给腿。身体阴影也不给，
+   * 灰色接触阴影画在每个落脚点上。
+   */
+  #adoptLegs(
+    id: ProxyId,
+    rig: SlimeLegVisualRig,
+    render: LeggedSlimeRenderDefinition,
+    walkSpeed?: number,
+  ): void {
+    this.slimeAnimators.set(id, new ThreeSlimeAnimator(rig.softBody, {
+      referenceSpeed: walkSpeed,
+      restHeightRatio: 0,
+    }));
+    this.slimeLegs.set(id, new ThreeSlimeLegVisual(rig, render));
   }
 
   /** 分槽位、登记、挂进场景图。两个入口共用同一张槽位表。 */
@@ -235,6 +291,7 @@ export class ThreeRenderScene implements RenderScene {
     this.slimeDrags.delete(id);
     this.slimeVisuals.delete(id);
     this.slimeAnimators.delete(id);
+    this.slimeLegs.delete(id);
     this.waterMotions.delete(id);
     this.elasticTethers.delete(id);
     this.dropRolls.delete(id);
@@ -339,6 +396,17 @@ export class ThreeRenderScene implements RenderScene {
     }
     for (const [id, animator] of this.slimeAnimators) {
       animator.update(deltaSeconds, elapsedSeconds, transforms.readParam(id, PARAM_SLIME_SPEED));
+    }
+    // 腿排在身体之后：`bodyRoot` 的高度由步态决定，而软体只在 `bodyRoot` 下面
+    // 原地挤压，两者写的不是同一个节点。
+    for (const [id, legs] of this.slimeLegs) {
+      if (!this.resolve(id)) continue;
+      legs.update(
+        deltaSeconds,
+        transforms.readTransform(id, this.legWorld),
+        readSlimeMotionParams(transforms, id, this.slimeMotion),
+        readSlimeGroundProbeParams(transforms, id, this.slimeGroundProbe),
+      );
     }
   }
 

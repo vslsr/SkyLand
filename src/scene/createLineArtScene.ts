@@ -57,6 +57,10 @@ export function createLineArtScene(
     worldSeed,
     renderScene,
     transforms: renderTransforms,
+    // 长腿 Actor 的落脚采样。没有地形世界的固定地图不传，腿退回自己脚下的平面。
+    sampleGroundHeight: terrainWorld
+      ? (x, z) => terrainWorld.sampleGroundHeight(x, z)
+      : undefined,
   });
   scene.background = new THREE.Color(renderer.background);
   scene.fog = new THREE.Fog(renderer.fog.color, renderer.fog.near, renderer.fog.far);

@@ -34,6 +34,12 @@ import {
   type SlimeDragParams,
 } from '../render/RenderSlimeDrag';
 import {
+  SLIME_GROUND_PROBE_AT_REST,
+  resolveSlimeLegGroundProbeLayout,
+  writeSlimeGroundProbeParams,
+} from '../render/RenderSlimeLegs';
+import { LegGroundProbeComponent } from '../actors/components/LegGroundProbeComponent';
+import {
   isPlayerRenderDefinition,
   resolvePlayerVisualShape,
   type PlayerVisualShape,
@@ -109,6 +115,8 @@ export class PlayerEntity extends Actor {
   private readonly visual: PlayerVisualShape;
   private readonly reconciler = new PlayerReconciler();
   private readonly grassDisplacement: GrassDisplacementComponent;
+  /** 只有长腿外壳才有：每帧采身体脚下的五个点，供渲染侧的步态落脚。 */
+  private readonly legGroundProbe?: LegGroundProbeComponent;
   private readonly gameAbility: GameAbilityComponent;
   private readonly waterMovementEffect: WaterMovementEffectController;
   private readonly jumpAbility: PlayerJumpComponent;
@@ -169,6 +177,12 @@ export class PlayerEntity extends Actor {
     this.isWaterAt = grassInteraction.isWaterAt?.bind(grassInteraction);
     const samplePlayerHeight = sampleBasePlayerHeight;
     const raycastGround = grassInteraction.raycastGround?.bind(grassInteraction);
+    if (render.model === 'line-art-legged-slime') {
+      this.legGroundProbe = this.addComponent(new LegGroundProbeComponent(
+        sampleGroundHeight,
+        resolveSlimeLegGroundProbeLayout(render),
+      )) as LegGroundProbeComponent;
+    }
     this.transform.position.x = spawn.x;
     this.transform.position.y = samplePlayerHeight?.(spawn.x, spawn.z) ?? 0;
     this.transform.position.z = spawn.z;
@@ -384,6 +398,25 @@ export class PlayerEntity extends Actor {
     // 咬住那一份。没有的时候也要每帧写，否则回收来的槽位会带着上一位玩家的
     // 残留把自己的外壳拉出去。
     writeSlimeDragParams(this.transforms, this.renderProxy.id, this.replicatedDrag);
+    this.publishGroundProbe();
+  }
+
+  /**
+   * 长腿外壳脚下那一小片地面。没有腿的外壳也要每帧写静止值——槽位会被回收，
+   * 上一位玩家留下的采样窗口会让新 proxy 的腿一出生就踩在别处的地面上。
+   */
+  private publishGroundProbe(): void {
+    const legs = this.legGroundProbe;
+    if (!legs) {
+      writeSlimeGroundProbeParams(
+        this.transforms,
+        this.renderProxy.id,
+        SLIME_GROUND_PROBE_AT_REST,
+      );
+      return;
+    }
+    legs.refresh(this.transform.position.x, this.transform.position.y, this.transform.position.z);
+    writeSlimeGroundProbeParams(this.transforms, this.renderProxy.id, legs.probe);
   }
 
   public override dispose(): void {

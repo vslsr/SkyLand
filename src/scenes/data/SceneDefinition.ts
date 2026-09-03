@@ -89,6 +89,37 @@ export type ActorRenderDefinition =
       shadowColor: string;
     }
   | {
+      model: 'line-art-legged-slime';
+      /** 软体身体的半径；身体本身沿用 `line-art-player-slime` 的那套外壳。 */
+      radius: number;
+      /** 静止站立时髋点离地高度。腿把身体撑到这里，软体不再贴地。 */
+      hipHeight: number;
+      /** 两条腿髋点的半间距。 */
+      legSpread: number;
+      legCount: number;
+      thighLength: number;
+      shinLength: number;
+      /** 粗线的半径——腿是圆柱，不是 LineSegments：WebGL 忽略 linewidth。 */
+      legThickness: number;
+      footRadius: number;
+      /** 落脚点离理想位置多远就迈一步。 */
+      stepLength: number;
+      /** 迈步时脚抬起的弧高。 */
+      stepHeight: number;
+      /** 一次迈步的时长，秒。 */
+      stepDuration: number;
+      membraneColor: string;
+      middleColor: string;
+      coreColor: string;
+      bubbleColor: string;
+      inkColor: string;
+      shadowColor: string;
+      legColor: string;
+      jointColor: string;
+      /** 落脚点那枚灰色贴地椭圆。它是画出来的接触提示，不是光照阴影。 */
+      footShadowColor: string;
+    }
+  | {
       model: 'line-art-raft';
       foamColor: string;
       length: number;

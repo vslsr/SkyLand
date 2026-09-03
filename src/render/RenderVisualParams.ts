@@ -97,5 +97,23 @@ export const PARAM_SLIME_DRAG_PULL_X = 28;
 export const PARAM_SLIME_DRAG_PULL_Y = 29;
 export const PARAM_SLIME_DRAG_PULL_Z = 30;
 
+/**
+ * 腿部落脚用的地面采样窗口（见 `RenderSlimeLegs.ts`）。
+ *
+ * 过边界的是身体脚下那一小片地面，不是每只脚的高度：脚落在哪里由渲染侧的步态
+ * 决定，玩法侧要按脚采样就得先回读渲染世界。窗口是常数大小的五个探针，
+ * 所以每个 Actor 每帧的采样次数与世界尺寸无关。
+ *
+ * **PROBE_RADIUS 为 0 表示没有地面采样。** 和 AIRBORNE 同一个道理：不驱动这项
+ * 表现的槽位每帧写 0，所以静止值必须是「没有」——否则那五个 0 会被当成
+ * 「地面在世界 Y=0」，让远处的腿一齐插进虚空。
+ */
+export const PARAM_SLIME_GROUND_CENTER_Y = 31;
+export const PARAM_SLIME_GROUND_EAST_Y = 32;
+export const PARAM_SLIME_GROUND_WEST_Y = 33;
+export const PARAM_SLIME_GROUND_SOUTH_Y = 34;
+export const PARAM_SLIME_GROUND_NORTH_Y = 35;
+export const PARAM_SLIME_GROUND_PROBE_RADIUS = 36;
+
 /** 每个 proxy 槽位的参数个数。新增参数就在上面加常量并把这里加一。 */
-export const RENDER_VISUAL_PARAM_COUNT = 31;
+export const RENDER_VISUAL_PARAM_COUNT = 37;
