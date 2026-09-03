@@ -44,9 +44,10 @@
       "range": 1.8,
       "facingDot": 0.15,
       "pinch": 1,
-      "leashSlack": 0.35,
-      "leashStiffness": 60,
-      "leashDamping": 14
+      "leashSlack": 0.2,
+      "leashStiffness": 90,
+      "leashDamping": 14,
+      "leashCarry": 40
     },
     "slimeSurfaceDrag": {
       "maximumDistance": 1.05,

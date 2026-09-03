@@ -9,6 +9,9 @@ import {
 
 const EPSILON = 1e-6;
 
+/** 拖带在绳长之外这么长一段里渐入，免得刚好压在边界上时一帧带一帧不带地抖。 */
+const LEASH_CARRY_RAMP = 0.3;
+
 function moveVectorTowards(currentX, currentZ, targetX, targetZ, maximumDelta) {
   const deltaX = targetX - currentX;
   const deltaZ = targetZ - currentZ;
@@ -73,6 +76,21 @@ export function stepCharacter(state, input, deltaSeconds, physics, params) {
       )) * dt;
       state.vx -= directionX * pull;
       state.vz -= directionZ * pull;
+
+      // 绳绷紧之后，拖的人说了算：直接把被拖者的速度往锚点速度上带，而不是再加
+      // 一份和他自己驱动力较劲的拉力。被拖者的驱动是有上限的加速度，这一项不是，
+      // 所以挣扎只能改变被拖出去的姿势，改变不了被拖走这件事。
+      //
+      // 拿速度而不是加速度，是因为「拖着走」的自然结果是两者速度相同；用加速度
+      // 较劲会稳定在一个被挣扎撑开的间距上，绳子越拉越长。
+      const carry = Math.max(0, toFiniteNumber(leash.carry));
+      if (carry > 0) {
+        // 在绳长附近渐入，避免刚好压在边界上时一帧带一帧不带地抖。
+        const tautness = Math.min(1, overshoot / LEASH_CARRY_RAMP);
+        const follow = (1 - Math.exp(-carry * dt)) * tautness;
+        state.vx += (toFiniteNumber(leash.anchorVelocityX) - state.vx) * follow;
+        state.vz += (toFiniteNumber(leash.anchorVelocityZ) - state.vz) * follow;
+      }
     }
   }
 
@@ -153,7 +171,10 @@ export function createCharacterSimulationParams(characterId, movement, jump, opt
     gravity: Math.max(0, toFiniteNumber(jump?.gravity, 22)),
     maximumFallSpeed: Math.max(0, toFiniteNumber(jump?.maximumFallSpeed, 20)),
     buoyancyHeight: /** @type {number | undefined} */ (undefined),
-    /** 被外力拴住时的缰绳 {anchorX, anchorZ, slack, stiffness, damping}；自由时是 undefined。 */
+    /**
+     * 被外力拴住时的缰绳；自由时是 undefined。
+     * {anchorX, anchorZ, slack, stiffness, damping, carry, anchorVelocityX, anchorVelocityZ}
+     */
     leash: /** @type {object | undefined} */ (undefined),
     bounds: options.bounds,
   };

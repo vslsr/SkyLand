@@ -39,6 +39,13 @@ export interface SnapshotLeash {
   stiffness: number;
   /** 径向阻尼。没有它人会在绳长附近来回荡，而不是停在绳边上。 */
   damping: number;
+  /**
+   * 拖带强度。绳绷紧时被拖者的速度按它收敛到锚点速度上，所以拖拽赢过被拖者
+   * 自己的驱动。不动的外力（地上的倒刺）锚点速度是 0，只拴不拖。
+   */
+  carry: number;
+  anchorVelocityX: number;
+  anchorVelocityZ: number;
 }
 
 /** 房间快照里的单名玩家，坐标由服务端权威计算。 */

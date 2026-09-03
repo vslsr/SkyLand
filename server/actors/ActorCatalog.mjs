@@ -371,6 +371,9 @@ function validateBite(raw, filename) {
     ...(definition.leashDamping !== undefined ? {
       leashDamping: requireNumber(definition.leashDamping, `${path}.leashDamping`, 0, 60),
     } : {}),
+    ...(definition.leashCarry !== undefined ? {
+      leashCarry: requireNumber(definition.leashCarry, `${path}.leashCarry`, 0, 60),
+    } : {}),
   };
 }
 

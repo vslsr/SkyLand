@@ -236,6 +236,7 @@ export interface ActorArchetypeDefinition {
       leashSlack?: number;
       leashStiffness?: number;
       leashDamping?: number;
+      leashCarry?: number;
     };
     slimeSurfaceDrag?: {
       maximumDistance: number;

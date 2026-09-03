@@ -789,6 +789,9 @@ export class ServerScene {
       slack: deformation.grabDistance + deformation.leashSlack,
       stiffness: deformation.leashStiffness,
       damping: deformation.leashDamping,
+      carry: deformation.leashCarry,
+      anchorVelocityX: roundCoordinate(deformation.anchorVelocityX),
+      anchorVelocityZ: roundCoordinate(deformation.anchorVelocityZ),
     };
   }
 
@@ -859,11 +862,15 @@ export class ServerScene {
       leashSlack: bite.leashSlack,
       leashStiffness: bite.leashStiffness,
       leashDamping: bite.leashDamping,
+      leashCarry: bite.leashCarry,
     })) return false;
     if (!bite.bite(target.id)) {
       targetDeformation.release(player.id);
       return false;
     }
+    // 立刻兑现一次：锚点与位移由 pullToward 写，不先跑一次的话，抓住到下一个
+    // tick 之间发出的快照会带着一条指向世界原点的缰绳。
+    targetDeformation.pullToward(player.id, target, player, player.characterState);
     return true;
   }
 

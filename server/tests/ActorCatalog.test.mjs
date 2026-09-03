@@ -258,9 +258,10 @@ test('ActorCatalog 保留软体形变与咬合参数，并拒绝越界值', asyn
     range: 1.8,
     facingDot: 0.15,
     pinch: 1,
-    leashSlack: 0.35,
-    leashStiffness: 60,
+    leashSlack: 0.2,
+    leashStiffness: 90,
     leashDamping: 14,
+    leashCarry: 40,
   });
 
   // 刚度乘固定步长超过 2 就会自激振荡，目录必须挡在这条线之前。

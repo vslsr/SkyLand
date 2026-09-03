@@ -25,7 +25,7 @@ export class SoftBodyBiteSystem {
       }
       // 方向取「被咬者 → 咬人者」的位置方向，所以这里给的是咬人者本人的位置，
       // 不是嘴：嘴离外壳太近，拿它当锚点算出来的位移会指进身体里。
-      if (deformation.pullToward(actor.id, target, actor)) continue;
+      if (deformation.pullToward(actor.id, target, actor, actor.characterState)) continue;
       deformation.release(actor.id);
       bite.release();
     }

@@ -31,10 +31,15 @@ export class BiteComponent extends ActorComponent {
      * 一分，所以是「越走越拉不动」而不是撞上一堵看不见的墙。刚度乘固定步长
      * 超过 2 这个弹簧就会自激振荡，所以目录把它卡在 120 以内。
      */
-    this.leashSlack = Math.max(0, finiteOr(definition.leashSlack, 0.35));
-    this.leashStiffness = Math.max(0, finiteOr(definition.leashStiffness, 60));
+    this.leashSlack = Math.max(0, finiteOr(definition.leashSlack, 0.2));
+    this.leashStiffness = Math.max(0, finiteOr(definition.leashStiffness, 90));
     /** 径向阻尼。没有它缰绳会形成极限环，人在绳长附近来回荡而不是停在绳边上。 */
     this.leashDamping = Math.max(0, finiteOr(definition.leashDamping, 14));
+    /**
+     * 拖带强度（每秒收敛率）。绳绷紧时被咬者的速度按它收敛到咬人者的速度上，
+     * 所以拖拽赢过被咬者自己的驱动——挣扎只能改变被拖走的姿势。
+     */
+    this.leashCarry = Math.max(0, finiteOr(definition.leashCarry, 40));
     this.targetActorId = null;
   }
 

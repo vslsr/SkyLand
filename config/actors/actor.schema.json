@@ -109,7 +109,8 @@
             "pinch": { "type": "number", "minimum": 0, "maximum": 1 },
             "leashSlack": { "type": "number", "minimum": 0, "maximum": 8 },
             "leashStiffness": { "type": "number", "minimum": 0, "maximum": 120 },
-            "leashDamping": { "type": "number", "minimum": 0, "maximum": 60 }
+            "leashDamping": { "type": "number", "minimum": 0, "maximum": 60 },
+            "leashCarry": { "type": "number", "minimum": 0, "maximum": 60 }
           }
         },
         "slimeSurfaceDrag": {

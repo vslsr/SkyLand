@@ -61,9 +61,13 @@ export class SoftBodyDeformationComponent extends ActorComponent {
     /** 施力方最后一次的世界位置，缰绳的锚点就是它。 */
     this.anchorX = 0;
     this.anchorZ = 0;
+    /** 施力方自己的速度。绳绷紧时被拖者直接按它走，所以拖拽赢过被拖者的驱动。 */
+    this.anchorVelocityX = 0;
+    this.anchorVelocityZ = 0;
     this.leashSlack = 0;
     this.leashStiffness = 0;
     this.leashDamping = 0;
+    this.leashCarry = 0;
   }
 
   get active() {
@@ -93,6 +97,7 @@ export class SoftBodyDeformationComponent extends ActorComponent {
     this.leashSlack = Math.max(0, finiteOr(options.leashSlack));
     this.leashStiffness = Math.max(0, finiteOr(options.leashStiffness));
     this.leashDamping = Math.max(0, finiteOr(options.leashDamping));
+    this.leashCarry = Math.max(0, finiteOr(options.leashCarry));
     this.revision += 1;
     this.expiresAt = undefined;
     return true;
@@ -107,10 +112,14 @@ export class SoftBodyDeformationComponent extends ActorComponent {
    *
    * 返回 false 表示已经拉断，调用方应当脱手。
    */
-  pullToward(sourceId, pose, sourcePosition) {
+  pullToward(sourceId, pose, sourcePosition, sourceVelocity) {
     if (this.sourceId !== sourceId || !this.heldExternally) return false;
     this.anchorX = finiteOr(sourcePosition.x);
     this.anchorZ = finiteOr(sourcePosition.z);
+    // 不动的外力（地上的倒刺）不传速度，于是拖带项自然是 0：它只会拴住人，
+    // 不会把人拖走。
+    this.anchorVelocityX = finiteOr(sourceVelocity?.vx);
+    this.anchorVelocityZ = finiteOr(sourceVelocity?.vz);
     const deltaX = this.anchorX - finiteOr(pose.x);
     const deltaY = finiteOr(sourcePosition.y) - finiteOr(pose.y);
     const deltaZ = this.anchorZ - finiteOr(pose.z);

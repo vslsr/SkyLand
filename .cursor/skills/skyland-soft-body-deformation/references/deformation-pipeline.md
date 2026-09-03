@@ -79,8 +79,15 @@
 2. `shared/actor/components/SnagComponent.mjs`：`hookedActorId` + 判定参数。
 3. `server/actors/SnagSystem.mjs`：踩上去时 `resolveSurfaceContact(radius, player, spikeWorld)` →
    `deformation.grab(spike.id, contact, { pinch, grabDistance, leashSlack, leashStiffness, leashDamping })`；
-   之后每 tick `deformation.pullToward(spike.id, player, spikeWorld)`。返回 false 就 `release` 两边。
+   之后每 tick `deformation.pullToward(spike.id, player, spikeWorld)`——不传速度，
+   于是拖带项是 0，倒刺只拴不拖。返回 false 就 `release` 两边。抓住之后要立刻兑现
+   一次，否则那一小段窗口里的缰绳锚点还是 (0,0)。
 4. 客户端一行不用改。
+
+当前这组值（slack 0.2 / k 90 / damping 14 / carry 40）的实测：站着不动的咬人者面前，
+被咬者冲刺挣脱停在 1.64m（形变 0.44m，振幅 0.004，不来回荡）；被拖着走时间距 2.13m、
+形变 0.93m，落在求解器可见量程 1.05 之内；全力反抗仍会被拖走咬人者六成以上的距离。
+调参时这三条一起看，只盯一条会顾此失彼。
 
 两个要点：
 

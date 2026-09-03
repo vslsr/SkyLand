@@ -10,7 +10,7 @@ A slime's shape is a client-side solver: a spring-driven core plus a per-vertex 
 Being *held*, on the other hand, is gameplay. A hold has two separable halves, and keeping them separate is the point:
 
 - **the deformation** — cosmetic, solved on each client, may never move an Actor or change collision;
-- **the leash** — a restoring force in the shared character step that limits how far the held Actor can get. It is authoritative and predicted like any other movement.
+- **the leash** — a restoring force in the shared character step that limits how far the held Actor can get, and carries them along when the holder moves. It is authoritative and predicted like any other movement.
 
 A source can have either half or both. The player's own mouse drag has only the first.
 
@@ -61,7 +61,9 @@ Decide first which of the two kinds you have.
 - Deformation forces stay within a radius-scaled bound, so the shape budget never grows with world scale.
 - **The leash lives in `stepCharacter`, never on the server alone.** Client prediction runs that same fixed step; a force applied only on the authority makes the client walk out and get yanked back by every snapshot, which is a permanent rubber band. The anchor the client has is one interpolation delay old — that residue is what reconciliation is for.
 - **A leash needs damping.** A pure spring against a constant drive acceleration is a limit cycle: the player gets flung back, the rope goes slack, they charge out again. The radial damping term is what makes them settle *at* the rope instead of oscillating across it. Keep `stiffness * fixedStep < 2` (the catalog caps it) or the spring self-excites.
+- **Towing is velocity, restraint is force.** The spring alone already beats a held player's own movement — their drive is a bounded acceleration and the spring is not — but a spring that has to *win an argument* settles at whatever distance the struggle stretches it to. The `carry` term instead blends the held velocity toward the holder's, so the hold tows rather than negotiates. A static source (a spike) simply reports zero anchor velocity and gets restraint without towing, from the same code.
 - Tune the leash so its steady-state stretch stays inside the solver's `maximumDistance`. Past that the visual is clamped and every hold looks identical, no matter how hard the victim pulls.
+- **Prime the anchor at grab time.** The anchor is written by the per-tick update, so a grab that does not immediately run one leaves a snapshot window whose leash points at the world origin — and yanks the victim there.
 
 ## Uplink budget
 
@@ -76,7 +78,8 @@ The self-reported drag is throttled to `SLIME_DRAG_SEND_INTERVAL_SECONDS` (the s
 ## Verify
 
 1. Server tests for a new source: grab refused when out of range/blocked, pull tracking both poses, **the pull pointing outward** (dot it with the contact normal — an inward pull is the classic direction bug), auto-release at the break distance, cleanup when either side leaves.
-2. A leash test that measures reach: free run vs. held run, then a second held run showing the reach has stopped growing. Settling, not oscillating, is the property that matters.
+2. A leash test that measures reach: free run vs. held run, then a second held run showing the reach has stopped growing. Settling, not oscillating, is the property that matters. For towing, have the victim struggle in the opposite direction and assert they still cover most of the holder's distance.
+   Two things will waste an afternoon if you don't know them: a player who is sent **no** input is not stepped at all, so a test that models "not resisting" by sending nothing measures a frozen player, not a passive one — send a zero-move input. And the test scene's origin is inside scenery: place fixtures on open ground and sync both the Actor transform and the character body, or the KCC stays at spawn while your math runs somewhere else.
 3. A render test that drives the real path — write params, `submitTransforms`, `updateVisuals` — not the solver directly. Applying the *same* revision for many frames must keep accumulating stretch.
 4. `tests/RenderSceneBoundary.test.ts`, always: a Component that quietly imported the solver fails there and nowhere else.
 5. `npm test` and `npx tsc --noEmit`.
