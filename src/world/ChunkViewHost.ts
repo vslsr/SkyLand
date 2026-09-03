@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import type { ChunkGenerator } from '../../shared/world/chunkGenerator.mjs';
 import { createOverrideCellCodeAt } from '../../shared/world/terrainCollisionMesh.mjs';
 import { frameTimeline } from '../platform/index';
 import { StreamingGrassSystem, type GrassInteractionTarget } from '../grass';
@@ -10,18 +11,24 @@ import {
   createChunkFillMaterial,
   createChunkGroundFillMaterial,
 } from '../models/chunkMesh';
-import type { ChunkTemplateOptions } from '../models/chunkTemplates';
+import { registerChunkTemplates, type ChunkTemplateOptions } from '../models/chunkTemplates';
 import type { SceneUpdateContext } from '../scene/SceneVisualSystem';
 import type { OceanVisualDefinition } from '../scenes/data/SceneDefinition';
 import { ChunkView } from './ChunkView';
+import { createChunkGenerator } from './loadChunkGenerator';
 
 /** 挂一个 chunk 的视图要的东西。全是数据——没有回调、没有 Actor、没有物理。 */
 export interface ChunkViewMountRequest {
   readonly key: string;
   readonly chunkX: number;
   readonly chunkZ: number;
-  /** 生成器产出的放置记录与几何数据（定长类型化数组）。 */
-  readonly data: ChunkGeometryPayload;
+  /**
+   * 这块 chunk 里被移除的物件位掩码。
+   *
+   * 几何由这一侧自己按种子生成，但「哪一棵树已经被砍掉」是服务端下发的玩法事实，
+   * 推不出来，必须传。
+   */
+  readonly skipMask?: { low: number; high: number };
   /**
    * 这一窗里被编辑过的格子，摊成 `[globalCellX, globalCellZ, code, ...]`。
    *
@@ -31,14 +38,14 @@ export interface ChunkViewMountRequest {
   readonly terrainOverrides: Int32Array;
 }
 
-type ChunkGeometryPayload = ConstructorParameters<typeof ChunkView>[3];
-
 export interface ChunkViewHostOptions {
   templates: ChunkTemplateOptions;
   environment: FillMaterialEnvironment;
   ocean?: OceanVisualDefinition;
   seaLevel?: number;
   worldSeed: number;
+  /** 生成后端就位时回调一次。玩法侧在那之前不该开始规划。 */
+  onGeneratorReady?: (kind: string) => void;
 }
 
 /**
@@ -70,6 +77,16 @@ export class ChunkViewHost {
   private readonly templates: ChunkTemplateOptions;
   private readonly worldSeed: number;
   private readonly seaLevel: number;
+  /**
+   * chunk 几何的生成后端。
+   *
+   * **它在这一侧，因为它需要 THREE 模板**：`registerChunkTemplates` 把每种物件的
+   * 几何烘成模板交给它，`buildChunk` 再照模板把顶点铺出来。玩法侧要的那一半
+   * （放置记录）是 `generateChunkProps`——同一个种子、同一份纯函数、不需要模板，
+   * 服务端 `ServerGeneratedPropActors` 早就直接调它。两侧各推各的，不用来回送。
+   */
+  private generator?: ChunkGenerator;
+  private disposed = false;
 
   public constructor(options: ChunkViewHostOptions) {
     this.root.name = 'chunk-views';
@@ -96,6 +113,21 @@ export class ChunkViewHost {
       this.grassInteraction = this.grass.interaction;
       this.root.add(this.grass.root);
     }
+
+    // 生成后端是异步取回来的；在它就位之前什么都不建，世界会晚一两帧出现，
+    // 这比先用一套参数铺一遍再重铺要划算。
+    void createChunkGenerator().then((generator) => {
+      if (this.disposed) return;
+      // 草继续由生成器产出同一批放置记录，但不再烘进静态 chunk；
+      // StreamingGrassSystem 会按这些原坐标生成可交互的实例叶片。
+      registerChunkTemplates(generator, {
+        ...options.templates,
+        content: { ...options.templates.content, grass: false },
+      });
+      generator.setSeed(this.worldSeed);
+      this.generator = generator;
+      options.onGeneratorReady?.(generator.kind);
+    });
   }
 
   /** 每帧：草地与水面的时间量。和流送规划无关，所以留在这一侧。 */
@@ -117,13 +149,18 @@ export class ChunkViewHost {
   }
 
   public mount(request: ChunkViewMountRequest): void {
-    if (this.views.has(request.key)) return;
-    // 两段分开打点：几何体是 Three 对象，草地实例是纯计算。
+    if (this.views.has(request.key) || !this.generator) return;
+    // `chunk-gen` 是纯计算（只是便宜到不值得搬）；`chunk-geometry` 建的是
+    // Three 对象。分开打点是为了看清哪一段值得动。
+    const data = frameTimeline.measure(
+      'chunk-gen',
+      () => this.generator!.buildChunk(request.chunkX, request.chunkZ, request.skipMask),
+    );
     const view = frameTimeline.measure('chunk-geometry', () => new ChunkView(
       request.key,
       request.chunkX,
       request.chunkZ,
-      request.data,
+      data,
       {
         fill: this.fillMaterial,
         groundFill: this.groundFillMaterial,
@@ -142,7 +179,7 @@ export class ChunkViewHost {
         cellCodeAt: createOverrideCellCodeAt(this.worldSeed, request.terrainOverrides),
       },
     ));
-    frameTimeline.measure('chunk-grass', () => this.grass?.mountChunk(request.key, request.data));
+    frameTimeline.measure('chunk-grass', () => this.grass?.mountChunk(request.key, data));
     this.views.set(request.key, view);
     this.root.add(view.root);
   }
@@ -161,6 +198,8 @@ export class ChunkViewHost {
 
   /** 场景卸载时释放这个流式世界独占的显存。 */
   public dispose(): void {
+    this.disposed = true;
+    this.generator = undefined;
     this.clear();
     this.grass?.dispose();
     this.waterMaterials?.surface.dispose();

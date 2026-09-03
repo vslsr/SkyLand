@@ -768,6 +768,45 @@ worker 已经在传的 `[globalCellX, globalCellZ, code, ...]`。
 `ThreeRenderScene` 上加一个有返回值的方法，棘轮看不见。所以把其中形状属于边界的
 六个都声明到了 `RenderScene` 上。
 
+### 已经做了的：尖刀证明渲染栈能在 worker 里跑 ✅
+
+这一步开头那次尖刀只证明了「`transferControlToOffscreen` + WebGL2 能在 worker 里
+清屏」——那和「SkyLand 的渲染栈能不能在 worker 里跑」不是一件事。真正会咬人的是
+自定义 shader 材质、chunk 几何、WASM 生成器、以及标记牌的文字贴图。
+
+`spike/` 把真东西搬进 worker 跑了一遍：`ThreeRenderScene`（Actor 模型 + 玩家史莱姆）、
+`ChunkViewHost`（四块 chunk 的地形、树、岩石、草）、`createSceneEnvironment` 的自定义
+材质、`createChunkGenerator` 的 WASM 后端、标记牌的 `OffscreenCanvas` 文字贴图，
+然后真画三帧。**全过**，68 次 draw call，画面正常。
+
+所以剩下的是装配的拆分，不是「能不能」的问题。这个目录不进产物（`tsc` 的 include
+与 vite build 的入口都不含它），留着当后面逐块搬运时的验证台。
+
+### 已经做了的：chunk 生成器归渲染侧 ✅
+
+`buildChunk` 同时产出**放置记录**（玩法：碰撞体、生成物件 Actor）和**几何顶点**
+（渲染）。它是最后一处骑在边界上的东西——而且它需要 THREE 模板
+（`registerChunkTemplates` 把每种物件烘成模板交给生成器）。
+
+解法和地形覆盖是同一个：**两侧各按种子推，不来回送**。
+
+- 生成器与模板注册整个搬进 `ChunkViewHost`。它收到的是 `(key, chunkX, chunkZ,
+  skipMask, terrainOverrides)`——全是数据，几何自己生成。
+- `ChunkStreamer` 改调 `generateChunkProps`：同一个种子、同一份纯函数、**不需要
+  模板**。服务端 `ServerGeneratedPropActors` 与 `shared/world/chunkColliders.mjs`
+  早就直接调它。
+
+值得写下来的一点：这让客户端的**碰撞体来自 JS 实现、几何来自 WASM 实现**，
+于是它依赖了那条「两个后端必须逐位一致」的规则（`skyland-chunk-world` skill 里
+「唯一重要的规则」）。这不是新增的风险——**服务端本来就是这么配的**：它用 JS 算
+碰撞体，而客户端一直用 WASM 画。也就是说这条依赖早就跨网络承重了，现在只是让
+客户端内部也照同一个办法配。`server/tests/chunkGenerator.test.mjs` 是那道闸门。
+
+浏览器里验过：交互标记牌正落在渲染出来的蘑菇上——牌子的位置来自 JS 推的 Actor，
+蘑菇的几何来自 WASM，两者像素对齐。
+
+`ChunkStreamer` 因此不再 import `registerChunkTemplates`，也不再持有生成器。
+
 ### 还没做的
 
 | | 说明 |
