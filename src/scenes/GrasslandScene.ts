@@ -20,9 +20,12 @@ import { VesselControlController } from '../controllers/VesselControlController'
 import { RoomClient, type JoinedRoom, type RoomSummary } from '../network/RoomClient';
 import { SnapshotBuffer } from '../network/SnapshotBuffer';
 import type { RoomSnapshot } from '../network/protocol';
+import { frameTimeline } from '../platform/index';
 import { PlayerEntity } from '../player/PlayerEntity';
+import { SlimeSurfaceDragController } from '../controllers/SlimeSurfaceDragController';
 import { RemotePlayerGroup } from '../player/RemotePlayerGroup';
 import { SceneRenderer } from '../rendering/SceneRenderer';
+import { SceneWorld } from '../scene/SceneWorld';
 import { createSceneRuntimeComponent, SceneComponentHost } from '../scene/components';
 import { INPUT_SEND_INTERVAL_SECONDS } from '../../shared/networkTuning.mjs';
 import {
@@ -58,6 +61,7 @@ export class GrasslandScene extends Scene {
   private readonly input: InputSubsystem;
   private readonly virtualControls: VirtualControls;
   private readonly renderer: SceneRenderer;
+  private readonly world: SceneWorld;
   private readonly sceneComponents = new SceneComponentHost(createSceneRuntimeComponent);
   private readonly flyController: FlyController;
   private readonly controls: SceneControlRouter;
@@ -81,6 +85,7 @@ export class GrasslandScene extends Scene {
   private joinedRoom?: JoinedRoom;
   private availableScenes: SceneSummary[] = [];
   private player?: PlayerEntity;
+  private slimeSurfaceDrag?: SlimeSurfaceDragController;
   private timeSinceInputSent = 0;
 
   /** 暴露当前场景的实时绑定方案，供设置页或调试面板调用 rebind/reset。 */
@@ -172,8 +177,10 @@ export class GrasslandScene extends Scene {
       this.refreshInventoryShortcut();
       this.hud.refreshInputPrompt();
     });
-    this.renderer = new SceneRenderer(options.canvas);
-    this.remotePlayers = new RemotePlayerGroup(this.renderer);
+    // 场景的两半:渲染核心与玩法查询。第 3 步搬 canvas 时只有前者跟着走。
+    this.world = new SceneWorld();
+    this.renderer = new SceneRenderer(options.canvas, this.world);
+    this.remotePlayers = new RemotePlayerGroup(this.world);
     this.flyController = new FlyController(options.canvas, {
       position: [0, 4.2, 13.5],
       yaw: 0,
@@ -184,14 +191,14 @@ export class GrasslandScene extends Scene {
     this.controls = new SceneControlRouter(this.flyController);
     this.vesselControls = new VesselControlController(this.input, {
       getPlayerId: () => this.joinedRoom?.player.id,
-      findOwnedActorId: (playerId) => this.renderer.findOwnedActorId(playerId),
-      findControllableActorId: () => this.renderer.findControllableActorId(),
+      findOwnedActorId: (playerId) => this.world.findOwnedActorId(playerId),
+      findControllableActorId: () => this.world.findControllableActorId(),
       requestControl: (actorId) => this.roomClient.requestActorControl(actorId),
       releaseControl: (actorId) => this.roomClient.releaseActorControl(actorId),
       sendInput: (actorId, input) => { this.roomClient.sendVesselInput(actorId, input); },
     });
     this.terrainEdits = new TerrainEditController(this.input, {
-      pickCell: (frame) => this.renderer.pickTerrainCell(frame.position, frame.axes.forward),
+      pickCell: (frame) => this.world.pickTerrainCell(frame.position, frame.axes.forward),
       highlight: (cell) => this.renderer.setTerrainHighlight(cell),
       sendEdit: (cellX, cellZ, operation) => {
         this.roomClient.editTerrain(cellX, cellZ, operation);
@@ -200,17 +207,17 @@ export class GrasslandScene extends Scene {
     this.actorInteractions = new ActorInteractionController(this.input, {
       getPlayerId: () => this.joinedRoom?.player.id,
       getPlayerPosition: () => this.player?.controller.position,
-      findOwnedActorId: (playerId) => this.renderer.findOwnedActorId(playerId),
-      pick: (frame) => this.renderer.pickActorInteraction(frame),
-      findNearby: (position) => this.renderer.findNearbyActorInteraction(position),
-      findHeld: (playerId) => this.renderer.findHeldActorInteraction(playerId),
+      findOwnedActorId: (playerId) => this.world.findOwnedActorId(playerId),
+      pick: (frame) => this.world.pickActorInteraction(frame),
+      findNearby: (position) => this.world.findNearbyActorInteraction(position),
+      findHeld: (playerId) => this.world.findHeldActorInteraction(playerId),
       getInputLabel: (tag) => {
         const control = this.input.getMappedControls(tag)[0];
         return control ? this.inputScheme.getControlLabel(control) : undefined;
       },
-      setHoveredActorId: (actorId) => this.renderer.setHoveredActorId(actorId),
+      setHoveredActorId: (actorId) => this.world.setHoveredActorId(actorId),
       setInteractionMarkerActorId: (actorId, inputLabel) => {
-        this.renderer.setInteractionMarkerActorId(actorId, inputLabel);
+        this.world.setInteractionMarkerActorId(actorId, inputLabel);
       },
       sendInteraction: (actorId) => { this.roomClient.interactWithActor(actorId); },
       setPrompt: (text) => this.hud.setInteractionPrompt(text),
@@ -253,18 +260,31 @@ export class GrasslandScene extends Scene {
       this.playerTransformLog?.handleStatus(status);
     });
     // 地形覆盖只从服务端来：客户端不做本地预测，避免脚下的世界两端不一致。
-    this.roomClient.onTerrainPatch((cells) => this.renderer.applyTerrainPatches(cells));
+    this.roomClient.onTerrainPatch((cells) => this.world.applyTerrainPatches(cells));
     this.roomClient.onDisconnect(() => {
       this.playerTransformLog?.handleDisconnect();
       this.handleDisconnect();
     });
-    this.renderer.addWorldObject(this.remotePlayers.root);
   }
 
   public update(deltaSeconds: number, elapsedSeconds: number): void {
     this.input.update();
     this.vesselControls.update(deltaSeconds);
     this.controls.update(deltaSeconds, elapsedSeconds);
+    // 玩家（本地与远端）排在 renderer.update 之前：它们把自己这一帧的 transform
+    // 与运动参数写进边界那段 SoA，而翻面发生在 renderer.update 里的 Actor 世界中。
+    // 写在翻面之后就会晚一帧——软体读到的速度和它被摆到的位置对不上。
+    this.slimeSurfaceDrag?.update();
+    // 「sim」= 第 2 步要搬进 Sim Worker 的那一半：本地预测与远端插值。
+    frameTimeline.measure('sim-player', () => {
+      this.player?.update(deltaSeconds);
+      if (this.joinedRoom?.scene.camera.mode === 'topdown') {
+        this.remotePlayers.sync(this.snapshots.sample(), this.joinedRoom.player.id);
+        this.remotePlayers.update(deltaSeconds);
+      } else {
+        this.remotePlayers.clear();
+      }
+    });
     this.renderer.update(deltaSeconds, elapsedSeconds, this.currentFocus());
     if (this.terrainEdits.active) {
       // 编辑模式独占 WorldInteract：同一次点击不能既改地形又去交互 Actor。
@@ -275,20 +295,13 @@ export class GrasslandScene extends Scene {
       this.actorInteractions.update(this.controls.frame);
     }
     const playerId = this.joinedRoom?.player.id;
-    this.hud.setVesselStatus(playerId ? this.renderer.getVesselHudState(playerId) : undefined);
-    this.player?.update(deltaSeconds, elapsedSeconds);
+    this.hud.setVesselStatus(playerId ? this.world.getVesselHudState(playerId) : undefined);
     this.sceneComponents.update(deltaSeconds, elapsedSeconds);
     this.sendPlayerInput(deltaSeconds);
-    if (this.joinedRoom?.scene.camera.mode === 'topdown') {
-      this.remotePlayers.sync(this.snapshots.sample(), this.joinedRoom.player.id);
-      this.remotePlayers.update(deltaSeconds, elapsedSeconds);
-    } else {
-      this.remotePlayers.clear();
-    }
   }
 
   public render(): void {
-    this.renderer.render(this.controls.frame);
+    frameTimeline.measure('draw', () => this.renderer.render(this.controls.frame));
   }
 
   /**
@@ -300,7 +313,7 @@ export class GrasslandScene extends Scene {
     if (player) {
       return {
         focusX: player.x,
-        focusY: this.player?.object3D.position.y ?? 0,
+        focusY: this.player?.renderPosition.y ?? 0,
         focusZ: player.z,
       };
     }
@@ -412,6 +425,7 @@ export class GrasslandScene extends Scene {
       uiRoot: this.baseLayer,
       input: this.input,
       renderer: this.renderer,
+      world: this.world,
       player: this.player,
       worldSeed: joined.room.worldSeed,
       getFocus: () => this.currentFocus(),
@@ -495,7 +509,7 @@ export class GrasslandScene extends Scene {
     this.renderer.setTimeOfDay(snapshot.timeOfDay, snapshot.dayLength);
     this.debugMenuPage?.setWeather(snapshot.weather);
     this.debugMenuPage?.setTimeOfDay(snapshot.timeOfDay, snapshot.dayLength);
-    this.renderer.syncActors(snapshot.actors, snapshot.players, snapshot.serverTime);
+    this.world.syncActors(snapshot.actors, snapshot.players, snapshot.serverTime);
     this.snapshots.push(snapshot);
 
     // 自己的那条不走插值：直接交给和解，把预测拉回服务器的结论。
@@ -593,17 +607,30 @@ export class GrasslandScene extends Scene {
     topDownCameraOffset: JoinedRoom['scene']['camera']['position'],
   ): void {
     if (this.player) return;
+    const renderWorld = this.renderer.renderWorld;
+    if (!renderWorld) throw new Error('当前场景没有渲染世界，无法建立玩家 proxy');
+    this.remotePlayers.setRenderWorld(renderWorld);
     this.player = new PlayerEntity(
       playerId,
       this.canvas,
       spawn,
       this.input,
       bounds,
-      this.renderer,
+      this.world,
       archetype,
+      renderWorld,
       topDownCameraOffset,
     );
-    this.renderer.addWorldObject(this.player.object3D);
+    // 蒙皮拖拽属于渲染侧：指针、相机和外壳都在这一边，玩家实体只经由
+    // setMouseFacingSuppressed 收到「一次手势归谁」那一个布尔。
+    this.slimeSurfaceDrag = new SlimeSurfaceDragController(
+      this.canvas,
+      this.input,
+      renderWorld.scene,
+      this.player.renderProxyId,
+      () => this.controls.frame,
+      (active) => this.player?.controller.setMouseFacingSuppressed(active),
+    );
     this.controls.setPlayerController(this.player.controller);
     this.timeSinceInputSent = 0;
   }
@@ -617,10 +644,11 @@ export class GrasslandScene extends Scene {
     this.snapshots.clear();
     this.vesselControls.reset();
     this.actorInteractions.reset();
-    this.remotePlayers.clear();
+    this.remotePlayers.setRenderWorld(undefined);
+    this.slimeSurfaceDrag?.dispose();
+    this.slimeSurfaceDrag = undefined;
     if (this.player) {
       this.controls.setPlayerController(undefined);
-      this.renderer.removeWorldObject(this.player.object3D);
       this.player.dispose();
       this.player = undefined;
     }

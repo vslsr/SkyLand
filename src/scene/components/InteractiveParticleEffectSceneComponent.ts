@@ -137,10 +137,10 @@ export class InteractiveParticleEffectSceneComponent implements SceneRuntimeComp
       spawnChance,
       this.definition.clusterRadius,
     );
-    if (!point || this.context.renderer.isWaterAt(point.x, point.z)) return;
+    if (!point || this.context.world.isWaterAt(point.x, point.z)) return;
     this.mountCluster(
       chunk.key,
-      [point.x, this.context.renderer.sampleGroundHeight(point.x, point.z), point.z],
+      [point.x, this.context.world.sampleGroundHeight(point.x, point.z), point.z],
       point.particleSeed,
     );
   }
@@ -174,7 +174,8 @@ export class InteractiveParticleEffectSceneComponent implements SceneRuntimeComp
   private applyPlayerInteraction(deltaSeconds: number): void {
     const player = this.context.player;
     if (!player) return;
-    player.object3D.getWorldPosition(this.playerPosition);
+    const { x, y, z } = player.renderPosition;
+    this.playerPosition.set(x, y, z);
     if (!this.hasPreviousPlayerPosition) {
       this.previousPlayerPosition.copy(this.playerPosition);
       this.hasPreviousPlayerPosition = true;
@@ -233,7 +234,8 @@ export class InteractiveParticleEffectSceneComponent implements SceneRuntimeComp
       this.hasPreviousPlayerPosition = false;
       return;
     }
-    player.object3D.getWorldPosition(this.previousPlayerPosition);
+    const { x, y, z } = player.renderPosition;
+    this.previousPlayerPosition.set(x, y, z);
     this.hasPreviousPlayerPosition = true;
   }
 }

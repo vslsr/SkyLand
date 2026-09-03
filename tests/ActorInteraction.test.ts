@@ -8,14 +8,6 @@ import {
   type ElasticTetherComponent,
 } from '../shared/actor/index.mjs';
 import { ClientActorSystem } from '../src/actors/ClientActorSystem';
-import {
-  INTERACTION_MARKER_COMPONENT,
-  type InteractionMarkerComponent,
-} from '../src/actors/components/InteractionMarkerComponent';
-import {
-  THREE_OBJECT_COMPONENT,
-  type ThreeObjectComponent,
-} from '../src/actors/components/ThreeObjectComponent';
 import { ActorInteractionController } from '../src/controllers/ActorInteractionController';
 import {
   createPlayerInputScheme,
@@ -152,12 +144,20 @@ const mushroomSnapshot: SnapshotActor = {
   },
 };
 
+/** beforeRender 会读画布尺寸给引导线算像素线宽；测试只需要这一个字段。 */
+const FAKE_RENDERER = {
+  domElement: { width: 1280, height: 720 },
+} as unknown as THREE.WebGLRenderer;
+
 test('异构 Actor 创建线稿模型，准星选中货箱并提供木筏 HUD 状态', () => {
   let now = 1_000;
   const system = new ClientActorSystem({
     definition,
     environment: { fogColor: '#ffffff', fogNear: 20, fogFar: 60 },
     now: () => now,
+    // 这些用例不测建模节流：一帧建完，断言才好写。分帧建模由
+    // ClientActorSystem.spawn.test.ts 单独覆盖。
+    spawnBudgetMilliseconds: Number.POSITIVE_INFINITY,
   });
   system.syncSnapshots([raftSnapshot, cargoSnapshot, reefSnapshot], 1_000);
   system.update(0, 0);
@@ -371,6 +371,9 @@ test('弹性蘑菇 Replica 拉长并在释放后回弹，标记组件始终可�
     definition,
     environment: { fogColor: '#ffffff', fogNear: 20, fogFar: 60 },
     now: () => now,
+    // 这些用例不测建模节流：一帧建完，断言才好写。分帧建模由
+    // ClientActorSystem.spawn.test.ts 单独覆盖。
+    spawnBudgetMilliseconds: Number.POSITIVE_INFINITY,
   });
   system.syncSnapshots([mushroomSnapshot], 1_000);
   system.update(0, 0);
@@ -378,13 +381,13 @@ test('弹性蘑菇 Replica 拉长并在释放后回弹，标记组件始终可�
 
   system.setInteractionMarkerActorId('mushroom-1', 'E');
   const actor = system.getActor('mushroom-1');
-  const marker = actor?.requireComponent(
-    INTERACTION_MARKER_COMPONENT,
-  ) as InteractionMarkerComponent;
-  assert.equal(marker.visible, true);
+  // 标记住在渲染世界里；Actor 那侧什么都不剩。
+  const markers = system.getActorRenderProxy('mushroom-1')!.markers;
+  assert.equal(markers.interactionVisible, true);
+  assert.equal(markers.interactionLabel, 'E');
   const camera = new THREE.PerspectiveCamera();
   camera.position.set(4, 6, 8);
-  system.beforeRender({} as THREE.WebGLRenderer, camera);
+  system.beforeRender(FAKE_RENDERER, camera);
   const markerRoot = system.root.getObjectByName('actor-interaction-marker');
   assert.ok(markerRoot);
   assert.equal(markerRoot.userData.controlLabel, 'E');
@@ -403,7 +406,7 @@ test('弹性蘑菇 Replica 拉长并在释放后回弹，标记组件始终可�
   }], 1_100);
   now = 1_230;
   for (let index = 0; index < 90; index += 1) system.update(1 / 60, index / 60);
-  const render = actor?.requireComponent(THREE_OBJECT_COMPONENT) as ThreeObjectComponent;
+  const render = system.getActorRenderProxy(actor!.id)!;
   const stretchedScale = render.elasticTetherRig?.stemRoot.scale.y ?? 1;
   assert.ok(stretchedScale > 2);
   const tether = actor?.requireComponent(ELASTIC_TETHER_COMPONENT) as ElasticTetherComponent;

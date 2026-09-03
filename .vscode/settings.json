@@ -1,0 +1,51 @@
+{
+  // 用仓库锁定的 TypeScript 版本，避免编辑器与 npm run build 判断不一致。
+  "typescript.tsdk": "node_modules/typescript/lib",
+  "typescript.enablePromptUseWorkspaceTsdk": true,
+
+  // native/chunkgen 是嵌套的 Cargo 工程，不在工作区根上，必须显式挂给
+  // rust-analyzer；它编译成 wasm32 的 cdylib，分析目标也要跟着换，否则
+  // 会报一堆与实际构建无关的宿主平台错误。
+  // 只跑引擎不需要装 Rust 工具链——.wasm 产物是签入仓库的。
+  "rust-analyzer.linkedProjects": [
+    "native/chunkgen/Cargo.toml"
+  ],
+  "rust-analyzer.cargo.target": "wasm32-unknown-unknown",
+  "rust-analyzer.check.allTargets": false,
+
+  "debug.javascript.autoAttachFilter": "smart",
+  "debug.javascript.terminalOptions": {
+    "skipFiles": [
+      "<node_internals>/**",
+      "${workspaceFolder}/node_modules/**"
+    ]
+  },
+
+  "files.exclude": {
+    "dist": true,
+    ".vite": true,
+    "native/chunkgen/target": true
+  },
+  "search.exclude": {
+    "dist": true,
+    ".vite": true,
+    "node_modules": true,
+    "package-lock.json": true,
+    "native/chunkgen/target": true
+  },
+  // cargo target 目录一次构建能产出上万个文件；放进监视会让编辑器整个卡住。
+  "files.watcherExclude": {
+    "**/dist/**": true,
+    "**/.vite/**": true,
+    "**/native/chunkgen/target/**": true,
+    "**/node_modules/**": true
+  },
+
+  // 把衍生文件折叠到主文件下，config/ 与根目录的树才看得清。
+  "explorer.fileNesting.enabled": true,
+  "explorer.fileNesting.patterns": {
+    "package.json": "package-lock.json, Dockerfile, .dockerignore",
+    "tsconfig.json": "vite.config.ts",
+    "README.md": "AGENTS.md"
+  }
+}

@@ -1,8 +1,5 @@
 import type { Actor } from '../../../shared/actor/Actor.mjs';
-import {
-  THREE_OBJECT_COMPONENT,
-  type ThreeObjectComponent,
-} from '../../actors/components/ThreeObjectComponent';
+
 import { AbilityLabController } from '../../abilities/lab';
 import type { SceneComponentDefinition } from '../../scenes/data/SceneDefinition';
 import type { SceneComponentContext, SceneRuntimeComponent } from './SceneComponent';
@@ -53,12 +50,12 @@ export class AbilityLabSceneComponent implements SceneRuntimeComponent {
 
   private syncTarget(): void {
     if (!this.active) return;
-    const target = this.context.renderer.getActor(this.definition.targetActorId);
+    const target = this.context.world.getActor(this.definition.targetActorId);
     if (target === this.boundTarget) return;
     this.controller.deactivate();
     this.boundTarget = undefined;
     if (!target) return;
-    const render = target.getComponent(THREE_OBJECT_COMPONENT) as ThreeObjectComponent | undefined;
+    const render = this.context.renderer.getActorRenderProxy(this.definition.targetActorId);
     if (!render?.abilityTargetRig) {
       throw new Error(
         `能力实验室目标 Actor ${this.definition.targetActorId} 缺少训练假人视觉 rig`,
@@ -66,7 +63,7 @@ export class AbilityLabSceneComponent implements SceneRuntimeComponent {
     }
     const player = this.context.player;
     if (!player) return;
-    this.controller.activate(player, player.object3D, target, render);
+    this.controller.activate(player, player.renderPosition, target, render);
     this.boundTarget = target;
   }
 }

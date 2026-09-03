@@ -32,28 +32,22 @@ import { DEFAULT_WORLD_SEED, PROP_KIND } from '../shared/world/worldConfig.mjs';
 import { selectWorldPropVariant } from '../shared/world/worldPropVariants.mjs';
 import { ClientActorSystem } from '../src/actors/ClientActorSystem';
 import {
-  THREE_OBJECT_COMPONENT,
-  type ThreeObjectComponent,
-} from '../src/actors/components/ThreeObjectComponent';
+  RENDER_PROXY_COMPONENT,
+} from '../src/actors/components/RenderProxyComponent';
 import {
   FIRE_VISUAL_COMPONENT,
   type FireVisualComponent,
 } from '../src/actors/components/FireVisualComponent';
-import {
-  TEMPERATURE_MARKER_COMPONENT,
-  type TemperatureMarkerComponent,
-} from '../src/actors/components/TemperatureMarkerComponent';
-import {
-  HYBRID_SLIME_VISUAL_COMPONENT,
-  type HybridSlimeVisualComponent,
-} from '../src/actors/components/HybridSlimeVisualComponent';
-import { SlimeSurfaceDragComponent } from '../src/actors/components/SlimeSurfaceDragComponent';
-import {
-  GUIDE_PATH_VISUAL_COMPONENT,
-  type GuidePathVisualComponent,
-} from '../src/actors/components/GuidePathVisualComponent';
 import type { SnapshotActor } from '../src/network/protocol';
-import { createPlayerActorVisual } from '../src/player/PlayerActorVisual';
+import { RenderTransformBuffer } from '../src/render/RenderTransformBuffer';
+import { resolvePlayerVisualShape } from '../src/player/playerVisualShape';
+import { ThreeRenderScene } from '../src/render/three/ThreeRenderScene';
+import type { ThreeHybridSlimeVisual } from '../src/render/three/ThreeHybridSlimeVisual';
+import type {
+  PlayerRenderDefinition,
+  ProxyId,
+  SlimeSurfaceDragDefinition,
+} from '../src/render/RenderScene';
 import type { SceneDefinition } from '../src/scenes/data/SceneDefinition';
 
 const ocean = {
@@ -410,20 +404,90 @@ const definition = {
   camera: { mode: 'fly', position: [0, 5, 10], yaw: 0, pitch: 0, moveSpeed: 8 },
 } satisfies SceneDefinition;
 
+/** beforeRender 会读画布尺寸给引导线算像素线宽；测试只需要这一个字段。 */
+const FAKE_RENDERER = {
+  domElement: { width: 1280, height: 720 },
+} as unknown as THREE.WebGLRenderer;
+
+const RENDER_ENVIRONMENT = { fogColor: '#ffffff', fogNear: 20, fogFar: 60 };
+
+/**
+ * 玩家史莱姆的表现现在住在渲染世界里，所以测试也从渲染世界这一侧取。
+ *
+ * `update` 保留搬迁前 `createPlayerActorVisual().update()` 的参数顺序，另外
+ * 先把 yaw 写到 proxy 的 root 上——真实链路里那一步由 `submitTransforms` 做，
+ * 软体读的正是它。
+ */
+function createPlayerVisualHarness(
+  name: string,
+  render: PlayerRenderDefinition,
+  walkSpeed: number,
+  surfaceDrag?: SlimeSurfaceDragDefinition,
+) {
+  const scene = new ThreeRenderScene(new THREE.Group(), RENDER_ENVIRONMENT);
+  const info = scene.createPlayerProxy({ name, render, walkSpeed, surfaceDrag });
+  const proxy = scene.resolve(info.id)!;
+  const slime = scene.resolveSlimeVisual(info.id) as ThreeHybridSlimeVisual;
+  return {
+    scene,
+    proxyId: info.id as ProxyId,
+    root: proxy.root,
+    get rig() {
+      return slime.rig;
+    },
+    get slime() {
+      return slime;
+    },
+    update(
+      deltaSeconds: number,
+      elapsedSeconds: number,
+      movementSpeed: number,
+      authorityYaw: number,
+      motion?: {
+        velocityX: number;
+        velocityZ: number;
+        verticalVelocity?: number;
+        grounded?: boolean;
+        collisionDisplacement?: { x: number; z: number };
+      },
+    ): void {
+      proxy.root.rotation.y = authorityYaw;
+      slime.update(deltaSeconds, elapsedSeconds, proxy.root.rotation.y, {
+        movementSpeed,
+        movementVelocityX: motion?.velocityX ?? 0,
+        movementVelocityZ: motion?.velocityZ ?? 0,
+        verticalVelocity: motion?.verticalVelocity ?? 0,
+        airborne: motion?.grounded === false ? 1 : 0,
+        collisionDisplacementX: motion?.collisionDisplacement?.x ?? 0,
+        collisionDisplacementZ: motion?.collisionDisplacement?.z ?? 0,
+      });
+    },
+    dispose(): void {
+      scene.dispose();
+    },
+  };
+}
+
 test('普通玩家眼睛使用独立的无光照、无雾渲染层', () => {
-  const visual = createPlayerActorVisual('unlit-eye-player', {
-    model: 'line-art-player-slime',
-    radius: 0.42,
-    membraneColor: '#4fd695',
-    middleColor: '#8ce8b6',
-    coreColor: '#2fbb7c',
-    bubbleColor: '#eafff2',
-    inkColor: '#173a2b',
-    shadowColor: '#1e5a40',
-  }, 3.2);
+  const scene = new ThreeRenderScene(new THREE.Group(), RENDER_ENVIRONMENT);
+  const info = scene.createPlayerProxy({
+    name: 'unlit-eye-player',
+    walkSpeed: 3.2,
+    render: {
+      model: 'line-art-player-slime',
+      radius: 0.42,
+      membraneColor: '#4fd695',
+      middleColor: '#8ce8b6',
+      coreColor: '#2fbb7c',
+      bubbleColor: '#eafff2',
+      inkColor: '#173a2b',
+      shadowColor: '#1e5a40',
+    },
+  });
+  const root = scene.resolve(info.id)!.root;
   const eyes = [
-    visual.model.root.getObjectByName('player-slime-eye-left'),
-    visual.model.root.getObjectByName('player-slime-eye-right'),
+    root.getObjectByName('player-slime-eye-left'),
+    root.getObjectByName('player-slime-eye-right'),
   ] as THREE.Mesh<THREE.SphereGeometry, THREE.MeshBasicMaterial>[];
 
   for (const eye of eyes) {
@@ -433,7 +497,7 @@ test('普通玩家眼睛使用独立的无光照、无雾渲染层', () => {
     assert.equal(eye.material.fog, false);
     assert.equal(eye.material.toneMapped, false);
   }
-  visual.dispose();
+  scene.dispose();
 });
 
 const snapshot: SnapshotActor = {
@@ -502,6 +566,9 @@ test('客户端收到快照后才创建 Actor Replica 并应用权威 Component 
     definition,
     environment: { fogColor: '#ffffff', fogNear: 20, fogFar: 60 },
     now: () => now,
+    // 这些用例不测建模节流：一帧建完，断言才好写。分帧建模由
+    // ClientActorSystem.spawn.test.ts 单独覆盖。
+    spawnBudgetMilliseconds: Number.POSITIVE_INFINITY,
   });
   assert.equal(system.getActor(snapshot.id), undefined);
 
@@ -511,12 +578,14 @@ test('客户端收到快照后才创建 Actor Replica 并应用权威 Component 
   const actor = system.getActor(snapshot.id)!;
   const transform = actor.requireComponent(TRANSFORM_COMPONENT) as TransformComponent;
   const buoyancy = actor.requireComponent(BUOYANCY_COMPONENT) as BuoyancyComponent;
-  const render = actor.requireComponent(THREE_OBJECT_COMPONENT) as ThreeObjectComponent;
+  const render = system.getActorRenderProxy(actor.id)!;
   assert.deepEqual([transform.x, transform.y, transform.z, transform.yaw], [2, 0, -3, 0.4]);
   assert.equal(buoyancy.draft, 0.21);
+  // 渲染世界拿到的是权威 transform 的 f32 镜像（边界上的 SoA 是 Float32Array），
+  // 所以这里按 f32 精度比较；Actor 上的权威值仍然是 f64，见上一行 deepEqual。
   assert.equal(render.root.position.x, 2);
   assert.equal(render.root.position.z, -3);
-  assert.equal(render.root.rotation.y, 0.4);
+  assert.ok(Math.abs(render.root.rotation.y - 0.4) < 1e-6);
   assert.ok(system.root.getObjectByName('actor-demo-raft-01-visual'));
   const collision = actor.requireComponent(SIMPLE_COLLISION_COMPONENT) as SimpleCollisionComponent;
   assert.equal(collision.halfWidth, 1.6);
@@ -543,12 +612,15 @@ test('视觉波动只作用于 VisualRoot，且快照移除会销毁 Replica', (
     definition,
     environment: { fogColor: '#ffffff', fogNear: 20, fogFar: 60 },
     now: () => now,
+    // 这些用例不测建模节流：一帧建完，断言才好写。分帧建模由
+    // ClientActorSystem.spawn.test.ts 单独覆盖。
+    spawnBudgetMilliseconds: Number.POSITIVE_INFINITY,
   });
   system.syncSnapshots([snapshot], 1_000);
   system.update(1 / 60, 1.25);
 
   const actor = system.getActor(snapshot.id)!;
-  const render = actor.requireComponent(THREE_OBJECT_COMPONENT) as ThreeObjectComponent;
+  const render = system.getActorRenderProxy(actor.id)!;
   assert.equal(render.root.position.y, snapshot.transform.y);
   assert.ok(Number.isFinite(render.visualRoot.position.y));
   assert.notEqual(render.visualRoot.position.y, render.root.position.y);
@@ -569,6 +641,9 @@ test('Actor Transform 在两份服务端快照之间插值而不做客户端外�
     definition,
     environment: { fogColor: '#ffffff', fogNear: 20, fogFar: 60 },
     now: () => now,
+    // 这些用例不测建模节流：一帧建完，断言才好写。分帧建模由
+    // ClientActorSystem.spawn.test.ts 单独覆盖。
+    spawnBudgetMilliseconds: Number.POSITIVE_INFINITY,
   });
   const from = { ...snapshot, transform: { x: 0, y: 0, z: 0, yaw: 0 } };
   const to = {
@@ -594,6 +669,9 @@ test('能力实验室对象由 Actor 快照创建，训练假人暴露 visualRoo
     definition,
     environment: { fogColor: '#ffffff', fogNear: 20, fogFar: 60 },
     now: () => 1_000,
+    // 这些用例不测建模节流：一帧建完，断言才好写。分帧建模由
+    // ClientActorSystem.spawn.test.ts 单独覆盖。
+    spawnBudgetMilliseconds: Number.POSITIVE_INFINITY,
   });
   system.syncSnapshots([
     trainingDummySnapshot,
@@ -603,14 +681,13 @@ test('能力实验室对象由 Actor 快照创建，训练假人暴露 visualRoo
   system.update(0, 0);
 
   const actor = system.getActor(trainingDummySnapshot.id)!;
-  const render = actor.requireComponent(THREE_OBJECT_COMPONENT) as ThreeObjectComponent;
+  const render = system.getActorRenderProxy(actor.id)!;
   assert.equal(actor.archetypeId, 'training-dummy');
   assert.ok(render.abilityTargetRig);
   assert.equal(render.abilityTargetRig.targetRoot, render.visualRoot);
   assert.equal(render.abilityTargetRig.burningAura.visible, false);
   assert.equal(render.root.position.z, -1.5);
-  const focusRender = system.getActor(focusObeliskSnapshot.id)!
-    .requireComponent(THREE_OBJECT_COMPONENT) as ThreeObjectComponent;
+  const focusRender = system.getActorRenderProxy(focusObeliskSnapshot.id)!;
   assert.ok(focusRender.root.getObjectByName('focus-obelisk-crystal'));
   const plaqueCollision = system.getActor(floorPlaqueSnapshot.id)!
     .requireComponent(SIMPLE_COLLISION_COMPONENT) as SimpleCollisionComponent;
@@ -625,6 +702,9 @@ test('客户端离散恢复父子关系，并只插值子 Actor 的权威世界�
     definition,
     environment: { fogColor: '#ffffff', fogNear: 20, fogFar: 60 },
     now: () => now,
+    // 这些用例不测建模节流：一帧建完，断言才好写。分帧建模由
+    // ClientActorSystem.spawn.test.ts 单独覆盖。
+    spawnBudgetMilliseconds: Number.POSITIVE_INFINITY,
   });
   const childFrom = createDeckPropSnapshot(0.72);
 
@@ -634,8 +714,8 @@ test('客户端离散恢复父子关系，并只插值子 Actor 的权威世界�
 
   const parent = system.getActor(snapshot.id)!;
   const child = system.getActor(childFrom.id)!;
-  const parentRender = parent.requireComponent(THREE_OBJECT_COMPONENT) as ThreeObjectComponent;
-  const childRender = child.requireComponent(THREE_OBJECT_COMPONENT) as ThreeObjectComponent;
+  const parentRender = system.getActorRenderProxy(parent.id)!;
+  const childRender = system.getActorRenderProxy(child.id)!;
   const childTransform = child.requireComponent(TRANSFORM_COMPONENT) as TransformComponent;
   let childGeometry: THREE.BufferGeometry | undefined;
   childRender.root.traverse((object) => {
@@ -651,10 +731,11 @@ test('客户端离散恢复父子关系，并只插值子 Actor 的权威世界�
   assert.equal(child.parent, parent);
   assert.deepEqual(parent.children, [child]);
   assert.equal(childRender.root.parent, parentRender.root);
-  assert.ok(Math.abs(childRender.root.position.x - 0.72) < 1e-9);
-  assert.ok(Math.abs(childRender.root.position.y - 0.62) < 1e-9);
-  assert.ok(Math.abs(childRender.root.position.z + 0.55) < 1e-9);
-  assert.ok(Math.abs(childRender.root.rotation.y + 0.1) < 1e-9);
+  // 局部坐标由渲染侧从 f32 的父/子世界坐标反算，容差按 f32 取。
+  assert.ok(Math.abs(childRender.root.position.x - 0.72) < 1e-6);
+  assert.ok(Math.abs(childRender.root.position.y - 0.62) < 1e-6);
+  assert.ok(Math.abs(childRender.root.position.z + 0.55) < 1e-6);
+  assert.ok(Math.abs(childRender.root.rotation.y + 0.1) < 1e-6);
   assert.ok(Math.abs(childTransform.x - childFrom.transform.x) < 1e-9);
   assert.ok(
     childRender.attachmentVisualRoot.position.lengthSq() > 1e-9
@@ -666,13 +747,14 @@ test('客户端离散恢复父子关系，并只插值子 Actor 的权威世界�
   system.syncSnapshots([snapshot, childTo], 1_100, 1_100);
   now = 1_170;
   system.update(0, 1.3);
-  assert.ok(Math.abs(childRender.root.position.x - 1.22) < 1e-9);
+  assert.ok(Math.abs(childRender.root.position.x - 1.22) < 1e-6);
   assert.equal(childTransform.localX, 1.72);
   parentRender.root.updateWorldMatrix(true, true);
+  // Three 层级组合出的世界坐标必须等于权威插值结果，容差按 f32 镜像取。
   const childWorld = childRender.root.getWorldPosition(new THREE.Vector3());
-  assert.ok(Math.abs(childWorld.x - childTransform.x) < 1e-9);
-  assert.ok(Math.abs(childWorld.y - childTransform.y) < 1e-9);
-  assert.ok(Math.abs(childWorld.z - childTransform.z) < 1e-9);
+  assert.ok(Math.abs(childWorld.x - childTransform.x) < 1e-6);
+  assert.ok(Math.abs(childWorld.y - childTransform.y) < 1e-6);
+  assert.ok(Math.abs(childWorld.z - childTransform.z) < 1e-6);
 
   // 服务端删除父节点时采用默认策略：子节点解除挂载并保持世界坐标。
   const detached = { ...childTo, parentActorId: null };
@@ -699,6 +781,9 @@ test('客户端按权威燃烧状态显示参考 LineLoop 火焰，稳定篝火�
     definition,
     environment: { fogColor: '#ffffff', fogNear: 20, fogFar: 60 },
     now: () => now,
+    // 这些用例不测建模节流：一帧建完，断言才好写。分帧建模由
+    // ClientActorSystem.spawn.test.ts 单独覆盖。
+    spawnBudgetMilliseconds: Number.POSITIVE_INFINITY,
   });
   const campfire: SnapshotActor = {
     id: 'campfire-01',
@@ -716,28 +801,34 @@ test('客户端按权威燃烧状态显示参考 LineLoop 火焰，稳定篝火�
   system.syncSnapshots([campfire, coldHay], 1_000, 1_000);
   system.update(1 / 60, 0.5);
 
-  const campfireFire = system.getActor(campfire.id)!
-    .requireComponent(FIRE_VISUAL_COMPONENT) as FireVisualComponent;
+  // rig 住在渲染世界里；Actor 上的 FireVisualComponent 只剩一个目标强度。
+  const campfireRig = system.getActorRenderProxy(campfire.id)!.fireVisualRig!;
   const hayActor = system.getActor(coldHay.id)!;
+  const hayRig = system.getActorRenderProxy(hayActor.id)!.fireVisualRig!;
   const hayFire = hayActor.requireComponent(FIRE_VISUAL_COMPONENT) as FireVisualComponent;
-  const temperatureMarker = hayActor.requireComponent(
-    TEMPERATURE_MARKER_COMPONENT,
-  ) as TemperatureMarkerComponent;
-  assert.equal(campfireFire.rig.root.visible, true);
-  assert.equal(hayFire.rig.root.visible, false);
-  assert.equal(temperatureMarker.visible, false);
-  assert.equal(temperatureMarker.label, '');
-  assert.equal(campfireFire.rig.flames.length, 5);
-  assert.equal(campfireFire.rig.sparks.length, 6);
+  assert.equal(
+    (system.getActor(campfire.id)!
+      .requireComponent(FIRE_VISUAL_COMPONENT) as FireVisualComponent).targetIntensity,
+    1,
+    '静态热源的目标强度应当在 spawn 时就是 1',
+  );
+  assert.equal(hayFire.targetIntensity, 0, '没烧起来时目标强度是 0');
+  const temperatureMarker = system.getActorRenderProxy(hayActor.id)!.markers;
+  assert.equal(campfireRig.root.visible, true);
+  assert.equal(hayRig.root.visible, false);
+  assert.equal(temperatureMarker.temperatureVisible, false);
+  assert.equal(temperatureMarker.temperatureLabel, '');
+  assert.equal(campfireRig.flames.length, 5);
+  assert.equal(campfireRig.sparks.length, 6);
 
   system.setTemperatureVisible(true);
-  assert.equal(temperatureMarker.visible, true);
-  assert.equal(temperatureMarker.label, '20.0 °C');
-  assert.ok(hayActor.requireComponent(THREE_OBJECT_COMPONENT)
+  assert.equal(temperatureMarker.temperatureVisible, true);
+  assert.equal(temperatureMarker.temperatureLabel, '20.0 °C');
+  assert.ok(system.getActorRenderProxy(hayActor.id)!
     .root.getObjectByName('actor-temperature-marker'));
   const camera = new THREE.PerspectiveCamera();
   camera.position.set(3, 4, 7);
-  system.beforeRender({} as THREE.WebGLRenderer, camera);
+  system.beforeRender(FAKE_RENDERER, camera);
 
   const burningHay: SnapshotActor = {
     ...coldHay,
@@ -751,16 +842,17 @@ test('客户端按权威燃烧状态显示参考 LineLoop 火焰，稳定篝火�
 
   const combustible = hayActor.requireComponent(COMBUSTIBLE_COMPONENT) as CombustibleComponent;
   assert.equal(combustible.burning, true);
-  assert.equal(hayFire.rig.root.visible, true);
-  assert.equal(temperatureMarker.label, '78.4 °C');
-  assert.equal(hayFire.rig.flames.length, 4);
-  assert.equal(hayFire.rig.sparks.length, 4);
-  const flameTop = Math.max(...hayFire.rig.flames.map((flame) => (
-    hayFire.rig.root.position.y
-      + (flame.y + flame.height) * hayFire.rig.root.scale.y
+  assert.equal(hayFire.targetIntensity, 1, '燃烧快照必须把目标强度推到 1');
+  assert.equal(hayRig.root.visible, true);
+  assert.equal(temperatureMarker.temperatureLabel, '78.4 °C');
+  assert.equal(hayRig.flames.length, 4);
+  assert.equal(hayRig.sparks.length, 4);
+  const flameTop = Math.max(...hayRig.flames.map((flame) => (
+    hayRig.root.position.y
+      + (flame.y + flame.height) * hayRig.root.scale.y
   )));
   assert.ok(flameTop > dryHayArchetype.components.render.height);
-  const flameOrigins = hayFire.rig.flames.map((flame) => (
+  const flameOrigins = hayRig.flames.map((flame) => (
     new THREE.Vector3(flame.x, flame.y, flame.z)
   ));
   let minimumOriginDistance = Number.POSITIVE_INFINITY;
@@ -773,10 +865,10 @@ test('客户端按权威燃烧状态显示参考 LineLoop 火焰，稳定篝火�
     }
   }
   assert.ok(minimumOriginDistance > dryHayArchetype.components.render.radius * 0.22);
-  const positions = hayFire.rig.flames[0].position.array as Float32Array;
+  const positions = hayRig.flames[0].position.array as Float32Array;
   assert.ok(positions.some((value) => Math.abs(value) > 1e-5));
   system.setTemperatureVisible(false);
-  assert.equal(temperatureMarker.visible, false);
+  assert.equal(temperatureMarker.temperatureVisible, false);
   system.dispose();
 });
 
@@ -785,6 +877,9 @@ test('混合史莱姆用单球核心与休眠弹簧蒙皮，且不会改写权�
     definition,
     environment: { fogColor: '#ffffff', fogNear: 20, fogFar: 60 },
     now: () => 1_000,
+    // 这些用例不测建模节流：一帧建完，断言才好写。分帧建模由
+    // ClientActorSystem.spawn.test.ts 单独覆盖。
+    spawnBudgetMilliseconds: Number.POSITIVE_INFINITY,
   });
   const pbfSlime: SnapshotActor = {
     id: 'pbf-slime-01',
@@ -796,10 +891,8 @@ test('混合史莱姆用单球核心与休眠弹簧蒙皮，且不会改写权�
   system.update(0, 0);
 
   const actor = system.getActor(pbfSlime.id)!;
-  const render = actor.requireComponent(THREE_OBJECT_COMPONENT) as ThreeObjectComponent;
-  const visual = actor.requireComponent(
-    HYBRID_SLIME_VISUAL_COMPONENT,
-  ) as HybridSlimeVisualComponent;
+  const render = system.getActorRenderProxy(actor.id)!;
+  const visual = system.getRenderScene().resolveSlimeVisual(render.id)!;
   const initialSurface = Float32Array.from(
     visual.rig.surfacePosition.array as ArrayLike<number>,
   );
@@ -807,12 +900,18 @@ test('混合史莱姆用单球核心与休眠弹簧蒙皮，且不会改写权�
     system.update(1 / 60, frame / 60);
   }
 
-  assert.deepEqual(
-    [render.root.position.x, render.root.position.y, render.root.position.z, render.root.rotation.y],
-    [1.5, 0, -2.8, 0.2],
-  );
+  for (const [actual, expected] of [
+    [render.root.position.x, 1.5],
+    [render.root.position.y, 0],
+    [render.root.position.z, -2.8],
+    [render.root.rotation.y, 0.2],
+  ]) {
+    assert.ok(Math.abs(actual - expected) < 1e-6, `权威根节点被改写：${actual} ≠ ${expected}`);
+  }
+  // 抵消量现在取自权威 TransformComponent.yaw（f64），而 root.rotation.y 是
+  // 边界上的 f32 镜像，两者差一个 f32 舍入——1 米半径上约 3 纳米。容差按 f32 取。
   assert.ok(
-    Math.abs(render.root.rotation.y + visual.rig.root.rotation.y) < 1e-9,
+    Math.abs(render.root.rotation.y + visual.rig.root.rotation.y) < 1e-6,
     '弹簧外壳应抵消权威 Actor yaw，避免把软体蒙皮整团硬转',
   );
   assert.equal(visual.simulation.vertexCount, visual.rig.surfaceDirections.length / 3);
@@ -969,8 +1068,9 @@ test('混合史莱姆用单球核心与休眠弹簧蒙皮，且不会改写权�
       ) < 1e-7,
     );
   }
+  // 与上面同理：抵消量来自 f64 权威 yaw，root.rotation.y 是 f32 镜像。
   assert.ok(
-    Math.abs(render.root.rotation.y + visual.rig.shadowRoot.rotation.y) < 1e-9,
+    Math.abs(render.root.rotation.y + visual.rig.shadowRoot.rotation.y) < 1e-6,
     '阴影应与外壳使用同一世界朝向，不能再独立旋转或拉伸',
   );
   for (const bubble of visual.rig.bubbles) {
@@ -991,6 +1091,9 @@ test('无模型 GuidePath Actor 只在快照存在时创建客户端 Three.js �
     definition,
     environment: { fogColor: '#ffffff', fogNear: 20, fogFar: 60 },
     now: () => now,
+    // 这些用例不测建模节流：一帧建完，断言才好写。分帧建模由
+    // ClientActorSystem.spawn.test.ts 单独覆盖。
+    spawnBudgetMilliseconds: Number.POSITIVE_INFINITY,
   });
   const guideSnapshot: SnapshotActor = {
     id: 'guide-path-01',
@@ -1012,15 +1115,16 @@ test('无模型 GuidePath Actor 只在快照存在时创建客户端 Three.js �
 
   const actor = system.getActor(guideSnapshot.id)!;
   const state = actor.requireComponent(GUIDE_PATH_COMPONENT) as GuidePathComponent;
-  const visual = actor.requireComponent(GUIDE_PATH_VISUAL_COMPONENT) as GuidePathVisualComponent;
-  const render = actor.requireComponent(THREE_OBJECT_COMPONENT) as ThreeObjectComponent;
+  const render = system.getActorRenderProxy(actor.id)!;
+  // 表现住在渲染世界里；Actor 上只剩 shared/ 的权威 GuidePathComponent。
+  const guide = system.getRenderScene().resolveGuidePath(render.id)!.guide;
   assert.equal(actor.hasComponents(SIMPLE_COLLISION_COMPONENT), false);
   assert.equal(state.currentPointIndex, 1);
   assert.equal(state.curve, 'linear');
-  assert.equal(visual.guide.currentMarkerIndex, 1);
+  assert.equal(guide.currentMarkerIndex, 1);
   assert.equal(render.root.position.x, 6);
   assert.equal(render.root.position.z, -4);
-  assert.ok(render.visualRoot.children.includes(visual.guide.root));
+  assert.ok(render.visualRoot.children.includes(guide.root));
 
   now = 1_100;
   system.syncSnapshots([], 1_100);
@@ -1036,28 +1140,22 @@ test('史莱姆表面拖拽带动整团软体，命中处最强，接近上限�
   const dragDefinition = pbfSlimeArchetype.components.slimeSurfaceDrag;
   assert.ok(render?.model === 'line-art-pbf-slime');
   assert.ok(dragDefinition);
-  const visual = createPlayerActorVisual('surface-drag-player', render, 3.2);
-  const hybrid = visual.component!;
-  const drag = new SlimeSurfaceDragComponent(
-    hybrid.rig,
-    hybrid.simulation,
-    dragDefinition,
-  );
-  const initialSurface = Float32Array.from(hybrid.simulation.positions);
+  const visual = createPlayerVisualHarness('surface-drag-player', render, 3.2, dragDefinition);
+  const initialSurface = Float32Array.from(visual.slime.simulation.positions);
   let topOffset = 0;
   for (let offset = 3; offset < initialSurface.length; offset += 3) {
     if (initialSurface[offset + 1] > initialSurface[topOffset + 1]) topOffset = offset;
   }
 
   // 动态几何的标准三角拾取短暂漏报时，窄范围顶点容错仍应命中肉眼可见表面。
-  const surfaceRaycast = hybrid.rig.surface.raycast;
-  hybrid.rig.surface.raycast = () => undefined;
-  assert.equal(drag.beginDrag({
+  const surfaceRaycast = visual.rig.surface.raycast;
+  visual.rig.surface.raycast = () => undefined;
+  assert.equal(visual.scene.beginSlimeSurfaceDrag(visual.proxyId, {
     origin: [0, 3, 0],
     direction: [0, -1, 0],
   }), true);
-  hybrid.rig.surface.raycast = surfaceRaycast;
-  assert.equal(drag.updateDrag({
+  visual.rig.surface.raycast = surfaceRaycast;
+  assert.equal(visual.scene.updateSlimeSurfaceDrag(visual.proxyId, {
     origin: [3, 3, 0],
     direction: [0, -1, 0],
   }), true);
@@ -1065,9 +1163,9 @@ test('史莱姆表面拖拽带动整团软体，命中处最强，接近上限�
     visual.update(1 / 60, frame / 60, 0, 0, { velocityX: 0, velocityZ: 0 });
   }
 
-  const pulledSurface = hybrid.simulation.positions;
+  const pulledSurface = visual.slime.simulation.positions;
   const selectedExtension = pulledSurface[topOffset] - initialSurface[topOffset];
-  const statsWhileDragging = hybrid.simulation.stats();
+  const statsWhileDragging = visual.slime.simulation.stats();
   assert.ok(selectedExtension > render.radius * 0.08, '命中表面应产生可见的局部拉伸');
   assert.ok(
     selectedExtension <= dragDefinition.maximumDistance + 1e-5,
@@ -1084,10 +1182,10 @@ test('史莱姆表面拖拽带动整团软体，命中处最强，接近上限�
   let equatorMaximumDelta = 0;
   for (let offset = 0; offset < pulledSurface.length; offset += 3) {
     const delta = Math.abs(pulledSurface[offset] - initialSurface[offset]);
-    if (Math.abs(hybrid.rig.surfaceDirections[offset + 1]) < 0.25) {
+    if (Math.abs(visual.rig.surfaceDirections[offset + 1]) < 0.25) {
       equatorMaximumDelta = Math.max(equatorMaximumDelta, delta);
     }
-    if (hybrid.rig.surfaceDirections[offset + 1] > -0.65) continue;
+    if (visual.rig.surfaceDirections[offset + 1] > -0.65) continue;
     farSideMaximumDelta = Math.max(farSideMaximumDelta, delta);
   }
   assert.ok(
@@ -1103,14 +1201,14 @@ test('史莱姆表面拖拽带动整团软体，命中处最强，接近上限�
     '底面仍被地面黏住，不能把整团史莱姆当作刚体平移',
   );
 
-  drag.endDrag();
+  visual.scene.endSlimeSurfaceDrag(visual.proxyId);
   for (let frame = 150; frame < 510; frame += 1) {
     visual.update(1 / 60, frame / 60, 0, 0, { velocityX: 0, velocityZ: 0 });
   }
   const releasedExtension = Math.abs(
-    hybrid.simulation.positions[topOffset] - initialSurface[topOffset],
+    visual.slime.simulation.positions[topOffset] - initialSurface[topOffset],
   );
-  assert.equal(hybrid.simulation.stats().surfaceDragActive, false);
+  assert.equal(visual.slime.simulation.stats().surfaceDragActive, false);
   assert.ok(releasedExtension < selectedExtension * 0.2, '松开后应由原有胡克弹簧平滑回弹');
   visual.dispose();
 });
@@ -1118,15 +1216,15 @@ test('史莱姆表面拖拽带动整团软体，命中处最强，接近上限�
 test('混合史莱姆的软核心产生黏地拖后，内部圆柱碰撞令接触侧蒙皮凹陷', () => {
   const render = pbfSlimeArchetype.components.render;
   assert.ok(render?.model === 'line-art-pbf-slime');
-  const visual = createPlayerActorVisual('pbf-player', render, 3.2);
-  const rig = visual.model.pbfSlimeVisualRig!;
+  const visual = createPlayerVisualHarness('pbf-player', render, 3.2);
+  const rig = visual.rig;
 
-  visual.model.root.rotation.y = 0;
+  visual.root.rotation.y = 0;
   for (let frame = 0; frame < 120; frame += 1) {
     visual.update(1 / 60, frame / 60, 0, 0, { velocityX: 0, velocityZ: 0 });
   }
   assert.equal(rig.root.userData.hybridSimulationActive, false);
-  const settledSurface = Float32Array.from(visual.component!.simulation.positions);
+  const settledSurface = Float32Array.from(visual.slime.simulation.positions);
   const averageSideRadius = (surface: ArrayLike<number>): number => {
     let radiusSum = 0;
     let count = 0;
@@ -1143,7 +1241,7 @@ test('混合史莱姆的软核心产生黏地拖后，内部圆柱碰撞令接�
 
   visual.update(1 / 60, 120 / 60, 3.2, 0, { velocityX: 0, velocityZ: 3.2 });
   const firstMovingForceBias = (
-    visual.component!.simulation.forceCenter[2] - visual.component!.simulation.center[2]
+    visual.slime.simulation.forceCenter[2] - visual.slime.simulation.center[2]
   );
   assert.ok(
     firstMovingForceBias > render.radius * 0.005
@@ -1154,27 +1252,27 @@ test('混合史莱姆的软核心产生黏地拖后，内部圆柱碰撞令接�
     visual.update(1 / 60, frame / 60, 3.2, 0, { velocityX: 0, velocityZ: 3.2 });
   }
   assert.ok(settledSurface.some((value, index) => (
-    Math.abs(value - visual.component!.simulation.positions[index]) > render.radius * 0.02
+    Math.abs(value - visual.slime.simulation.positions[index]) > render.radius * 0.02
   )), '移动锚点应通过胡克弹簧带动蒙皮，而不是整团刚体平移');
   assert.ok(
-    visual.component!.simulation.center[2] < -render.radius * 0.1,
+    visual.slime.simulation.center[2] < -render.radius * 0.1,
     '内部质量中心应平滑拖在 Actor 根节点后方',
   );
   assert.ok(
-    visual.component!.simulation.forceCenter[2]
-      > visual.component!.simulation.center[2] + render.radius * 0.12,
+    visual.slime.simulation.forceCenter[2]
+      > visual.slime.simulation.center[2] + render.radius * 0.12,
     '蒙皮的中心力应向 +Z 移动方向偏移，同时允许质量中心留在后方',
   );
   assert.ok(
     Math.hypot(
-      rig.core.position.x - visual.component!.simulation.forceCenter[0],
-      rig.core.position.y - visual.component!.simulation.forceCenter[1],
-      rig.core.position.z - visual.component!.simulation.forceCenter[2],
+      rig.core.position.x - visual.slime.simulation.forceCenter[0],
+      rig.core.position.y - visual.slime.simulation.forceCenter[1],
+      rig.core.position.z - visual.slime.simulation.forceCenter[2],
     ) < 1e-7,
     '移动时可见核心必须持续跟随向心力中心，而不是滞后的质量中心',
   );
   assert.ok(
-    averageSideRadius(visual.component!.simulation.positions) < settledSideRadius * 0.92,
+    averageSideRadius(visual.slime.simulation.positions) < settledSideRadius * 0.92,
     '移动时中上层蒙皮应受到随速度增强的向心弹簧力',
   );
 
@@ -1231,35 +1329,35 @@ test('混合史莱姆的软核心产生黏地拖后，内部圆柱碰撞令接�
     );
   }
 
-  const movingLag = Math.abs(visual.component!.simulation.center[2]);
+  const movingLag = Math.abs(visual.slime.simulation.center[2]);
   visual.update(1 / 60, 210 / 60, 0, 0, { velocityX: 0, velocityZ: 0 });
   assert.ok(
-    Math.abs(visual.component!.simulation.center[2]) > movingLag * 0.85,
+    Math.abs(visual.slime.simulation.center[2]) > movingLag * 0.85,
     '停止首帧仍应保留大部分拖后量，而不是瞬间弹回',
   );
 
-  visual.model.root.rotation.y = Math.PI / 2;
-  const forceCenterBeforeTurn = Float32Array.from(visual.component!.simulation.forceCenter);
+  visual.root.rotation.y = Math.PI / 2;
+  const forceCenterBeforeTurn = Float32Array.from(visual.slime.simulation.forceCenter);
   visual.update(1 / 60, 211 / 60, 3.2, Math.PI / 2, {
     velocityX: 3.2,
     velocityZ: 0,
   });
   assert.ok(
     Math.hypot(
-      visual.component!.simulation.forceCenter[0] - forceCenterBeforeTurn[0],
-      visual.component!.simulation.forceCenter[2] - forceCenterBeforeTurn[2],
+      visual.slime.simulation.forceCenter[0] - forceCenterBeforeTurn[0],
+      visual.slime.simulation.forceCenter[2] - forceCenterBeforeTurn[2],
     ) < render.radius * 0.05,
     '转向首帧核心只能逐步补间，不能从旧方向闪到新方向',
   );
   assert.ok(
-    visual.component!.simulation.forceCenter[0] > forceCenterBeforeTurn[0]
-      && visual.component!.simulation.forceCenter[2] < forceCenterBeforeTurn[2],
+    visual.slime.simulation.forceCenter[0] > forceCenterBeforeTurn[0]
+      && visual.slime.simulation.forceCenter[2] < forceCenterBeforeTurn[2],
     '核心补间位移必须沿旧向心力中心指向新向心力中心的方向',
   );
 
   const firstTurnFaceYaw = rig.faceRoot.rotation.y;
   assert.ok(firstTurnFaceYaw > 0 && firstTurnFaceYaw < Math.PI / 2);
-  assert.ok(Math.abs(visual.model.root.rotation.y + rig.root.rotation.y) < 1e-9);
+  assert.ok(Math.abs(visual.root.rotation.y + rig.root.rotation.y) < 1e-9);
 
   for (let frame = 212; frame <= 330; frame += 1) {
     visual.update(1 / 60, frame / 60, 3.2, Math.PI / 2, {
@@ -1267,8 +1365,8 @@ test('混合史莱姆的软核心产生黏地拖后，内部圆柱碰撞令接�
       velocityZ: 0,
     });
   }
-  assert.equal(visual.component?.type, HYBRID_SLIME_VISUAL_COMPONENT);
-  assert.ok(visual.model.root.getObjectByName('pbf-slime-surface'));
+  assert.ok(visual.scene.resolveSlimeVisual(visual.proxyId), 'PBF 玩家的软体表现应由渲染世界持有');
+  assert.ok(visual.root.getObjectByName('pbf-slime-surface'));
   assert.ok(Math.abs(rig.faceRoot.rotation.y - Math.PI / 2) < 0.001);
 
   const beforeCollisionSurface = Float32Array.from(rig.surfacePosition.array);
@@ -1302,7 +1400,7 @@ test('混合史莱姆的软核心产生黏地拖后，内部圆柱碰撞令接�
   assert.ok(beforeCollisionSurface.some((value, index) => (
     Math.abs(value - rig.surfacePosition.array[index]) > render.radius * 0.02
   )), '真实碰撞必须让可见弹簧蒙皮发生适应性形变');
-  const adaptingError = visual.component!.simulation.stats().maximumSkinError;
+  const adaptingError = visual.slime.simulation.stats().maximumSkinError;
 
   for (let frame = 345; frame <= 392; frame += 1) {
     visual.update(1 / 60, frame / 60, 0, Math.PI / 2, {
@@ -1312,7 +1410,7 @@ test('混合史莱姆的软核心产生黏地拖后，内部圆柱碰撞令接�
     });
   }
   assert.ok(
-    visual.component!.simulation.stats().maximumSkinError < adaptingError * 0.6,
+    visual.slime.simulation.stats().maximumSkinError < adaptingError * 0.6,
     '持续顶住同一碰撞面时只允许平滑恢复，不应每帧重复注入冲击',
   );
   for (let frame = 393; frame <= 512; frame += 1) {
@@ -1328,27 +1426,28 @@ test('混合史莱姆的软核心产生黏地拖后，内部圆柱碰撞令接�
   );
   assert.ok(
     Math.hypot(
-      visual.component!.simulation.center[0],
-      visual.component!.simulation.center[2],
+      visual.slime.simulation.center[0],
+      visual.slime.simulation.center[2],
     ) < render.radius * 0.001,
   );
   assert.ok(
     Math.hypot(
-      visual.component!.simulation.forceCenter[0] - visual.component!.simulation.center[0],
-      visual.component!.simulation.forceCenter[2] - visual.component!.simulation.center[2],
+      visual.slime.simulation.forceCenter[0] - visual.slime.simulation.center[0],
+      visual.slime.simulation.forceCenter[2] - visual.slime.simulation.center[2],
     ) < render.radius * 1e-6,
     '停止后偏心吸引点应回到球形核心，水滴形平滑恢复',
   );
-  assert.equal(visual.collisionRadius, 0.52);
-  assert.ok(visual.collisionRadius < render.radius * 0.6, '权威圆柱必须留在可变形蒙皮内部');
+  const shape = resolvePlayerVisualShape(render);
+  assert.equal(shape.collisionRadius, 0.52);
+  assert.ok(shape.collisionRadius < render.radius * 0.6, '权威圆柱必须留在可变形蒙皮内部');
   visual.dispose();
 });
 
 test('混合史莱姆用移动与跳跃速度合成三维水滴轴，并让质量核心反向塌陷', () => {
   const render = pbfSlimeArchetype.components.render;
   assert.ok(render?.model === 'line-art-pbf-slime');
-  const visual = createPlayerActorVisual('jump-visual-player', render, 3.2);
-  const simulation = visual.component!.simulation;
+  const visual = createPlayerVisualHarness('jump-visual-player', render, 3.2);
+  const simulation = visual.slime.simulation;
   const minimumSurfaceY = (): number => {
     let minimum = Number.POSITIVE_INFINITY;
     for (let offset = 1; offset < simulation.positions.length; offset += 3) {
@@ -1377,7 +1476,7 @@ test('混合史莱姆用移动与跳跃速度合成三维水滴轴，并让质�
     minimumAlignment: number,
     maximumAlignment: number,
   ): number => {
-    const directions = visual.component!.rig.surfaceDirections;
+    const directions = visual.rig.surfaceDirections;
     let sum = 0;
     let count = 0;
     for (let offset = 0; offset < simulation.positions.length; offset += 3) {
@@ -1496,8 +1595,8 @@ test('混合史莱姆用移动与跳跃速度合成三维水滴轴，并让质�
 test('混合史莱姆起跳首帧移除平底，并让水滴圆头向上、尖尾向下', () => {
   const render = pbfSlimeArchetype.components.render;
   assert.ok(render?.model === 'line-art-pbf-slime');
-  const visual = createPlayerActorVisual('jump-silhouette-player', render, 3.2);
-  const component = visual.component!;
+  const visual = createPlayerVisualHarness('jump-silhouette-player', render, 3.2);
+  const component = visual.slime;
   const simulation = component.simulation;
   const directions = component.rig.surfaceDirections;
   const verticalExtent = (): number => {
@@ -1616,6 +1715,9 @@ test('高数量物品 Actor 保留交互与碰撞身份，但用批次绘制而�
     definition,
     environment: { fogColor: '#ffffff', fogNear: 20, fogFar: 60 },
     now: () => 1_000,
+    // 这些用例不测建模节流：一帧建完，断言才好写。分帧建模由
+    // ClientActorSystem.spawn.test.ts 单独覆盖。
+    spawnBudgetMilliseconds: Number.POSITIVE_INFINITY,
   });
   const wood: SnapshotActor = {
     id: 'drop-1',
@@ -1631,7 +1733,7 @@ test('高数量物品 Actor 保留交互与碰撞身份，但用批次绘制而�
   system.update(0, 0);
 
   const actor = system.getActor(wood.id)!;
-  assert.equal(actor.getComponent(THREE_OBJECT_COMPONENT), undefined);
+  assert.equal(actor.getComponent(RENDER_PROXY_COMPONENT), undefined);
   assert.equal((actor.requireComponent(ITEM_STACK_COMPONENT) as ItemStackComponent).quantity, 12);
   assert.ok(actor.getComponent(SIMPLE_COLLISION_COMPONENT));
   assert.equal(system.findNearbyInteractableActor({ x: 1, z: 2 })?.quantity, 12);
@@ -1654,6 +1756,9 @@ test('木堆与石堆各自成批：合批系统按渲染模型分派模板，�
     definition,
     environment: { fogColor: '#ffffff', fogNear: 20, fogFar: 60 },
     now: () => 1_000,
+    // 这些用例不测建模节流：一帧建完，断言才好写。分帧建模由
+    // ClientActorSystem.spawn.test.ts 单独覆盖。
+    spawnBudgetMilliseconds: Number.POSITIVE_INFINITY,
   });
   const wood: SnapshotActor = {
     id: 'drop-wood',
@@ -1703,6 +1808,9 @@ test('圆木使用参考项目的八边形单根模型，并按权威位移滚�
     definition,
     environment: { fogColor: '#ffffff', fogNear: 20, fogFar: 60 },
     now: () => now,
+    // 这些用例不测建模节流：一帧建完，断言才好写。分帧建模由
+    // ClientActorSystem.spawn.test.ts 单独覆盖。
+    spawnBudgetMilliseconds: Number.POSITIVE_INFINITY,
   });
   const snapshot = (x: number): SnapshotActor => ({
     id: 'drop-wood-log-roll',
@@ -1801,6 +1909,9 @@ test('单颗果实按权威位移旋转，sleeping 后不再累积滚动角', ()
     definition: orchardDefinition,
     environment: { fogColor: '#ffffff', fogNear: 20, fogFar: 60 },
     now: () => now,
+    // 这些用例不测建模节流：一帧建完，断言才好写。分帧建模由
+    // ClientActorSystem.spawn.test.ts 单独覆盖。
+    spawnBudgetMilliseconds: Number.POSITIVE_INFINITY,
   });
   const snapshot = (x: number, state: 'active' | 'sleeping'): SnapshotActor => ({
     id: 'drop-fruit-roll',
@@ -1872,6 +1983,9 @@ test('客户端用同一世界种子为每棵树选择确定的普通树或果�
     definition: mixedForestDefinition,
     environment: { fogColor: '#ffffff', fogNear: 20, fogFar: 60 },
     worldSeed,
+    // 这些用例不测建模节流：一帧建完，断言才好写。分帧建模由
+    // ClientActorSystem.spawn.test.ts 单独覆盖。
+    spawnBudgetMilliseconds: Number.POSITIVE_INFINITY,
   });
   const props = new Int32Array(PROP_BUFFER_LENGTH);
   const propCount = generateChunkProps(worldSeed, -1, 0, props);
@@ -1920,6 +2034,9 @@ test('果子按服务端时钟自己熟：冷却中不画也不能交互，到�
     definition: orchardDefinition,
     environment: { fogColor: '#ffffff', fogNear: 20, fogFar: 60 },
     now: () => now,
+    // 这些用例不测建模节流：一帧建完，断言才好写。分帧建模由
+    // ClientActorSystem.spawn.test.ts 单独覆盖。
+    spawnBudgetMilliseconds: Number.POSITIVE_INFINITY,
   });
 
   const props = new Int32Array(PROP_BUFFER_LENGTH);
@@ -1983,6 +2100,9 @@ test('流式树按 Chunk 构造无网格 Actor，偏离态可在无 Transform �
     environment: { fogColor: '#ffffff', fogNear: 20, fogFar: 60 },
     collision,
     now: () => now,
+    // 这些用例不测建模节流：一帧建完，断言才好写。分帧建模由
+    // ClientActorSystem.spawn.test.ts 单独覆盖。
+    spawnBudgetMilliseconds: Number.POSITIVE_INFINITY,
   });
   system.setGeneratedPropOverrideTarget((chunkX, chunkZ, propIndex, removed) => {
     overrides.push({ chunkX, chunkZ, propIndex, removed });
@@ -2008,7 +2128,7 @@ test('流式树按 Chunk 构造无网格 Actor，偏离态可在无 Transform �
   const actorId = formatGeneratedPropId(PROP_KIND.TREE, -1, 0, propIndex);
   const actor = system.getActor(actorId)!;
   assert.ok(actor);
-  assert.equal(actor.hasComponents(THREE_OBJECT_COMPONENT), false);
+  assert.equal(actor.hasComponents(RENDER_PROXY_COMPONENT), false);
   const transform = actor.requireComponent(TRANSFORM_COMPONENT) as TransformComponent;
   assert.equal(
     system.findNearbyInteractableActor({ x: transform.x + 0.2, z: transform.z })?.actorId,
@@ -2034,3 +2154,4 @@ test('流式树按 Chunk 构造无网格 Actor，偏离态可在无 Transform �
   assert.equal(system.getActor(actorId), undefined);
   system.dispose();
 });
+

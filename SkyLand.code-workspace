@@ -1,0 +1,25 @@
+{
+  // SkyLand 工作区入口。
+  //
+  // 「文件 → 打开工作区」选中本文件即可。跑起来有两条路：
+  //
+  //   F5 → `SkyLand: 全栈调试`        Node 服务端 + Vite(5180) + 独立 Chrome，可下断点
+  //   任务 → `SkyLand: 启动开发环境（不调试）`   只想跑，不要调试器
+  //
+  // 想看线上形态（不经过 Vite，dist 与 /api、/ws 都由同一个 Node 进程提供、
+  // 与 Dockerfile 一致），用 `SkyLand: 生产模式全栈`。
+  //
+  // 这份文件刻意只做入口：设置、启动配置、任务与扩展推荐全部放在 .vscode/ 下，
+  // 这样直接「打开文件夹」和「打开工作区」拿到的是同一套行为，不会有两份真相。
+  "folders": [
+    {
+      "name": "SkyLand",
+      "path": "."
+    }
+  ],
+  "settings": {
+    // 唯一放在这里的一条：多根工作区下 VS Code 默认按目录名排序，
+    // 显式给根目录起名后标题栏与资源管理器都显示 SkyLand 而不是仓库路径。
+    "window.title": "${rootName}${separator}${activeEditorShort}${separator}${dirty}"
+  }
+}

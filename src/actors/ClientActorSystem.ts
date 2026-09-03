@@ -58,7 +58,11 @@ import {
 import { toWorldSeed } from '../../shared/world/worldConfig.mjs';
 import { selectWorldPropVariant } from '../../shared/world/worldPropVariants.mjs';
 import type { FillMaterialEnvironment } from '../materials/createFillMaterial';
-import { createActorVisualModel } from '../models/actors/createActorVisualModel';
+import { NULL_PROXY_ID } from '../render/RenderScene';
+import { frameTimeline } from '../platform/index';
+import { RenderTransformBuffer } from '../render/RenderTransformBuffer';
+import type { ThreeMeshProxy } from '../render/three/ThreeMeshProxy';
+import { ThreeRenderScene } from '../render/three/ThreeRenderScene';
 import type { SnapshotActor, SnapshotPlayer } from '../network/protocol';
 import type { SceneDefinition } from '../scenes/data/SceneDefinition';
 import type {
@@ -72,41 +76,42 @@ import {
   ReplicationComponent,
 } from './components/ReplicationComponent';
 import {
-  THREE_OBJECT_COMPONENT,
-  ThreeObjectComponent,
-} from './components/ThreeObjectComponent';
-import {
-  INTERACTION_MARKER_COMPONENT,
-  InteractionMarkerComponent,
-} from './components/InteractionMarkerComponent';
+  RENDER_PROXY_COMPONENT,
+  RenderProxyComponent,
+} from './components/RenderProxyComponent';
 import { ActorTransformSystem } from './systems/ActorTransformSystem';
-import { AttachmentVisualSystem } from './systems/AttachmentVisualSystem';
-import { CargoVisualSystem } from './systems/CargoVisualSystem';
-import { WaterBobVisualSystem } from './systems/WaterBobVisualSystem';
-import { ActorDropRollSystem } from './systems/ActorDropRollSystem';
-import { ElasticTetherVisualSystem } from './systems/ElasticTetherVisualSystem';
+import { ActorVisualParamSystem } from './systems/ActorVisualParamSystem';
+import { RenderTransformSyncSystem } from './systems/RenderTransformSyncSystem';
 import {
   FIRE_VISUAL_COMPONENT,
   FireVisualComponent,
 } from './components/FireVisualComponent';
-import { FireVisualSystem } from './systems/FireVisualSystem';
 import { GeneratedPropFruitSystem } from './systems/GeneratedPropFruitSystem';
 import { HighCountActorBatchSystem } from './systems/HighCountActorBatchSystem';
-import { HybridSlimeVisualComponent } from './components/HybridSlimeVisualComponent';
-import { HybridSlimeVisualSystem } from './systems/HybridSlimeVisualSystem';
-import {
-  TEMPERATURE_MARKER_COMPONENT,
-  TemperatureMarkerComponent,
-} from './components/TemperatureMarkerComponent';
 import {
   LOCAL_DERIVED_ACTOR_COMPONENT,
   LocalDerivedActorComponent,
 } from './components/LocalDerivedActorComponent';
+import { ActorGuidePathSyncSystem } from './systems/ActorGuidePathSyncSystem';
 import {
-  GUIDE_PATH_VISUAL_COMPONENT,
-  GuidePathVisualComponent,
-} from './components/GuidePathVisualComponent';
-import { GuidePathVisualSystem } from './systems/GuidePathVisualSystem';
+  ActorInstanceSystem,
+  type ActorInstanceCatalog,
+} from './systems/ActorInstanceSystem';
+import { RenderInstanceBuffer } from '../render/RenderInstanceBuffer';
+
+/**
+ * 一帧最多花在「建 Replica」上的毫秒数（实现路径文档 §2 的第 1 项）。
+ *
+ * 打点量到的问题：进房间那一帧 `render-spawn` 是 31–146 ms——服务端第一份快照里
+ * 视野内的 Actor 会在同一帧里被一次性建出来，而每个 Replica 的 `createMeshProxy`
+ * 都要程序化地生成一整棵模型。这是全程最大的一次卡顿，而且它**在渲染侧**，
+ * 把模拟搬进 worker 一点都帮不上。
+ *
+ * 用时间预算而不是个数预算，是因为要压的就是「一帧的墙钟时间」：不同原型的建模
+ * 成本差一个数量级，按个数配额压不住最贵的那几个。`CHUNK_BUILD_BUDGET_PER_FRAME`
+ * 那条按个数的预算在这里不适用，理由同上。
+ */
+const REPLICA_SPAWN_BUDGET_MILLISECONDS = 4;
 
 export interface ClientActorSystemOptions {
   definition: SceneDefinition;
@@ -121,6 +126,22 @@ export interface ClientActorSystemOptions {
    */
   collision?: CollisionWorld;
   physics?: PhysicsWorld;
+  /**
+   * 场景共用的渲染世界与它的边界缓冲。
+   *
+   * 传进来时 Actor Replica 与本地玩家共用同一个渲染世界、同一段 transform SoA
+   * ——本地玩家因此也能拿到 ProxyId。不传就自己建一对，单独使用这个 System 的
+   * 测试不需要额外搭场景。
+   */
+  renderScene?: ThreeRenderScene;
+  transforms?: RenderTransformBuffer;
+  /**
+   * 一帧的建模预算，毫秒。测试传 `Infinity` 就回到「一帧建完」的旧行为，
+   * 传 0 则每帧只建一个——预算再紧也保证有进度。
+   */
+  spawnBudgetMilliseconds?: number;
+  /** 单调时钟。和 `now` 分开：`now` 是快照用的时间轴，测试里不会在一帧内推进。 */
+  spawnClock?: () => number;
 }
 
 type PropStateSnapshot = {
@@ -185,7 +206,22 @@ function resolveExternalAttachmentTransforms(
 
 /** 接收服务端完整 Actor 快照并维护对应的客户端 Replica。 */
 export class ClientActorSystem implements SceneVisualSystem {
-  public readonly root = new THREE.Group();
+  /**
+   * Game World 与 Render World 之间那条边界（路线图 §2 / 第 1 步）。
+   * Actor 手上只有 proxyId；Object3D 全部住在 renderScene 里，
+   * 两侧靠 transforms 这段字节通信。
+   */
+  private readonly transforms: RenderTransformBuffer;
+  private readonly renderScene: ThreeRenderScene;
+  /**
+   * 这个 System 往场景图里挂东西的那个节点，就是渲染世界的根。
+   *
+   * 两者必须是同一个组：proxy 由渲染世界挂载，合批与悬停高亮由这里挂载，
+   * 分成两个节点会让其中一个不在场景图里。
+   */
+  public get root(): THREE.Group {
+    return this.renderScene.root;
+  }
   private readonly world = new ActorWorld();
   private readonly archetypes: Map<string, SceneDefinition['actorArchetypes'][number]>;
   private readonly snapshots = new ActorSnapshotBuffer();
@@ -199,6 +235,9 @@ export class ClientActorSystem implements SceneVisualSystem {
   private readonly collision: CollisionWorld;
   private readonly physics?: PhysicsWorld;
   private readonly highCountBatches: HighCountActorBatchSystem;
+  /** 合批内容的实例通道，以及渲染侧反查原型用的那张顺序表。 */
+  private readonly instances = new RenderInstanceBuffer();
+  private readonly archetypeOrder: string[];
   private readonly fruit: GeneratedPropFruitSystem;
   /** actorId → 登记进碰撞世界的实例，逐帧复用，避免每帧产生一批临时对象。 */
   private readonly colliderInstances = new Map<string, {
@@ -213,8 +252,6 @@ export class ClientActorSystem implements SceneVisualSystem {
   private collidersStale = true;
   private hoveredActorId?: string;
   private hoverHelper?: THREE.BoxHelper;
-  private simpleCollisionVisible = false;
-  private temperatureVisible = false;
   private readonly generatedPropChunks = new Map<string, Set<string>>();
   private readonly generatedPropStates = new Map<string, PropStateSnapshot>();
   private generatedPropOverrideTarget?: PropOverrideTarget;
@@ -230,9 +267,10 @@ export class ClientActorSystem implements SceneVisualSystem {
     }>
   >();
   private readonly worldSeed: number;
+  private readonly spawnBudgetMilliseconds: number;
+  private readonly spawnClock: () => number;
 
   public constructor(options: ClientActorSystemOptions) {
-    this.root.name = 'replicated-actor-world';
     this.archetypes = new Map(
       options.definition.actorArchetypes.map((definition) => [definition.id, definition]),
     );
@@ -252,25 +290,38 @@ export class ClientActorSystem implements SceneVisualSystem {
     this.collision = options.collision ?? new CollisionWorld();
     this.physics = options.physics;
     this.highCountBatches = new HighCountActorBatchSystem(options.environment, this.archetypes);
+    // 两侧共用的原型顺序：玩法侧写下标，渲染侧按同一份表反查 render 定义。
+    this.archetypeOrder = [...this.archetypes.keys()];
     this.fruit = new GeneratedPropFruitSystem(options.environment, this.archetypes);
+    this.spawnBudgetMilliseconds = options.spawnBudgetMilliseconds ?? REPLICA_SPAWN_BUDGET_MILLISECONDS;
+    this.spawnClock = options.spawnClock
+      ?? (() => (globalThis.performance ?? Date).now());
+    this.transforms = options.transforms ?? new RenderTransformBuffer();
+    this.renderScene = options.renderScene
+      ?? new ThreeRenderScene(
+        createActorWorldRoot(),
+        options.environment,
+        options.definition.renderer.ocean,
+      );
     // 客户端不运行 AttachmentSystem：最终世界坐标来自快照插值，不能被
     // localTransform 再次解算覆盖。
-    this.world.addSystem(new ActorTransformSystem(this.root));
-    this.world.addSystem(new GuidePathVisualSystem());
-    this.world.addSystem(new HybridSlimeVisualSystem());
-    if (options.definition.renderer.ocean) {
-      this.world.addSystem(new WaterBobVisualSystem(options.definition.renderer.ocean));
-      this.world.addSystem(new CargoVisualSystem(options.definition.renderer.ocean));
-    }
-    this.world.addSystem(new AttachmentVisualSystem());
-    this.world.addSystem(new ElasticTetherVisualSystem());
-    // 必须排在弹性拉伸之后：脱落物件的姿态由这一步覆盖成刚体朝向。
-    this.world.addSystem(new ActorDropRollSystem());
-    this.world.addSystem(new FireVisualSystem());
-    this.environment = options.environment;
+    //
+    // 前两个 System 就是那条边界：ActorTransformSystem 只写 SoA 字节，
+    // RenderTransformSyncSystem 翻面并交给渲染世界。后面所有表现 System 读的都是
+    // 已经摆好位置的 matrixWorld，所以这两个必须排在最前且相邻。
+    this.world.addSystem(new ActorTransformSystem(this.transforms));
+    // 参数要和 transform 同一次翻面，所以必须夹在写入与 publish 之间。
+    this.world.addSystem(new ActorVisualParamSystem(this.transforms));
+    // 合批内容走自己那条通道，但同样是「写字节」，所以和 SoA 写入排在一起、
+    // 都在 publish 之前。这条现在还没有双缓冲（同一帧写完就读），排在这里是为了
+    // 等它也跨线程时不用再挪一次。
+    this.world.addSystem(new ActorInstanceSystem(this.instances, this.createInstanceCatalog()));
+    this.world.addSystem(new RenderTransformSyncSystem(this.transforms, this.renderScene));
+    this.world.addSystem(new ActorGuidePathSyncSystem(this.renderScene));
+    // 到这里 Actor 世界里就只剩五个 System 了，而且**一个都不 import three**：
+    // 三个写字节、一个发命令、一个翻面。船体波动、货箱浮沉、附着继承、弹性拉伸
+    // 与脱落翻滚全部搬进了渲染世界（实现路径文档 §1.75）。
   }
-
-  private readonly environment: FillMaterialEnvironment;
 
   public syncSnapshots(
     snapshots: readonly SnapshotActor[],
@@ -301,23 +352,63 @@ export class ClientActorSystem implements SceneVisualSystem {
       applicableSnapshots.push(snapshot);
     }
 
-    // Pass 1：先创建完整集合，确保父节点可以出现在快照的任意位置。
+    // Pass 1a：原型换了的先删掉，让它走下面的新建路径。
     for (const snapshot of applicableSnapshots) {
-      let actor = this.world.getActor(snapshot.id) as Actor | undefined;
-      const archetypeId = this.resolveSnapshotArchetypeId(snapshot);
-      if (actor && actor.archetypeId !== archetypeId) {
+      const actor = this.world.getActor(snapshot.id) as Actor | undefined;
+      if (actor && actor.archetypeId !== this.resolveSnapshotArchetypeId(snapshot)) {
         this.world.removeActor(actor.id);
-        actor = undefined;
       }
-      actor ??= this.createReplica(snapshot);
-      if (!actor.hasComponents(REPLICATION_COMPONENT)) {
+    }
+
+    // Pass 1b：按预算创建。没轮到的这一帧就不存在，而下一帧的快照集合里它还在——
+    // 所以不需要维护待建队列，也就不会有「排着队的 Actor 已经离开视野」这种脏状态。
+    const pending = new Map<string, SnapshotActor>();
+    for (const snapshot of applicableSnapshots) {
+      if (!this.world.getActor(snapshot.id)) pending.set(snapshot.id, snapshot);
+    }
+    const spawnDeadline = this.spawnClock() + this.spawnBudgetMilliseconds;
+    let spawned = 0;
+    /**
+     * 建一个 Replica，父节点优先。
+     *
+     * 「父节点可以出现在快照的任意位置」是这一遍原本就保证的性质，分帧之后更要保住：
+     * 孩子先于父节点被建出来的话，Pass 2 会把它当成「挂在外部 Actor 上」——那条路径
+     * 是给玩家用的，一个本该跟着船走的货箱会被当成玩家嘴里叼着的东西。
+     */
+    const spawn = (snapshot: SnapshotActor, chain: Set<string>): Actor | undefined => {
+      const existing = this.world.getActor(snapshot.id) as Actor | undefined;
+      if (existing) return existing;
+      // 脏数据里的环形父子关系不该把客户端拖进死循环。
+      if (chain.has(snapshot.id)) return undefined;
+      chain.add(snapshot.id);
+      const parentActorId = snapshot.parentActorId ?? undefined;
+      // 只有「父节点也在这一批待建里」才需要递归；已经在世界里、或根本不是 Replica
+      // （玩家）的父节点都走不到这里。
+      const parentSnapshot = parentActorId === undefined
+        ? undefined
+        : pending.get(parentActorId);
+      // 父节点建不出来（预算用完或脏数据）就连孩子一起推到下一帧。
+      if (parentSnapshot && !spawn(parentSnapshot, chain)) return undefined;
+      // 预算再紧也要建一个：否则视野里新出现的 Actor 可能永远排不上。
+      if (spawned > 0 && this.spawnClock() >= spawnDeadline) return undefined;
+      const actor = this.createReplica(snapshot);
+      spawned += 1;
+      return actor;
+    };
+    for (const snapshot of applicableSnapshots) spawn(snapshot, new Set());
+
+    // Pass 1c：这一帧已经存在的都要带上复制标记。
+    for (const snapshot of applicableSnapshots) {
+      const actor = this.world.getActor(snapshot.id) as Actor | undefined;
+      if (actor && !actor.hasComponents(REPLICATION_COMPONENT)) {
         actor.addComponent(new ReplicationComponent());
       }
     }
 
     // Pass 2：父子关系是离散状态，直接采用当前采样快照的目标值。
     for (const snapshot of applicableSnapshots) {
-      const actor = this.world.getActor(snapshot.id) as Actor;
+      const actor = this.world.getActor(snapshot.id) as Actor | undefined;
+      if (!actor) continue;
       const parentActorId = snapshot.parentActorId ?? undefined;
       // 玩家等外部 Actor 不在 Replica ActorWorld 中；它们的姿态已在快照入缓冲前合成。
       if (parentActorId && !this.world.getActor(parentActorId)) {
@@ -332,7 +423,8 @@ export class ClientActorSystem implements SceneVisualSystem {
 
     // Pass 3：Component 脚本读取到的 Transform 同时包含局部坐标和世界坐标。
     for (const snapshot of applicableSnapshots) {
-      this.applySnapshot(this.world.getActor(snapshot.id) as Actor, snapshot);
+      const actor = this.world.getActor(snapshot.id) as Actor | undefined;
+      if (actor) this.applySnapshot(actor, snapshot);
     }
 
     for (const actor of this.world.actors() as Actor[]) {
@@ -351,20 +443,37 @@ export class ClientActorSystem implements SceneVisualSystem {
   }
 
   public update(deltaSeconds: number, elapsedSeconds: number): void {
-    this.applySnapshotSet(this.snapshots.sample(this.now()));
-    this.world.update(deltaSeconds, elapsedSeconds);
-    this.highCountBatches.sync(this.world);
-    // 果子的熟没熟由绝对服务端时间决定，所以这里用换算过的服务端时钟，
-    // 而不是本地 Date.now()。
-    const serverTime = this.snapshots.serverTimeAt(this.now());
-    this.fruit.sync(this.world, serverTime === undefined ? undefined : serverTime / 1000);
-    // 和高数量批次一样按需挂进场景：没有果树的地图不会多出一层空节点。
-    if (this.fruit.instanceCount > 0 && !this.fruit.root.parent) this.root.add(this.fruit.root);
-    if (this.highCountBatches.root.children.length > 0 && !this.highCountBatches.root.parent) {
-      this.root.add(this.highCountBatches.root);
-    }
-    this.publishColliders();
-    this.hoverHelper?.update();
+    // 打点按「第 2 步之后这段代码会在哪个线程上」分：
+    // `sim-actors` 进 Sim Worker，`render-batches` / `render-visuals` 留在主线程。
+    // `sim-actors` 只包玩法：快照应用与 Actor 世界的 System。
+    // Replica 的装配单独打点——`createMeshProxy` 会在渲染世界里建一整棵模型，
+    // 那是渲染成本，混进 sim 会把「搬进 worker 能省多少」算高。
+    frameTimeline.measure('sim-actors', () => {
+      this.applySnapshotSet(this.snapshots.sample(this.now()));
+      this.world.update(deltaSeconds, elapsedSeconds);
+    });
+    frameTimeline.measure('render-batches', () => {
+      this.highCountBatches.sync(this.instances, this.archetypeOrder);
+      // 果子的熟没熟由绝对服务端时间决定，所以这里用换算过的服务端时钟，
+      // 而不是本地 Date.now()。
+      const serverTime = this.snapshots.serverTimeAt(this.now());
+      this.fruit.sync(this.world, serverTime === undefined ? undefined : serverTime / 1000);
+      // 和高数量批次一样按需挂进场景：没有果树的地图不会多出一层空节点。
+      if (this.fruit.instanceCount > 0 && !this.fruit.root.parent) this.root.add(this.fruit.root);
+      if (this.highCountBatches.root.children.length > 0 && !this.highCountBatches.root.parent) {
+        this.root.add(this.highCountBatches.root);
+      }
+    });
+    // 渲染世界自己的表现系统。它们读的是刚翻面的参数段，所以排在 world.update 之后。
+    // deltaSeconds 目前仍来自模拟侧——第 3 步渲染进 worker 后换成渲染线程的时钟。
+    frameTimeline.measure(
+      'render-visuals',
+      () => this.renderScene.updateVisuals(this.transforms, deltaSeconds, elapsedSeconds),
+    );
+    frameTimeline.measure('sim-colliders', () => {
+      this.publishColliders();
+      this.hoverHelper?.update();
+    });
   }
 
   /**
@@ -413,26 +522,14 @@ export class ClientActorSystem implements SceneVisualSystem {
     }
   }
 
-  public beforeRender(_renderer: THREE.WebGLRenderer, camera: THREE.Camera): void {
-    for (const actor of this.world.query(GUIDE_PATH_VISUAL_COMPONENT) as Actor[]) {
-      const visual = actor.requireComponent(
-        GUIDE_PATH_VISUAL_COMPONENT,
-      ) as GuidePathVisualComponent;
-      visual.setResolution(_renderer.domElement.width, _renderer.domElement.height);
-    }
-    for (const actor of this.world.query(INTERACTION_MARKER_COMPONENT) as Actor[]) {
-      const marker = actor.requireComponent(
-        INTERACTION_MARKER_COMPONENT,
-      ) as InteractionMarkerComponent;
-      marker.faceCamera(camera);
-    }
-    if (!this.temperatureVisible) return;
-    for (const actor of this.world.query(TEMPERATURE_MARKER_COMPONENT) as Actor[]) {
-      const marker = actor.requireComponent(
-        TEMPERATURE_MARKER_COMPONENT,
-      ) as TemperatureMarkerComponent;
-      marker.faceCamera(camera);
-    }
+  public beforeRender(renderer: THREE.WebGLRenderer, camera: THREE.Camera): void {
+    // 线宽是像素单位，要 resize 之后的真实画布尺寸；世界 UI 的朝向也只有到这里
+    // 才拿得到相机。两件都是渲染世界自己的事，这里只负责把参数递过去。
+    this.renderScene.setGuidePathResolution(
+      renderer.domElement.width,
+      renderer.domElement.height,
+    );
+    this.renderScene.faceCameras(camera);
   }
 
   public dispose(): void {
@@ -447,10 +544,29 @@ export class ClientActorSystem implements SceneVisualSystem {
     this.highCountBatches.dispose();
     this.fruit.dispose();
     this.world.dispose();
+    // world.dispose() 逐个跑 endPlay，正常路径下每个 RenderProxyComponent 都会
+    // 还掉自己的槽位。这一句兜住不正常的路径：渲染世界的资源不该依赖「每个 proxy
+    // 都恰好有一个活着的 Actor 持有它」这条不变量才能释放。
+    //
+    // 渲染世界**归场景所有**（玩家的 proxy 也在里面），但这一帧的驱动和释放都
+    // 托管给 Actor 世界：翻面（`RenderTransformSyncSystem`）必须夹在写 SoA 与
+    // 依赖翻面结果的 Actor 表现 System 之间，拆不出来。第 2 步要拆的正是这个
+    // 夹心结构；在那之前，「谁驱动谁就负责释放」比多一个只管析构的系统更清楚。
+    this.renderScene.dispose();
   }
 
   public getActor(actorId: string): Actor | undefined {
     return this.world.getActor(actorId) as Actor | undefined;
+  }
+
+  /** 渲染世界本身。表现搬过去之后，测试与调试代码经由它查渲染侧状态。 */
+  public getRenderScene(): ThreeRenderScene {
+    return this.renderScene;
+  }
+
+  public getActorRenderProxy(actorId: string): ThreeMeshProxy | undefined {
+    const actor = this.world.getActor(actorId) as Actor | undefined;
+    return actor ? this.resolveRender(actor) : undefined;
   }
 
   public findOwnedActorId(playerId: string): string | undefined {
@@ -483,11 +599,8 @@ export class ClientActorSystem implements SceneVisualSystem {
   }
 
   public setSimpleCollisionVisible(visible: boolean): void {
-    this.simpleCollisionVisible = visible;
-    for (const actor of this.world.query(THREE_OBJECT_COMPONENT) as Actor[]) {
-      const render = actor.requireComponent(THREE_OBJECT_COMPONENT) as ThreeObjectComponent;
-      render.setSimpleCollisionVisible(visible);
-    }
+    // 碰撞盒可视化是渲染世界自己的状态：这里不再遍历 Actor。
+    this.renderScene.setSimpleCollisionVisible(visible);
   }
 
   public setGeneratedPropOverrideTarget(target?: PropOverrideTarget): void {
@@ -558,13 +671,8 @@ export class ClientActorSystem implements SceneVisualSystem {
   }
 
   public setTemperatureVisible(visible: boolean): void {
-    this.temperatureVisible = visible;
-    for (const actor of this.world.query(TEMPERATURE_MARKER_COMPONENT) as Actor[]) {
-      const marker = actor.requireComponent(
-        TEMPERATURE_MARKER_COMPONENT,
-      ) as TemperatureMarkerComponent;
-      marker.setVisible(visible);
-    }
+    // 和 setSimpleCollisionVisible 一样：这是渲染世界自己的状态，不再在 Actor 上镜像。
+    this.renderScene.setTemperatureMarkersVisible(visible);
   }
 
   public pickInteractableActor(
@@ -581,11 +689,12 @@ export class ClientActorSystem implements SceneVisualSystem {
     let nearest: { distance: number; candidate: ActorInteractionCandidate } | undefined;
     for (const actor of this.world.query(
       INTERACTABLE_COMPONENT,
-      THREE_OBJECT_COMPONENT,
+      RENDER_PROXY_COMPONENT,
     ) as Actor[]) {
       const interactable = actor.requireComponent(INTERACTABLE_COMPONENT) as InteractableComponent;
       if (!interactable.enabled) continue;
-      const render = actor.requireComponent(THREE_OBJECT_COMPONENT) as ThreeObjectComponent;
+      const render = this.resolveRender(actor);
+      if (!render) continue;
       render.root.updateWorldMatrix(true, true);
       const hit = this.raycaster.intersectObject(render.root, true)[0];
       if (!hit || (nearest && hit.distance >= nearest.distance)) continue;
@@ -674,15 +783,11 @@ export class ClientActorSystem implements SceneVisualSystem {
   }
 
   public setInteractionMarkerActorId(actorId?: string, inputLabel?: string): void {
-    // Actor 数量由场景 Schema 固定在 256 以内；标记切换不随世界面积增长。
-    for (const actor of this.world.query(INTERACTION_MARKER_COMPONENT) as Actor[]) {
-      const marker = actor.requireComponent(
-        INTERACTION_MARKER_COMPONENT,
-      ) as InteractionMarkerComponent;
-      const selected = actor.id === actorId && Boolean(inputLabel);
-      marker.setLabel(selected ? inputLabel! : '');
-      marker.setVisible(selected);
-    }
+    // 生成物件带 InteractableComponent 却没有 proxy，所以「目标没有 proxyId」
+    // 与「没有选中」都是合法输入，统一退化成 NULL_PROXY_ID。
+    const actor = actorId ? this.world.getActor(actorId) as Actor | undefined : undefined;
+    const proxy = actor?.getComponent(RENDER_PROXY_COMPONENT) as RenderProxyComponent | undefined;
+    this.renderScene.setInteractionMarker(proxy?.proxyId ?? NULL_PROXY_ID, inputLabel ?? '');
   }
 
   public setHoveredActorId(actorId?: string): void {
@@ -690,7 +795,7 @@ export class ClientActorSystem implements SceneVisualSystem {
     this.disposeHoverHelper();
     this.hoveredActorId = actorId;
     const actor = actorId ? this.world.getActor(actorId) as Actor | undefined : undefined;
-    const render = actor?.getComponent(THREE_OBJECT_COMPONENT) as ThreeObjectComponent | undefined;
+    const render = actor ? this.resolveRender(actor) : undefined;
     if (!render) return;
     render.root.updateWorldMatrix(true, true);
     this.hoverHelper = new THREE.BoxHelper(render.visualRoot, 0x8a6238);
@@ -717,6 +822,26 @@ export class ClientActorSystem implements SceneVisualSystem {
       floatState: buoyancy.state as VesselHudState['floatState'],
       eventRevision: buoyancy.eventRevision,
       lastEvent: buoyancy.lastEvent ?? null,
+    };
+  }
+
+  /**
+   * 「哪些原型走合批、什么时候换单个模板」是玩法事实，所以由这一侧给出。
+   * 判据就是原型有没有 `itemStack`——`createReplica` 正是照它提前返回、不建 proxy 的。
+   */
+  private createInstanceCatalog(): ActorInstanceCatalog {
+    const archetypeIndex = new Map<string, number>();
+    this.archetypeOrder.forEach((id, index) => archetypeIndex.set(id, index));
+    const singleModels = new Set(['line-art-fruit-pile', 'line-art-wood-log']);
+    return {
+      archetypeIndex,
+      isBatched: (archetypeId) => (
+        this.archetypes.get(archetypeId)?.components.itemStack !== undefined
+      ),
+      supportsSingle: (archetypeId) => {
+        const model = this.archetypes.get(archetypeId)?.components.render?.model;
+        return model !== undefined && singleModels.has(model);
+      },
     };
   }
 
@@ -804,78 +929,74 @@ export class ClientActorSystem implements SceneVisualSystem {
       return actor;
     }
 
+    // 样式来自已净化的原型、不在快照里，所以随 spawn 一次性给定；
+    // 每帧过边界的只有路点、当前节点与开关（见 ActorGuidePathSyncSystem）。
+    const guidePathStyle = archetype.components.guidePath
+      ? {
+        lineColor: archetype.components.guidePath.lineColor ?? '#fffdf4',
+        markerColor: archetype.components.guidePath.markerColor ?? '#fffdf4',
+        lineWidth: archetype.components.guidePath.lineWidth ?? 5,
+        dashLength: archetype.components.guidePath.dashLength ?? 0.8,
+        gapLength: archetype.components.guidePath.gapLength ?? 0.55,
+        dashSpeed: archetype.components.guidePath.dashSpeed ?? 0.5,
+        markerSize: archetype.components.guidePath.markerSize ?? 0.55,
+      }
+      : undefined;
+
     if (!archetype.components.render && archetype.components.guidePath) {
-      const root = new THREE.Group();
-      const visualRoot = new THREE.Group();
-      root.name = `actor-${snapshot.id}-root`;
-      visualRoot.name = `actor-${snapshot.id}-visual`;
-      root.add(visualRoot);
-      const render = new ThreeObjectComponent({
-        root,
-        visualRoot,
-        length: 0,
-        width: 0,
-        simpleCollision: {
-          shape: 'box',
-          centerX: 0,
-          centerZ: 0,
-          halfWidth: 0,
-          halfLength: 0,
-          minimumY: 0,
-          maximumY: 0,
-          supportShape: 'box',
-          supportHalfWidth: 0,
-          supportHalfLength: 0,
-        },
+      const info = this.renderScene.createMeshProxy({
+        name: `actor-${snapshot.id}`,
+        guidePath: guidePathStyle,
       });
-      actor.addComponent(render);
-      this.attachGuidePathVisual(actor, render);
-      this.root.add(root);
+      actor.addComponent(new RenderProxyComponent(info.id, this.renderScene));
       this.world.addActor(actor);
       return actor;
     }
     if (!archetype.components.render) throw new Error(`可视 Actor ${archetype.id} 缺少 render`);
-    const model = createActorVisualModel(this.environment, archetype.components.render);
-    model.root.name = `actor-${snapshot.id}-root`;
-    model.visualRoot.name = `actor-${snapshot.id}-visual`;
-    actor.addComponent(new SimpleCollisionComponent(model.simpleCollision));
-    const render = new ThreeObjectComponent(model);
-    render.setSimpleCollisionVisible(this.simpleCollisionVisible);
-    actor.addComponent(render);
-    this.attachGuidePathVisual(actor, render);
-    if (
-      archetype.components.render.model === 'line-art-pbf-slime'
-      && render.pbfSlimeVisualRig
-    ) {
-      actor.addComponent(new HybridSlimeVisualComponent(
-        render.pbfSlimeVisualRig,
-        archetype.components.render,
-      ));
+    // 几何由渲染世界自己从配置生成；Game World 只拿回 proxyId 与几个数值。
+    const info = frameTimeline.measure('render-spawn', () => this.renderScene.createMeshProxy({
+      name: `actor-${snapshot.id}`,
+      render: archetype.components.render,
+      // 「要不要标记」是 spawn 时的一次性事实；锚点本来就产在渲染侧，不必回送。
+      interactionMarker: Boolean(archetype.components.interactable),
+      temperatureMarker: Boolean(archetype.components.temperature),
+      guidePath: guidePathStyle,
+      // 船体和货箱在原型里互斥（有 buoyancy 的没有 cargo，反之亦然），
+      // 所以「哪一种浮动」是一个值而不是两个开关。
+      waterMotion: archetype.components.buoyancy
+        ? 'hull'
+        : (archetype.components.cargo ? 'cargo' : undefined),
+    }));
+    // proxy 已经占了一个槽位，但要到 addActor 之后才由 RenderProxyComponent 的
+    // 生命周期负责回收。这中间任何一步抛出（例如原型声明了 temperature 却没装上
+    // 对应 Component），槽位既不在 freeSlots 里也没有 Actor 持有它——泄漏一个
+    // 挂在场景图上的模型。所以整段装配包在 try 里，失败就把 proxy 还回去。
+    let assembled = false;
+    try {
+      actor.addComponent(new SimpleCollisionComponent(info.simpleCollision));
+      // RenderProxyComponent 必须先于所有表现 Component 加入：Actor.endPlay 是插入
+      // 顺序的逆序，marker 要先释放自己的子树，proxy 的 disposeSubtree 才能最后跑。
+      actor.addComponent(new RenderProxyComponent(info.id, this.renderScene));
+      // 软体蒙皮不再挂在 Actor 上：createMeshProxy 认出 PBF 史莱姆就在渲染世界里
+      // 自己建一份表现，玩法侧只写 SlimeMotionParams 那几个 f32（§1.5）。
+      const render = this.renderScene.resolve(info.id) as ThreeMeshProxy;
+      if (render.fireVisualRig) {
+        const emitter = actor.getComponent(HEAT_EMITTER_COMPONENT) as HeatEmitterComponent | undefined;
+        actor.addComponent(new FireVisualComponent(emitter?.enabled ? 1 : 0));
+      }
+      this.world.addActor(actor);
+      assembled = true;
+    } finally {
+      // addActor 成功之后 proxy 归 Actor 管；在那之前失败就由这里回收。
+      if (!assembled) this.renderScene.destroyMeshProxy(info.id);
     }
-    if (render.fireVisualRig) {
-      const emitter = actor.getComponent(HEAT_EMITTER_COMPONENT) as HeatEmitterComponent | undefined;
-      actor.addComponent(new FireVisualComponent(render.fireVisualRig, emitter?.enabled ? 1 : 0));
-    }
-    if (archetype.components.interactable) {
-      actor.addComponent(new InteractionMarkerComponent(
-        model.root,
-        render.interactionAnchorY,
-      ));
-    }
-    if (archetype.components.temperature) {
-      const temperature = actor.requireComponent(TEMPERATURE_COMPONENT) as TemperatureComponent;
-      const marker = new TemperatureMarkerComponent(
-        model.root,
-        render.simpleCollision.centerX + render.simpleCollision.halfWidth + 0.42,
-        render.interactionAnchorY,
-        temperature.temperature,
-      );
-      marker.setVisible(this.temperatureVisible);
-      actor.addComponent(marker);
-    }
-    this.root.add(model.root);
-    this.world.addActor(actor);
     return actor;
+  }
+
+  /** 渲染侧查找。拾取、悬停高亮这类仍住在客户端的表现代码经由它取 Object3D。 */
+  private resolveRender(actor: Actor): ThreeMeshProxy | undefined {
+    const proxy = actor.getComponent(RENDER_PROXY_COMPONENT) as RenderProxyComponent | undefined;
+    return proxy ? this.renderScene.resolve(proxy.proxyId) : undefined;
   }
 
   private applySnapshot(actor: Actor, snapshot: SnapshotActor): void {
@@ -960,10 +1081,6 @@ export class ClientActorSystem implements SceneVisualSystem {
       const temperature = actor.requireComponent(TEMPERATURE_COMPONENT) as TemperatureComponent;
       temperature.temperature = snapshot.thermal.temperature;
       temperature.revision = snapshot.thermal.revision;
-      const temperatureMarker = actor.getComponent(
-        TEMPERATURE_MARKER_COMPONENT,
-      ) as TemperatureMarkerComponent | undefined;
-      temperatureMarker?.setTemperature(snapshot.thermal.temperature);
       const combustible = actor.getComponent(COMBUSTIBLE_COMPONENT) as CombustibleComponent | undefined;
       if (combustible) {
         combustible.burning = snapshot.thermal.burning;
@@ -994,8 +1111,6 @@ export class ClientActorSystem implements SceneVisualSystem {
       });
     }
     replication.revision = Math.max(replication.revision, snapshot.revision);
-    const render = actor.getComponent(THREE_OBJECT_COMPONENT) as ThreeObjectComponent | undefined;
-    if (render) render.root.userData.floatState = snapshot.buoyancy?.state;
   }
 
   private disposeHoverHelper(): void {
@@ -1079,15 +1194,6 @@ export class ClientActorSystem implements SceneVisualSystem {
     throw new Error(`Actor ${snapshot.id} 的快照缺少 archetypeId`);
   }
 
-  private attachGuidePathVisual(actor: Actor, render: ThreeObjectComponent): void {
-    const state = actor.getComponent(GUIDE_PATH_COMPONENT) as GuidePathComponent | undefined;
-    if (!state) return;
-    const visual = new GuidePathVisualComponent(state);
-    visual.guide.root.name = `actor-${actor.id}-guide-path`;
-    render.visualRoot.add(visual.guide.root);
-    actor.addComponent(visual);
-  }
-
   private archetypeForGeneratedProp(
     kind: number,
     chunkX: number,
@@ -1103,4 +1209,11 @@ export class ClientActorSystem implements SceneVisualSystem {
       this.generatedPropArchetypeVariants.get(kind) ?? [],
     )?.archetype;
   }
+}
+
+/** 没有注入渲染世界时（独立使用这个 System 的测试）自己建的那个根节点。 */
+function createActorWorldRoot(): THREE.Group {
+  const root = new THREE.Group();
+  root.name = 'replicated-actor-world';
+  return root;
 }

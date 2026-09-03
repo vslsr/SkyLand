@@ -1,27 +1,41 @@
-import * as THREE from 'three';
 import type { GrassInteractionTarget } from '../grass';
 import type { InterpolatedPlayerState } from '../network/protocol';
 import type { PhysicsWorld } from '../../shared/physics/PhysicsWorld.mjs';
 import type { ActorArchetypeDefinition } from '../scenes/data/SceneDefinition';
+import type { RenderScene } from '../render/RenderScene';
+import type { RenderTransformBuffer } from '../render/RenderTransformBuffer';
 import { RemotePlayer } from './RemotePlayer';
 import {
   RemotePlayerColliders,
   type RemotePlayerColliderState,
 } from './RemotePlayerColliders';
 
-/** 远端玩家集合：按快照增删改，本地玩家由 PlayerEntity 单独负责。 */
+/**
+ * 远端玩家集合：按快照增删改，本地玩家由 PlayerEntity 单独负责。
+ *
+ * 这里以前有一个自己的 `THREE.Group` 装所有远端玩家的模型。现在每名远端玩家
+ * 都是渲染世界里的一个 proxy，所以这个类不再持有任何场景图节点——
+ * 它只是一张 id → RemotePlayer 的表。
+ */
 export class RemotePlayerGroup {
-  public readonly root = new THREE.Group();
   private readonly players = new Map<string, RemotePlayer>();
   private archetype?: ActorArchetypeDefinition;
   private colliders?: RemotePlayerColliders;
+  private renderWorld?: { scene: RenderScene; transforms: RenderTransformBuffer };
 
   public constructor(private readonly grassInteraction: GrassInteractionTarget & {
     sampleGroundHeight?(x: number, z: number): number;
     samplePlayerHeight?(x: number, z: number, buoyancyDraft?: number): number;
     getPhysicsWorld?(): PhysicsWorld | undefined;
-  }) {
-    this.root.name = 'remote-players';
+  }) {}
+
+  /** 换场景时重新绑定：proxy 属于某一张地图的渲染世界，不能跨地图留着。 */
+  public setRenderWorld(
+    renderWorld: { scene: RenderScene; transforms: RenderTransformBuffer } | undefined,
+  ): void {
+    if (this.renderWorld === renderWorld) return;
+    this.clear();
+    this.renderWorld = renderWorld;
   }
 
   public get size(): number {
@@ -35,7 +49,8 @@ export class RemotePlayerGroup {
 
   public sync(states: InterpolatedPlayerState[], localPlayerId?: string): void {
     const archetype = this.archetype;
-    if (!archetype) return;
+    const renderWorld = this.renderWorld;
+    if (!archetype || !renderWorld) return;
     const seen = new Set<string>();
 
     for (const state of states) {
@@ -46,9 +61,8 @@ export class RemotePlayerGroup {
         existing.applyState(state);
         continue;
       }
-      const created = new RemotePlayer(state, this.grassInteraction, archetype);
+      const created = new RemotePlayer(state, this.grassInteraction, archetype, renderWorld);
       this.players.set(state.id, created);
-      this.root.add(created.object3D);
     }
 
     for (const [id, player] of this.players) {
@@ -76,8 +90,8 @@ export class RemotePlayerGroup {
     this.colliders.sync(states);
   }
 
-  public update(deltaSeconds: number, elapsedSeconds: number): void {
-    for (const player of this.players.values()) player.update(deltaSeconds, elapsedSeconds);
+  public update(deltaSeconds: number): void {
+    for (const player of this.players.values()) player.update(deltaSeconds);
   }
 
   public clear(): void {

@@ -1,18 +1,19 @@
 import * as THREE from 'three';
 import {
-  ACTOR_RESIDENCY_COMPONENT,
-  COMBUSTIBLE_COMPONENT,
-  DROP_MOTION_COMPONENT,
-  ITEM_STACK_COMPONENT,
-  TRANSFORM_COMPONENT,
-  type Actor,
-  type ActorWorld,
-  type ActorResidencyComponent,
-  type CombustibleComponent,
-  type DropMotionComponent,
-  type ItemStackComponent,
-  type TransformComponent,
-} from '../../../shared/actor/index.mjs';
+  INSTANCE_ARCHETYPE,
+  INSTANCE_BURNING,
+  INSTANCE_ID,
+  INSTANCE_QUANTITY,
+  INSTANCE_RESIDENCY,
+  INSTANCE_ROLL_RADIUS,
+  INSTANCE_SINGLE,
+  INSTANCE_X,
+  INSTANCE_Y,
+  INSTANCE_YAW,
+  INSTANCE_Z,
+  residencyName,
+  type RenderInstanceBuffer,
+} from '../../render/RenderInstanceBuffer';
 import { createFillMaterial, type FillMaterialEnvironment } from '../../materials/createFillMaterial';
 import {
   FRUIT_PILE_PIECES,
@@ -289,8 +290,9 @@ export class HighCountActorBatchSystem {
   private readonly up = new THREE.Vector3(0, 1, 0);
   private readonly rollAxis = new THREE.Vector3();
   private readonly rollStep = new THREE.Quaternion();
-  private readonly rollingVisuals = new Map<string, RollingVisualState>();
-  private readonly liveRollingActorIds = new Set<string>();
+  /** 按**实例号**记账，不是 Actor id：渲染侧不认识 Actor。 */
+  private readonly rollingVisuals = new Map<number, RollingVisualState>();
+  private readonly liveRollingInstanceIds = new Set<number>();
 
   public constructor(
     private readonly environment: FillMaterialEnvironment,
@@ -299,37 +301,41 @@ export class HighCountActorBatchSystem {
     this.root.name = 'high-count-actor-batches';
   }
 
-  public sync(world: ActorWorld): void {
-    const groups = new Map<string, Actor[]>();
-    this.liveRollingActorIds.clear();
-    for (const actor of world.query(TRANSFORM_COMPONENT, ITEM_STACK_COMPONENT) as Actor[]) {
-      const archetype = this.archetypes.get(actor.archetypeId);
+  /**
+   * 从实例通道重建这一帧的合批（实现路径文档 §3）。
+   *
+   * 这里以前直接扫 `ActorWorld`——一个渲染系统伸手进 Game World 拿 Component。
+   * 渲染世界要进线程，这条就断了。现在输入只是一段定长记录：原型下标、几个状态位、
+   * 位置与数量。**它不再认识 Actor，只认识实例号。**
+   */
+  public sync(instances: RenderInstanceBuffer, archetypeOrder: readonly string[]): void {
+    const groups = new Map<string, number[]>();
+    this.liveRollingInstanceIds.clear();
+    for (let index = 0; index < instances.count; index += 1) {
+      const archetypeId = archetypeOrder[instances.readInt(index, INSTANCE_ARCHETYPE)];
+      const archetype = archetypeId === undefined ? undefined : this.archetypes.get(archetypeId);
       if (!isPileRender(archetype?.components.render)) continue;
-      const residency = actor.getComponent(ACTOR_RESIDENCY_COMPONENT) as ActorResidencyComponent | undefined;
-      const combustible = actor.getComponent(COMBUSTIBLE_COMPONENT) as CombustibleComponent | undefined;
-      const stack = actor.requireComponent(ITEM_STACK_COMPONENT) as ItemStackComponent;
-      const supportsSingle = (
-        archetype.components.render.model === 'line-art-fruit-pile'
-        || archetype.components.render.model === 'line-art-wood-log'
-      );
-      const single = supportsSingle && stack.quantity === 1;
-      if (single && (archetype.components.dropMotion?.radius ?? 0) > 0) {
-        this.liveRollingActorIds.add(actor.id);
+      const single = instances.readInt(index, INSTANCE_SINGLE) === 1;
+      if (instances.readFloat(index, INSTANCE_ROLL_RADIUS) > 0) {
+        this.liveRollingInstanceIds.add(instances.readInt(index, INSTANCE_ID));
       }
-      const key = `${actor.archetypeId}:${residency?.state ?? 'active'}:${combustible?.burning ? 'burning' : 'normal'}:${single ? 'single' : 'pile'}`;
+      // 编号翻回名字再拼 key：合批的调试对象名要能读。
+      const key = `${archetypeId}:${residencyName(instances.readInt(index, INSTANCE_RESIDENCY))}`
+        + `:${instances.readInt(index, INSTANCE_BURNING) === 1 ? 'burning' : 'normal'}`
+        + `:${single ? 'single' : 'pile'}`;
       let group = groups.get(key);
       if (!group) {
         group = [];
         groups.set(key, group);
       }
-      group.push(actor);
+      group.push(index);
     }
-    for (const actorId of this.rollingVisuals.keys()) {
-      if (!this.liveRollingActorIds.has(actorId)) this.rollingVisuals.delete(actorId);
+    for (const instanceId of this.rollingVisuals.keys()) {
+      if (!this.liveRollingInstanceIds.has(instanceId)) this.rollingVisuals.delete(instanceId);
     }
 
     for (const batch of this.batches.values()) batch.root.visible = false;
-    for (const [key, actors] of groups) {
+    for (const [key, members] of groups) {
       const [archetypeId, , burnState, shape] = key.split(':');
       const archetype = this.archetypes.get(archetypeId)!;
       const definition = archetype.components.render as PileRender;
@@ -339,10 +345,10 @@ export class HighCountActorBatchSystem {
         burnState === 'burning',
         shape === 'single',
         archetype.components.dropMotion?.radius ?? 0,
-        actors.length,
+        members.length,
       );
       batch.root.visible = true;
-      this.updateBatch(batch, actors);
+      this.updateBatch(batch, instances, members);
     }
   }
 
@@ -356,7 +362,7 @@ export class HighCountActorBatchSystem {
     }
     this.batches.clear();
     this.rollingVisuals.clear();
-    this.liveRollingActorIds.clear();
+    this.liveRollingInstanceIds.clear();
   }
 
   private requireBatch(
@@ -400,37 +406,47 @@ export class HighCountActorBatchSystem {
     return batch;
   }
 
-  private updateBatch(batch: BatchEntry, actors: readonly Actor[]): void {
-    const rollingQuaternions = actors.map((actor) => this.updateRollingVisual(actor));
-    const signature = actors.map((actor, index) => {
-      const transform = actor.requireComponent(TRANSFORM_COMPONENT) as TransformComponent;
-      const stack = actor.requireComponent(ITEM_STACK_COMPONENT) as ItemStackComponent;
-      const roll = rollingQuaternions[index];
+  private updateBatch(
+    batch: BatchEntry,
+    instances: RenderInstanceBuffer,
+    members: readonly number[],
+  ): void {
+    const rollingQuaternions = members.map((index) => this.updateRollingVisual(instances, index));
+    const signature = members.map((index, slot) => {
+      const roll = rollingQuaternions[slot];
       const rotation = roll
         ? `,${roll.x.toFixed(3)},${roll.y.toFixed(3)},${roll.z.toFixed(3)},${roll.w.toFixed(3)}`
         : '';
-      return `${actor.id},${transform.x.toFixed(3)},${transform.y.toFixed(3)},${transform.z.toFixed(3)},${transform.yaw.toFixed(3)},${stack.quantity}${rotation}`;
+      return `${instances.readInt(index, INSTANCE_ID)}`
+        + `,${instances.readFloat(index, INSTANCE_X).toFixed(3)}`
+        + `,${instances.readFloat(index, INSTANCE_Y).toFixed(3)}`
+        + `,${instances.readFloat(index, INSTANCE_Z).toFixed(3)}`
+        + `,${instances.readFloat(index, INSTANCE_YAW).toFixed(3)}`
+        + `,${instances.readFloat(index, INSTANCE_QUANTITY)}${rotation}`;
     }).join('|');
     if (signature === batch.signature) return;
     batch.signature = signature;
-    batch.fill.count = actors.length;
+    batch.fill.count = members.length;
     const source = batch.baseOutlinePositions;
-    const outlinePositions = new Float32Array(source.length * actors.length);
+    const outlinePositions = new Float32Array(source.length * members.length);
     let output = 0;
-    for (let index = 0; index < actors.length; index += 1) {
-      const actor = actors[index];
-      const transform = actor.requireComponent(TRANSFORM_COMPONENT) as TransformComponent;
-      const stack = actor.requireComponent(ITEM_STACK_COMPONENT) as ItemStackComponent;
-      const roll = rollingQuaternions[index];
+    for (let slot = 0; slot < members.length; slot += 1) {
+      const index = members[slot];
+      const quantity = instances.readFloat(index, INSTANCE_QUANTITY);
+      const roll = rollingQuaternions[slot];
       const visualScale = roll
         ? 1
-        : 0.74 + Math.min(0.34, Math.log2(stack.quantity + 1) * 0.065);
-      this.position.set(transform.x, transform.y, transform.z);
+        : 0.74 + Math.min(0.34, Math.log2(quantity + 1) * 0.065);
+      this.position.set(
+        instances.readFloat(index, INSTANCE_X),
+        instances.readFloat(index, INSTANCE_Y),
+        instances.readFloat(index, INSTANCE_Z),
+      );
       if (roll) this.quaternion.copy(roll);
-      else this.quaternion.setFromAxisAngle(this.up, transform.yaw);
+      else this.quaternion.setFromAxisAngle(this.up, instances.readFloat(index, INSTANCE_YAW));
       this.scale.setScalar(visualScale);
       this.matrix.compose(this.position, this.quaternion, this.scale);
-      batch.fill.setMatrixAt(index, this.matrix);
+      batch.fill.setMatrixAt(slot, this.matrix);
       for (let offset = 0; offset < source.length; offset += 3) {
         this.point.set(source[offset], source[offset + 1], source[offset + 2]).applyMatrix4(this.matrix);
         outlinePositions[output++] = this.point.x;
@@ -446,30 +462,36 @@ export class HighCountActorBatchSystem {
   }
 
   /** 球的滚动角只由权威插值位置的位移累积，不需要再复制一套角速度。 */
-  private updateRollingVisual(actor: Actor): THREE.Quaternion | undefined {
-    if (!this.liveRollingActorIds.has(actor.id)) return undefined;
-    const transform = actor.requireComponent(TRANSFORM_COMPONENT) as TransformComponent;
-    const motion = actor.getComponent(DROP_MOTION_COMPONENT) as DropMotionComponent | undefined;
-    if (!motion || motion.radius <= 0) return undefined;
-    let state = this.rollingVisuals.get(actor.id);
+  private updateRollingVisual(
+    instances: RenderInstanceBuffer,
+    index: number,
+  ): THREE.Quaternion | undefined {
+    const instanceId = instances.readInt(index, INSTANCE_ID);
+    if (!this.liveRollingInstanceIds.has(instanceId)) return undefined;
+    const radius = instances.readFloat(index, INSTANCE_ROLL_RADIUS);
+    if (radius <= 0) return undefined;
+    const x = instances.readFloat(index, INSTANCE_X);
+    const z = instances.readFloat(index, INSTANCE_Z);
+    let state = this.rollingVisuals.get(instanceId);
     if (!state) {
       state = {
-        quaternion: new THREE.Quaternion().setFromAxisAngle(this.up, transform.yaw),
-        lastX: transform.x,
-        lastZ: transform.z,
+        quaternion: new THREE.Quaternion()
+          .setFromAxisAngle(this.up, instances.readFloat(index, INSTANCE_YAW)),
+        lastX: x,
+        lastZ: z,
       };
-      this.rollingVisuals.set(actor.id, state);
+      this.rollingVisuals.set(instanceId, state);
       return state.quaternion;
     }
-    const deltaX = transform.x - state.lastX;
-    const deltaZ = transform.z - state.lastZ;
+    const deltaX = x - state.lastX;
+    const deltaZ = z - state.lastZ;
     const distance = Math.hypot(deltaX, deltaZ);
     if (distance > 1e-6) {
       this.rollAxis.set(deltaZ / distance, 0, -deltaX / distance);
-      this.rollStep.setFromAxisAngle(this.rollAxis, distance / motion.radius);
+      this.rollStep.setFromAxisAngle(this.rollAxis, distance / radius);
       state.quaternion.premultiply(this.rollStep).normalize();
-      state.lastX = transform.x;
-      state.lastZ = transform.z;
+      state.lastX = x;
+      state.lastZ = z;
     }
     return state.quaternion;
   }

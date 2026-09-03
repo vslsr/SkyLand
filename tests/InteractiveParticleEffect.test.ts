@@ -128,6 +128,9 @@ test('streamed leaf clusters stay bounded and discard old chunks after a large f
     environmentRuntime: undefined,
     addWorldObject: (object: THREE.Object3D) => mounted.add(object),
     removeWorldObject: (object: THREE.Object3D) => mounted.delete(object),
+  };
+  // 地形采样搬去 SceneWorld 了：渲染器只剩渲染核心（实现路径文档 §3）。
+  const world = {
     isWaterAt: () => false,
     sampleGroundHeight: () => 0,
   };
@@ -153,6 +156,7 @@ test('streamed leaf clusters stay bounded and discard old chunks after a large f
       },
     } as never,
     renderer: renderer as never,
+    world: world as never,
     worldSeed: 0x12345678,
     getFocus: () => focus,
   } as never);

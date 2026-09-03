@@ -2,6 +2,7 @@ import http from 'node:http';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { ApiRouter } from './http/ApiRouter.mjs';
+import { applyCrossOriginIsolation } from './http/crossOriginIsolation.mjs';
 import { sendJson } from './http/HttpResponses.mjs';
 import { StaticWebServer } from './http/StaticWebServer.mjs';
 import { RoomProcessManager } from './rooms/RoomProcessManager.mjs';
@@ -23,6 +24,9 @@ const apiRouter = new ApiRouter(roomManager, {
 
 const server = http.createServer(async (request, response) => {
   const url = new URL(request.url ?? '/', `http://${request.headers.host ?? 'localhost'}`);
+  // 跨源隔离在路由之前统一写入：文档、静态资源、API 与错误响应必须是同一份策略，
+  // 只要有一份 HTML 缺了 COOP/COEP，整个页面就拿不到 crossOriginIsolated。
+  applyCrossOriginIsolation(response);
 
   try {
     if (await apiRouter.handle(request, response, url)) return;

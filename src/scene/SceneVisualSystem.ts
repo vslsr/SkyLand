@@ -4,6 +4,9 @@ import type { CollisionWorld } from '../../shared/collision/index.mjs';
 import type { DayNightVisualTarget } from '../environment/EnvironmentTypes';
 import type { SceneEnvironmentRuntime } from '../materials/createFillMaterial';
 import type { GrassInteractionTarget } from '../grass';
+import type { ThreeMeshProxy } from '../render/three/ThreeMeshProxy';
+import type { ThreeRenderScene } from '../render/three/ThreeRenderScene';
+import type { RenderTransformBuffer } from '../render/RenderTransformBuffer';
 import type { SnapshotActor, SnapshotPlayer } from '../network/protocol';
 import type { ActorFloatState, ActorEventType } from '../network/protocol';
 import type { WeatherType } from '../weather/index';
@@ -44,6 +47,11 @@ export interface ActorSnapshotTarget {
     externalActors?: readonly SnapshotPlayer[],
   ): void;
   getActor(actorId: string): Actor | undefined;
+  /**
+   * 按 Actor id 取渲染世界里的 proxy。Actor 上只有 proxyId，Object3D 住在渲染侧，
+   * 所以还留在客户端的表现代码（能力实验室的目标 rig）经由这里查。
+   */
+  getActorRenderProxy(actorId: string): ThreeMeshProxy | undefined;
   findOwnedActorId(playerId: string): string | undefined;
   findControllableActorId(): string | undefined;
   pickInteractableActor(
@@ -94,6 +102,15 @@ export interface SceneComposition {
   environmentRuntime?: SceneEnvironmentRuntime;
   grassInteraction?: GrassInteractionTarget;
   actorSnapshotTarget?: ActorSnapshotTarget;
+  /**
+   * 这张地图的渲染世界与它那段边界字节。
+   *
+   * 归场景所有，不归 `ClientActorSystem`：本地玩家和远端玩家都不是 Replica，
+   * 但它们的 proxy 必须和 Actor 的 proxy 落在同一个渲染世界、同一段 SoA 里，
+   * 否则「一个 ProxyId 指一个东西」就不成立了。
+   */
+  renderScene?: ThreeRenderScene;
+  renderTransforms?: RenderTransformBuffer;
   /**
    * 旧 CollisionWorld 只保留给非玩家 Actor 推出、交互宽相与兼容调试。
    * 玩家和相机均使用下面的 Rapier PhysicsWorld。

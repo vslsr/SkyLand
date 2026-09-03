@@ -1,6 +1,11 @@
 import './style.css';
 import './ui/scrollbars.css';
 import { initRapier } from '../shared/physics/RapierRuntime.mjs';
+import {
+  describeThreadingCapabilities,
+  formatFrameTimingReport,
+  frameTimeline,
+} from './platform/index';
 import { GrasslandScene } from './scenes/GrasslandScene';
 import { SceneManager } from './scenes/SceneManager';
 
@@ -30,6 +35,10 @@ function showStartupError(error: unknown): void {
   errorPanel.hidden = false;
 }
 
+// 隔离没打开是个静默降级：SharedArrayBuffer 会直接不可用，而不是报错。
+// 把能力集打在启动日志的第一行，线上排查时不必再去猜响应头。
+console.info(`SkyLand platform: ${describeThreadingCapabilities()}`);
+
 try {
   await initRapier(() => import('@dimforge/rapier3d'));
   const sceneManager = new SceneManager();
@@ -43,13 +52,26 @@ try {
 
   let previousTime = performance.now();
   const startedAt = previousTime;
+  // 帧时间报表每隔一段打一次。第 2 步的判断全靠它，所以它是常开的：
+  // 每帧多两次 performance.now()，代价可以忽略，而「上线之后才发现没打点」不行。
+  const FRAME_REPORT_INTERVAL_SECONDS = 10;
+  let nextReportAt = FRAME_REPORT_INTERVAL_SECONDS;
 
   const frame = (now: number): void => {
     const deltaSeconds = Math.min((now - previousTime) / 1000, 0.05);
     const elapsedSeconds = (now - startedAt) / 1000;
     previousTime = now;
+    // 帧边界在这里，不在场景里：整帧减去各阶段之和就是还没打点的地方
+    // （引擎迁移路线图 第 2 步——先有证据，再拆线程）。
+    frameTimeline.beginFrame();
     sceneManager.update(deltaSeconds, elapsedSeconds);
     sceneManager.render(elapsedSeconds);
+    frameTimeline.endFrame();
+    if (elapsedSeconds >= nextReportAt) {
+      nextReportAt = elapsedSeconds + FRAME_REPORT_INTERVAL_SECONDS;
+      console.info(`[frame]\n${formatFrameTimingReport(frameTimeline.report())}`);
+      frameTimeline.reset();
+    }
     requestAnimationFrame(frame);
   };
 

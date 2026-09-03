@@ -1,4 +1,5 @@
 import {
+  terrainCellCodeAt,
   terrainCellCornerHeight,
   terrainCellShape,
 } from './terrainContent.mjs';
@@ -39,16 +40,102 @@ function createVertexAppender(vertices, indices) {
 }
 
 /**
+ * 建一块 chunk 的网格要读的格子码窗口边长。
+ *
+ * 网格按格子铺三角，但东、北两侧的崖面归本格所有，所以还要多读一行一列——
+ * 正好是 `TERRAIN_GRID + 1`。窗口是闭区间 `[0, TERRAIN_GRID]`，不是开区间。
+ */
+export const TERRAIN_CHUNK_CODE_SPAN = TERRAIN_GRID + 1;
+
+/**
+ * 把建这块网格要用到的格子码一次性采样出来。
+ *
+ * 采出来之后建网格就只依赖数据，不再依赖回调——那是它能被扔进 worker 的前提
+ * （实现路径文档 §2 的第 2 项）。采样本身只有 289 次查表，留在调用方这一侧。
+ */
+export function sampleTerrainChunkCodes(chunkX, chunkZ, cellCodeAt) {
+  if (typeof cellCodeAt !== 'function') throw new TypeError('cellCodeAt must be a function.');
+  const span = TERRAIN_CHUNK_CODE_SPAN;
+  const codes = new Int32Array(span * span);
+  const originCellX = chunkX * TERRAIN_GRID;
+  const originCellZ = chunkZ * TERRAIN_GRID;
+  for (let localZ = 0; localZ < span; localZ += 1) {
+    for (let localX = 0; localX < span; localX += 1) {
+      codes[localZ * span + localX] = cellCodeAt(originCellX + localX, originCellZ + localZ);
+    }
+  }
+  return codes;
+}
+
+/**
+ * 只用「世界种子 + 这一窗里的编辑覆盖」推出同一窗格子码。
+ *
+ * 和 `sampleTerrainChunkCodes` 得到的结果必须逐格相同——那个走的是
+ * `TerrainPatchStore.cellCodeAt` 回调，这个走的是同一条推导（程序化底图 + 覆盖层）。
+ * 分成两个函数是因为**回调过不了线程边界，而种子和一小把覆盖格可以**：
+ * 工作线程拿到这两样就能自己把 289 格算出来，不必让主线程先算一遍
+ * （实现路径文档 §2 的第 2 项）。
+ *
+ * `overrides` 是三个一组的扁平数组：`[globalCellX, globalCellZ, code, ...]`。
+ * 没被编辑过的 chunk 传空数组，这是绝大多数情况。
+ */
+export function buildTerrainChunkCodes(worldSeed, chunkX, chunkZ, overrides) {
+  const span = TERRAIN_CHUNK_CODE_SPAN;
+  const codes = new Int32Array(span * span);
+  const originCellX = chunkX * TERRAIN_GRID;
+  const originCellZ = chunkZ * TERRAIN_GRID;
+  for (let localZ = 0; localZ < span; localZ += 1) {
+    for (let localX = 0; localX < span; localX += 1) {
+      codes[localZ * span + localX] = terrainCellCodeAt(
+        worldSeed,
+        originCellX + localX,
+        originCellZ + localZ,
+      );
+    }
+  }
+  for (let offset = 0; offset + 2 < overrides.length; offset += 3) {
+    const localX = overrides[offset] - originCellX;
+    const localZ = overrides[offset + 1] - originCellZ;
+    // 覆盖格来自相邻 chunk 时可能落在窗口外，直接跳过。
+    if (localX < 0 || localX >= span || localZ < 0 || localZ >= span) continue;
+    codes[localZ * span + localX] = overrides[offset + 2];
+  }
+  return codes;
+}
+
+/**
  * Build one world-space chunk mesh: two triangles per cell plus east/north-owned cliffs.
  * Static terrain is derived only from cellCodeAt, so client and server need no network payload.
  */
 export function buildTerrainCollisionMesh(chunkX, chunkZ, cellCodeAt) {
-  if (typeof cellCodeAt !== 'function') throw new TypeError('cellCodeAt must be a function.');
+  return buildTerrainCollisionMeshFromCodes(
+    chunkX,
+    chunkZ,
+    sampleTerrainChunkCodes(chunkX, chunkZ, cellCodeAt),
+  );
+}
+
+/**
+ * 和 `buildTerrainCollisionMesh` 是同一套拓扑，只是输入换成了采样好的格子码。
+ *
+ * **只有这一份实现**：上面那个函数是它的包装。两份拓扑各自演化的话，客户端走
+ * worker、服务端走回调，两边的地面就会悄悄长得不一样。
+ */
+export function buildTerrainCollisionMeshFromCodes(chunkX, chunkZ, codes) {
+  const span = TERRAIN_CHUNK_CODE_SPAN;
+  if (codes.length !== span * span) {
+    throw new RangeError(`terrain code window must be ${span}x${span}, got ${codes.length}`);
+  }
+  const originCellX = chunkX * TERRAIN_GRID;
+  const originCellZ = chunkZ * TERRAIN_GRID;
+  const cellCodeAt = (cellX, cellZ) => {
+    const localX = cellX - originCellX;
+    const localZ = cellZ - originCellZ;
+    return codes[localZ * span + localX];
+  };
   const vertices = [];
   const indices = [];
   const appendTriangle = createVertexAppender(vertices, indices);
-  const originCellX = chunkX * TERRAIN_GRID;
-  const originCellZ = chunkZ * TERRAIN_GRID;
 
   const cornersAt = (cellX, cellZ) => {
     const code = cellCodeAt(cellX, cellZ);

@@ -2,6 +2,7 @@ import type * as THREE from 'three';
 import type { InputSubsystem } from '../../input';
 import type { PlayerEntity } from '../../player/PlayerEntity';
 import type { SceneRenderer } from '../../rendering/SceneRenderer';
+import type { SceneWorld } from '../SceneWorld';
 import type {
   SceneComponentDefinition,
   SceneDefinition,
@@ -14,6 +15,8 @@ export interface SceneComponentContext {
   readonly uiRoot: HTMLElement;
   readonly input: InputSubsystem;
   readonly renderer: SceneRenderer;
+  /** 场景里不属于渲染的那一半：地形采样、物理查询、Actor 查询。 */
+  readonly world: SceneWorld;
   readonly player?: PlayerEntity;
   /** 房间分配的流式世界种子；固定场景可以省略。 */
   readonly worldSeed?: number;

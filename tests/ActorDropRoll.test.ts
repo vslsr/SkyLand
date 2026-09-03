@@ -13,10 +13,13 @@ import {
   TRANSFORM_COMPONENT,
   TransformComponent,
 } from '../shared/actor/index.mjs';
-import { ActorDropRollSystem } from '../src/actors/systems/ActorDropRollSystem';
-import { ElasticTetherVisualSystem } from '../src/actors/systems/ElasticTetherVisualSystem';
-import { ThreeObjectComponent } from '../src/actors/components/ThreeObjectComponent';
-import { createElasticMushroomModel } from '../src/models/actors/createElasticMushroomModel';
+import { ActorTransformSystem } from '../src/actors/systems/ActorTransformSystem';
+import { ActorVisualParamSystem } from '../src/actors/systems/ActorVisualParamSystem';
+import { RenderTransformSyncSystem } from '../src/actors/systems/RenderTransformSyncSystem';
+import { RenderProxyComponent } from '../src/actors/components/RenderProxyComponent';
+import { RenderTransformBuffer } from '../src/render/RenderTransformBuffer';
+import type { ThreeMeshProxy } from '../src/render/three/ThreeMeshProxy';
+import { ThreeRenderScene } from '../src/render/three/ThreeRenderScene';
 import { ActorSnapshotBuffer } from '../src/actors/ActorSnapshotBuffer';
 import { ClientActorSystem } from '../src/actors/ClientActorSystem';
 import type { SceneDefinition } from '../src/scenes/data/SceneDefinition';
@@ -39,8 +42,24 @@ const DROP_RADIUS = 0.28;
 /** 与 elastic-mushroom.actor.json 保持一致：叼住之后还要再拉这么远才拔断。 */
 const PULL_DISTANCE = 2.8;
 
-function createMushroom(): { world: ActorWorld; actor: Actor; render: ThreeObjectComponent } {
+/**
+ * 弹性拉伸与脱落翻滚都搬进了渲染世界（实现路径文档 §1.75），所以这里跑的是
+ * 完整的那条链路：Actor 组件 → 参数段 → 翻面 → 渲染侧表现。`step()` 就是一帧。
+ */
+function createMushroom(): {
+  world: ActorWorld;
+  actor: Actor;
+  scene: ThreeRenderScene;
+  render: ThreeMeshProxy;
+  step: (deltaSeconds: number, elapsedSeconds: number) => void;
+} {
   const world = new ActorWorld();
+  // 模型住在渲染世界里，Actor 只拿 proxyId（引擎迁移路线图 第 1 步）。
+  const scene = new ThreeRenderScene(new THREE.Group(), ENVIRONMENT);
+  const transforms = new RenderTransformBuffer();
+  world.addSystem(new ActorTransformSystem(transforms));
+  world.addSystem(new ActorVisualParamSystem(transforms));
+  world.addSystem(new RenderTransformSyncSystem(transforms, scene));
   const actor = new Actor('elastic-mushroom-01', 'elastic-mushroom');
   actor.addComponent(new TransformComponent({ position: [1, 0, 2], yaw: 0 }));
   actor.addComponent(new ElasticTetherComponent({
@@ -55,17 +74,21 @@ function createMushroom(): { world: ActorWorld; actor: Actor; render: ThreeObjec
     radius: DROP_RADIUS,
     settleSpeed: 0.1,
   }));
-  const render = actor.addComponent(
-    new ThreeObjectComponent(createElasticMushroomModel(ENVIRONMENT, RENDER)),
-  ) as ThreeObjectComponent;
-  // 渲染根位置平时由 ActorTransformSystem 写；这里只测翻滚，直接摆好即可。
-  render.root.position.set(1, 0, 2);
+  const info = scene.createMeshProxy({ name: 'actor-elastic-mushroom-01', render: RENDER });
+  actor.addComponent(new RenderProxyComponent(info.id, scene));
+  const render = scene.resolve(info.id) as ThreeMeshProxy;
   world.addActor(actor);
-  return { world, actor, render };
+  const step = (deltaSeconds: number, elapsedSeconds: number): void => {
+    world.update(deltaSeconds, elapsedSeconds);
+    scene.updateVisuals(transforms, deltaSeconds, elapsedSeconds);
+  };
+  // 先兑现一帧：根节点的位置来自 SoA，后面的世界坐标断言要建立在它之上。
+  step(0, 0);
+  return { world, actor, scene, render, step };
 }
 
 /** 菌盖中心在世界空间里的位置，用来判断蘑菇到底是立着还是躺着。 */
-function capWorldPosition(render: ThreeObjectComponent): THREE.Vector3 {
+function capWorldPosition(render: ThreeMeshProxy): THREE.Vector3 {
   const rig = render.elasticTetherRig;
   assert.ok(rig);
   render.root.updateWorldMatrix(true, true);
@@ -80,19 +103,20 @@ test('蘑菇模型提供绕刚体球心的翻滚枢轴', () => {
   assert.equal(rig.bodyRoot.position.y, 0);
 });
 
-test('还长在地上时翻滚系统不改姿态', () => {
-  const { world, render } = createMushroom();
-  const system = new ActorDropRollSystem();
-  const before = capWorldPosition(render);
-  system.update(world);
-  const after = capWorldPosition(render);
-  assert.ok(after.distanceTo(before) < 1e-6, `未脱落却被摆动了：${after.toArray()}`);
-  assert.equal(render.dropRollRig?.pivotRoot.position.y, 0);
+test('还长在地上时翻滚表现不改姿态', () => {
+  const { render, step } = createMushroom();
+  step(1 / 60, 0);
+  // 断言只看翻滚枢轴：菌盖的世界坐标同一帧还被弹性拉伸的闲置摆动动着，
+  // 那是另一项表现的正常输出，不是这条用例要证的事。
+  const rig = render.dropRollRig;
+  assert.ok(rig);
+  assert.equal(rig.pivotRoot.position.y, 0);
+  assert.equal(rig.bodyRoot.position.y, 0);
+  assert.ok(rig.pivotRoot.quaternion.equals(new THREE.Quaternion()), '未脱落却被摆了姿态');
 });
 
 test('脱落后按刚体朝向翻倒，且绕球心而不是绕菌柄根部', () => {
-  const { world, actor, render } = createMushroom();
-  const system = new ActorDropRollSystem();
+  const { actor, render, step } = createMushroom();
   const upright = capWorldPosition(render);
 
   (actor.requireComponent(ELASTIC_DETACH_COMPONENT) as ElasticDetachComponent).markDetached();
@@ -100,11 +124,12 @@ test('脱落后按刚体朝向翻倒，且绕球心而不是绕菌柄根部', ()
   // 绕 X 轴翻 90°：蘑菇整株躺倒。
   const half = Math.SQRT1_2;
   motion.setRotation({ x: half, y: 0, z: 0, w: half });
-  system.update(world);
+  step(1 / 60, 0);
 
+  // 半径经参数段过了一次 f32：0.28 在 f32 里是 0.28000000119…，按 f32 容差比。
   const rig = render.dropRollRig;
-  assert.equal(rig?.pivotRoot.position.y, DROP_RADIUS);
-  assert.equal(rig?.bodyRoot.position.y, -DROP_RADIUS);
+  assert.ok(Math.abs((rig?.pivotRoot.position.y ?? 0) - DROP_RADIUS) < 1e-6);
+  assert.ok(Math.abs((rig?.bodyRoot.position.y ?? 0) + DROP_RADIUS) < 1e-6);
 
   const toppled = capWorldPosition(render);
   // 立着时菌盖在球心正上方；翻 90° 之后它应该跑到球心的水平方向上。
@@ -122,9 +147,7 @@ test('脱落后按刚体朝向翻倒，且绕球心而不是绕菌柄根部', ()
 });
 
 test('脱落之后弹性拉伸表现交出姿态，不再把蘑菇掰回竖直', () => {
-  const { world, actor, render } = createMushroom();
-  const tetherVisual = new ElasticTetherVisualSystem();
-  const rollSystem = new ActorDropRollSystem();
+  const { actor, render, step } = createMushroom();
   const rig = render.elasticTetherRig;
   assert.ok(rig);
 
@@ -134,25 +157,24 @@ test('脱落之后弹性拉伸表现交出姿态，不再把蘑菇掰回竖直',
   tether.targetX = 2.4;
   tether.targetY = 1.1;
   tether.targetZ = 2;
-  tetherVisual.update(world, 1 / 60, 0);
+  step(1 / 60, 0);
   assert.ok(rig.stemRoot.scale.y !== 1, '拉伸没有生效，后续断言没有意义');
 
   (actor.requireComponent(ELASTIC_DETACH_COMPONENT) as ElasticDetachComponent).markDetached();
   tether.holderPlayerId = null;
-  tetherVisual.update(world, 1 / 60, 1 / 60);
+  step(1 / 60, 1 / 60);
 
   assert.equal(rig.stemRoot.scale.y, 1);
-  assert.ok(rig.elasticRoot.quaternion.equals(new THREE.Quaternion()), '菌柄仍被拉伸系统扭着');
+  assert.ok(rig.elasticRoot.quaternion.equals(new THREE.Quaternion()), '菌柄仍被拉伸表现扭着');
 
   const motion = actor.requireComponent(DROP_MOTION_COMPONENT) as DropMotionComponent;
   const half = Math.SQRT1_2;
   motion.setRotation({ x: half, y: 0, z: 0, w: half });
-  rollSystem.update(world);
-  // 再跑一帧拉伸系统：它必须继续放手，翻滚姿态要留得住。
-  tetherVisual.update(world, 1 / 60, 2 / 60);
+  // 再跑一帧：拉伸必须继续放手，翻滚姿态要留得住。
+  step(1 / 60, 2 / 60);
   assert.ok(
     Math.abs(render.dropRollRig!.pivotRoot.quaternion.x - half) < 1e-6,
-    '翻滚姿态被拉伸系统盖掉了',
+    '翻滚姿态被拉伸表现盖掉了',
   );
 });
 
@@ -186,10 +208,8 @@ test('两份快照之间对朝向做球面插值，并且走近路', () => {
   assert.ok(Math.abs(rotation[0] - Math.sin(Math.PI / 8)) < 0.02, rotation.join(','));
 });
 
-test('被叼住拖拽期间仍然归弹性拉伸管，翻滚系统不插手', () => {
-  const { world, actor, render } = createMushroom();
-  const tetherVisual = new ElasticTetherVisualSystem();
-  const rollSystem = new ActorDropRollSystem();
+test('被叼住拖拽期间仍然归弹性拉伸管，翻滚表现不插手', () => {
+  const { actor, render, step } = createMushroom();
   const rig = render.elasticTetherRig;
   assert.ok(rig);
 
@@ -203,12 +223,9 @@ test('被叼住拖拽期间仍然归弹性拉伸管，翻滚系统不插手', ()
   const motion = actor.requireComponent(DROP_MOTION_COMPONENT) as DropMotionComponent;
   motion.setRotation({ x: Math.SQRT1_2, y: 0, z: 0, w: Math.SQRT1_2 });
 
-  for (let frame = 0; frame < 20; frame += 1) {
-    tetherVisual.update(world, 1 / 60, frame / 60);
-    rollSystem.update(world);
-  }
+  for (let frame = 0; frame < 20; frame += 1) step(1 / 60, frame / 60);
 
-  assert.ok(rig.stemRoot.scale.y !== 1, '拉伸表现被翻滚系统顶掉了');
+  assert.ok(rig.stemRoot.scale.y !== 1, '拉伸表现被翻滚表现顶掉了');
   assert.ok(
     render.dropRollRig!.pivotRoot.quaternion.equals(new THREE.Quaternion()),
     '还没拔断就开始翻滚了',
@@ -218,8 +235,7 @@ test('被叼住拖拽期间仍然归弹性拉伸管，翻滚系统不插手', ()
 });
 
 test('拉到最长时菌盖仍然长在菌柄顶端，不会脱开', () => {
-  const { world, actor, render } = createMushroom();
-  const tetherVisual = new ElasticTetherVisualSystem();
+  const { actor, render, step } = createMushroom();
   const rig = render.elasticTetherRig;
   assert.ok(rig);
 
@@ -230,9 +246,7 @@ test('拉到最长时菌盖仍然长在菌柄顶端，不会脱开', () => {
   tether.targetX = 1;
   tether.targetY = 20;
   tether.targetZ = 2;
-  for (let frame = 0; frame < 240; frame += 1) {
-    tetherVisual.update(world, 1 / 60, frame / 60);
-  }
+  for (let frame = 0; frame < 240; frame += 1) step(1 / 60, frame / 60);
 
   const stemTop = rig.restLength * rig.stemRoot.scale.y;
   assert.ok(
@@ -377,6 +391,9 @@ test('端到端：快照说我叼着它，按一次交互键就发出放下请�
     definition,
     environment: ENVIRONMENT,
     now: () => now,
+    // 这些用例不测建模节流：一帧建完，断言才好写。分帧建模由
+    // ClientActorSystem.spawn.test.ts 单独覆盖。
+    spawnBudgetMilliseconds: Number.POSITIVE_INFINITY,
   } as never);
 
   const sent: string[] = [];
