@@ -1,8 +1,17 @@
 import { positiveNumber } from './authoringNumber.mjs';
+import { color, positive } from './fieldSpec.mjs';
 
 /** 弹性蘑菇：全仓唯一 supportShape 与主形状不同的模型。 */
 export const elasticMushroomModel = {
   id: 'line-art-elastic-mushroom',
+  /** Authoring 字段。运行时校验与 actor.schema.json 都读这一份。 */
+  fields: {
+    capColor: color(),
+    stemColor: color(),
+    spotColor: color(),
+    radius: positive(3),
+    height: positive(5),
+  },
   collision: (render) => {
     const radius = positiveNumber(render.radius, 0.5);
     return {

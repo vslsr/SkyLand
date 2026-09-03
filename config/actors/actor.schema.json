@@ -547,8 +547,8 @@
               "properties": {
                 "model": { "const": "line-art-raft" },
                 "foamColor": { "$ref": "#/$defs/color" },
-                "length": { "type": "number", "exclusiveMinimum": 0 },
-                "width": { "type": "number", "exclusiveMinimum": 0 }
+                "length": { "type": "number", "exclusiveMinimum": 0, "maximum": 30 },
+                "width": { "type": "number", "exclusiveMinimum": 0, "maximum": 30 }
               }
             },
             {
@@ -559,9 +559,9 @@
                 "model": { "const": "line-art-cargo-crate" },
                 "color": { "$ref": "#/$defs/color" },
                 "accentColor": { "$ref": "#/$defs/color" },
-                "length": { "type": "number", "exclusiveMinimum": 0 },
-                "width": { "type": "number", "exclusiveMinimum": 0 },
-                "height": { "type": "number", "exclusiveMinimum": 0 }
+                "length": { "type": "number", "exclusiveMinimum": 0, "maximum": 10 },
+                "width": { "type": "number", "exclusiveMinimum": 0, "maximum": 10 },
+                "height": { "type": "number", "exclusiveMinimum": 0, "maximum": 10 }
               }
             },
             {
@@ -572,8 +572,8 @@
                 "model": { "const": "line-art-reef" },
                 "color": { "$ref": "#/$defs/color" },
                 "accentColor": { "$ref": "#/$defs/color" },
-                "radius": { "type": "number", "exclusiveMinimum": 0 },
-                "height": { "type": "number", "exclusiveMinimum": 0 }
+                "radius": { "type": "number", "exclusiveMinimum": 0, "maximum": 10 },
+                "height": { "type": "number", "exclusiveMinimum": 0, "maximum": 20 }
               }
             },
             {

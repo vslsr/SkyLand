@@ -1,8 +1,15 @@
 import { positiveNumber } from './authoringNumber.mjs';
+import { color, positive } from './fieldSpec.mjs';
 
 /** 木筏。 */
 export const raftModel = {
   id: 'line-art-raft',
+  /** Authoring 字段。运行时校验与 actor.schema.json 都读这一份。 */
+  fields: {
+    foamColor: color(),
+    length: positive(30),
+    width: positive(30),
+  },
   collision: (render) => ({
     halfWidth: positiveNumber(render.width, 1) * 0.5,
     halfLength: positiveNumber(render.length, 1) * 0.5,

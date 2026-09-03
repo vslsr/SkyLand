@@ -71,9 +71,9 @@ const DESCRIPTORS = [
   campfireModel,
   dryHayModel,
   woodPileModel,
-  stonePileModel,
-  fruitPileModel,
   woodLogModel,
+  fruitPileModel,
+  stonePileModel,
 ];
 
 /** @type {Map<string, ActorModelDescriptor>} */

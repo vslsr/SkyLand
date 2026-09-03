@@ -293,12 +293,52 @@ test('两张模型注册表的键完全一致', () => {
 
 **这一步之后，A6 / A7 两处以及 A8 的一半已经不再各自持有模型清单。**
 
-**Step 3 · 字段规格与 schema 生成（2-3 天，收益最大）**
+**Step 3 · 字段规格与 schema 生成 ✅ 已完成**
 
-加 `fields`，`validateRender` 改写成通用遍历器，`actor.schema.json` 改为生成物 + CI 漂移检查。
-这一步一次性干掉 A3 和 A4 两份，也是唯一能消除「schema 没人验证」这个现存漏洞的做法。
+描述符加了 `fields`（`color()` / `number(min,max)` / `positive(max)` / `integer(min,max)`）与
+`constraints`（跨字段约束，pbf 史莱姆的内核必须在外壳内、骨骼腿必须够到站姿落脚点）。
 
-**Step 4 · 渲染侧注册表（1 天）**
+- **A3**：`validateRender` 从 **240 行**十六段分支变成 **30 行**通用遍历器。校验实现留在
+  `ActorCatalog`（要用它自己那套 `require*` 才能给出和其它 Component 一致的报错文案），
+  `shared/` 那边只放声明。
+- **A4**：`config/actors/actor.schema.json` 的 render 段改为生成物，
+  `node scripts/generate-actor-schema.mjs` 重新生成，
+  `server/tests/ActorSchemaGeneration.test.mjs` 每次 `npm test` 都重新生成并比对。
+  生成器保留了文件原有排版（叶子对象一行放不下才展开），所以只替换 render 段，
+  文件其余部分逐字节不动。
+
+**顺手修掉了那处已经发生的漂移**（§4 里记的「没人验证的重复品」不是假设）：木筏的
+`length`/`width`、货箱的 `length`/`width`/`height`、礁石的 `radius`/`height` —— 七个字段在
+schema 里**没有上限**，`ActorCatalog` 里有（30/10/10/10/10/20）。编辑器放行 `width: 500`，
+服务端启动时才报错。规则统一从运行时那一份（真正执行的那份）来。
+
+**验证**：
+
+- 生成后的 `actor.schema.json` diff **恰好只有那 7 个字段**——其余 16 个分支、
+  全部字段顺序与规则逐字节重现。这同时证明了 `fields` 声明与原 schema 完全等价。
+- 新旧 `validateRender` 对拍：16 个模型 + 未注册模型各 3000 组随机 render
+  （字段缺失、边界值、越界 ±0.0001、`NaN` / `Infinity` / 字符串 / 对象 / 数组、多余字段），
+  共 51000 组，其中 4779 组通过校验。**接受/拒绝判定 0 处不一致，通过时净化结果
+  逐字段逐键序 0 处不一致。**
+- 另以真实 authoring 值为基准逐字段破坏（559 组单错用例），报错文案只有 3 处不同：
+  pbf 史莱姆那条 `particleCount、constraintIterations 和 bubbleCount 必须是整数`
+  的分组信息，现在指名道姓说是哪一个。没有测试断言过旧文案。
+  多错并存时先报哪一处确实变了（旧实现把三个整数字段提前到 `radius` 之前校验，
+  新实现按声明顺序走）——那不是契约。
+- 变异验证：改字段上限却没重新生成、手改 render 段内的上限、手删 render 段里的字段，
+  三者都被挡下。
+- `npm test` 675 项全绿，`npx tsc --noEmit` 干净，`npm run build` 通过。
+
+**范围说明**：生成器只拥有 render 段。`playerMovement`、`buoyancy` 等其它 Component 的
+schema 仍是手写的，和各自的 `validate*` 之间仍然没有比对——那是同一类问题的另一片，
+不在本步范围内。
+
+**一次不明失败**：中途有一批 `npm run test:server` 里 2/3 次在
+`SceneInteractionE2E` 的「流式树砍伐」用例上失败，改动前 2/2 通过。此后 17 次连续全绿，
+无法复现。该用例起真实 HTTP 服务并拉起房间子进程，对负载敏感；
+render 字段校验与套接字时序之间也没有可解释的通路。记在这里，不当作已解决。
+
+**Step 4 · 渲染侧注册表（1 天，下一步）**
 
 建 `src/models/actors/registry.ts` + 键一致性测试，`createActorVisualModel` 改为查表并抛错。
 **建议排在 `engine-migration-roadmap-vlqccr` 合并之后**——那条分支新增的

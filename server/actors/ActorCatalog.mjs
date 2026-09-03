@@ -7,7 +7,7 @@ import {
   MAX_PATROL_WAYPOINTS,
 } from '../../shared/actor/components/PatrolPathComponent.mjs';
 import { itemCatalog } from '../../shared/items/index.mjs';
-import { modelHasTrait } from '../../shared/actor/models/index.mjs';
+import { actorModel, modelHasTrait } from '../../shared/actor/models/index.mjs';
 
 export const DEFAULT_ACTOR_DIRECTORY = fileURLToPath(new URL('../../config/actors/', import.meta.url));
 
@@ -602,243 +602,45 @@ function validateGeneratedProp(raw, filename) {
   return { maximumHealth, harvestDamage, drop: validatedDrop };
 }
 
+/**
+ * Render 组件的净化。
+ *
+ * 「哪个模型有哪些字段、各自什么范围」全部来自模型描述符的 `fields`
+ * （`shared/actor/models/`），这里只负责遍历并套上本文件那套报错文案。
+ *
+ * 原来这里是十六段各写一遍的分支，共 237 行；同一份规则在
+ * `config/actors/actor.schema.json` 里还有第二份手抄本，两份已经在木筏、货箱、
+ * 礁石那七个尺寸字段上漂了——schema 没上限，这里有。现在 schema 由
+ * `scripts/generate-actor-schema.mjs` 从同一份 `fields` 生成。
+ * 详见 `doc/model-dispatch-refactor.md`。
+ */
 function validateRender(raw, filename) {
   const path = `${filename}.components.render`;
   const render = requireObject(raw, path);
-  if (render.model === 'line-art-player-slime') {
-    return {
-      model: render.model,
-      radius: requireNumber(render.radius, `${path}.radius`, Number.EPSILON, 2),
-      membraneColor: requireColor(render.membraneColor, `${path}.membraneColor`),
-      middleColor: requireColor(render.middleColor, `${path}.middleColor`),
-      coreColor: requireColor(render.coreColor, `${path}.coreColor`),
-      bubbleColor: requireColor(render.bubbleColor, `${path}.bubbleColor`),
-      inkColor: requireColor(render.inkColor, `${path}.inkColor`),
-      shadowColor: requireColor(render.shadowColor, `${path}.shadowColor`),
-    };
-  }
-  if (render.model === 'line-art-pbf-slime') {
-    const particleCount = requireNumber(render.particleCount, `${path}.particleCount`, 16, 192);
-    const constraintIterations = requireNumber(
-      render.constraintIterations,
-      `${path}.constraintIterations`,
-      1,
-      5,
-    );
-    const bubbleCount = requireNumber(render.bubbleCount, `${path}.bubbleCount`, 0, 24);
-    if (![particleCount, constraintIterations, bubbleCount].every(Number.isInteger)) {
-      throw new TypeError(`${path} 的 particleCount、constraintIterations 和 bubbleCount 必须是整数`);
+  const descriptor = actorModel(render.model);
+  if (!descriptor) throw new TypeError(`${path}.model 不受支持：${render.model}`);
+
+  const sanitized = { model: descriptor.id };
+  for (const [name, spec] of Object.entries(descriptor.fields)) {
+    const fieldPath = `${path}.${name}`;
+    if (spec.kind === 'color') {
+      sanitized[name] = requireColor(render[name], fieldPath);
+      continue;
     }
-    const radius = requireNumber(render.radius, `${path}.radius`, Number.EPSILON, 2);
-    const collisionRadius = requireNumber(
-      render.collisionRadius,
-      `${path}.collisionRadius`,
-      Number.EPSILON,
-      2,
-    );
-    const collisionHeight = requireNumber(
-      render.collisionHeight,
-      `${path}.collisionHeight`,
-      Number.EPSILON,
-      4,
-    );
-    if (collisionRadius >= radius) {
-      throw new TypeError(`${path}.collisionRadius 必须小于外部蒙皮 radius`);
+    const value = requireNumber(render[name], fieldPath, spec.minimum, spec.maximum);
+    // 整数检查放在范围之后：先说「超范围」比先说「不是整数」更贴近作者的错法。
+    if (spec.integer && !Number.isInteger(value)) {
+      throw new TypeError(`${fieldPath} 必须是整数`);
     }
-    if (collisionHeight >= radius) {
-      throw new TypeError(`${path}.collisionHeight 必须低于外部蒙皮顶部`);
-    }
-    return {
-      model: render.model,
-      radius,
-      collisionRadius,
-      collisionHeight,
-      particleCount,
-      constraintIterations,
-      gravity: requireNumber(render.gravity, `${path}.gravity`, 0, 50),
-      centerForce: requireNumber(render.centerForce, `${path}.centerForce`, 0, 100),
-      viscosity: requireNumber(render.viscosity, `${path}.viscosity`, 0, 100),
-      bubbleCount,
-      bubbleSpeed: requireNumber(render.bubbleSpeed, `${path}.bubbleSpeed`, 0, 2),
-      surfaceColor: requireColor(render.surfaceColor, `${path}.surfaceColor`),
-      innerColor: requireColor(render.innerColor, `${path}.innerColor`),
-      highlightColor: requireColor(render.highlightColor, `${path}.highlightColor`),
-      bubbleColor: requireColor(render.bubbleColor, `${path}.bubbleColor`),
-      inkColor: requireColor(render.inkColor, `${path}.inkColor`),
-      shadowColor: requireColor(render.shadowColor, `${path}.shadowColor`),
-    };
+    sanitized[name] = value;
   }
-  if (render.model === 'line-art-legged-slime') {
-    const legCount = requireNumber(render.legCount, `${path}.legCount`, 2, 6);
-    if (!Number.isInteger(legCount)) {
-      throw new TypeError(`${path}.legCount 必须是整数`);
-    }
-    const radius = requireNumber(render.radius, `${path}.radius`, Number.EPSILON, 2);
-    const hipHeight = requireNumber(render.hipHeight, `${path}.hipHeight`, Number.EPSILON, 4);
-    const thighLength = requireNumber(render.thighLength, `${path}.thighLength`, Number.EPSILON, 3);
-    const shinLength = requireNumber(render.shinLength, `${path}.shinLength`, Number.EPSILON, 3);
-    const legSpread = requireNumber(render.legSpread, `${path}.legSpread`, Number.EPSILON, 2);
-    // 站姿下脚就够不到地的话，IK 每帧都在把落脚点往回收，腿会绷成一条直线并且
-    // 一直打滑——「骨骼有关节」这件事在画面上直接消失。
-    const standingReach = Math.hypot(hipHeight, legSpread);
-    if (thighLength + shinLength <= standingReach) {
-      throw new TypeError(
-        `${path} 的 thighLength + shinLength 必须够到站姿落脚点（> ${standingReach.toFixed(3)}）`,
-      );
-    }
-    return {
-      model: render.model,
-      radius,
-      hipHeight,
-      legSpread,
-      legCount,
-      thighLength,
-      shinLength,
-      legThickness: requireNumber(
-        render.legThickness,
-        `${path}.legThickness`,
-        Number.EPSILON,
-        0.3,
-      ),
-      footLength: requireNumber(render.footLength, `${path}.footLength`, Number.EPSILON, 0.6),
-      stepLength: requireNumber(render.stepLength, `${path}.stepLength`, Number.EPSILON, 3),
-      stepHeight: requireNumber(render.stepHeight, `${path}.stepHeight`, 0, 2),
-      stepDuration: requireNumber(render.stepDuration, `${path}.stepDuration`, Number.EPSILON, 2),
-      membraneColor: requireColor(render.membraneColor, `${path}.membraneColor`),
-      middleColor: requireColor(render.middleColor, `${path}.middleColor`),
-      coreColor: requireColor(render.coreColor, `${path}.coreColor`),
-      bubbleColor: requireColor(render.bubbleColor, `${path}.bubbleColor`),
-      inkColor: requireColor(render.inkColor, `${path}.inkColor`),
-      shadowColor: requireColor(render.shadowColor, `${path}.shadowColor`),
-      legColor: requireColor(render.legColor, `${path}.legColor`),
-      footShadowColor: requireColor(render.footShadowColor, `${path}.footShadowColor`),
-    };
+
+  // 跨字段约束只能等所有字段都拿到值之后再跑。
+  for (const constraint of descriptor.constraints ?? []) {
+    const message = constraint(sanitized, path);
+    if (message) throw new TypeError(message);
   }
-  if (render.model === 'line-art-raft') {
-    return {
-      model: render.model,
-      foamColor: requireColor(render.foamColor, `${path}.foamColor`),
-      length: requireNumber(render.length, `${path}.length`, Number.EPSILON, 30),
-      width: requireNumber(render.width, `${path}.width`, Number.EPSILON, 30),
-    };
-  }
-  if (render.model === 'line-art-cargo-crate') {
-    return {
-      model: render.model,
-      color: requireColor(render.color, `${path}.color`),
-      accentColor: requireColor(render.accentColor, `${path}.accentColor`),
-      length: requireNumber(render.length, `${path}.length`, Number.EPSILON, 10),
-      width: requireNumber(render.width, `${path}.width`, Number.EPSILON, 10),
-      height: requireNumber(render.height, `${path}.height`, Number.EPSILON, 10),
-    };
-  }
-  if (render.model === 'line-art-reef') {
-    return {
-      model: render.model,
-      color: requireColor(render.color, `${path}.color`),
-      accentColor: requireColor(render.accentColor, `${path}.accentColor`),
-      radius: requireNumber(render.radius, `${path}.radius`, Number.EPSILON, 10),
-      height: requireNumber(render.height, `${path}.height`, Number.EPSILON, 20),
-    };
-  }
-  if (render.model === 'line-art-elastic-mushroom') {
-    return {
-      model: render.model,
-      capColor: requireColor(render.capColor, `${path}.capColor`),
-      stemColor: requireColor(render.stemColor, `${path}.stemColor`),
-      spotColor: requireColor(render.spotColor, `${path}.spotColor`),
-      radius: requireNumber(render.radius, `${path}.radius`, Number.EPSILON, 3),
-      height: requireNumber(render.height, `${path}.height`, Number.EPSILON, 5),
-    };
-  }
-  if (render.model === 'line-art-training-dummy') {
-    return {
-      model: render.model,
-      woodColor: requireColor(render.woodColor, `${path}.woodColor`),
-      accentColor: requireColor(render.accentColor, `${path}.accentColor`),
-      radius: requireNumber(render.radius, `${path}.radius`, Number.EPSILON, 3),
-      height: requireNumber(render.height, `${path}.height`, Number.EPSILON, 6),
-    };
-  }
-  if (render.model === 'line-art-focus-obelisk') {
-    return {
-      model: render.model,
-      stoneColor: requireColor(render.stoneColor, `${path}.stoneColor`),
-      crystalColor: requireColor(render.crystalColor, `${path}.crystalColor`),
-      radius: requireNumber(render.radius, `${path}.radius`, Number.EPSILON, 3),
-      height: requireNumber(render.height, `${path}.height`, Number.EPSILON, 6),
-    };
-  }
-  if (render.model === 'line-art-floor-plaque') {
-    return {
-      model: render.model,
-      color: requireColor(render.color, `${path}.color`),
-      accentColor: requireColor(render.accentColor, `${path}.accentColor`),
-      width: requireNumber(render.width, `${path}.width`, Number.EPSILON, 12),
-      length: requireNumber(render.length, `${path}.length`, Number.EPSILON, 12),
-      height: requireNumber(render.height, `${path}.height`, Number.EPSILON, 1),
-    };
-  }
-  if (render.model === 'line-art-campfire') {
-    return {
-      model: render.model,
-      stoneColor: requireColor(render.stoneColor, `${path}.stoneColor`),
-      woodColor: requireColor(render.woodColor, `${path}.woodColor`),
-      emberColor: requireColor(render.emberColor, `${path}.emberColor`),
-      radius: requireNumber(render.radius, `${path}.radius`, Number.EPSILON, 3),
-      height: requireNumber(render.height, `${path}.height`, Number.EPSILON, 3),
-    };
-  }
-  if (render.model === 'line-art-dry-hay') {
-    return {
-      model: render.model,
-      color: requireColor(render.color, `${path}.color`),
-      accentColor: requireColor(render.accentColor, `${path}.accentColor`),
-      radius: requireNumber(render.radius, `${path}.radius`, Number.EPSILON, 3),
-      height: requireNumber(render.height, `${path}.height`, Number.EPSILON, 3),
-    };
-  }
-  if (render.model === 'line-art-wood-pile') {
-    return {
-      model: render.model,
-      woodColor: requireColor(render.woodColor, `${path}.woodColor`),
-      cutColor: requireColor(render.cutColor, `${path}.cutColor`),
-      inkColor: requireColor(render.inkColor, `${path}.inkColor`),
-      radius: requireNumber(render.radius, `${path}.radius`, Number.EPSILON, 3),
-      height: requireNumber(render.height, `${path}.height`, Number.EPSILON, 3),
-    };
-  }
-  if (render.model === 'line-art-wood-log') {
-    return {
-      model: render.model,
-      woodColor: requireColor(render.woodColor, `${path}.woodColor`),
-      cutColor: requireColor(render.cutColor, `${path}.cutColor`),
-      inkColor: requireColor(render.inkColor, `${path}.inkColor`),
-      radius: requireNumber(render.radius, `${path}.radius`, Number.EPSILON, 1),
-      length: requireNumber(render.length, `${path}.length`, Number.EPSILON, 3),
-    };
-  }
-  if (render.model === 'line-art-fruit-pile') {
-    return {
-      model: render.model,
-      fruitColor: requireColor(render.fruitColor, `${path}.fruitColor`),
-      accentColor: requireColor(render.accentColor, `${path}.accentColor`),
-      inkColor: requireColor(render.inkColor, `${path}.inkColor`),
-      radius: requireNumber(render.radius, `${path}.radius`, Number.EPSILON, 3),
-      height: requireNumber(render.height, `${path}.height`, Number.EPSILON, 3),
-    };
-  }
-  if (render.model === 'line-art-stone-pile') {
-    return {
-      model: render.model,
-      stoneColor: requireColor(render.stoneColor, `${path}.stoneColor`),
-      accentColor: requireColor(render.accentColor, `${path}.accentColor`),
-      inkColor: requireColor(render.inkColor, `${path}.inkColor`),
-      radius: requireNumber(render.radius, `${path}.radius`, Number.EPSILON, 3),
-      height: requireNumber(render.height, `${path}.height`, Number.EPSILON, 3),
-    };
-  }
-  throw new TypeError(`${path}.model 不受支持：${render.model}`);
+  return sanitized;
 }
 
 function validateActorArchetype(raw, filename) {
