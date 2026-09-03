@@ -567,6 +567,19 @@
             {
               "type": "object",
               "additionalProperties": false,
+              "required": ["model", "color", "accentColor", "length", "width", "height"],
+              "properties": {
+                "model": { "const": "line-art-storage-chest" },
+                "color": { "$ref": "#/$defs/color" },
+                "accentColor": { "$ref": "#/$defs/color" },
+                "length": { "type": "number", "exclusiveMinimum": 0 },
+                "width": { "type": "number", "exclusiveMinimum": 0 },
+                "height": { "type": "number", "exclusiveMinimum": 0 }
+              }
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
               "required": ["model", "color", "accentColor", "radius", "height"],
               "properties": {
                 "model": { "const": "line-art-reef" },

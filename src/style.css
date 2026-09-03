@@ -1203,3 +1203,111 @@ body.is-topdown .virtual-controls.is-desktop-debug {
 .inventory__badge--pooled {
   opacity: 0.62;
 }
+
+/* ---- 容器界面 ------------------------------------------------------------ */
+
+/*
+ * 不做双面板拖拽：一行同时给出「身上」和「箱内」，两个按钮各搬一个方向。玩家要
+ * 决定搬哪边就得同时看见两边，分成两个面板再让人拖来拖去，是把这个判断拆散之后
+ * 再要求玩家自己拼回去。
+ */
+.container__summary {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.container__capacity {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.container__viewers {
+  margin: 0;
+  font-size: 11px;
+  opacity: 0.7;
+}
+
+.container__store-all {
+  margin-bottom: 12px;
+  padding: 6px 14px;
+  font-size: 11px;
+  font-weight: 700;
+  background: rgba(138, 98, 56, 0.14);
+  border: 1px solid rgba(138, 98, 56, 0.5);
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.container__store-all:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.container__rows {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.container__row {
+  display: grid;
+  grid-template-columns: 32px 1fr auto auto auto;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 10px;
+  border: 1px solid rgba(138, 98, 56, 0.28);
+  border-radius: 4px;
+}
+
+.container__swatch {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  color: var(--item-tint);
+}
+
+.container__icon {
+  width: 22px;
+  height: 22px;
+}
+
+.container__name {
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.container__counts {
+  font-size: 11px;
+  opacity: 0.7;
+  white-space: nowrap;
+}
+
+.container__action {
+  min-width: 40px;
+  padding: 4px 10px;
+  font-size: 11px;
+  font-weight: 700;
+  background: transparent;
+  border: 1px solid rgba(138, 98, 56, 0.5);
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.container__action:disabled {
+  opacity: 0.32;
+  cursor: default;
+}
+
+.container__empty-notice {
+  margin: 0;
+  font-size: 11px;
+  opacity: 0.65;
+}

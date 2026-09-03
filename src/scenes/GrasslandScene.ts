@@ -16,6 +16,8 @@ import { SceneControlRouter } from '../controllers/SceneControlRouter';
 import { ActorInteractionController } from '../controllers/ActorInteractionController';
 import { InventoryController } from '../controllers/InventoryController';
 import { HotbarController } from '../controllers/HotbarController';
+import { ContainerController } from '../controllers/ContainerController';
+import { ContainerPage } from '../ui/pages/ContainerPage';
 import { HotbarBar } from '../ui/HotbarBar';
 import { buildInventoryView } from '../inventory/index';
 import { TerrainEditController } from '../controllers/TerrainEditController';
@@ -87,6 +89,8 @@ export class GrasslandScene extends Scene {
   private readonly inventory: InventoryController;
   private readonly hotbarBar = new HotbarBar();
   private readonly hotbar: HotbarController;
+  private readonly containerPage = new ContainerPage();
+  private readonly container: ContainerController;
   private readonly debugMenuPage?: DebugMenuPage;
   private readonly playerTransformLog?: PlayerTransformLogRecorder;
   private disposeDebugMenuShortcut?: () => void;
@@ -265,6 +269,19 @@ export class GrasslandScene extends Scene {
       send: (command) => { this.roomClient.sendInventoryCommand(command); },
       setProgress: (progress) => this.hotbarBar.setProgress(progress),
     });
+    this.container = new ContainerController(this.containerPage, {
+      getInventory: () => this.player?.getComponent(INVENTORY_COMPONENT) as
+        InventoryComponent | undefined,
+      getContainer: (actorId) => this.world.getContainer?.(actorId),
+      findOpenContainerActorId: () => this.world.findOpenContainerActorId?.(),
+      isOpen: () => this.commonUI.top === this.containerPage,
+      setOpen: (open) => {
+        if (open) this.commonUI.push(this.containerPage);
+        else this.commonUI.pop(this.containerPage);
+      },
+      send: (command) => { this.roomClient.sendInventoryCommand(command); },
+    });
+    this.containerPage.onRequestClose(() => this.container.requestClose());
     // 点一下快捷栏那一格 = 切到它；点一下背包里那件东西 = 放上快捷栏并握住。
     // 两条都只发意图，握没握上以下一帧快照为准。
     // 快捷栏挂在 HUD 层而不是 CommonUI 栈里：它在游戏进行中一直可见可点，
@@ -604,6 +621,9 @@ export class GrasslandScene extends Scene {
       this.inventory.sync();
       this.hotbarBar.setSlots(buildInventoryView(inventory).hotbar);
     }
+    // 容器界面跟随服务端的开合：走远、箱子被拆、掉线都由服务端把人移出，客户端
+    // 不各自判一遍距离，也就不会出现「服务端已经关了但界面还开着」。
+    this.container.sync();
     const pickupDrop = player.getComponent(PICKUP_DROP_COMPONENT) as PickupDropComponent | undefined;
     if (pickupDrop) {
       pickupDrop.heldActorId = own.heldActorId ?? null;

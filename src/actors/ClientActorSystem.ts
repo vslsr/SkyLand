@@ -26,6 +26,8 @@ import {
   GuidePathComponent,
   INTERACTABLE_COMPONENT,
   InteractableComponent,
+  CONTAINER_COMPONENT,
+  ContainerComponent,
   ITEM_STACK_COMPONENT,
   ItemStackComponent,
   LifetimeComponent,
@@ -942,6 +944,9 @@ export class ClientActorSystem implements SceneVisualSystem {
     if (archetype.components.heatEmitter) {
       actor.addComponent(new HeatEmitterComponent(archetype.components.heatEmitter));
     }
+    if (archetype.components.container) {
+      actor.addComponent(new ContainerComponent(archetype.components.container));
+    }
     if (archetype.components.itemStack) {
       actor.addComponent(new ItemStackComponent({
         ...archetype.components.itemStack,
@@ -1144,6 +1149,12 @@ export class ClientActorSystem implements SceneVisualSystem {
       const fire = actor.getComponent(FIRE_VISUAL_COMPONENT) as FireVisualComponent | undefined;
       if (fire) fire.targetIntensity = snapshot.thermal.burning ? 1 : 0;
     }
+    if (snapshot.container) {
+      // 容器是纯权威状态：内容、谁开着、开了几个，全跟随快照。别人存进去的东西
+      // 因此会直接出现在自己的界面上，不需要本地做任何预测。
+      const container = actor.requireComponent(CONTAINER_COMPONENT) as ContainerComponent;
+      container.applySnapshot(snapshot.container);
+    }
     if (snapshot.itemStack) {
       const stack = actor.requireComponent(ITEM_STACK_COMPONENT) as ItemStackComponent;
       stack.quantity = snapshot.itemStack.quantity;
@@ -1185,6 +1196,7 @@ export class ClientActorSystem implements SceneVisualSystem {
       ELASTIC_TETHER_COMPONENT,
     ) as ElasticTetherComponent | undefined;
     const stack = actor.getComponent(ITEM_STACK_COMPONENT) as ItemStackComponent | undefined;
+    const container = actor.getComponent(CONTAINER_COMPONENT) as ContainerComponent | undefined;
     return {
       actorId: actor.id,
       label: interactable.label,
@@ -1193,7 +1205,28 @@ export class ClientActorSystem implements SceneVisualSystem {
       holderPlayerId: tether?.holderPlayerId ?? null,
       pickupHolderActorId: this.externalParentActorIds.get(actor.id) ?? null,
       quantity: stack?.quantity,
+      // 我开着没有：开着的时候交互键说的是「关上」。
+      containerOpen: container?.openForViewer ?? false,
     };
+  }
+
+  getContainer(actorId: string): ContainerComponent | undefined {
+    return this.world.getActor(actorId)?.getComponent(CONTAINER_COMPONENT) as
+      ContainerComponent | undefined;
+  }
+
+  /**
+   * 服务端认为我正开着哪个容器。
+   *
+   * 权威侧同时只允许开一个（`container:open` 会先关掉旧的），所以第一个命中的就是
+   * 答案；找不到就是没开着——走远被移出时这里自然变成 undefined，界面跟着关。
+   */
+  findOpenContainerActorId(): string | undefined {
+    for (const actor of this.world.query(CONTAINER_COMPONENT)) {
+      const container = actor.getComponent(CONTAINER_COMPONENT) as ContainerComponent;
+      if (container.openForViewer) return actor.id;
+    }
+    return undefined;
   }
 
   private rememberGeneratedPropState(

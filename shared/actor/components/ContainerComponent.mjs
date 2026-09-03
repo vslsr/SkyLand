@@ -39,10 +39,21 @@ export class ContainerComponent extends ActorComponent {
     this.reach = positiveNumber(definition.reach, DEFAULT_CONTAINER_REACH);
     /** 正开着这个容器的玩家；内容只发给他们，走远由服务端移出。 */
     this.viewerPlayerIds = new Set();
+    /**
+     * 镜像侧的两个字段：客户端拿不到 `viewerPlayerIds`（那是别人的身份），只拿到
+     * 「有几个人开着」和「我开着没有」。盖子开不开看前者——别人翻箱子我也该看见盖子
+     * 掀起来；界面开不开看后者。
+     */
+    this.viewerCount = 0;
+    this.openForViewer = false;
     this.revision = 0;
   }
 
   get slotCapacity() { return this.ledger.slotCapacity; }
+
+  get slots() { return this.ledger.slots; }
+
+  get pooled() { return this.ledger.pooled; }
 
   get usedSlots() { return this.ledger.usedSlots; }
 
@@ -76,6 +87,26 @@ export class ContainerComponent extends ActorComponent {
   }
 
   isOpenFor(playerId) { return this.viewerPlayerIds.has(playerId); }
+
+  /**
+   * 客户端镜像：按快照重建。
+   *
+   * `entries` 只有正开着它的人才收得到，收不到时**保留上一次的内容**而不是清空：
+   * 关箱子那一帧内容会停发，清空会让界面在关闭动画里闪一下空列表。
+   *
+   * @returns 是否真的变了，供界面决定要不要重画。
+   */
+  applySnapshot(snapshot) {
+    if (!snapshot) return false;
+    const nextRevision = Math.max(0, Math.trunc(Number(snapshot.revision) || 0));
+    const changed = nextRevision !== this.revision;
+    this.label = typeof snapshot.label === 'string' ? snapshot.label : this.label;
+    this.viewerCount = Math.max(0, Math.trunc(Number(snapshot.viewerCount) || 0));
+    this.openForViewer = snapshot.open === true;
+    if (Array.isArray(snapshot.entries)) this.ledger.applySnapshot(snapshot.entries);
+    this.revision = nextRevision;
+    return changed;
+  }
 
   /**
    * 复制形态。内容只发给正开着它的人：没开箱子的玩家不需要知道里面有什么，

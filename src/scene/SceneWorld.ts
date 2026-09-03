@@ -1,6 +1,7 @@
 import type { Actor } from '../../shared/actor/Actor.mjs';
 import type { PhysicsWorld } from '../../shared/physics/PhysicsWorld.mjs';
 import { TERRAIN_CELL_SIZE } from '../../shared/world/terrainConfig.mjs';
+import type { ContainerModelLike } from '../inventory/index';
 import type { GrassBendImpulse, GrassInteractionTarget } from '../grass';
 import type { SnapshotActor, SnapshotPlayer } from '../network/protocol';
 import type { TerrainWorld } from '../world/TerrainWorld';
@@ -195,6 +196,14 @@ export class SceneWorld implements GrassInteractionTarget {
 
   public findHeldActorInteraction(playerId: string): ActorInteractionCandidate | undefined {
     return this.actorSnapshotTarget?.findHeldInteractableActor(playerId);
+  }
+
+  public getContainer(actorId: string): ContainerModelLike | undefined {
+    return this.actorSnapshotTarget?.getContainer?.(actorId);
+  }
+
+  public findOpenContainerActorId(): string | undefined {
+    return this.actorSnapshotTarget?.findOpenContainerActorId?.();
   }
 
   public setHoveredActorId(actorId?: string): void {

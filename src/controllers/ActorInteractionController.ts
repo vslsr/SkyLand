@@ -124,6 +124,7 @@ export class ActorInteractionController {
       carrierActorId: candidate.carrierActorId,
       holderPlayerId: candidate.holderPlayerId,
       pickupHolderActorId: candidate.pickupHolderActorId,
+      containerOpen: candidate.containerOpen,
     };
   }
 
