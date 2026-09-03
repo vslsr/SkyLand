@@ -228,8 +228,10 @@ export function createTerrainChunkGeometry(
   const waterSplashScales: number[] = [];
   const waterSplashDirections: number[] = [];
   const groundTop = new THREE.Color(options.groundColor);
-  const groundFloor = groundTop.clone().multiplyScalar(0.88);
-  const groundCliff = groundTop.clone().multiplyScalar(0.78);
+  // 台地的水底与侧面比顶面压得更暗：顶面本身没有明暗变化，起伏全靠这两级
+  // 色阶读出来，压得太浅时一整片地会糊成同一块颜色。
+  const groundFloor = groundTop.clone().multiplyScalar(0.84);
+  const groundCliff = groundTop.clone().multiplyScalar(0.70);
   const waterPrimary = new THREE.Color(options.oceanDefinition?.surfaceColor ?? 0xc9e6f2);
   const waterSecondary = new THREE.Color(options.oceanDefinition?.secondaryColor ?? 0xb7dbea);
   const waterDeep = new THREE.Color(options.oceanDefinition?.deepColor ?? 0x2f6f96);

@@ -30,7 +30,7 @@ function createGroundGrid(): THREE.LineSegments {
 
 /** 固定尺寸的一整块地面，供不做流式加载的场景使用。 */
 export function createGroundModel(
-  color: THREE.ColorRepresentation = 0xf1eddf,
+  color: THREE.ColorRepresentation = 0xe0dbc6,
   environment?: FillMaterialEnvironment,
 ): THREE.Group {
   const ground = new THREE.Group();
