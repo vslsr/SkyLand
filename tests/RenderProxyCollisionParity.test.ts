@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createSimpleCollisionFromRender } from '../shared/actor/simpleCollision.mjs';
 import { createActorVisualModel } from '../src/models/actors/createActorVisualModel';
+import { modelBuildsFireVisual } from '../src/render/renderModelFacts';
 import type { ActorRenderDefinition } from '../src/scenes/data/SceneDefinition';
 
 /**
@@ -108,4 +109,23 @@ test('这份定义表覆盖了 render union 的每一种模型', () => {
     15,
     'render union 的成员数变了：新增一种模型就要在这里加一条最小定义',
   );
+});
+
+/**
+ * 「这个模型会不会长出火焰」原来是 `resolve()` 出活 proxy 再看它有没有 rig。
+ * 递出活对象过不了线程边界，所以那件事改成了一张按 `render.model` 查的表。
+ *
+ * 表会和模型工厂脱节——这条把两边钉在一起：**建出来有没有 rig，必须和表说的一致**。
+ * 哪天给某个模型加了火焰而忘了改表，那个 Actor 就不会有 `FireVisualComponent`，
+ * 火点着了却不显示；反过来多列一项，会给一个没有 rig 的 Actor 挂上空表现。
+ */
+test('哪些模型会长出火焰，那张表和模型工厂说的一致', () => {
+  for (const definition of RENDER_DEFINITIONS) {
+    const model = createActorVisualModel(ENVIRONMENT, definition);
+    assert.equal(
+      Boolean(model.fireVisualRig),
+      modelBuildsFireVisual(definition.model),
+      `${definition.model}：renderModelFacts 里那张表和模型工厂对不上`,
+    );
+  }
 });

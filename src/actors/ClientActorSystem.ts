@@ -100,6 +100,7 @@ import {
 } from './systems/ActorInstanceSystem';
 import { RenderInstanceBuffer } from '../render/RenderInstanceBuffer';
 import { RenderProxyTable } from '../render/RenderProxyTable';
+import { modelBuildsFireVisual } from '../render/renderModelFacts';
 import { PROP_FLOAT_STRIDE, PROP_INT_STRIDE } from '../render/propInstanceLayout';
 import { FRUIT_FLOAT_STRIDE, FRUIT_INT_STRIDE } from '../render/fruitInstanceLayout';
 import { ActorFruitInstanceSystem } from './systems/ActorFruitInstanceSystem';
@@ -274,7 +275,6 @@ export class ClientActorSystem implements SceneVisualSystem {
   /** 快照换过一批 Actor 之后必须重新登记，置位后由下一次查询或 update 兑现。 */
   private collidersStale = true;
   private hoveredActorId?: string;
-  private hoverHelper?: THREE.BoxHelper;
   private readonly generatedPropChunks = new Map<string, Set<string>>();
   private readonly generatedPropStates = new Map<string, PropStateSnapshot>();
   private generatedPropOverrideTarget?: PropOverrideTarget;
@@ -501,10 +501,7 @@ export class ClientActorSystem implements SceneVisualSystem {
       'render-visuals',
       () => this.renderScene.updateVisuals(this.transforms, deltaSeconds, elapsedSeconds),
     );
-    frameTimeline.measure('sim-colliders', () => {
-      this.publishColliders();
-      this.hoverHelper?.update();
-    });
+    frameTimeline.measure('sim-colliders', () => this.publishColliders());
   }
 
   /**
@@ -564,7 +561,8 @@ export class ClientActorSystem implements SceneVisualSystem {
   }
 
   public dispose(): void {
-    this.disposeHoverHelper();
+    // 高亮盒归渲染世界释放（`ThreeRenderScene.dispose`）；这一侧只清自己的记账。
+    this.hoveredActorId = undefined;
     this.snapshots.clear();
     for (const actorId of this.colliderInstances.keys()) {
       this.collision.removeDynamic(actorId);
@@ -834,19 +832,13 @@ export class ClientActorSystem implements SceneVisualSystem {
 
   public setHoveredActorId(actorId?: string): void {
     if (actorId === this.hoveredActorId) return;
-    this.disposeHoverHelper();
     this.hoveredActorId = actorId;
+    // 高亮盒整个在渲染世界里建与释放；这一侧只说「高亮谁」。
+    // 和 setInteractionMarker 一样：没有 proxy 的 Actor（生成物件、合批掉落物）
+    // 与「没有悬停」都退化成 NULL_PROXY_ID。
     const actor = actorId ? this.world.getActor(actorId) as Actor | undefined : undefined;
-    const render = actor ? this.resolveRender(actor) : undefined;
-    if (!render) return;
-    render.root.updateWorldMatrix(true, true);
-    this.hoverHelper = new THREE.BoxHelper(render.visualRoot, 0x8a6238);
-    this.hoverHelper.name = 'actor-interaction-highlight';
-    const material = this.hoverHelper.material as THREE.LineBasicMaterial;
-    material.transparent = true;
-    material.opacity = 0.9;
-    material.depthTest = false;
-    this.root.add(this.hoverHelper);
+    const proxy = actor?.getComponent(RENDER_PROXY_COMPONENT) as RenderProxyComponent | undefined;
+    this.renderScene.setHoveredProxy(proxy?.proxyId ?? NULL_PROXY_ID);
   }
 
   public getVesselHudState(playerId: string): VesselHudState | undefined {
@@ -1028,8 +1020,11 @@ export class ClientActorSystem implements SceneVisualSystem {
       actor.addComponent(new RenderProxyComponent(proxyId, this.proxyIds));
       // 软体蒙皮不再挂在 Actor 上：createMeshProxy 认出 PBF 史莱姆就在渲染世界里
       // 自己建一份表现，玩法侧只写 SlimeMotionParams 那几个 f32（§1.5）。
-      const render = this.renderScene.resolve(proxyId) as ThreeMeshProxy;
-      if (render.fireVisualRig) {
+      //
+      // 「这个模型会不会长出火焰」以前是 resolve() 出活 proxy 再看它有没有 rig。
+      // 递出一个活对象过不了线程边界，而这件事本来就只取决于 render.model——
+      // 是一条 spawn 时的事实，这一侧照同一份定义判得出来。
+      if (modelBuildsFireVisual(archetype.components.render.model)) {
         const emitter = actor.getComponent(HEAT_EMITTER_COMPONENT) as HeatEmitterComponent | undefined;
         actor.addComponent(new FireVisualComponent(emitter?.enabled ? 1 : 0));
       }
@@ -1160,15 +1155,6 @@ export class ClientActorSystem implements SceneVisualSystem {
       });
     }
     replication.revision = Math.max(replication.revision, snapshot.revision);
-  }
-
-  private disposeHoverHelper(): void {
-    if (!this.hoverHelper) return;
-    this.hoverHelper.parent?.remove(this.hoverHelper);
-    this.hoverHelper.geometry.dispose();
-    (this.hoverHelper.material as THREE.Material).dispose();
-    this.hoverHelper = undefined;
-    this.hoveredActorId = undefined;
   }
 
   private createInteractionCandidate(

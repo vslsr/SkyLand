@@ -155,6 +155,18 @@ export interface RenderCommandSink {
   setGuidePath(id: ProxyId, state: GuidePathState, pathChanged: boolean): void;
 }
 
+/**
+ * 渲染世界的**全部**入口。
+ *
+ * 「全部」是有意义的：玩法侧只准通过这个接口说话。够到具体后端（`ThreeRenderScene`）
+ * 就绕过了那条「每个方法返回 void」的棘轮——而那条棘轮是 canvas 能不能进线程的
+ * 唯一保障。
+ *
+ * 两个**没有**列在这里的方法：`faceCameras(THREE.Camera)` 与
+ * `setGuidePathResolution(w, h)`。它们收的是 Three 的相机和画布尺寸，是渲染世界
+ * **内部**的每帧动作，只是眼下经由 `ClientActorSystem.beforeRender` 路过——
+ * 渲染循环进线程之后它们跟着走，不会出现在边界上。
+ */
 export interface RenderScene extends RenderCommandSink {
   /**
    * 在指定槽位建一个 Actor 网格 proxy。
@@ -171,6 +183,24 @@ export interface RenderScene extends RenderCommandSink {
   createMeshProxy(id: ProxyId, desc: MeshProxyDesc): void;
   /** 玩家史莱姆。见 `PlayerProxyDesc`：另一类内容，另一个具名入口。 */
   createPlayerProxy(id: ProxyId, desc: PlayerProxyDesc): void;
+  /**
+   * 准星选中了谁 / 悬停高亮谁。`NULL_PROXY_ID` 表示没有。
+   *
+   * 标记牌与高亮盒整个在渲染世界里建与释放，玩法侧只说「是哪一个」——
+   * 没有 proxy 的 Actor（生成物件、合批掉落物）和「没有选中」是同一种输入。
+   */
+  setInteractionMarker(id: ProxyId, label: string): void;
+  setHoveredProxy(id: ProxyId): void;
+  /** 两个调试开关。它们是渲染世界自己的状态，不在 Actor 上镜像。 */
+  setTemperatureMarkersVisible(visible: boolean): void;
+  setSimpleCollisionVisible(visible: boolean): void;
+  /** 渲染世界自己的表现系统跑一帧。读的是刚翻面的那一段字节。 */
+  updateVisuals(
+    transforms: RenderTransformBuffer,
+    deltaSeconds: number,
+    elapsedSeconds: number,
+  ): void;
+  dispose(): void;
   /**
    * 把这一帧的 transform SoA 兑现到渲染世界。
    *

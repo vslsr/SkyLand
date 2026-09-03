@@ -91,6 +91,9 @@ export class ThreeRenderScene implements RenderScene {
   private temperatureMarkersVisible = false;
   /** 当前选中的交互目标；NULL_PROXY_ID 表示没有选中。 */
   private selectedInteractionProxy: ProxyId = NULL_PROXY_ID;
+  /** 当前悬停高亮的目标与它的包围盒。两者都是渲染世界自己的状态。 */
+  private hoveredProxy: ProxyId = NULL_PROXY_ID;
+  private hoverHelper?: THREE.BoxHelper;
   /** 渲染世界自己的表现系统。它们只认识 ProxyId，不认识 Actor。 */
   private readonly fireVisual = new ThreeFireVisual();
   /** proxyId → 引导路径表现。只有引导 Actor 有，所以用 Map 而不是按槽位的数组。 */
@@ -281,6 +284,9 @@ export class ThreeRenderScene implements RenderScene {
     deltaSeconds: number,
     elapsedSeconds: number,
   ): void {
+    // 悬停盒跟着目标走。放在最前是因为它读的是上一帧摆好的世界矩阵，
+    // 和玩法侧原来在 sim-colliders 里调 hoverHelper.update() 的时机等价。
+    this.hoverHelper?.update();
     const live = this.liveProxies();
     // 顺序照搬搬迁之前 Actor 世界里的那一段：波动先算（附着要读父级摆好的
     // visualRoot），附着居中，弹性拉伸在脱落翻滚之前（翻滚会覆盖它摆好的姿态）。
@@ -387,6 +393,41 @@ export class ThreeRenderScene implements RenderScene {
     }
   }
 
+  /**
+   * 悬停高亮。
+   *
+   * 这个包围盒以前由 `ClientActorSystem` 自己 `new THREE.BoxHelper(...)`——它得先
+   * `resolve()` 拿到活的 proxy 才建得出来，而**递出一个活对象是线程边界过不去的**。
+   * 现在玩法侧只发一个 `ProxyId`（没有选中就是 `NULL_PROXY_ID`），盒子在这一侧建、
+   * 在这一侧释放，和 `setInteractionMarker` 是同一个套路。
+   */
+  public setHoveredProxy(id: ProxyId): void {
+    if (id === this.hoveredProxy) return;
+    this.#disposeHoverHelper();
+    this.hoveredProxy = id;
+    const proxy = id === NULL_PROXY_ID ? undefined : this.proxies[id];
+    if (!proxy) return;
+    // 包围盒按当前世界矩阵算，所以要先把这一支刷新到位。
+    proxy.root.updateWorldMatrix(true, true);
+    const helper = new THREE.BoxHelper(proxy.visualRoot, 0x8a6238);
+    helper.name = 'actor-interaction-highlight';
+    const material = helper.material as THREE.LineBasicMaterial;
+    material.transparent = true;
+    material.opacity = 0.9;
+    material.depthTest = false;
+    this.hoverHelper = helper;
+    this.root.add(helper);
+  }
+
+  #disposeHoverHelper(): void {
+    if (!this.hoverHelper) return;
+    this.hoverHelper.parent?.remove(this.hoverHelper);
+    this.hoverHelper.geometry.dispose();
+    (this.hoverHelper.material as THREE.Material).dispose();
+    this.hoverHelper = undefined;
+    this.hoveredProxy = NULL_PROXY_ID;
+  }
+
   /** 温度牌的全局开关。和 setSimpleCollisionVisible 一样是渲染世界自己的状态。 */
   public setTemperatureMarkersVisible(visible: boolean): void {
     this.temperatureMarkersVisible = visible;
@@ -409,6 +450,7 @@ export class ThreeRenderScene implements RenderScene {
   }
 
   public dispose(): void {
+    this.#disposeHoverHelper();
     for (const guide of this.guidePaths.values()) guide.dispose();
     this.guidePaths.clear();
     this.guidePathStyles.clear();
