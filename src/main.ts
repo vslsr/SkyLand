@@ -7,6 +7,7 @@ import {
   frameTimeline,
 } from './platform/index';
 import { createFrameStatsPanel } from './debug/FrameStatsPanel';
+import { suppressBrowserContextMenu } from './input/contextMenu';
 import { GrasslandScene } from './scenes/GrasslandScene';
 import { SceneManager } from './scenes/SceneManager';
 
@@ -39,6 +40,10 @@ function showStartupError(error: unknown): void {
 // 隔离没打开是个静默降级：SharedArrayBuffer 会直接不可用，而不是报错。
 // 把能力集打在启动日志的第一行，线上排查时不必再去猜响应头。
 console.info(`SkyLand platform: ${describeThreadingCapabilities()}`);
+
+// 右键属于游戏输入，浏览器菜单不该抢走它。放在 try 之外：这条和 WebGL、
+// 物理运行时都没关系，启动失败时的错误面板上右键也不该弹菜单。
+suppressBrowserContextMenu();
 
 try {
   await initRapier(() => import('@dimforge/rapier3d'));

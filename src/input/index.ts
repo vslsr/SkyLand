@@ -74,3 +74,7 @@ export type {
   VirtualJoystickMode,
 } from './config/InputSchemeTypes';
 export { VirtualControls, type VirtualControlsOptions } from './ui/VirtualControls';
+export {
+  suppressBrowserContextMenu,
+  type BrowserContextMenuOptions,
+} from './contextMenu';

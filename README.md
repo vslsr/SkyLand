@@ -243,6 +243,18 @@ bindings.resetAllBindings();
 竖屏分别应用缩放与边距。桌面调试时在地址后添加 `?virtual-controls=1`；进入
 `topdown` 场景后即可用鼠标检查摇杆和按钮，正式桌面布局仍保持隐藏。
 
+### 右键不弹浏览器菜单
+
+右键在游戏画面里是输入，不是「打开系统菜单」的手势：菜单一弹就挡住画面、吃掉后续的
+pointermove，右键拖拽根本做不完整。`src/input/contextMenu.ts` 的
+`suppressBrowserContextMenu()` 在 `src/main.ts` 启动时装一次，捕获阶段拦掉整份文档的
+`contextmenu` 默认行为。
+
+它只拦默认行为，不拦 `pointerdown`/`pointerup`，也不 `stopPropagation`：`Mouse.Button2`
+照常进 `KeyboardMouseInputDevice`，CommonUI 事件栈的分发链路不变，玩法随时可以把右键绑上去。
+文本输入控件（`input`、`textarea`、`select`、`contenteditable`）默认放行，房间名这类输入框
+仍然能用原生复制粘贴菜单；需要连输入框一起屏蔽时传 `allowTextEntry: false`。
+
 ### 屏幕层级：UI 先吃掉指针
 
 摇杆热区是一整块透明矩形，覆盖屏幕左下角将近半屏，因此**它排在哪一层就决定了
@@ -427,9 +439,20 @@ WASM 算出的世界必然逐位相同。一旦这里引入浮点，就可能出
 
 一个 chunk 的树与岩石仍合批成**一份**填充几何体和**一份**轮廓线几何体，颜色随
 顶点走（`createFillMaterial` 的 `vertexTint`）。地形增加普通地面填充/网格两个 pass；
-含水格时再增加水面/水线两个 pass。实例草由 `StreamingGrassSystem` 另占两个 pass。
-因此单块按内容为 4–8 次 draw call，且只存在于加载半径内，数量上界仍由常驻 chunk
-数决定。
+含水格时再增加水面/水线两个 pass，靠岸的 chunk 另有岸线与水花各一个。实例草由
+`StreamingGrassSystem` 另占两个 pass。因此单块按内容为 4–10 次 draw call，且只存在于
+加载半径内，数量上界仍由常驻 chunk 数决定。水域地图因此明显更贵：7×7 的常驻窗口里，
+地形部分从纯陆地的 98 次涨到 134–204 次（随世界种子的水域占比而定）。
+
+**水面排在海床之前画**（`TerrainChunkView` 的 `TERRAIN_RENDER_ORDER`）。两者都是不透明
+材质，而 three 的不透明列表里 `renderOrder` 压过深度排序，海床先画就意味着水面之下的
+每个像素都要完整跑一遍海床的片元着色器——云影的两层噪声加散射雾——然后立刻被水面
+覆盖。反过来先写下水面的深度，被淹掉的海床在 early-z 阶段整片丢掉；两者都不 discard，
+顺序不影响成像。固定海域场景靠的是同一条：水面 `-2`，地面用默认的 `0`。
+
+水面几何只在场景给出 `renderer.ocean` 时才建。水格由世界生成决定，和场景开不开水域
+无关，`content.ocean: false` 的流式地图照样会生成 WATER 格——不加这道闸，非水域地图
+会为每块含水 chunk 白建一份当场就被丢掉的水面。
 
 `renderer.content` 的 `ground` / `trees` / `grass` 开关在流式场景里改为决定 chunk
 里放什么：关掉某一类就注册一个空模板。放置结果本身不受影响——放置算法在 WASM 与

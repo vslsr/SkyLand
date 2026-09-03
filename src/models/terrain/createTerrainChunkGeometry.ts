@@ -245,6 +245,16 @@ export function createTerrainChunkGeometry(
   const originCellX = options.chunkX * TERRAIN_GRID;
   const originCellZ = options.chunkZ * TERRAIN_GRID;
   const seaLevel = Number.isFinite(options.seaLevel) ? Number(options.seaLevel) : 0;
+  /**
+   * 没有 ocean 定义就一格水面都不建。
+   *
+   * 水格由世界生成决定，和场景开不开水域无关：`legged-slime` 这类
+   * `content.ocean: false` 的流式地图照样会生成 WATER 格。`TerrainChunkView`
+   * 拿不到水面材质，建出来的水面/水线/岸线/水花当场就被丢掉——非水域地图不必
+   * 为此付这份构建开销和垃圾。两侧的开关是同一个：`ChunkViewHost` 的
+   * `ocean` 与 `waterMaterials` 一起有、一起没有。
+   */
+  const emitWater = options.oceanDefinition !== undefined;
   const sourceCellCodeAt = options.cellCodeAt
     ?? ((globalCellX: number, globalCellZ: number) => (
       terrainCellCodeAt(options.worldSeed, globalCellX, globalCellZ)
@@ -368,7 +378,7 @@ export function createTerrainChunkGeometry(
         appendLine(groundLines, northEast, northWest, 0.012);
       }
 
-      if (terrainCellHasWater(code, seaLevel)) {
+      if (emitWater && terrainCellHasWater(code, seaLevel)) {
         const waterSouthWest = { x: southWest.x, y: seaLevel, z: southWest.z };
         const waterSouthEast = { x: southEast.x, y: seaLevel, z: southEast.z };
         const waterNorthEast = { x: northEast.x, y: seaLevel, z: northEast.z };
