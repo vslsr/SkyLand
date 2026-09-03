@@ -495,6 +495,25 @@ export interface WorldStreamingDefinition {
   keepRadius: number;
   /** 岩石的填充色。地面、草、树的颜色沿用 palette。 */
   rockColor: string;
+  /**
+   * 成片密草的生成参数。
+   *
+   * 不写这一块时，草地只有生成器放置的稀疏草簇；写了则在此之上按 chunk
+   * 确定性地叠一层不规则凸多边形草丛，数量与半径都有上界。
+   */
+  grassPatches?: WorldGrassPatchDefinition;
+}
+
+export interface WorldGrassPatchDefinition {
+  /** 每个 chunk 至多几丛。 */
+  maxPerChunk: number;
+  /** 每一丛独立出现的概率。 */
+  spawnChance: number;
+  /** 外接半径的下限与上限（米）。 */
+  minRadius: number;
+  maxRadius: number;
+  /** 每平方米的叶片数。 */
+  bladeDensity: number;
 }
 
 export interface WorldPropVariantDefinition {

@@ -48,6 +48,37 @@ function requireInteger(value, path, minimum, maximum) {
   return value;
 }
 
+/**
+ * 成片密草的参数。
+ *
+ * 半径上限同时是草丛在自己 chunk 内的留白，所以必须明显小于半个 chunk，
+ * 否则草丛会越过 chunk 边界、在卸载时被切掉半丛。
+ */
+function parseGrassPatches(value, path) {
+  if (value === undefined) return undefined;
+  const raw = requireObject(value, path);
+  const patches = {
+    maxPerChunk: requireInteger(raw.maxPerChunk, `${path}.maxPerChunk`, 0, 8),
+    spawnChance: requireNumber(raw.spawnChance, `${path}.spawnChance`),
+    minRadius: requireNumber(raw.minRadius, `${path}.minRadius`),
+    maxRadius: requireNumber(raw.maxRadius, `${path}.maxRadius`),
+    bladeDensity: requireNumber(raw.bladeDensity, `${path}.bladeDensity`),
+  };
+  if (patches.spawnChance < 0 || patches.spawnChance > 1) {
+    throw new TypeError(`${path}.spawnChance 必须在 0-1 之间`);
+  }
+  if (patches.minRadius <= 0 || patches.minRadius > patches.maxRadius) {
+    throw new TypeError(`${path}.minRadius 必须为正且不大于 maxRadius`);
+  }
+  if (patches.maxRadius > CHUNK_SIZE / 4) {
+    throw new TypeError(`${path}.maxRadius 必须不大于 ${CHUNK_SIZE / 4}，否则草丛会越过 chunk 边界`);
+  }
+  if (patches.bladeDensity <= 0 || patches.bladeDensity > 80) {
+    throw new TypeError(`${path}.bladeDensity 必须在 0-80 之间`);
+  }
+  return patches;
+}
+
 function requireBoolean(value, path) {
   if (typeof value !== 'boolean') throw new TypeError(`${path} 必须是布尔值`);
   return value;
@@ -542,7 +573,9 @@ function validateSceneDefinition(raw, filename, actorCatalog) {
       loadRadius: requireInteger(rawWorld.loadRadius, `${filename}.renderer.world.loadRadius`, 1, 6),
       keepRadius: requireInteger(rawWorld.keepRadius, `${filename}.renderer.world.keepRadius`, 2, 8),
       rockColor: requireColor(rawWorld.rockColor, `${filename}.renderer.world.rockColor`),
+      grassPatches: parseGrassPatches(rawWorld.grassPatches, `${filename}.renderer.world.grassPatches`),
     };
+    if (world.grassPatches === undefined) delete world.grassPatches;
     // 加载半径与保留半径相等时，站在 chunk 边界上来回走会让同一批 chunk
     // 反复构建又销毁，比不做流式加载还糟。
     if (world.keepRadius <= world.loadRadius) {

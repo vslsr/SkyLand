@@ -269,7 +269,20 @@
           "properties": {
             "loadRadius": { "type": "integer", "minimum": 1, "maximum": 6 },
             "keepRadius": { "type": "integer", "minimum": 2, "maximum": 8 },
-            "rockColor": { "$ref": "#/$defs/color" }
+            "rockColor": { "$ref": "#/$defs/color" },
+            "grassPatches": {
+              "type": "object",
+              "description": "在稀疏草簇之上，按 chunk 确定性生成的成片密草",
+              "additionalProperties": false,
+              "required": ["maxPerChunk", "spawnChance", "minRadius", "maxRadius", "bladeDensity"],
+              "properties": {
+                "maxPerChunk": { "type": "integer", "minimum": 0, "maximum": 8 },
+                "spawnChance": { "type": "number", "minimum": 0, "maximum": 1 },
+                "minRadius": { "type": "number", "exclusiveMinimum": 0, "maximum": 12 },
+                "maxRadius": { "type": "number", "exclusiveMinimum": 0, "maximum": 12 },
+                "bladeDensity": { "type": "number", "exclusiveMinimum": 0, "maximum": 80 }
+              }
+            }
           }
         }
       }
