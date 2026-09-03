@@ -1136,6 +1136,95 @@ test('无模型 GuidePath Actor 只在快照存在时创建客户端 Three.js �
   system.dispose();
 });
 
+test('咬住的形变在命中处拔出一个锥，尖端落在牙上', () => {
+  const render = pbfSlimeArchetype.components.render;
+  const dragDefinition = pbfSlimeArchetype.components.slimeSurfaceDrag;
+  assert.ok(render?.model === 'line-art-pbf-slime');
+  assert.ok(dragDefinition);
+  const scene = new ThreeRenderScene(new THREE.Group(), RENDER_ENVIRONMENT);
+  const transforms = new RenderTransformBuffer(4);
+  const info = scene.createPlayerProxy({
+    name: 'bitten-player',
+    render,
+    walkSpeed: 3.2,
+    surfaceDrag: dragDefinition,
+  });
+  const slime = scene.resolveSlimeVisual(info.id)!;
+  const drag = { ...SLIME_DRAG_AT_REST };
+  const step = (frames: number, from = 0): void => {
+    for (let frame = 0; frame < frames; frame += 1) {
+      writeSlimeDragParams(transforms, info.id, drag);
+      transforms.publish();
+      scene.submitTransforms(transforms);
+      scene.updateVisuals(transforms, 1 / 60, (from + frame) / 60);
+    }
+  };
+  step(90);
+  const initialSurface = Float32Array.from(slime.simulation.positions);
+
+  // 命中点取正对 +Z 的那一圈顶点，和被咬时服务端给的那一面一致。
+  let contactOffset = 0;
+  let best = Number.NEGATIVE_INFINITY;
+  const centerY = render.radius * 0.46;
+  for (let offset = 0; offset < initialSurface.length; offset += 3) {
+    const score = initialSurface[offset + 2]
+      - Math.abs(initialSurface[offset]) * 2
+      - Math.abs(initialSurface[offset + 1] - centerY) * 2;
+    if (score <= best) continue;
+    best = score;
+    contactOffset = offset;
+  }
+  const pull = 0.6;
+  drag.revision = 1;
+  drag.contactX = initialSurface[contactOffset];
+  drag.contactY = initialSurface[contactOffset + 1];
+  drag.contactZ = initialSurface[contactOffset + 2];
+  drag.pullZ = pull;
+  drag.pinch = 1;
+  step(180, 90);
+
+  const bitten = slime.simulation.positions;
+  const tip = bitten[contactOffset + 2] - initialSurface[contactOffset + 2];
+  // 尖端要落在牙上。力平衡兑现不了这一条：拖拽弹簧 120、蒙皮回弹约 80，命中点
+  // 停在目标的一半，无论施力方把嘴挪多远——被咬住的那块皮得是位置约束。
+  assert.ok(
+    Math.abs(tip - pull) < 0.02,
+    `咬住的那块皮就在牙上，实际只走了 ${tip} / ${pull}`,
+  );
+
+  // 侧面得有落差也得有厚度：只有命中点动是一根「单顶点针」，动得太平是个圆包。
+  let followers = 0;
+  let farSideMaximum = 0;
+  for (let offset = 0; offset < bitten.length; offset += 3) {
+    const moved = Math.hypot(
+      bitten[offset] - initialSurface[offset],
+      bitten[offset + 1] - initialSurface[offset + 1],
+      bitten[offset + 2] - initialSurface[offset + 2],
+    );
+    if (offset !== contactOffset && moved > tip * 0.25) followers += 1;
+    if (initialSurface[offset + 2] > -render.radius * 0.5) continue;
+    farSideMaximum = Math.max(farSideMaximum, moved);
+  }
+  assert.ok(followers >= 6, `尖要有侧面，不能只有命中点自己动，实际 ${followers} 个顶点跟随`);
+  assert.ok(
+    farSideMaximum < tip * 0.15,
+    `咬住的是一块皮，背面不该整团跟着走，实际 ${farSideMaximum}`,
+  );
+
+  // 松口后由原有胡克弹簧收回去，不能把咬住时按下的速度攒着弹飞。
+  drag.revision = 0;
+  drag.pinch = 0;
+  drag.pullZ = 0;
+  step(360, 270);
+  assert.equal(slime.simulation.stats().surfaceDragActive, false);
+  assert.ok(
+    Math.abs(slime.simulation.positions[contactOffset + 2] - initialSurface[contactOffset + 2])
+      < tip * 0.2,
+    '松口后应回到静止外壳',
+  );
+  scene.dispose();
+});
+
 test('远端玩家的拖拽形变从参数段复现，松手后回弹', () => {
   const render = pbfSlimeArchetype.components.render;
   const dragDefinition = pbfSlimeArchetype.components.slimeSurfaceDrag;

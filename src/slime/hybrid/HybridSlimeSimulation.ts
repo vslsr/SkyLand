@@ -93,15 +93,21 @@ const MAX_SURFACE_DRAG_BODY_OFFSET_RADIUS_RATIO = 0.42;
 const SURFACE_DRAG_BODY_FOLLOW_RATE = 14;
 /** 底面被地面黏住，只保留一部分整体跟随，避免拖拽时整只史莱姆像刚体滑走。 */
 const SURFACE_DRAG_BOTTOM_ADHESION = 0.45;
-/** pinch = 1 时影响圈收掉这么多：尖是「只有命中点附近动」才尖。 */
-const PINCH_INFLUENCE_NARROWING = 0.74;
 /**
- * pinch = 1 时权重指数加到 1 + 这个值。
+ * pinch = 1 时影响圈收掉这么多。
  *
- * 光把影响圈收窄只会得到一个小一号的圆包。真正让它变尖的是权重profile：指数
- * 越高，命中点与它周围几圈的落差越大，拔出来的就是锥而不是丘。
+ * 收得太狠会得到一根「单顶点针」：外壳顶点间距约 0.2 m，影响圈比它还小的时候，
+ * 除了命中点没有第二个顶点跟着动，画面上就是一根凭空戳出来的刺，底下还带一道
+ * 折角。留下三四圈邻居，尖才有侧面。
  */
-const PINCH_WEIGHT_EXPONENT = 3;
+const PINCH_INFLUENCE_NARROWING = 0.45;
+/**
+ * pinch = 1 时的权重外形：`(1 - d/R)^k`，k 就是这个指数。
+ *
+ * 不能沿用 smoothstep：它在命中点附近导数为零，也就是个平顶，拉出来是蘑菇头
+ * 不是尖。幂函数在 d=0 处有斜率，锥尖才收得住；指数控制侧面收敛得多快。
+ */
+const PINCH_CONE_EXPONENT = 2.2;
 
 function clamp(value: number, minimum: number, maximum: number): number {
   return Math.max(minimum, Math.min(maximum, value));
@@ -250,7 +256,6 @@ export class HybridSlimeSimulation {
 
     const pinch = clamp(options.pinch ?? 0, 0, 1);
     const influenceRadius = options.influenceRadius * (1 - PINCH_INFLUENCE_NARROWING * pinch);
-    const weightExponent = 1 + PINCH_WEIGHT_EXPONENT * pinch;
     this.surfaceDragPinch = pinch;
     this.surfaceDragStartPositions.set(this.positions);
     this.surfaceDragVertexOffset = nearestOffset;
@@ -274,9 +279,10 @@ export class HybridSlimeSimulation {
       );
       const linearWeight = clamp(1 - distance / influenceRadius, 0, 1);
       // smoothstep 避免影响圈边缘出现折线，同时保持命中顶点权重为 1。
-      // 再按 pinch 抬指数：咬住时落差更陡，命中处因此收成一个尖。
       const smoothWeight = linearWeight * linearWeight * (3 - 2 * linearWeight);
-      const localWeight = pinch > 0 ? Math.pow(smoothWeight, weightExponent) : smoothWeight;
+      // 咬住时换成带尖的幂外形：smoothstep 的平顶拉出来是蘑菇头，幂函数才是锥。
+      const coneWeight = Math.pow(linearWeight, PINCH_CONE_EXPONENT);
+      const localWeight = smoothWeight + (coneWeight - smoothWeight) * pinch;
       // 底部离地越近跟随越弱，模拟黏地；其余顶点都保留全局下限，
       // 因此影响圈之外的背面同样会被带动，只是幅度小于命中邻域。
       const groundAdhesion = clamp(
@@ -704,6 +710,11 @@ export class HybridSlimeSimulation {
 
   /**
    * 衰减控制手感，硬约束负责安全：即使低帧率或参数调得过强，选中的表面也不能无限延伸。
+   *
+   * pinch 那一份是位置约束而不是力：力平衡下命中点最多走到目标的一半——拖拽弹簧
+   * `pullForce` 是 120，蒙皮回弹的 `skinStiffness + neighborStiffness` 约 80，两边
+   * 相等尖就不长了，无论施力方把嘴挪多远。牙齿不是弹簧，被咬住的那块皮就在牙上，
+   * 所以按权重把它按到目标位置：尖的外形因此直接是权重 profile，而不是刚度比例。
    */
   private constrainSurfaceDrag(): void {
     if (!this.surfaceDragActive) return;
@@ -711,6 +722,19 @@ export class HybridSlimeSimulation {
       const weight = this.surfaceDragWeights[vertex];
       if (weight <= 1e-5) continue;
       const offset = vertex * 3;
+      const grip = this.surfaceDragPinch * weight;
+      if (grip > 1e-5) {
+        const gripX = this.surfaceDragStartPositions[offset] + this.surfaceDragPullX * weight;
+        const gripY = this.surfaceDragStartPositions[offset + 1] + this.surfaceDragPullY * weight;
+        const gripZ = this.surfaceDragStartPositions[offset + 2] + this.surfaceDragPullZ * weight;
+        this.positions[offset] += (gripX - this.positions[offset]) * grip;
+        this.positions[offset + 1] += (gripY - this.positions[offset + 1]) * grip;
+        this.positions[offset + 2] += (gripZ - this.positions[offset + 2]) * grip;
+        // 被咬住的材料不再自己弹：留着的速度会在松口那一帧把尖弹飞。
+        this.velocities[offset] *= 1 - grip;
+        this.velocities[offset + 1] *= 1 - grip;
+        this.velocities[offset + 2] *= 1 - grip;
+      }
       const displacementX = this.positions[offset] - this.surfaceDragStartPositions[offset];
       const displacementY = this.positions[offset + 1] - this.surfaceDragStartPositions[offset + 1];
       const displacementZ = this.positions[offset + 2] - this.surfaceDragStartPositions[offset + 2];

@@ -27,6 +27,14 @@ export class BiteComponent extends ActorComponent {
      */
     this.pinch = Math.max(0, Math.min(1, finiteOr(definition.pinch, 1)));
     /**
+     * 牙齿捏起来的那块皮有多深（米）。
+     *
+     * 咬住看得见不能靠两个人恰好隔着一段距离：外壳半径 0.95 m 而角色碰撞半径只有
+     * 0.52 m，贴身咬的时候嘴其实埋在被咬者的外壳里，纯几何算出来的位移是零。
+     * 捏起一块皮是牙的属性，所以深度写在这儿。
+     */
+    this.gripDepth = Math.max(0, finiteOr(definition.gripDepth, 0.35));
+    /**
      * 缰绳：被咬住的人能挣多远。绳长以内完全自由，出了绳长每多走一米就多拽回
      * 一分，所以是「越走越拉不动」而不是撞上一堵看不见的墙。刚度乘固定步长
      * 超过 2 这个弹簧就会自激振荡，所以目录把它卡在 120 以内。
