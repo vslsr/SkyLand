@@ -96,6 +96,11 @@ export const PARAM_SLIME_DRAG_CONTACT_Z = 27;
 export const PARAM_SLIME_DRAG_PULL_X = 28;
 export const PARAM_SLIME_DRAG_PULL_Y = 29;
 export const PARAM_SLIME_DRAG_PULL_Z = 30;
+/**
+ * 这一次抓取有多「尖」。0 是鼠标拖拽（整团跟着走），1 是被牙齿咬住（命中处拔出
+ * 一个尖）。它跟着 revision 一起在抓取那一刻生效，之后整次抓取都不变。
+ */
+export const PARAM_SLIME_DRAG_PINCH = 31;
 
 /**
  * 腿部落脚用的地面采样窗口（见 `RenderSlimeLegs.ts`）。
@@ -108,12 +113,12 @@ export const PARAM_SLIME_DRAG_PULL_Z = 30;
  * 表现的槽位每帧写 0，所以静止值必须是「没有」——否则那五个 0 会被当成
  * 「地面在世界 Y=0」，让远处的腿一齐插进虚空。
  */
-export const PARAM_SLIME_GROUND_CENTER_Y = 31;
-export const PARAM_SLIME_GROUND_EAST_Y = 32;
-export const PARAM_SLIME_GROUND_WEST_Y = 33;
-export const PARAM_SLIME_GROUND_SOUTH_Y = 34;
-export const PARAM_SLIME_GROUND_NORTH_Y = 35;
-export const PARAM_SLIME_GROUND_PROBE_RADIUS = 36;
+export const PARAM_SLIME_GROUND_CENTER_Y = 32;
+export const PARAM_SLIME_GROUND_EAST_Y = 33;
+export const PARAM_SLIME_GROUND_WEST_Y = 34;
+export const PARAM_SLIME_GROUND_SOUTH_Y = 35;
+export const PARAM_SLIME_GROUND_NORTH_Y = 36;
+export const PARAM_SLIME_GROUND_PROBE_RADIUS = 37;
 
 /** 每个 proxy 槽位的参数个数。新增参数就在上面加常量并把这里加一。 */
-export const RENDER_VISUAL_PARAM_COUNT = 37;
+export const RENDER_VISUAL_PARAM_COUNT = 38;

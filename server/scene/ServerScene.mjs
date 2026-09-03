@@ -86,6 +86,7 @@ function roundCoordinate(value) {
 function roundSlimeDrag(drag) {
   return {
     revision: drag.revision,
+    pinch: drag.pinch,
     contactX: roundCoordinate(drag.contactX),
     contactY: roundCoordinate(drag.contactY),
     contactZ: roundCoordinate(drag.contactZ),
@@ -773,6 +774,25 @@ export class ServerScene {
     deformation.applySelfReported(sanitized, this.now(), regrab);
   }
 
+  /**
+   * 被外力拴住时的缰绳。它必须过网：客户端预测跑的是同一份 stepCharacter，
+   * 只在服务端加力，客户端就会一路走出去再被快照拽回来，变成持续的橡皮筋。
+   */
+  activeLeash(player) {
+    const deformation = player.getComponent(SOFT_BODY_DEFORMATION_COMPONENT);
+    if (!deformation?.heldExternally || deformation.leashStiffness <= 0) return undefined;
+    return {
+      anchorX: roundCoordinate(deformation.anchorX),
+      anchorZ: roundCoordinate(deformation.anchorZ),
+      slack: deformation.grabDistance + deformation.leashSlack,
+      stiffness: deformation.leashStiffness,
+      damping: deformation.leashDamping,
+      carry: deformation.leashCarry,
+      anchorVelocityX: roundCoordinate(deformation.anchorVelocityX),
+      anchorVelocityZ: roundCoordinate(deformation.anchorVelocityZ),
+    };
+  }
+
   /** 这一帧要下发的形变；自己上报的那一份还要过超时。 */
   activeSlimeDrag(player) {
     const deformation = player.getComponent(SOFT_BODY_DEFORMATION_COMPONENT);
@@ -831,12 +851,24 @@ export class ServerScene {
     }
     if (!target) return false;
 
+    // 命中点仍然按嘴的位置挑：被咬的是朝着那张嘴的那块皮。形变的方向另算。
     const contact = resolveSurfaceContact(radius, target, mouth, { x: 0, y: 0, z: 0 });
-    if (!targetDeformation.grab(player.id, contact)) return false;
+    if (!targetDeformation.grab(player.id, contact, {
+      pinch: bite.pinch,
+      // 形变与缰绳都从咬住那一刻的距离起算：咬上的瞬间既不变形，也不被拽一下。
+      grabDistance: Math.hypot(target.x - player.x, target.y - player.y, target.z - player.z),
+      leashSlack: bite.leashSlack,
+      leashStiffness: bite.leashStiffness,
+      leashDamping: bite.leashDamping,
+      leashCarry: bite.leashCarry,
+    })) return false;
     if (!bite.bite(target.id)) {
       targetDeformation.release(player.id);
       return false;
     }
+    // 立刻兑现一次：锚点与位移由 pullToward 写，不先跑一次的话，抓住到下一个
+    // tick 之间发出的快照会带着一条指向世界原点的缰绳。
+    targetDeformation.pullToward(player.id, target, player, player.characterState);
     return true;
   }
 
@@ -938,6 +970,8 @@ export class ServerScene {
    */
   stepPlayerOnce(player, input) {
     player.stepBudget -= 1;
+    // 缰绳走共享固定步，权威与客户端预测因此算的是同一件事。
+    player.characterParams.leash = this.activeLeash(player);
     player.yaw = normalizeAngle(toFiniteNumber(input.yaw, player.yaw));
     const move = sanitizeMoveInput({ ...input.move, sprint: input.sprint === true });
     player.syncWaterMovementEffect(this.isWaterAt(player.x, player.z));
@@ -1171,6 +1205,7 @@ export class ServerScene {
       players: Array.from(this.players.values(), (player) => {
         const slimeDrag = this.activeSlimeDrag(player);
         const bitingPlayerId = player.getComponent(BITE_COMPONENT)?.targetActorId;
+        const leash = this.activeLeash(player);
         return {
           id: player.id,
           name: player.name,
@@ -1191,6 +1226,7 @@ export class ServerScene {
           pickupDropRevision: player.getComponent(PICKUP_DROP_COMPONENT)?.revision ?? 0,
           ...(slimeDrag ? { slimeDrag } : {}),
           ...(bitingPlayerId ? { bitingPlayerId } : {}),
+          ...(leash ? { leash } : {}),
         };
       }),
     };

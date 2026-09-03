@@ -93,7 +93,9 @@ export class ThreeSlimeSurfaceDrag {
         drag.contactX,
         drag.contactY,
         drag.contactZ,
-        this.definition,
+        // pinch 是这一次抓取的属性，不是原型参数：同一只史莱姆被鼠标拖和被咬，
+        // 形状本来就该不一样。
+        { ...this.definition, pinch: drag.pinch },
       )) return;
       this.replicatedRevision = drag.revision;
     }

@@ -51,7 +51,11 @@ import {
   createPlayerMovementAttributes,
 } from '../../shared/abilities/playerMovementEffects.mjs';
 import type { PhysicsWorld } from '../../shared/physics/PhysicsWorld.mjs';
-import type { PlayerInputStep, SnapshotSlimeDrag } from '../network/protocol';
+import type {
+  PlayerInputStep,
+  SnapshotLeash,
+  SnapshotSlimeDrag,
+} from '../network/protocol';
 import {
   MAXIMUM_PENDING_INPUT_STEPS,
   SIMULATION_STEP_SECONDS,
@@ -261,6 +265,11 @@ export class PlayerEntity extends Actor {
    * 服务端推给自己的形变——今天只有「被别人咬住」一种。自己的鼠标拖拽不走这里，
    * 而且渲染侧规定一块外壳只有一个所有者：自己正拖着时，复制过来的会被忽略。
    */
+  /** 被外力拴住时的缰绳，转交本地预测；见 TopDownController.setLeash。 */
+  public setLeash(leash: SnapshotLeash | undefined): void {
+    this.controller.setLeash(leash);
+  }
+
   public setReplicatedSlimeDrag(drag: SnapshotSlimeDrag | undefined): void {
     this.replicatedDrag.revision = drag?.revision ?? 0;
     this.replicatedDrag.contactX = drag?.contactX ?? 0;
@@ -269,6 +278,7 @@ export class PlayerEntity extends Actor {
     this.replicatedDrag.pullX = drag?.pullX ?? 0;
     this.replicatedDrag.pullY = drag?.pullY ?? 0;
     this.replicatedDrag.pullZ = drag?.pullZ ?? 0;
+    this.replicatedDrag.pinch = drag?.pinch ?? 0;
   }
 
   public captureTransformDebugState(): PlayerTransformDebugState {

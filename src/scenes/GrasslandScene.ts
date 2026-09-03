@@ -299,6 +299,8 @@ export class GrasslandScene extends Scene {
       const own = states.find((state) => state.id === localPlayerId);
       this.localPlayerBiting = own?.bitingPlayerId !== undefined;
       this.player?.setReplicatedSlimeDrag(own?.slimeDrag);
+      // 缰绳要在这一帧的预测步之前落到 characterParams 上，重放才和权威一致。
+      this.player?.setLeash(own?.leash);
       this.player?.update(deltaSeconds);
       if (localPlayerId && this.joinedRoom?.scene.camera.mode === 'topdown') {
         this.remotePlayers.sync(states, localPlayerId);

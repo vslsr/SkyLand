@@ -19,9 +19,11 @@ function blendSlimeDrag(
   if (!to || !from || from.revision !== to.revision) return to;
   return {
     revision: to.revision,
+    // 命中点与 pinch 都是抓取身份的一部分，只在换抓取时变；插值它们没有意义。
     contactX: to.contactX,
     contactY: to.contactY,
     contactZ: to.contactZ,
+    pinch: to.pinch,
     pullX: from.pullX + (to.pullX - from.pullX) * amount,
     pullY: from.pullY + (to.pullY - from.pullY) * amount,
     pullZ: from.pullZ + (to.pullZ - from.pullZ) * amount,
@@ -43,6 +45,7 @@ function toState(player: SnapshotPlayer): InterpolatedPlayerState {
     grounded: player.grounded,
     ...(player.slimeDrag ? { slimeDrag: player.slimeDrag } : {}),
     ...(player.bitingPlayerId ? { bitingPlayerId: player.bitingPlayerId } : {}),
+    ...(player.leash ? { leash: player.leash } : {}),
   };
 }
 
@@ -71,6 +74,9 @@ function blend(from: SnapshotPlayer, to: SnapshotPlayer, amount: number): Interp
     ...(slimeDrag ? { slimeDrag } : {}),
     // 咬没咬着是离散状态，跟 grounded 一样只取更近的那一份，不插值。
     ...(to.bitingPlayerId ? { bitingPlayerId: to.bitingPlayerId } : {}),
+    // 缰绳同样取最新的那一份：它进的是本地预测，插值出来的中间锚点不对应
+    // 服务端重放时用过的任何一个值。
+    ...(to.leash ? { leash: to.leash } : {}),
   };
 }
 
