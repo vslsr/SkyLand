@@ -20,7 +20,7 @@ import {
   lerpAngle,
   normalizeAngle,
 } from '../../shared/playerMovement.mjs';
-import type { PlayerInputFrame, PlayerInputStep } from '../network/protocol';
+import type { PlayerInputFrame, PlayerInputStep, SnapshotLeash } from '../network/protocol';
 import type { SceneBounds } from '../scenes/data/SceneDefinition';
 import {
   type PlayerJumpComponent,
@@ -361,6 +361,18 @@ export class TopDownController {
    * 容差内保留本地预测；超出容差时只平滑逻辑修正量，不能把固定步插值延迟
    * 误当成网络误差。普通和解也不能清空固定步余量，否则快照会周期性打断移动。
    */
+  /**
+   * 被外力（牙齿、之后的倒刺）拴住时的缰绳，来自权威快照。
+   *
+   * 它进的是共享固定步，所以本地预测和服务端重放算的是同一件事；只在服务端加力
+   * 会让客户端一路走出去再被快照拽回来，变成持续的橡皮筋。锚点随施力方移动，
+   * 客户端拿到的那一份比权威旧一个插值延迟，出入由既有的和解平滑吸收。
+   */
+  public setLeash(leash: SnapshotLeash | undefined): void {
+    if (!this.characterParams) return;
+    this.characterParams.leash = leash;
+  }
+
   public rewindAndReplay(
     authoritative: AuthoritativeCharacterState,
     pendingInputs: readonly PlayerInputStep[],

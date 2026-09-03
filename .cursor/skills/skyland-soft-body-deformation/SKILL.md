@@ -5,7 +5,14 @@ description: Work on SkyLand's soft-body slime deformation — the hybrid core+s
 
 # SkyLand Soft-Body Deformation
 
-A slime's shape is a client-side solver: a spring-driven core plus a per-vertex skin. Nothing about that shape is authoritative. Gameplay never reads it, the server never simulates it, and no deformation may move an Actor, change collision, or affect any gameplay state. What crosses the network is at most **where the skin was grabbed and how far it is being pulled** — six numbers.
+A slime's shape is a client-side solver: a spring-driven core plus a per-vertex skin. Nothing about that shape is authoritative — gameplay never reads it, and the server never simulates it. What crosses the network is **where the skin was grabbed and how far it is being pulled**.
+
+Being *held*, on the other hand, is gameplay. A hold has two separable halves, and keeping them separate is the point:
+
+- **the deformation** — cosmetic, solved on each client, may never move an Actor or change collision;
+- **the leash** — a restoring force in the shared character step that limits how far the held Actor can get. It is authoritative and predicted like any other movement.
+
+A source can have either half or both. The player's own mouse drag has only the first.
 
 ## The two halves
 
@@ -18,6 +25,7 @@ A slime's shape is a client-side solver: a spring-driven core plus a per-vertex 
 | movement, jumps, environment collisions | `SlimeMotionParams` → param SoA → `slime.update` | gameplay writes bytes each frame |
 | the player's own mouse drag | pointer → `ThreeSlimeSurfaceDrag` → solver, in-render | render world, never leaves it |
 | an external grab (bite today, snags/grabbers later) | `SoftBodyDeformationComponent` → snapshot `slimeDrag` → `SlimeDragParams` → `applyReplicated` | server owns the numbers |
+| the leash of an external grab | `SoftBodyDeformationComponent` → snapshot `leash` → `params.leash` → `stepCharacter` | shared fixed step, both sides |
 
 The local mouse drag is deliberately *not* a Component. Pointer, camera and shell all live on the render side, so routing it through gameplay would be a boundary crossing that buys nothing. It reaches the network only because the owner uplinks it (`readSlimeSurfaceDrag` → `player:slime-drag`).
 
@@ -29,9 +37,15 @@ Decide first which of the two kinds you have.
 
 1. Put `softBodyDeformation` on the deformable archetype (it carries `breakDistance`).
 2. Give the source its own small Component holding *its* relation and tunables (`BiteComponent` is the model: `range`, `facingDot`, `targetActorId`).
-3. Grab once, with a contact point in the victim's local space — `resolveSurfaceContact` in `shared/softBodyDeformation.mjs` turns a world anchor into one. The contact is fixed at grab time so the grabbed patch of skin turns with the victim.
-4. Each tick, in a focused server System, convert the anchor to victim-local (`actorWorldToLocal`) and call `pullToward`. A `false` return means the break distance was exceeded — release both sides. `SoftBodyBiteSystem` is under forty lines; a snag system should be shorter.
-5. Nothing else. The snapshot field, interpolation, param SoA, replay and rebound are already wired.
+3. Grab once, with a contact point in the victim's local space — `resolveSurfaceContact` in `shared/softBodyDeformation.mjs` turns a world anchor into one. The contact is fixed at grab time so the grabbed patch of skin turns with the victim. Pass the source's `pinch`, its `grabDistance`, and its leash parameters.
+4. Each tick, in a focused server System, call `pullToward(sourceId, victimPose, sourcePosition)`. A `false` return means the break distance was exceeded — release both sides. `SoftBodyBiteSystem` is under forty lines; a snag system should be shorter.
+5. Nothing else. The snapshot fields, interpolation, param SoA, replay, leash and rebound are already wired.
+
+### Two things that are easy to get wrong
+
+**The pull direction is source-position → not anchor-minus-contact.** `pullToward` takes the *source's world position* and derives the direction as **victim → source**, with a length equal to how much further apart they have drifted since the grab. The obvious-looking alternative — the anchor point minus the contact point — is wrong at exactly the distances a grab happens at: a mouth sits 0.42m in front of its owner, so at bite range that vector points *into* the victim's body, and the shell dents inward into a round lump instead of being pulled out into a spike.
+
+**A bite is not a drag.** `pinch` (0..1) is a property of the grab, not of the archetype: 0 keeps the wide influence radius and whole-body follow that makes a mouse drag feel like moving a blob of putty; 1 narrows the influence radius, steepens the weight profile and switches the body follow off entirely, so teeth pull a point. Narrowing the radius alone just gives a smaller round lump — the steepened weight exponent is what makes it a cone.
 
 **A force that is a property of motion** — a new squash on landing, a lean while sprinting. That is a `SlimeMotionParams` field plus solver code, not a Component: add the param in `RenderVisualParams.ts`, write it from the entity, consume it in the solver's rest-shape rebuild.
 
@@ -45,6 +59,9 @@ Decide first which of the two kinds you have.
 - **Every live slot is written every frame**, including the local player's rest values. A recycled proxy slot otherwise inherits the previous player's pull.
 - **Never trust a client for another player's shape.** The mouse drag is self-reported and sanitized; anything a *second* actor does to you is derived server-side from both authoritative poses, so every client agrees and nobody can fabricate it.
 - Deformation forces stay within a radius-scaled bound, so the shape budget never grows with world scale.
+- **The leash lives in `stepCharacter`, never on the server alone.** Client prediction runs that same fixed step; a force applied only on the authority makes the client walk out and get yanked back by every snapshot, which is a permanent rubber band. The anchor the client has is one interpolation delay old — that residue is what reconciliation is for.
+- **A leash needs damping.** A pure spring against a constant drive acceleration is a limit cycle: the player gets flung back, the rope goes slack, they charge out again. The radial damping term is what makes them settle *at* the rope instead of oscillating across it. Keep `stiffness * fixedStep < 2` (the catalog caps it) or the spring self-excites.
+- Tune the leash so its steady-state stretch stays inside the solver's `maximumDistance`. Past that the visual is clamped and every hold looks identical, no matter how hard the victim pulls.
 
 ## Uplink budget
 
@@ -58,7 +75,8 @@ The self-reported drag is throttled to `SLIME_DRAG_SEND_INTERVAL_SECONDS` (the s
 
 ## Verify
 
-1. Server tests for a new source: grab refused when out of range/blocked, pull tracking both poses, auto-release at the break distance, cleanup when either side leaves.
-2. A render test that drives the real path — write params, `submitTransforms`, `updateVisuals` — not the solver directly. Applying the *same* revision for many frames must keep accumulating stretch.
-3. `tests/RenderSceneBoundary.test.ts`, always: a Component that quietly imported the solver fails there and nowhere else.
-4. `npm test` and `npx tsc --noEmit`.
+1. Server tests for a new source: grab refused when out of range/blocked, pull tracking both poses, **the pull pointing outward** (dot it with the contact normal — an inward pull is the classic direction bug), auto-release at the break distance, cleanup when either side leaves.
+2. A leash test that measures reach: free run vs. held run, then a second held run showing the reach has stopped growing. Settling, not oscillating, is the property that matters.
+3. A render test that drives the real path — write params, `submitTransforms`, `updateVisuals` — not the solver directly. Applying the *same* revision for many frames must keep accumulating stretch.
+4. `tests/RenderSceneBoundary.test.ts`, always: a Component that quietly imported the solver fails there and nowhere else.
+5. `npm test` and `npx tsc --noEmit`.

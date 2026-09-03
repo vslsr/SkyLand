@@ -21,6 +21,20 @@ export class BiteComponent extends ActorComponent {
     this.range = Math.max(0, finiteOr(definition.range, 1.8));
     /** 得大致朝着对方：单位连线与正前方的点积下限，1 是正对，0 是侧面。 */
     this.facingDot = finiteOr(definition.facingDot, 0.15);
+    /**
+     * 咬出来的形变有多尖。牙齿的默认值是 1：咬住是在一处捏出一个尖，而不是把
+     * 整只史莱姆推成一个圆包。留成参数是给之后的钝口外力（吸盘、抓手）用的。
+     */
+    this.pinch = Math.max(0, Math.min(1, finiteOr(definition.pinch, 1)));
+    /**
+     * 缰绳：被咬住的人能挣多远。绳长以内完全自由，出了绳长每多走一米就多拽回
+     * 一分，所以是「越走越拉不动」而不是撞上一堵看不见的墙。刚度乘固定步长
+     * 超过 2 这个弹簧就会自激振荡，所以目录把它卡在 120 以内。
+     */
+    this.leashSlack = Math.max(0, finiteOr(definition.leashSlack, 0.35));
+    this.leashStiffness = Math.max(0, finiteOr(definition.leashStiffness, 60));
+    /** 径向阻尼。没有它缰绳会形成极限环，人在绳长附近来回荡而不是停在绳边上。 */
+    this.leashDamping = Math.max(0, finiteOr(definition.leashDamping, 14));
     this.targetActorId = null;
   }
 

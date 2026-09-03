@@ -232,6 +232,10 @@ export interface ActorArchetypeDefinition {
     bite?: {
       range: number;
       facingDot?: number;
+      pinch?: number;
+      leashSlack?: number;
+      leashStiffness?: number;
+      leashDamping?: number;
     };
     slimeSurfaceDrag?: {
       maximumDistance: number;

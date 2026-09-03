@@ -48,6 +48,34 @@ export function stepCharacter(state, input, deltaSeconds, physics, params) {
   state.vx = horizontal.x;
   state.vz = horizontal.z;
 
+  // 被咬住/钩住时的缰绳。绳长以内完全自由，出了绳长每多走一米就多拽回一分，
+  // 所以是「越走越拉不动」而不是撞上一堵看不见的墙：玩家自己的驱动加速度有上限，
+  // 拉力没有，两者相等的地方就是他能挣到的最远处。
+  //
+  // 它必须写在这一步共享的固定步里：只在服务端加力，客户端预测就会一路走出去
+  // 再被快照拽回来，变成持续的橡皮筋。只作用于水平面——竖直方向留给重力与跳跃。
+  const leash = params.leash;
+  if (leash) {
+    const deltaX = state.x - leash.anchorX;
+    const deltaZ = state.z - leash.anchorZ;
+    const distance = Math.hypot(deltaX, deltaZ);
+    const overshoot = distance - Math.max(0, toFiniteNumber(leash.slack));
+    if (overshoot > 0 && distance > EPSILON) {
+      const directionX = deltaX / distance;
+      const directionZ = deltaZ / distance;
+      // 纯弹簧会形成极限环：玩家被弹回去、绳松了又冲出来，在绳长附近来回荡。
+      // 阻尼项按径向速度取，往外冲时加大拉力，往回收时减小，于是停在绳边上
+      // 而不是在它两侧反复穿越。夹在 0 以上：缰绳只会拽回来，不会把人推出去。
+      const radialVelocity = state.vx * directionX + state.vz * directionZ;
+      const pull = Math.max(0, (
+        overshoot * Math.max(0, toFiniteNumber(leash.stiffness))
+        + radialVelocity * Math.max(0, toFiniteNumber(leash.damping))
+      )) * dt;
+      state.vx -= directionX * pull;
+      state.vz -= directionZ * pull;
+    }
+  }
+
   const jumpPressed = input?.jump === true;
   const buoyancyJumpSupported = buoyant
     && state.y <= buoyancyHeight + BUOYANCY_SUPPORT_DISTANCE;
@@ -125,6 +153,8 @@ export function createCharacterSimulationParams(characterId, movement, jump, opt
     gravity: Math.max(0, toFiniteNumber(jump?.gravity, 22)),
     maximumFallSpeed: Math.max(0, toFiniteNumber(jump?.maximumFallSpeed, 20)),
     buoyancyHeight: /** @type {number | undefined} */ (undefined),
+    /** 被外力拴住时的缰绳 {anchorX, anchorZ, slack, stiffness, damping}；自由时是 undefined。 */
+    leash: /** @type {object | undefined} */ (undefined),
     bounds: options.bounds,
   };
 }

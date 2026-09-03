@@ -96,6 +96,11 @@ export const PARAM_SLIME_DRAG_CONTACT_Z = 27;
 export const PARAM_SLIME_DRAG_PULL_X = 28;
 export const PARAM_SLIME_DRAG_PULL_Y = 29;
 export const PARAM_SLIME_DRAG_PULL_Z = 30;
+/**
+ * 这一次抓取有多「尖」。0 是鼠标拖拽（整团跟着走），1 是被牙齿咬住（命中处拔出
+ * 一个尖）。它跟着 revision 一起在抓取那一刻生效，之后整次抓取都不变。
+ */
+export const PARAM_SLIME_DRAG_PINCH = 31;
 
 /** 每个 proxy 槽位的参数个数。新增参数就在上面加常量并把这里加一。 */
-export const RENDER_VISUAL_PARAM_COUNT = 31;
+export const RENDER_VISUAL_PARAM_COUNT = 32;

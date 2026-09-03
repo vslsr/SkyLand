@@ -39,7 +39,7 @@ test('自己上报的形变只被净化转发：换抓取时递增 revision，�
 
   scene.applySlimeDrag('player-1', { ...CONTACT, pullX: 0.4, pullY: 0.2, pullZ: 0 });
   assert.deepEqual(readDrag(scene, 'player-1'), {
-    revision: 1, ...CONTACT, pullX: 0.4, pullY: 0.2, pullZ: 0,
+    revision: 1, pinch: 0, ...CONTACT, pullX: 0.4, pullY: 0.2, pullZ: 0,
   });
   assert.equal(
     scene.createSnapshot().players[0].x,
@@ -107,16 +107,27 @@ test('咬住把形变力挂到被咬者身上，再按一次松口', async () =>
   assert.equal(readDrag(scene, 'biter'), undefined, '咬人的一方自己不变形');
   assert.equal(scene.createSnapshot().players.find((p) => p.id === 'biter').bitingPlayerId, 'victim');
 
+  assert.equal(bitten.pinch, 1, '牙齿要在命中处捏出一个尖，而不是把整团推成圆包');
+  assert.ok(
+    Math.hypot(bitten.pullX, bitten.pullY, bitten.pullZ) < 1e-9,
+    '咬上的瞬间还没分开，不该有形变',
+  );
+
   // 位移跟着两边位姿走：咬人的一方往后退，被咬者的外壳就被拉长。
-  const before = Math.hypot(bitten.pullX, bitten.pullY, bitten.pullZ);
   biter.setPosition(0, -0.5, biter.y);
   scene.update();
   const stretched = readDrag(scene, 'victim');
-  assert.ok(
-    Math.hypot(stretched.pullX, stretched.pullY, stretched.pullZ) > before + 0.3,
-    '退后应该把外壳拉得更长',
-  );
+  const length = Math.hypot(stretched.pullX, stretched.pullY, stretched.pullZ);
+  assert.ok(length > 0.3, `退后应该把外壳拉长，实际 ${length}`);
   assert.equal(stretched.revision, bitten.revision, '同一次咬住不能换抓取计数');
+
+  // 方向必须是「被咬者 → 咬人者」，也就是把命中处那块皮**往外**扯。
+  // 早先拿「嘴的位置减命中点」当位移：咬住的距离很近，嘴常常落在外壳内侧，
+  // 算出来的向量指进身体，画面上就成了一个圆钝的凹包。
+  const outward = (
+    stretched.pullX * stretched.contactX + stretched.pullZ * stretched.contactZ
+  );
+  assert.ok(outward > 0, `形变必须朝咬人者那一侧扯出去，实际点积 ${outward}`);
 
   // 咬着的时候，被咬者自己上报的鼠标拖拽让位：一块外壳只有一个形变来源。
   scene.applySlimeDrag('victim', { ...CONTACT, pullX: 0.9, pullY: 0, pullZ: 0 });
@@ -158,6 +169,58 @@ test('够不着、背对着、已经被咬着都咬不上；拉太远自动脱�
     false,
   );
   assert.equal(readDrag(scene, 'victim'), undefined);
+});
+
+test('咬住的人被缰绳越拉越紧地限制在原地附近', async () => {
+  const clock = createClock();
+  const scene = await createSoftBodyScene(clock);
+  scene.addPlayer({ id: 'biter', name: '咬人的', slot: 0 });
+  scene.addPlayer({ id: 'victim', name: '被咬的', slot: 1 });
+  const { biter, victim } = faceOff(scene, 1.2);
+  // 咬人的一方站着不动，被咬的一方一路往外跑。
+  const runAway = (ticks) => {
+    for (let index = 0; index < ticks; index += 1) {
+      scene.applyInput('victim', {
+        inputs: [{
+          tick: index + 1, move: { x: 0, z: 1 }, sprint: true, jump: false, yaw: 0,
+        }],
+      });
+      clock.advance(0.05);
+      scene.update();
+    }
+  };
+
+  const startZ = victim.z;
+  runAway(40);
+  const freeZ = victim.z;
+  assert.ok(freeZ - startZ > 3, `没被咬时应该跑得掉，实际只走了 ${freeZ - startZ}`);
+
+  // 拉回来重咬，这次带着缰绳跑。
+  victim.setPosition(0, 1.2, victim.y);
+  victim.characterState.x = 0;
+  victim.characterState.z = 1.2;
+  scene.physics.setCharacterTranslation('victim', victim.characterState);
+  assert.equal(scene.toggleBite('biter'), true);
+  const leash = scene.createSnapshot().players.find((p) => p.id === 'victim').leash;
+  assert.ok(leash, '被拴住的一方要下发缰绳，客户端预测得用同一份');
+  assert.ok(Math.abs(leash.anchorZ - biter.z) < 0.5, '锚点是咬人者的位置');
+
+  const leashedStart = victim.z;
+  runAway(40);
+  const leashed = victim.z - leashedStart;
+  assert.ok(leashed > 0, '绳长以内还是能动的，不是被钉死');
+  assert.ok(
+    leashed < (freeZ - startZ) * 0.6,
+    `缰绳应该明显限制活动范围：自由 ${freeZ - startZ}，被拴 ${leashed}`,
+  );
+
+  // 越走越拉不动：再跑同样久，也几乎推不出去了。
+  const settled = victim.z;
+  runAway(40);
+  assert.ok(
+    victim.z - settled < leashed * 0.35,
+    `拉力应该越来越大直到推不动，实际又走了 ${victim.z - settled}`,
+  );
 });
 
 test('被咬的人离开房间，咬着他的那张嘴也松开', async () => {

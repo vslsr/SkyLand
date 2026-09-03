@@ -1,4 +1,5 @@
 import { ActorComponent } from '../ActorComponent.mjs';
+import { actorWorldVectorToLocal } from '../../softBodyDeformation.mjs';
 
 export const SOFT_BODY_DEFORMATION_COMPONENT = 'softBodyDeformation';
 
@@ -26,6 +27,9 @@ function finiteOr(value, fallback = 0) {
  * 渲染在客户端，这里只有会被复制出去的那七个数。
  */
 export class SoftBodyDeformationComponent extends ActorComponent {
+  /** 每 tick 复用的换算缓冲，避免热路径分配。 */
+  #localPull = { x: 0, y: 0, z: 0 };
+
   constructor(definition = {}) {
     super(SOFT_BODY_DEFORMATION_COMPONENT);
     /** 外力把外壳拉出这么远就自动脱手，免得有人把别人一路拽过整张地图。 */
@@ -40,12 +44,26 @@ export class SoftBodyDeformationComponent extends ActorComponent {
     this.pullY = 0;
     this.pullZ = 0;
     /**
+     * 这一次抓取有多「尖」。0 是外壳主人自己的鼠标拖拽——影响圈很大、整团跟着走；
+     * 1 是牙齿之类的外力——影响圈收窄、命中处拔出一个尖。由施力方给出，因为
+     * 同一块外壳被鼠标拖和被咬，形状本来就该不一样。
+     */
+    this.pinch = 0;
+    /**
      * 抓取计数。换一次抓取就加一，接收端据此重建影响权重而不是继续拉旧的那块蒙皮。
      * 所有来源共用同一个计数器：分开计数会让「先被咬、松口后再自己拖」复用同一个
      * 号，接收端就不会重新拾取。
      */
     this.revision = 0;
     this.expiresAt = undefined;
+    /** 抓住那一刻两者的距离；形变长度从这里起算，所以咬住的瞬间不变形。 */
+    this.grabDistance = 0;
+    /** 施力方最后一次的世界位置，缰绳的锚点就是它。 */
+    this.anchorX = 0;
+    this.anchorZ = 0;
+    this.leashSlack = 0;
+    this.leashStiffness = 0;
+    this.leashDamping = 0;
   }
 
   get active() {
@@ -61,7 +79,7 @@ export class SoftBodyDeformationComponent extends ActorComponent {
    * 外力抓住一处外壳。命中点固定在抓住那一刻的那块皮上，之后 Actor 转身时
    * 它跟着一起转，所以只在这里写一次。
    */
-  grab(sourceId, contact) {
+  grab(sourceId, contact, options = {}) {
     if (!sourceId || this.heldExternally) return false;
     this.sourceId = sourceId;
     this.contactX = finiteOr(contact.x);
@@ -70,21 +88,52 @@ export class SoftBodyDeformationComponent extends ActorComponent {
     this.pullX = 0;
     this.pullY = 0;
     this.pullZ = 0;
+    this.pinch = Math.max(0, Math.min(1, finiteOr(options.pinch, 1)));
+    this.grabDistance = Math.max(0, finiteOr(options.grabDistance));
+    this.leashSlack = Math.max(0, finiteOr(options.leashSlack));
+    this.leashStiffness = Math.max(0, finiteOr(options.leashStiffness));
+    this.leashDamping = Math.max(0, finiteOr(options.leashDamping));
     this.revision += 1;
     this.expiresAt = undefined;
     return true;
   }
 
   /**
-   * 把外力的锚点（已换算到本 Actor 本地坐标）兑现成这一帧的位移。
-   * 返回 false 表示已经被拉断，调用方应当脱手。
+   * 每 tick 给出施力方的世界位置，兑现成这一帧的形变位移。
+   *
+   * 方向取**被捏者指向施力方**，长度是抓住之后两者多分开的距离。不能拿「锚点
+   * 减命中点」当位移：咬住的距离很近，嘴往往就落在外壳附近甚至内侧，那个差向量
+   * 会指进身体里，画面上是个凹包而不是被扯出来的尖。
+   *
+   * 返回 false 表示已经拉断，调用方应当脱手。
    */
-  pullToward(sourceId, anchorLocal) {
+  pullToward(sourceId, pose, sourcePosition) {
     if (this.sourceId !== sourceId || !this.heldExternally) return false;
-    this.pullX = finiteOr(anchorLocal.x) - this.contactX;
-    this.pullY = finiteOr(anchorLocal.y) - this.contactY;
-    this.pullZ = finiteOr(anchorLocal.z) - this.contactZ;
-    return Math.hypot(this.pullX, this.pullY, this.pullZ) <= this.breakDistance;
+    this.anchorX = finiteOr(sourcePosition.x);
+    this.anchorZ = finiteOr(sourcePosition.z);
+    const deltaX = this.anchorX - finiteOr(pose.x);
+    const deltaY = finiteOr(sourcePosition.y) - finiteOr(pose.y);
+    const deltaZ = this.anchorZ - finiteOr(pose.z);
+    const distance = Math.hypot(deltaX, deltaY, deltaZ);
+    const stretch = distance - this.grabDistance;
+    if (!(stretch > 0) || distance <= 1e-6) {
+      this.pullX = 0;
+      this.pullY = 0;
+      this.pullZ = 0;
+      return true;
+    }
+    const scale = stretch / distance;
+    const local = actorWorldVectorToLocal(
+      finiteOr(pose.yaw),
+      deltaX * scale,
+      deltaY * scale,
+      deltaZ * scale,
+      this.#localPull,
+    );
+    this.pullX = local.x;
+    this.pullY = local.y;
+    this.pullZ = local.z;
+    return stretch <= this.breakDistance;
   }
 
   /**
@@ -95,6 +144,8 @@ export class SoftBodyDeformationComponent extends ActorComponent {
     if (this.heldExternally) return false;
     if (this.sourceId !== SELF_REPORTED_SOURCE || regrab) this.revision += 1;
     this.sourceId = SELF_REPORTED_SOURCE;
+    // 主人自己拖自己：整团跟着走，不拔尖。客户端无从选择，也就不多一个可伪造项。
+    this.pinch = 0;
     this.contactX = state.contactX;
     this.contactY = state.contactY;
     this.contactZ = state.contactZ;
@@ -133,6 +184,7 @@ export class SoftBodyDeformationComponent extends ActorComponent {
       pullX: this.pullX,
       pullY: this.pullY,
       pullZ: this.pullZ,
+      pinch: this.pinch,
     };
   }
 }

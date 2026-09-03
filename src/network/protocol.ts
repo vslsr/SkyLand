@@ -15,9 +15,30 @@ export interface SlimeDragState {
   pullZ: number;
 }
 
-/** 快照里的拖拽状态：revision 变化表示重新抓取，接收端需要重建影响权重。 */
+/** 快照里的形变状态：revision 变化表示重新抓取，接收端需要重建影响权重。 */
 export interface SnapshotSlimeDrag extends SlimeDragState {
   revision: number;
+  /**
+   * 这一次抓取有多「尖」。0 是外壳主人自己的鼠标拖拽，整团跟着走；
+   * 1 是被牙齿之类的外力咬住，只在命中处拔出一个尖。由施力方决定。
+   */
+  pinch: number;
+}
+
+/**
+ * 被外力拴住时的缰绳，世界坐标。
+ *
+ * 它必须过网而不是只在服务端加力：客户端预测跑的是同一份 `stepCharacter`，
+ * 只有权威一侧收着，客户端就会一路走出去再被快照拽回来，变成持续的橡皮筋。
+ */
+export interface SnapshotLeash {
+  anchorX: number;
+  anchorZ: number;
+  /** 绳长。以内完全自由，出了这个半径每多走一米就多拽回一分。 */
+  slack: number;
+  stiffness: number;
+  /** 径向阻尼。没有它人会在绳长附近来回荡，而不是停在绳边上。 */
+  damping: number;
 }
 
 /** 房间快照里的单名玩家，坐标由服务端权威计算。 */
@@ -47,6 +68,8 @@ export interface SnapshotPlayer {
   slimeDrag?: SnapshotSlimeDrag;
   /** 正被这名玩家咬着。只有咬人的一方带，用来让交互键知道该松口了。 */
   bitingPlayerId?: string;
+  /** 正被外力拴着；客户端预测必须用同一份，否则会持续橡皮筋。 */
+  leash?: SnapshotLeash;
 }
 
 export type ActorFloatState = 'afloat' | 'overloaded' | 'flooding' | 'sinking';
@@ -198,4 +221,5 @@ export interface InterpolatedPlayerState {
   grounded?: boolean;
   slimeDrag?: SnapshotSlimeDrag;
   bitingPlayerId?: string;
+  leash?: SnapshotLeash;
 }

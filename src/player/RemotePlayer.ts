@@ -122,6 +122,7 @@ export class RemotePlayer extends Actor {
     this.drag.pullX = state.slimeDrag?.pullX ?? 0;
     this.drag.pullY = state.slimeDrag?.pullY ?? 0;
     this.drag.pullZ = state.slimeDrag?.pullZ ?? 0;
+    this.drag.pinch = state.slimeDrag?.pinch ?? 0;
   }
 
   public update(deltaSeconds: number): void {
