@@ -1,105 +1,88 @@
-import * as THREE from 'three';
-import { TERRAIN_CELL_SIZE } from '../../shared/world/terrainConfig.mjs';
-import type { CollisionWorld } from '../../shared/collision/index.mjs';
+import type {
+  AbilityLabAction,
+  AbilityLabViewState,
+} from '../abilities/lab/AbilityLabSimulation';
 import type { CameraFrame } from '../camera/CameraTransform';
 import {
   createRenderCamera,
   RenderCameraBuffer,
+  type RenderCamera,
 } from '../render/RenderCameraBuffer';
-import { type GrassInteractionTarget } from '../grass';
+import type { PointerViewport } from '../grass';
 import { frameTimeline } from '../platform/index';
-import { releaseOwnResources } from '../render/renderAssets';
-import { createLineArtScene } from '../scene/createLineArtScene';
-import type { DayNightVisualTarget } from '../environment/EnvironmentTypes';
-import type { SceneEnvironmentRuntime } from '../materials/createFillMaterial';
+import {
+  CAMERA_FIELD_OF_VIEW,
+  type RenderWorldConnection,
+  type RenderWorldPort,
+} from '../render/RenderWorldRuntime';
 import type {
   ActorSnapshotTarget,
   SceneComposition,
   SceneUpdateContext,
-  SceneVisualSystem,
-  WeatherVisualTarget,
+  SceneFrameSystem,
 } from '../scene/SceneVisualSystem';
-import type { ThreeMeshProxy } from '../render/three/ThreeMeshProxy';
-import type { ThreeRenderScene } from '../render/three/ThreeRenderScene';
-import type { RenderTransformBuffer } from '../render/RenderTransformBuffer';
-import type { SceneBeforeRenderListener } from '../scene/components';
+import type { ProxyId } from '../render/RenderScene';
+import type { RenderWorldHandle } from '../render/RenderProxyTable';
 import type { SceneDefinition } from '../scenes/data/SceneDefinition';
 import type { SceneWorld } from '../scene/SceneWorld';
-import type { TerrainWorld } from '../world/TerrainWorld';
-import type { PhysicsWorld } from '../../shared/physics/PhysicsWorld.mjs';
 import { DEFAULT_WEATHER, type WeatherType } from '../weather/index';
 import { DEFAULT_START_HOUR } from '../../shared/dayNight.mjs';
-
-const EMPTY_SCENE_COLOR = 0xfdfbf6;
-
-function createEmptyScene(): THREE.Scene {
-  const scene = new THREE.Scene();
-  scene.background = new THREE.Color(EMPTY_SCENE_COLOR);
-  return scene;
-}
+import { DayNightClock } from '../environment/DayNightClock';
 
 /**
- * 换场景时释放上一张地图的 GPU 资源。
+ * 主线程这一侧的渲染门面（引擎迁移路线图 第 3 步）。
  *
- * 遍历式释放是路线图 §8.2 里那条要被替换掉的规则——它会无差别 dispose 每一个
- * geometry 与 material，包括别人共享的那些。在全部资源转成句柄之前，先让它
- * 避让所有权表管着的东西。
+ * **这个类里一个 `THREE` 都没有。** 画布、`WebGLRenderer`、场景图、表现系统
+ * 全在 `RenderWorldRuntime` 里；这一侧只做四件跨不过去的事：
+ *
+ * 1. 量画布——`clientWidth` 与 `devicePixelRatio` 是 DOM 的事，
+ *    `transferControlToOffscreen` 之后画布元素仍留在主线程，只有绘制上下文走了
+ * 2. 推进昼夜时钟，每帧把小时数发过去
+ * 3. 把机位摊进 `RenderCameraBuffer`，并按同一份数据回答「反投影用的视图」
+ * 4. 驱动**玩法侧**那批每帧系统，然后让渲染世界跑它自己那一帧
+ *
+ * 其余全部是转发。`runtime` 现在是就地那个真对象；换成 worker 之后它变成一个
+ * 命令队列，这个类一个字都不用改——那正是它上面每个方法都返回 `void` 的原因。
  */
-function disposeScene(scene: THREE.Scene): void {
-  scene.traverse(releaseOwnResources);
-}
-
 export class SceneRenderer {
-  private readonly renderer: THREE.WebGLRenderer;
-  private readonly camera = new THREE.PerspectiveCamera(50, 1, 0.1, 100);
-  private scene = createEmptyScene();
-  private visualSystems: SceneVisualSystem[] = [];
-  private grassInteraction?: GrassInteractionTarget;
+  private readonly runtime: RenderWorldPort;
+  private readonly cameraChannel: RenderCameraBuffer;
+  private visualSystems: SceneFrameSystem[] = [];
   private actorSnapshotTarget?: ActorSnapshotTarget;
-  /** 当前地图的渲染世界。整张对象随场景一起换掉，所以引用可以直接比身份。 */
-  private renderWorldHandle?: { scene: ThreeRenderScene; transforms: RenderTransformBuffer };
-  private weatherTarget?: WeatherVisualTarget;
-  private dayNightTarget?: DayNightVisualTarget;
-  private sceneEnvironmentRuntime?: SceneEnvironmentRuntime;
-  private collisionWorld?: CollisionWorld;
-  private terrainWorld?: TerrainWorld;
-  private physicsWorld?: PhysicsWorld;
-  private physicsDebug?: THREE.LineSegments;
-  private terrainHighlight?: THREE.LineSegments;
-  private fixedWaterWorld = false;
-  private fixedWaterLevel = 0;
+  private renderWorldHandle?: RenderWorldHandle;
   private currentWeather: WeatherType = DEFAULT_WEATHER;
   private simpleCollisionVisible = false;
   private temperatureVisible = false;
-  private readonly dynamicWorld = new THREE.Group();
-  private readonly lookTarget = new THREE.Vector3();
   /**
-   * 相机过边界的那一段字节，以及读出来落脚的地方。
+   * 昼夜时钟（引擎迁移路线图 第 3 步）。
    *
-   * 属于渲染器而不是场景：换地图会换掉整个渲染世界，相机却是一直在的
-   * （大厅 → 房间 → 大厅 都是同一个）。
+   * 它原来住在 `DayNightSystem` 里，于是「现在几点」要从渲染世界读回来——调试菜单
+   * 的时钟就是那么显示的。`DayNightClock` 是纯状态（不 import three），
+   * 本来就不该在那一侧。现在这边推进、这边校正，每帧把小时数**发**过去。
    */
-  private readonly cameraChannel = new RenderCameraBuffer();
+  private readonly dayNightClock = new DayNightClock(DEFAULT_START_HOUR, 0);
   private readonly cameraFrame = createRenderCamera();
-  private readonly beforeRenderListeners = new Set<SceneBeforeRenderListener>();
+  /** 上一次发过去的画布尺寸，用来只在变了时才发一条命令。 */
+  private viewport = { width: 0, height: 0, pixelRatio: 0 };
 
   /**
    * `world` 是这张地图**不属于渲染**的那一半（地形、物理、Actor 查询）。
-   *
-   * 场景组合仍然由这个类装配（`loadScene` → `createLineArtScene`），所以换场景时
-   * 由它把玩法那一半交给 `SceneWorld`。第 3 步 canvas 交给渲染线程之后，
-   * 装配会跟着一起搬走，那时这条依赖反过来——但现在先把**接口**拆干净。
+   * 物理调试线框的顶点从那里取，然后**推**给渲染世界——物理世界只该被一处持有。
    */
-  public constructor(canvas: HTMLCanvasElement, private readonly world: SceneWorld) {
-    this.renderer = new THREE.WebGLRenderer({
-      canvas,
-      antialias: true,
-      alpha: false,
-      powerPreference: 'high-performance',
-    });
-    this.renderer.setClearColor(0xfdfbf6, 1);
-    this.renderer.outputEncoding = THREE.sRGBEncoding;
-    this.scene.add(this.dynamicWorld);
+  public constructor(
+    private readonly canvas: HTMLCanvasElement,
+    private readonly world: SceneWorld,
+    /**
+     * 渲染那一侧。**由外面建好递进来**，因为 `SceneWorld` 也要往它发命令
+     * （草地脉冲、地形编辑镜像），两个消费者不能各建一个。
+     *
+     * 相机那段字节属于连接而不是场景：换地图会换掉整个渲染世界，相机却是一直在的
+     * （大厅 → 房间 → 大厅 都是同一个）。
+     */
+    connection: RenderWorldConnection,
+  ) {
+    this.runtime = connection.port;
+    this.cameraChannel = connection.camera;
   }
 
   /**
@@ -114,57 +97,46 @@ export class SceneRenderer {
   }
 
   /**
-   * 画一帧。
+   * 主线程这一侧的相机视图：机位朝向 + 投影参数。
    *
-   * 机位**不再由参数传进来**（实现路径文档 §3）：它从 `camera` 那段字节里读。
-   * 玩法侧每 tick 写一次并翻面，这里读的永远是完整的一帧。canvas 交给渲染线程
-   * 之后这个方法跑在那一侧，那时它读的是同一段 `SharedArrayBuffer`，
-   * 调用方不用改。
+   * **不是从渲染世界读回来的**——机位是玩法侧每 tick 写进那段字节的，
+   * 视场角是常量，宽高比来自画布元素（它没跟着绘制上下文走）。
+   * 输入适配器（鼠标拖草）要反投影就用这个。
+   */
+  public getCameraView(): { camera: RenderCamera; viewport: PointerViewport } {
+    const { width, height } = this.measureCanvas();
+    return {
+      camera: this.cameraChannel.read(this.cameraFrame),
+      viewport: { fovRadians: (CAMERA_FIELD_OF_VIEW * Math.PI) / 180, aspect: width / height },
+    };
+  }
+
+  /**
+   * 画一帧。画布尺寸在这一侧量好发过去，其余全在渲染世界里。
+   *
+   * 尺寸只在变了的时候才发：跨线程时每一条命令都是报文里的一项，而窗口大小
+   * 一局里变不了几次。
    */
   public render(): void {
-    this.resizeToDisplaySize();
-    const frame = this.cameraChannel.read(this.cameraFrame);
-    this.camera.position.set(...frame.position);
-    this.camera.up.set(...frame.up);
-    this.lookTarget.set(
-      frame.position[0] + frame.forward[0],
-      frame.position[1] + frame.forward[1],
-      frame.position[2] + frame.forward[2],
-    );
-    this.camera.lookAt(this.lookTarget);
-    for (const listener of this.beforeRenderListeners) listener(this.camera);
-    for (const system of this.visualSystems) {
-      system.beforeRender?.(this.renderer, this.camera);
+    const viewport = this.measureCanvas();
+    if (
+      viewport.width !== this.viewport.width
+      || viewport.height !== this.viewport.height
+      || viewport.pixelRatio !== this.viewport.pixelRatio
+    ) {
+      this.viewport = viewport;
+      this.runtime.setViewport(viewport.width, viewport.height, viewport.pixelRatio);
     }
-    this.renderer.render(this.scene, this.camera);
+    frameTimeline.measure('draw', () => this.runtime.render());
   }
 
   /**
    * 当前地图的渲染世界。玩家实体（本地与远端）经由它建自己的 proxy——
-   * 它们不是 Replica，但必须和 Actor 共用同一个渲染世界和同一段边界字节。
+   * 它们不是 Replica，但必须和 Actor 共用同一个渲染世界、同一段边界字节，
+   * 以及同一张槽位表。
    */
-  public get renderWorld(): {
-    scene: ThreeRenderScene;
-    transforms: RenderTransformBuffer;
-  } | undefined {
+  public get renderWorld(): RenderWorldHandle | undefined {
     return this.renderWorldHandle;
-  }
-
-  public addWorldObject(object: THREE.Object3D): void {
-    this.dynamicWorld.add(object);
-  }
-
-  public removeWorldObject(object: THREE.Object3D): void {
-    this.dynamicWorld.remove(object);
-  }
-
-  public get grassInteractionTarget(): GrassInteractionTarget | undefined {
-    return this.grassInteraction;
-  }
-
-  public onBeforeRender(listener: SceneBeforeRenderListener): () => void {
-    this.beforeRenderListeners.add(listener);
-    return () => this.beforeRenderListeners.delete(listener);
   }
 
   public update(
@@ -172,8 +144,13 @@ export class SceneRenderer {
     elapsedSeconds: number,
     context?: SceneUpdateContext,
   ): void {
-    // 逐个系统打点太碎；这里只分「Actor 世界那一支（自己再细分）」与「其余场景系统」，
-    // 后者是草地、天气、昼夜、海面、chunk 流送这一批。
+    // 时钟在这一侧推进，然后把结果发给渲染世界。一个时刻只有一份，
+    // 不会因为两侧各推各的而漂开。
+    this.dayNightClock.advance(Math.max(0, Math.min(deltaSeconds, 0.1)));
+    this.runtime.setTimeOfDay(this.dayNightClock.timeOfDay, this.dayNightClock.running);
+    if (context) this.runtime.setFrameContext(context);
+    // 逐个系统打点太碎；这里只分「Actor 世界那一支（自己再细分）」与「其余玩法系统」，
+    // 后者眼下只有 chunk 流送的规划。
     for (const system of this.visualSystems) {
       if (system === (this.actorSnapshotTarget as unknown)) {
         system.update(deltaSeconds, elapsedSeconds, context);
@@ -184,38 +161,62 @@ export class SceneRenderer {
         () => system.update(deltaSeconds, elapsedSeconds, context),
       );
     }
-    this.updatePhysicsDebug();
-  }
-
-  public getActorRenderProxy(actorId: string): ThreeMeshProxy | undefined {
-    return this.actorSnapshotTarget?.getActorRenderProxy(actorId);
-  }
-
-  /** 高亮一格地形；传 undefined 收起高亮。 */
-  public setTerrainHighlight(cell?: { cellX: number; cellZ: number }): void {
-    if (!cell || !this.terrainWorld) {
-      if (this.terrainHighlight) this.terrainHighlight.visible = false;
-      return;
-    }
-    if (!this.terrainHighlight) {
-      this.terrainHighlight = createTerrainHighlight();
-      this.addWorldObject(this.terrainHighlight);
-    }
-    const centerX = (cell.cellX + 0.5) * TERRAIN_CELL_SIZE;
-    const centerZ = (cell.cellZ + 0.5) * TERRAIN_CELL_SIZE;
-    // 贴着格心的地面画，抬高一点避免和地形共面闪烁。
-    this.terrainHighlight.position.set(
-      centerX,
-      this.terrainWorld.sampleGroundHeight(centerX, centerZ) + 0.05,
-      centerZ,
+    // 物理线框的数据源在玩法这一半，所以是**推**过去的，不是渲染侧回头来拉。
+    this.runtime.setPhysicsDebug(
+      this.simpleCollisionVisible ? this.world.debugRenderPhysics() : undefined,
     );
-    this.terrainHighlight.visible = true;
+    // 渲染阶段：玩法那一批全部跑完、SoA 也翻过面之后，渲染世界才跑自己的一帧。
+    // 渲染循环进 worker 那天，要搬走的就是这一句和 `render()`。
+    frameTimeline.measure(
+      'render-visuals',
+      () => this.runtime.update(deltaSeconds, elapsedSeconds),
+    );
+  }
+
+  /**
+   * 能力实验室的三条命令，转发给渲染世界（引擎迁移路线图 第 3 步）。
+   *
+   * 这里原来是 `getActorRenderProxy`——把渲染世界里活的 `ThreeMeshProxy` 递给
+   * 玩法侧的场景组件。整套动画搬进渲染世界之后，这一层只剩转发。
+   */
+  public setAbilityLabTarget(id: ProxyId): void {
+    this.renderWorldHandle?.scene.setAbilityLabTarget(id);
+  }
+
+  public setAbilityLabState(
+    state: AbilityLabViewState | undefined,
+    casterX: number,
+    casterY: number,
+    casterZ: number,
+  ): void {
+    this.renderWorldHandle?.scene.setAbilityLabState(state, casterX, casterY, casterZ);
+  }
+
+  public playAbilityLabAction(
+    action: AbilityLabAction,
+    casterX: number,
+    casterY: number,
+    casterZ: number,
+    succeeded: boolean,
+  ): void {
+    this.renderWorldHandle?.scene.playAbilityLabAction(
+      action,
+      casterX,
+      casterY,
+      casterZ,
+      succeeded,
+    );
+  }
+
+  /** 高亮一格地形；传 undefined 收起高亮。高度由渲染侧那份地形自己算。 */
+  public setTerrainHighlight(cell?: { cellX: number; cellZ: number }): void {
+    this.runtime.setTerrainHighlight(cell);
   }
 
   public setSimpleCollisionVisible(visible: boolean): void {
     this.simpleCollisionVisible = visible;
     this.actorSnapshotTarget?.setSimpleCollisionVisible(visible);
-    if (this.physicsDebug) this.physicsDebug.visible = visible;
+    if (!visible) this.runtime.setPhysicsDebug(undefined);
   }
 
   public get isSimpleCollisionVisible(): boolean {
@@ -233,156 +234,76 @@ export class SceneRenderer {
 
   public setWeather(weather: WeatherType): void {
     this.currentWeather = weather;
-    this.weatherTarget?.setWeather(weather);
+    this.runtime.setWeather(weather);
   }
 
   public get weather(): WeatherType {
     return this.currentWeather;
   }
 
-  /**
-   * 同步房间权威时刻。两帧快照之间由昼夜系统本地推进，这里只做校正，
-   * 所以时间不会随快照频率跳动。
-   */
   public setTimeOfDay(timeOfDay: number, dayLengthSeconds: number): void {
-    this.dayNightTarget?.applyServerTime(timeOfDay, dayLengthSeconds);
-  }
-
-  /** 当前场景的共享光照与雾 uniform；场景 Component 的表现接到同一份上。 */
-  public get environmentRuntime(): SceneEnvironmentRuntime | undefined {
-    return this.sceneEnvironmentRuntime;
-  }
-
-  /** 当前渲染用的时刻；没有加载场景时回落到正午。 */
-  public get timeOfDay(): number {
-    return this.dayNightTarget?.timeOfDay ?? DEFAULT_START_HOUR;
+    this.dayNightClock.applyServerTime(timeOfDay, dayLengthSeconds);
   }
 
   /**
-   * 加载场景。worldSeed 来自房间，决定流式世界长什么样；
-   * 不做流式加载的场景会忽略它。
+   * 场景进出。渲染世界里的表现组件（落叶）靠它挂上／摘下自己的对象，
+   * 和主线程那批场景组件的 `setActive` 是同一个语义。
    */
-  public loadScene(definition: SceneDefinition, worldSeed?: number): void {
-    if (definition.renderer.type !== 'line-art') {
-      throw new Error(`不支持的场景渲染器：${definition.renderer.type as string}`);
-    }
-    this.currentWeather = DEFAULT_WEATHER;
-    this.fixedWaterWorld = definition.renderer.content.ocean === true
-      && definition.renderer.content.ground === false;
-    this.fixedWaterLevel = definition.gameplay.water?.seaLevel ?? 0;
-    this.replaceScene(createLineArtScene(definition, worldSeed));
+  public setSceneActive(active: boolean): void {
+    // 状态记在渲染世界那一侧：`onEnter` 发生在加入房间**之前**，那时还没有场景
+    // 组合，开关打在空处；`RenderWorldRuntime` 装上新组合时会把它补上去。
+    this.runtime.setSceneActive(active);
   }
 
-  public showEmptyScene(): void {
-    this.currentWeather = DEFAULT_WEATHER;
-    this.fixedWaterWorld = false;
-    this.fixedWaterLevel = 0;
-    this.replaceScene({ scene: createEmptyScene(), visualSystems: [] });
-    this.world.clear();
+  public get timeOfDay(): number {
+    return this.dayNightClock.timeOfDay;
   }
 
-  private replaceScene(composition: SceneComposition): void {
-    for (const system of this.visualSystems) system.dispose?.();
-    this.scene.remove(this.dynamicWorld);
-    disposeScene(this.scene);
-    // 碰撞世界随场景走：上一张地图的 chunk 与 Actor 碰撞体一起被丢掉，
-    // 不会有残留的盒子挡住新地图里的路。
-    this.collisionWorld?.clear();
-    this.physicsWorld?.dispose();
-    this.scene = composition.scene;
+  /**
+   * 这张地图的天气与时钟从头开始。
+   *
+   * 和换组合分开是因为它们的时机不同：换组合是每次都做的，而「重开时钟」只在真的
+   * 换了一张地图时做——退回空场景不该把时刻拨回早上。
+   */
+  public resetEnvironment(definition?: SceneDefinition): void {
+    this.currentWeather = DEFAULT_WEATHER;
+    if (!definition) return;
+    // 关掉昼夜或冻结时长度为 0，时刻停在 startHour。
+    const dayNight = definition.environment.dayNight;
+    this.dayNightClock.reset(
+      dayNight.startHour,
+      dayNight.enabled && !dayNight.paused ? dayNight.dayLengthSeconds : 0,
+    );
+  }
+
+  /**
+   * 接住新组合里属于**玩法**的那一半。
+   *
+   * 渲染那一半根本不经过这里：`SceneCompositionHost` 先让渲染世界按定义与种子
+   * 自己建好（`renderCommands.loadRenderScene`），再把它递出来的三个口子交给
+   * `createGameWorld`。这个方法收到的 `SceneComposition` 里因此没有一个 THREE 对象。
+   */
+  public adoptComposition(composition: SceneComposition): void {
     this.visualSystems = composition.visualSystems;
-    this.weatherTarget = composition.weatherTarget;
-    this.dayNightTarget = composition.dayNightTarget;
-    this.sceneEnvironmentRuntime = composition.environmentRuntime;
-    this.grassInteraction = composition.grassInteraction;
     this.actorSnapshotTarget = composition.actorSnapshotTarget;
-    this.world.adopt(composition, {
-      fixedWaterWorld: this.fixedWaterWorld,
-      fixedWaterLevel: this.fixedWaterLevel,
-    });
-    this.renderWorldHandle = composition.renderScene && composition.renderTransforms
-      ? { scene: composition.renderScene, transforms: composition.renderTransforms }
+    this.renderWorldHandle = composition.renderScene
+      && composition.renderTransforms
+      && composition.renderProxyIds
+      ? {
+        scene: composition.renderScene,
+        transforms: composition.renderTransforms,
+        proxyIds: composition.renderProxyIds,
+      }
       : undefined;
-    this.collisionWorld = composition.collisionWorld;
-    this.terrainWorld = composition.terrainWorld;
-    this.physicsWorld = composition.physicsWorld;
-    if (this.physicsDebug) this.physicsDebug.visible = Boolean(this.physicsWorld)
-      && this.simpleCollisionVisible;
     this.actorSnapshotTarget?.setSimpleCollisionVisible(this.simpleCollisionVisible);
     this.actorSnapshotTarget?.setTemperatureVisible(this.temperatureVisible);
-    this.weatherTarget?.setWeather(this.currentWeather);
-    this.scene.add(this.dynamicWorld);
   }
 
-  private updatePhysicsDebug(): void {
-    if (!this.simpleCollisionVisible || !this.physicsWorld) return;
-    const buffers = this.physicsWorld.debugRender();
-    if (!this.physicsDebug) {
-      this.physicsDebug = new THREE.LineSegments(
-        new THREE.BufferGeometry(),
-        new THREE.LineBasicMaterial({ vertexColors: true, depthTest: false }),
-      );
-      this.physicsDebug.name = 'rapier-physics-debug';
-      this.physicsDebug.renderOrder = 998;
-      this.physicsDebug.frustumCulled = false;
-      this.dynamicWorld.add(this.physicsDebug);
-    }
-    const colors = new Float32Array((buffers.colors.length / 4) * 3);
-    for (let source = 0, target = 0; source < buffers.colors.length; source += 4) {
-      colors[target++] = buffers.colors[source];
-      colors[target++] = buffers.colors[source + 1];
-      colors[target++] = buffers.colors[source + 2];
-    }
-    this.physicsDebug.geometry.setAttribute(
-      'position',
-      new THREE.BufferAttribute(buffers.vertices, 3),
-    );
-    this.physicsDebug.geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
-    this.physicsDebug.geometry.computeBoundingSphere();
-    this.physicsDebug.visible = true;
+  private measureCanvas(): { width: number; height: number; pixelRatio: number } {
+    return {
+      width: Math.max(1, Math.floor(this.canvas.clientWidth || this.canvas.width)),
+      height: Math.max(1, Math.floor(this.canvas.clientHeight || this.canvas.height)),
+      pixelRatio: Math.min(window.devicePixelRatio || 1, 1.75),
+    };
   }
-
-  private resizeToDisplaySize(): void {
-    const canvas = this.renderer.domElement;
-    const pixelRatio = Math.min(window.devicePixelRatio || 1, 1.75);
-    const width = Math.max(1, Math.floor(canvas.clientWidth));
-    const height = Math.max(1, Math.floor(canvas.clientHeight));
-    const requiredWidth = Math.floor(width * pixelRatio);
-    const requiredHeight = Math.floor(height * pixelRatio);
-
-    if (canvas.width !== requiredWidth || canvas.height !== requiredHeight) {
-      this.renderer.setPixelRatio(pixelRatio);
-      this.renderer.setSize(width, height, false);
-      this.camera.aspect = width / height;
-      this.camera.updateProjectionMatrix();
-    }
-  }
-}
-
-/**
- * 一格地形的高亮框：贴地的方框加四个角柱，线稿风格下比半透明面片更清楚，
- * 也不需要额外的透明排序。
- */
-function createTerrainHighlight(): THREE.LineSegments {
-  const half = TERRAIN_CELL_SIZE / 2;
-  const corner = TERRAIN_CELL_SIZE * 0.22;
-  const points: number[] = [];
-  const square: Array<[number, number]> = [
-    [-half, -half], [half, -half], [half, half], [-half, half],
-  ];
-  for (let index = 0; index < square.length; index += 1) {
-    const [fromX, fromZ] = square[index];
-    const [toX, toZ] = square[(index + 1) % square.length];
-    points.push(fromX, 0, fromZ, toX, 0, toZ);
-    // 角柱：从地面往上一小截，斜坡上也能一眼看出选中的是哪一格。
-    points.push(fromX, 0, fromZ, fromX, corner, fromZ);
-  }
-  const geometry = new THREE.BufferGeometry();
-  geometry.setAttribute('position', new THREE.Float32BufferAttribute(points, 3));
-  const material = new THREE.LineBasicMaterial({ color: 0xf0a33c, depthTest: false });
-  const lines = new THREE.LineSegments(geometry, material);
-  lines.name = 'terrain-edit-highlight';
-  lines.renderOrder = 999;
-  lines.frustumCulled = false;
-  return lines;
 }

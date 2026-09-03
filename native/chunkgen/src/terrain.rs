@@ -1,8 +1,10 @@
 //! 确定性台阶地形的 Rust 镜像。
 //!
-//! 必须与 `shared/world/terrainContent.mjs` 逐位一致。这里仅保留物件放置
-//! 所需的表面、形状和整数高度，完整网格仍由共享 JS 生成并渲染。
+//! 必须与 `shared/world/terrainContent.mjs` 逐位一致。这里保留物件放置所需的
+//! 表面、形状和整数高度，外加打包进格 code 的群系（`biome.rs`）；完整网格仍由
+//! 共享 JS 生成并渲染。
 
+use crate::biome::terrain_biome_at;
 use crate::hash::{hash32, value_noise};
 
 pub const TERRAIN_SURFACE_GROUND: u32 = 0;
@@ -43,6 +45,8 @@ const TERRAIN_DIAGONAL_NEIGHBORS: [(i32, i32, u32); 4] = [
 /// 高 8 位是有符号高度层，第 4 位是表面，低 4 位是形状。
 const TERRAIN_SHAPE_MASK: i32 = 0b1111;
 const TERRAIN_SURFACE_SHIFT: i32 = 4;
+const TERRAIN_BIOME_SHIFT: i32 = 5;
+const TERRAIN_BIOME_MASK: i32 = 0b111;
 const TERRAIN_HEIGHT_SHIFT: i32 = 8;
 const TERRAIN_MINIMUM_HEIGHT_LEVEL: i32 = -128;
 const TERRAIN_MAXIMUM_HEIGHT_LEVEL: i32 = 127;
@@ -59,6 +63,9 @@ pub struct TerrainCell {
     pub height_level: i32,
     pub surface: u32,
     pub shape: u32,
+    /// 地皮。不影响高度、形状与可通行性，放置算法目前也不读它；
+    /// 它进 `TerrainCell` 是因为格 code 里有它，跨端比对逐位覆盖这一段。
+    pub biome: u32,
 }
 
 #[inline]
@@ -91,11 +98,14 @@ fn base_level_at(seed: u32, global_cell_x: i32, global_cell_z: i32) -> i32 {
 #[inline]
 pub fn terrain_cell_at(seed: u32, global_cell_x: i32, global_cell_z: i32) -> TerrainCell {
     let height_level = base_level_at(seed, global_cell_x, global_cell_z);
+    // 群系与高度互不干涉：水底也带着它所在片区的地皮。
+    let biome = terrain_biome_at(seed, global_cell_x, global_cell_z);
     if height_level < 0 {
         return TerrainCell {
             height_level,
             surface: TERRAIN_SURFACE_WATER,
             shape: TERRAIN_SHAPE_FLAT,
+            biome,
         };
     }
 
@@ -120,6 +130,7 @@ pub fn terrain_cell_at(seed: u32, global_cell_x: i32, global_cell_z: i32) -> Ter
                 height_level,
                 surface: TERRAIN_SURFACE_GROUND,
                 shape: TERRAIN_LOW_CORNER_SHAPES[direction],
+                biome,
             };
         }
     }
@@ -131,6 +142,7 @@ pub fn terrain_cell_at(seed: u32, global_cell_x: i32, global_cell_z: i32) -> Ter
                 height_level,
                 surface: TERRAIN_SURFACE_GROUND,
                 shape: TERRAIN_CARDINAL_NEIGHBORS[direction].2,
+                biome,
             };
         }
     }
@@ -144,6 +156,7 @@ pub fn terrain_cell_at(seed: u32, global_cell_x: i32, global_cell_z: i32) -> Ter
                 height_level,
                 surface: TERRAIN_SURFACE_GROUND,
                 shape,
+                biome,
             };
         }
     }
@@ -152,6 +165,7 @@ pub fn terrain_cell_at(seed: u32, global_cell_x: i32, global_cell_z: i32) -> Ter
         height_level,
         surface: TERRAIN_SURFACE_GROUND,
         shape: TERRAIN_SHAPE_FLAT,
+        biome,
     }
 }
 
@@ -187,6 +201,7 @@ pub extern "C" fn terrain_cell_code_at(seed: u32, global_cell_x: i32, global_cel
         cell.height_level
     };
     ((height & 0xff) << TERRAIN_HEIGHT_SHIFT)
+        | (((cell.biome as i32) & TERRAIN_BIOME_MASK) << TERRAIN_BIOME_SHIFT)
         | (((cell.surface as i32) & 1) << TERRAIN_SURFACE_SHIFT)
         | ((cell.shape as i32) & TERRAIN_SHAPE_MASK)
 }

@@ -25,7 +25,7 @@ export function createStonePieceGeometry(radius: number): THREE.BufferGeometry {
   return geometry;
 }
 
-/** 独立预览模型；实际高数量掉落由 HighCountActorBatchSystem 合并绘制。 */
+/** 独立预览模型；实际高数量掉落由 ThreeHighCountBatchVisual 合并绘制。 */
 export function createStonePileModel(
   environment: FillMaterialEnvironment,
   definition: StonePileRender,

@@ -3,6 +3,7 @@ import test from 'node:test';
 import { Group, Object3D } from 'three';
 import { TopDownCameraOrbit } from '../src/camera/TopDownCameraOrbit';
 import { SlimeSurfaceDragController } from '../src/controllers/SlimeSurfaceDragController';
+import { RenderProxyTable } from '../src/render/RenderProxyTable';
 import { RenderTransformBuffer } from '../src/render/RenderTransformBuffer';
 import { ThreeRenderScene } from '../src/render/three/ThreeRenderScene';
 import { TopDownController } from '../src/controllers/TopDownController';
@@ -21,7 +22,7 @@ import {
   WaterMovementEffectController,
   createPlayerMovementAttributes,
 } from '../shared/abilities/playerMovementEffects.mjs';
-import { SIMULATION_STEP_SECONDS } from '../shared/networkTuning.mjs';
+import { RECONCILE_CONVERGENCE, SIMULATION_STEP_SECONDS } from '../shared/networkTuning.mjs';
 import { getRapier, PhysicsWorld } from '../shared/physics/index.mjs';
 
 class TestKeyboardMouseDevice extends BufferedInputDevice {
@@ -489,7 +490,13 @@ test('本地玩家和解只纠正逻辑误差，并保留固定步相位与可�
   assert.ok(Math.abs(tolerated.residualDistance - 0.005) < 1e-6);
   assert.equal(tolerated.corrected, false);
   assert.equal(tolerated.snapped, false);
-  assert.equal(controller.position.x, predicted.x, '6cm 容差内不能用毫米量化快照改写预测位置');
+  // 容差内不整个采用重放结果（毫米量化的快照会让 Rapier 每拍换个起点），
+  // 但必须朝它收敛固定比例——原来原样保留预测，误差永远不消，会一直攒到
+  // 6cm 门槛再一次性拉回，走起来就是一秒一顿。
+  assert.ok(
+    Math.abs(controller.position.x - (predicted.x + 0.005 * RECONCILE_CONVERGENCE)) < 1e-9,
+    '容差内应朝权威收敛 RECONCILE_CONVERGENCE 的比例',
+  );
   assert.equal(root.position.z, interpolatedZ, '可见插值位置不能参与逻辑误差计算');
 
   controller.update(halfStep);
@@ -519,6 +526,74 @@ test('本地玩家和解只纠正逻辑误差，并保留固定步相位与可�
   controller.update(halfStep);
   assert.ok(root.position.x > beforeCorrection.x, '可见位置应开始向纠正后的逻辑位置收敛');
   assert.ok(root.position.x < correctedX, '普通纠正必须平滑收敛而不是瞬移');
+
+  controller.dispose();
+  physics.dispose();
+  input.dispose();
+});
+
+test('容差内的误差会逐拍衰减，不会攒到门槛再被一次性拉回', () => {
+  const root = new Object3D();
+  const scheme = createPlayerInputScheme({ storage: null });
+  const input = new InputSubsystem({
+    actions: scheme.actions,
+    config: scheme.config,
+    contexts: scheme.contexts,
+    devices: [],
+  });
+  const physics = new PhysicsWorld(getRapier(), { timestep: SIMULATION_STEP_SECONDS });
+  physics.setActorCollider('ground', {
+    shape: 'box', x: 0, y: 0, z: 0, yaw: 0,
+    halfWidth: 20, halfLength: 20, minimumY: -1, maximumY: 0,
+  });
+  physics.prepareQueries();
+  const { canvas } = createCanvas();
+  const controller = new TopDownController(canvas, root, input, {
+    enabled: false,
+    movement: { walkSpeed: 3.2, sprintMultiplier: 1.65 },
+    // 没有 jumpAbility 就不会建角色状态，和解会走「没有状态」那条瞬移分支。
+    jumpAbility: new PlayerJumpComponent({
+      impulse: 7, gravity: 22, maximumFallSpeed: 20, airControl: 0.85,
+    }),
+    physicsWorld: physics,
+    characterId: 'converge-test-player',
+    collisionRadius: 0.42,
+    collisionHeight: 0.84,
+  });
+
+  // 先跑一帧把角色状态与物理代理建起来，否则和解走的是「没有状态」那条瞬移分支。
+  controller.update(SIMULATION_STEP_SECONDS);
+  controller.drainInputSteps();
+
+  // 这是玩家实际报的那个毛病：站着不动，两端差着 4.9cm 却一直消不掉。
+  // 每拍都把权威摆在同一个位置上，看客户端认不认。
+  const authorityX = controller.position.x - 0.049;
+  const errors: number[] = [];
+  for (let snapshot = 0; snapshot < 12; snapshot += 1) {
+    const result = controller.rewindAndReplay({
+      x: authorityX,
+      y: controller.verticalPosition,
+      z: controller.position.z,
+      vx: 0,
+      vy: controller.verticalVelocity,
+      vz: 0,
+      grounded: controller.isGrounded,
+    }, []);
+    assert.equal(result.corrected, false, '4.9cm 在 6cm 容差内，不该走可见纠正');
+    errors.push(Math.abs(controller.position.x - authorityX));
+  }
+
+  for (let index = 1; index < errors.length; index += 1) {
+    assert.ok(
+      errors[index] < errors[index - 1],
+      `第 ${index} 拍误差没有变小：${errors[index - 1].toFixed(5)} → ${errors[index].toFixed(5)}`,
+    );
+  }
+  // 收敛四分之一时，十二拍之后应当只剩零头；原来的实现这里会是恒定的 0.049。
+  assert.ok(
+    errors.at(-1)! < errors[0] * 0.1,
+    `误差应当衰减到一成以下，实际 ${errors[0].toFixed(4)} → ${errors.at(-1)!.toFixed(4)}`,
+  );
 
   controller.dispose();
   physics.dispose();
@@ -568,9 +643,15 @@ test('旧房间缺少拖拽配置时渲染侧仍自动装配蒙皮拖拽，并�
     },
   };
   // 蒙皮拖拽整条链路都在渲染侧：玩家只贡献一个 ProxyId。
+  const dragScene = new ThreeRenderScene(
+    new Group(),
+    { fogColor: '#ffffff', fogNear: 20, fogFar: 60 },
+  );
   const renderWorld = {
-    scene: new ThreeRenderScene(new Group(), { fogColor: '#ffffff', fogNear: 20, fogFar: 60 }),
+    scene: dragScene,
     transforms: new RenderTransformBuffer(),
+    // 槽位由玩法侧分配：渲染世界不回话（见 RenderScene.createPlayerProxy）。
+    proxyIds: new RenderProxyTable(dragScene),
   };
   const player = new PlayerEntity(
     'surface-drag-player',

@@ -1,4 +1,4 @@
-import type * as THREE from 'three';
+import type { SceneUpdateContext } from '../SceneVisualSystem';
 import type { InputSubsystem } from '../../input';
 import type { PlayerEntity } from '../../player/PlayerEntity';
 import type { SceneRenderer } from '../../rendering/SceneRenderer';
@@ -21,7 +21,7 @@ export interface SceneComponentContext {
   /** 房间分配的流式世界种子；固定场景可以省略。 */
   readonly worldSeed?: number;
   /** 与 ChunkStreamer 共用的当前玩家/相机焦点。 */
-  readonly getFocus?: () => { focusX: number; focusY: number; focusZ: number };
+  readonly getFocus?: () => SceneUpdateContext;
 }
 
 /**
@@ -38,9 +38,13 @@ export interface SceneRuntimeComponent {
   dispose?(): void;
 }
 
-export type SceneBeforeRenderListener = (camera: THREE.Camera) => void;
 
+
+/**
+ * 返回 `undefined` 表示「这一类不归主线程建」——纯表现的组件由
+ * `createRenderWorld` 建，跟着 canvas 走。
+ */
 export type SceneComponentFactory = (
   definition: SceneComponentDefinition,
   context: SceneComponentContext,
-) => SceneRuntimeComponent;
+) => SceneRuntimeComponent | undefined;

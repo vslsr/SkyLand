@@ -2,7 +2,6 @@ export {
   NULL_PROXY_ID,
   toProxyId,
   type MeshProxyDesc,
-  type MeshProxyInfo,
   type ProxyId,
   type RenderCommandSink,
   type RenderScene,

@@ -64,6 +64,7 @@ function bytesFor(capacity: number): number {
 
 export class RenderTransformBuffer {
   #capacity = 0;
+  #grown?: (bytes: ArrayBufferLike) => void;
   #bytes: ArrayBufferLike = new ArrayBuffer(0);
   #header: Int32Array<ArrayBufferLike> = new Int32Array(0);
   #transforms: Float32Array<ArrayBufferLike> = new Float32Array(0);
@@ -78,6 +79,29 @@ export class RenderTransformBuffer {
     this.#parents.fill(NULL_PROXY_ID);
   }
 
+  /**
+   * 接住另一条线程投递过来的同一段字节（引擎迁移路线图 第 3 步）。
+   *
+   * 容量写在表头里，所以只凭这段字节就能还原出全部视图——渲染线程不需要额外
+   * 被告知任何东西。SAB 时两侧看的是同一块内存，没有拷贝。
+   *
+   * **注意扩容**：`ensureSlot` 会重新分配一整段新字节，那一刻这一侧接住的旧段
+   * 就成了孤儿。所以跨线程用的时候，要么一开始就按上界开够，要么在扩容之后
+   * 把新的 `bytes` 再投递一次。这个坑关在这个类里，见类注释第 3 条。
+   */
+  public static fromBytes(bytes: ArrayBufferLike): RenderTransformBuffer {
+    const capacity = new Int32Array(bytes, 0, HEADER_INT32_COUNT)[HEADER_CAPACITY];
+    if (!Number.isInteger(capacity) || capacity <= 0) {
+      throw new Error(`这段字节不像 RenderTransformBuffer：表头里的容量是 ${capacity}`);
+    }
+    // 先按最小容量正常构造再换视图：私有字段只有构造器装得上，
+    // `Object.create` 出来的壳子调不了 `#adopt`。那一小段字节随即被丢掉。
+    const buffer = new RenderTransformBuffer(1);
+    // 只换视图，不碰表头——表头归写入的那一侧。
+    buffer.#adopt(bytes, capacity);
+    return buffer;
+  }
+
   public get capacity(): number {
     return this.#capacity;
   }
@@ -90,6 +114,16 @@ export class RenderTransformBuffer {
   /** 跨线程投递的就是这一段字节；SAB 时零拷贝。 */
   public get bytes(): ArrayBufferLike {
     return this.#bytes;
+  }
+
+  /**
+   * 扩容之后的回调：那一块新的字节要送给读的一侧。
+   *
+   * 扩容会**重新分配**，旧的那一块跨线程的对面还拿着；不通知它，它会一直读一段
+   * 没人再写的内存。只在真的跨线程时才需要设——单线程下两边就是同一个对象。
+   */
+  public onGrow(listener?: (bytes: ArrayBufferLike) => void): void {
+    this.#grown = listener;
   }
 
   public get isShared(): boolean {
@@ -236,6 +270,8 @@ export class RenderTransformBuffer {
         bank * capacity * RENDER_VISUAL_PARAM_COUNT,
       );
     }
+    // 搬完再通知：对面接到手里的必须已经是搬好内容的那一块。
+    this.#grown?.(this.#bytes);
   }
 
   /** 唯一重建视图的地方。任何可能重新分配的操作都必须经过它。 */

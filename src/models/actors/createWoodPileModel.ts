@@ -7,7 +7,7 @@ import type { ActorVisualModel } from './ActorVisualModel';
 
 type WoodPileRender = Extract<ActorRenderDefinition, { model: 'line-art-wood-pile' }>;
 
-/** 独立预览模型；实际高数量掉落由 HighCountActorBatchSystem 合并绘制。 */
+/** 独立预览模型；实际高数量掉落由 ThreeHighCountBatchVisual 合并绘制。 */
 export function createWoodPileModel(
   environment: FillMaterialEnvironment,
   definition: WoodPileRender,

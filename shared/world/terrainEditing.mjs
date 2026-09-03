@@ -13,6 +13,7 @@ import {
 import {
   encodeTerrainCell,
   sampleTerrain,
+  terrainCellBiome,
   terrainCellHeightLevel,
   terrainCellShape,
   terrainCellSurface,
@@ -108,6 +109,7 @@ export class TerrainEditor {
       code,
       heightLevel: terrainCellHeightLevel(code),
       surface: terrainCellSurface(code),
+      biome: terrainCellBiome(code),
       shape: terrainCellShape(code),
       bedY: sample.groundY,
       waterDepth: terrainWaterDepth(sample, this.seaLevel),
@@ -118,12 +120,15 @@ export class TerrainEditor {
   /**
    * 原子修改一格；未显式指定 surface 时保留原类型。若降低后的普通地面低于
    * 海平面并紧邻真实水格，则按四邻域让水进入；远处孤立深坑不会自动积水。
+   *
+   * 群系不参与编辑：挖高挖低的是同一片地皮，雪地被抬起来之后仍然是雪地。
    */
   setCell(globalCellX, globalCellZ, changes = {}) {
     requireInteger(globalCellX, 'globalCellX');
     requireInteger(globalCellZ, 'globalCellZ');
     const previous = this.patches.cellCodeAt(globalCellX, globalCellZ);
     const previousHeight = terrainCellHeightLevel(previous);
+    const biome = terrainCellBiome(previous);
     const heightLevel = changes.heightLevel === undefined
       ? previousHeight
       : requireHeightLevel(changes.heightLevel);
@@ -140,7 +145,7 @@ export class TerrainEditor {
       && surface === TERRAIN_SURFACE.GROUND
       && heightLevel < previousHeight
     ) {
-      const candidate = encodeTerrainCell(heightLevel, surface, shape);
+      const candidate = encodeTerrainCell(heightLevel, surface, shape, biome);
       if (
         terrainCellMinimumBedHeight(candidate) < this.seaLevel
         && this.#hasAdjacentWater(globalCellX, globalCellZ)
@@ -156,7 +161,7 @@ export class TerrainEditor {
       !hasExplicitSurface
       && surface === TERRAIN_SURFACE.WATER
       && heightLevel > previousHeight
-      && !terrainCellHasWater(encodeTerrainCell(heightLevel, surface, shape), this.seaLevel)
+      && !terrainCellHasWater(encodeTerrainCell(heightLevel, surface, shape, biome), this.seaLevel)
     ) {
       surface = TERRAIN_SURFACE.GROUND;
     }
@@ -164,7 +169,7 @@ export class TerrainEditor {
     return this.patches.setCellCode(
       globalCellX,
       globalCellZ,
-      encodeTerrainCell(heightLevel, surface, shape),
+      encodeTerrainCell(heightLevel, surface, shape, biome),
     );
   }
 
@@ -203,14 +208,15 @@ export class TerrainEditor {
     requireInteger(globalCellZ, 'globalCellZ');
     const previous = this.patches.cellCodeAt(globalCellX, globalCellZ);
     const shape = terrainCellShape(previous);
+    const biome = terrainCellBiome(previous);
     let heightLevel = terrainCellHeightLevel(previous);
-    let code = encodeTerrainCell(heightLevel, TERRAIN_SURFACE.WATER, shape);
+    let code = encodeTerrainCell(heightLevel, TERRAIN_SURFACE.WATER, shape, biome);
     while (
       !terrainCellHasWater(code, this.seaLevel)
       && heightLevel > MINIMUM_HEIGHT_LEVEL
     ) {
       heightLevel -= 1;
-      code = encodeTerrainCell(heightLevel, TERRAIN_SURFACE.WATER, shape);
+      code = encodeTerrainCell(heightLevel, TERRAIN_SURFACE.WATER, shape, biome);
     }
     return this.patches.setCellCode(globalCellX, globalCellZ, code);
   }

@@ -16,10 +16,24 @@ const WASM_URL = new URL('../../shared/world/wasm/chunkgen.wasm', import.meta.ur
  */
 let compiledModule: Promise<WebAssembly.Module | undefined> | undefined;
 
-/** 用 ?chunkgen=js 打开页面即可强制走 JS 后端，方便对照两条路径的表现。 */
-function isJavaScriptForced(): boolean {
-  if (typeof window === 'undefined') return false;
-  return new URLSearchParams(window.location.search).get('chunkgen') === 'js';
+/**
+ * 用 `?chunkgen=js` 打开页面即可强制走 JS 后端，方便对照两条路径的表现。
+ *
+ * 生成器现在跑在渲染线程上，而 worker 的 `location` 是**它自己脚本的地址**，
+ * 不是页面的——所以这个开关由主线程读出来，随开工那条报文交过去。
+ * 不这么做的话它会静默失效：不报错，只是 `?chunkgen=js` 不再有任何作用。
+ */
+let javaScriptForced = typeof window !== 'undefined'
+  && new URLSearchParams(window.location.search).get('chunkgen') === 'js';
+
+/** 渲染线程在开工时把主线程读到的那个开关补上。 */
+export function forceJavaScriptChunkGenerator(forced: boolean): void {
+  javaScriptForced = forced;
+}
+
+/** 主线程读到的开关，用来交给渲染线程。 */
+export function isJavaScriptChunkGeneratorForced(): boolean {
+  return javaScriptForced;
 }
 
 async function compileChunkGenerator(): Promise<WebAssembly.Module | undefined> {
@@ -40,7 +54,7 @@ async function compileChunkGenerator(): Promise<WebAssembly.Module | undefined> 
  * 差别只是快慢，没有理由因为一个 3 KB 的文件加载失败就让玩家进不去游戏。
  */
 export async function createChunkGenerator(): Promise<ChunkGenerator> {
-  if (isJavaScriptForced()) {
+  if (javaScriptForced) {
     console.info('[world] 已按 ?chunkgen=js 强制使用 JS 生成后端');
     return createJavaScriptChunkGenerator();
   }

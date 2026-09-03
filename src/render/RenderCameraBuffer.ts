@@ -54,17 +54,36 @@ export class RenderCameraBuffer {
   readonly #header: Int32Array<ArrayBufferLike>;
   readonly #values: Float32Array<ArrayBufferLike>;
 
-  public constructor() {
-    this.#bytes = allocateSharedBytes(
+  public constructor(bytes?: ArrayBufferLike) {
+    const adopted = bytes !== undefined;
+    this.#bytes = bytes ?? allocateSharedBytes(
       HEADER_BYTES + 2 * RENDER_CAMERA_STRIDE * Float32Array.BYTES_PER_ELEMENT,
     );
     this.#header = new Int32Array(this.#bytes, 0, HEADER_INT32_COUNT);
     this.#values = new Float32Array(this.#bytes, HEADER_BYTES, 2 * RENDER_CAMERA_STRIDE);
+    // 接管别人那一段时什么都不写：那边可能已经写过机位了，覆盖回缺省会闪一帧。
+    if (adopted) return;
     this.#header[HEADER_READ_BANK] = 0;
     this.#header[HEADER_FRAME_ID] = 0;
     const initial = createRenderCamera();
     // 两面都填成缺省朝向：第一帧就算没人写过也画得出东西。
     for (const bank of [0, 1]) this.#writeBank(bank, initial.position, initial.forward, initial.up);
+  }
+
+  /**
+   * 接管另一条线程投递过来的那一段字节。
+   *
+   * 这个通道定长（表头 + 两面各九个 float），所以不像 transform SoA 那样需要把容量
+   * 写进表头再读出来——认得出长度就够了。
+   */
+  public static fromBytes(bytes: ArrayBufferLike): RenderCameraBuffer {
+    const expected = HEADER_BYTES + 2 * RENDER_CAMERA_STRIDE * Float32Array.BYTES_PER_ELEMENT;
+    if (bytes.byteLength !== expected) {
+      throw new Error(
+        `这段字节不像 RenderCameraBuffer：长度是 ${bytes.byteLength}，该是 ${expected}`,
+      );
+    }
+    return new RenderCameraBuffer(bytes);
   }
 
   /** 跨线程投递的就是这一段字节；SAB 时零拷贝。 */

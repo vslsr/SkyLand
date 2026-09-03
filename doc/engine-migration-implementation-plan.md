@@ -574,7 +574,7 @@ headless Chromium + SwiftShader。**所以这一步在这个仓库、这套验�
 
 新增 `src/scene/SceneWorld.ts` 收下后三件里属于玩法的部分：地形采样、物理查询、
 Actor 查询、草地脉冲入口。`SceneRenderer` 只剩渲染核心、表现开关，以及两个确实属于
-渲染侧的查找（`getActorRenderProxy`、`setTerrainHighlight`）。
+渲染侧的查找（`setTerrainHighlight`）。
 
 **这一半几乎不碰 Three**：地形是纯数据、物理是 Rapier、Actor 查询走 Game World。
 唯一的例外是上面那个 `pickActorInteraction`——它随后也改成了解析求交，
@@ -720,20 +720,363 @@ worker 已经在传的 `[globalCellX, globalCellZ, code, ...]`。
 顺带修掉一处浪费：地形网格请求不再转移 `overrides` 缓冲区。它几乎总是空的，
 而挂载时地形几何要用同一份；为省一次结构化克隆把它交出去，换来的是再收一次。
 
-### 还没做的
+### 已经做了的：把边界改成单向的 ✅
 
-| | 说明 |
+上面五项做完之后，边界上还剩**两样线程边界过不去的东西**：`createMeshProxy` 是一个
+**有返回值的函数调用**，`resolve()` 会**递出一个活的 `ThreeMeshProxy`**。
+有返回值就意味着调用方要等对面回话，而线程边界上没有「等一下」。
+
+`MeshProxyInfo` 原来有五个字段，玩法侧只读两个（`length` / `width` /
+`interactionAnchorY` 在渲染世界之外一次都没被读过）：
+
+- **`simpleCollision` 是一次纯粹的往返。** 渲染侧算它的方式就是调
+  `createSimpleCollisionFromRender(render)`——一个输入只有 render 定义的 shared
+  纯函数，玩法侧本来就拿着那份定义，服务端 `ServerActorFactory` 早就直接调它。
+  新增 `tests/RenderProxyCollisionParity.test.ts` 把这条等价关系对**全部 15 种模型**
+  钉住：哪天有人让某个模型按真实几何去量碰撞盒，那条会先炸。
+- **槽位号挪到玩法侧分配。** 新增 `src/render/RenderProxyTable.ts`：自由表 + 命令口。
+  两者合一不是巧合——**销毁 proxy 和回收槽位是同一件事**，拆成两个调用就一定会有人
+  只写一半，然后下一个 Actor 拿到一个还挂着模型的槽位。合在一起之后
+  `RenderProxyComponent` 一个字都不用改，它拿到的仍然只是一个命令口。
+
+于是 `createMeshProxy(id, desc)` / `createPlayerProxy(id, desc)` 都返回 `void`，
+**`RenderScene` 上每一个方法都返回 `void`**。新棘轮按源码文本盯住这一条——
+类型上「`void`」和「返回了但没人用」区分不开，而后者一样会在 worker 上炸。
+
+顺带把重复了五遍的 `{ scene, transforms }` 句柄收成一个 `RenderWorldHandle`
+（它现在多一个 `proxyIds`，玩家实体和 Actor 必须共用同一张槽位表——两套编号就
+没有边界可言了）。
+
+### 已经做了的：拆掉最后两处 `resolve()` ✅
+
+`RenderScene` 上每个方法都返回 `void` 之后，还剩两处**递出活着的 `ThreeMeshProxy`**——
+那和返回值一样过不了线程边界。
+
+- **悬停高亮**：`THREE.BoxHelper` 原来由玩法侧 `new` 出来，得先 `resolve()` 拿到活
+  proxy 才建得出。现在整个搬进 `ThreeRenderScene`，玩法侧只发一个 `ProxyId`
+  （没有悬停就是 `NULL_PROXY_ID`），和 `setInteractionMarker` 同一个套路。
+  盒子的每帧 `update()` 也跟着挪进 `updateVisuals`——它读的本来就是上一帧摆好的
+  世界矩阵，时机等价。
+- **火焰**：「这个模型会不会长出火焰」原来是 `resolve()` 出 proxy 再看它有没有 rig。
+  实际上它只取决于 `render.model`——只有 campfire 与 dry-hay 两种。新增
+  `src/render/renderModelFacts.ts`；放在 `src/render/` 是因为**答案由渲染侧的模型
+  工厂决定**，哪天某个模型也长出火焰，改的是那边。用例把表和工厂钉在一起：
+  多列或漏列都会先炸在那里，而不是变成「火点着了却不显示」。
+
+顺带补上一个**棘轮漏洞**：那条「每个方法返回 `void`」只看 `RenderScene` 与
+`RenderCommandSink` 两个接口，而玩法侧其实还在具体类上调另外八个方法——往
+`ThreeRenderScene` 上加一个有返回值的方法，棘轮看不见。所以把其中形状属于边界的
+六个都声明到了 `RenderScene` 上。
+
+### 已经做了的：尖刀证明渲染栈能在 worker 里跑 ✅
+
+这一步开头那次尖刀只证明了「`transferControlToOffscreen` + WebGL2 能在 worker 里
+清屏」——那和「SkyLand 的渲染栈能不能在 worker 里跑」不是一件事。真正会咬人的是
+自定义 shader 材质、chunk 几何、WASM 生成器、以及标记牌的文字贴图。
+
+`spike/` 把真东西搬进 worker 跑了一遍：`ThreeRenderScene`（Actor 模型 + 玩家史莱姆）、
+`ChunkViewHost`（四块 chunk 的地形、树、岩石、草）、`createSceneEnvironment` 的自定义
+材质、`createChunkGenerator` 的 WASM 后端、标记牌的 `OffscreenCanvas` 文字贴图，
+然后真画三帧。**全过**，68 次 draw call，画面正常。
+
+所以剩下的是装配的拆分，不是「能不能」的问题。
+
+（这个目录已经删了：渲染循环真搬进去之后，它证明过的两件事就是产物本身，
+留着只会变成第二份会漂开的 worker 装配代码。它自己的 README 当时就是这么写的。）
+
+### 已经做了的：chunk 生成器归渲染侧 ✅
+
+`buildChunk` 同时产出**放置记录**（玩法：碰撞体、生成物件 Actor）和**几何顶点**
+（渲染）。它是最后一处骑在边界上的东西——而且它需要 THREE 模板
+（`registerChunkTemplates` 把每种物件烘成模板交给生成器）。
+
+解法和地形覆盖是同一个：**两侧各按种子推，不来回送**。
+
+- 生成器与模板注册整个搬进 `ChunkViewHost`。它收到的是 `(key, chunkX, chunkZ,
+  skipMask, terrainOverrides)`——全是数据，几何自己生成。
+- `ChunkStreamer` 改调 `generateChunkProps`：同一个种子、同一份纯函数、**不需要
+  模板**。服务端 `ServerGeneratedPropActors` 与 `shared/world/chunkColliders.mjs`
+  早就直接调它。
+
+值得写下来的一点：这让客户端的**碰撞体来自 JS 实现、几何来自 WASM 实现**，
+于是它依赖了那条「两个后端必须逐位一致」的规则（`skyland-chunk-world` skill 里
+「唯一重要的规则」）。这不是新增的风险——**服务端本来就是这么配的**：它用 JS 算
+碰撞体，而客户端一直用 WASM 画。也就是说这条依赖早就跨网络承重了，现在只是让
+客户端内部也照同一个办法配。`server/tests/chunkGenerator.test.mjs` 是那道闸门。
+
+浏览器里验过：交互标记牌正落在渲染出来的蘑菇上——牌子的位置来自 JS 推的 Actor，
+蘑菇的几何来自 WASM，两者像素对齐。
+
+`ChunkStreamer` 因此不再 import `registerChunkTemplates`，也不再持有生成器。
+
+### 已经做了的：装配劈成两半 ✅
+
+`createLineArtScene` 原来一个函数建完整张地图，玩法与渲染混在一起。现在：
+
+- **`createRenderWorld(definition, worldSeed)`** —— 会跟着 canvas 走的每一样东西：
+  `THREE.Scene`、材质、`ThreeRenderScene`、`ChunkViewHost`、昼夜与天气、
+  固定地图的地面/树/草/海面。**输入只有场景定义和世界种子两个纯数据**，
+  没有碰撞世界、没有物理世界、没有 Actor——那正是「能不能搬进 worker」的判据。
+- **`createLineArtScene`** —— 建玩法那一半（碰撞、物理、地形采样、Actor 世界、
+  流送规划），然后把两半接起来。
+
+两半之间只有三样东西过去：`renderScene`（proxy 命令口）、`chunkViews`（挂载命令口）、
+`transforms`（那段边界字节）。
+
+顺带拆掉一个假字段：`SceneVisualSystem` 要求 `root`，但**渲染器从不碰它**——
+那个字段只是为了让装配 `scene.add(root)`。流送规划、Actor 世界这类东西为了进
+每帧列表得凭空长出一个 `root`。现在分成 `SceneFrameSystem`（每帧被驱动，
+渲染器只要这个）与 `SceneVisualSystem extends`（还往场景图里挂几何）。
+`ChunkStreamer` 因此不再有 `root` 与 `beforeRender`。
+
+**还剩一处反向依赖**，而且是写在签名上的：`createRenderWorld` 收一个
+`sampleGroundHeight`——天气要按地面高度落雨，今天那是一个指向 `TerrainWorld`
+（玩法侧）的回调。修法和 chunk 生成器、地形覆盖是同一个：地面高度是
+`(种子, 编辑覆盖)` 的纯函数，渲染侧自己推得出来。留在参数上是为了让这笔债
+看得见，而不是藏在某个字段里。
+
+**这条缝就是第 3 步要的那条**：把 `createRenderWorld` 换成「在 worker 里建、
+回传三个命令口」，`createLineArtScene` 一个字都不用改。
+
+### 已经做了的：渲染命令通道 ✅
+
+新增 `src/render/worker/renderCommands.ts`。`RenderCommandQueue` 同时实现
+`RenderScene` 与 `ChunkViewSink`，所以玩法侧换成跨线程时一个字都不用改。
+
+- **按帧成批**：每帧几百个 proxy 各发一条 `postMessage`，结构化克隆的开销会比渲染
+  本身还贵。所以攒成一批、一帧 `flush()` 一次——和 SoA 的 `publish()` 同一个节奏。
+- **两条命令刻意不带那段字节**：`submitTransforms` 与 `updateVisuals` 只送时间量，
+  worker 一开始就拿到了同一个 SAB。
+- `applyRenderCommand` 的 switch 收尾是 `command satisfies never`：加了命令种类却
+  忘了兑现会变成编译错误。
+
+`RenderTransformBuffer.fromBytes`：容量写在表头里，渲染线程只凭那段字节就能还原
+全部视图。**扩容会让接住的旧段成为孤儿**，这个坑写在方法注释里。
+
+尖刀改成真跨线程驱动：主线程这一侧**一个 Three 对象都没有**，只有命令队列、
+槽位表和那段字节。11 条命令克隆过去，worker 画出 68 次 draw call，货箱正落在主线程
+写进 SAB 的那三个 x 上（`shared=true`）——位置根本没走命令。
+
+### 已经做了的：拿掉最后一条 `onBeforeRender` ✅
+
+鼠标拖草是**输入**适配器（`getBoundingClientRect` 决定它留在主线程），但它原来要一个
+活的 `THREE.Camera` 才能反投影，于是每帧从渲染侧回调一次借。
+
+现在自己算：反投影要的东西主线程本来就有——机位与朝向（那段相机字节正是它写的）、
+视场角、视口宽高比。和准星拾取改成解析求交是同一个道理，**需要的是数，不是那个对象**。
+
+用例拿被替换掉的东西当参照：三种机位（含偏航过的）× 四个屏幕点，落点和
+`THREE.Raycaster` 差在 1e-4 以内；另外钉住了「打不到地面不产生冲量」和
+「退化朝向不算出 NaN」。浏览器里横扫一条正弦轨迹，草沿轨迹压弯。
+
+于是 **`onBeforeRender` 在 `SceneRenderer` 之外一个调用方都没有了**，有棘轮盯着。
+
+### 已经做了的：三笔账清完了 ✅
+
+**天气的 `sampleGroundHeight`**：`createRenderWorld` 原来收一个指向玩法侧
+`TerrainWorld` 的回调——渲染侧每帧反向读一次玩法侧。`TerrainWorld` 是纯数学，
+输入只有种子与海平面，所以这一侧自己建一份，两侧各推各的。服务端下发的地形编辑
+是唯一推不出来的部分，经 `setTerrainCells` 命令镜像过去。用例钉住两个条件：
+同种子必然同高度、编辑镜像之后仍然一致。
+
+**昼夜的 `timeOfDay`**：`DayNightClock` 原来住在 `DayNightSystem` 里，于是
+「现在几点」要从渲染世界读回来。它是纯状态，现在归 `SceneRenderer`：那边推进、
+那边校正，每帧把小时数**发**过去。一个时刻只有一份，不会因为两侧各推各的而漂开
+——这也是为什么没有采用「两边各留一口时钟」的写法。
+
+**落叶搬进渲染世界**：`InteractiveParticleEffectSceneComponent` 曾经靠
+`renderer.addWorldObject` 把自己建的 `Object3D` 塞进场景图。落叶是纯表现，
+它要的只是几个数和一块地形，所以整个搬过来，改名 `InteractiveParticleEffectHost`
+挪进 `src/particles/`（位置和名字要说实话）。玩家扫过落叶的位置改从每帧的
+`SceneUpdateContext` 取——那里因此多了一组 `playerRender*`：focus 的 XZ 是权威位置
+（流送要那个），而扫落叶跟的是眼睛看到的身影，两者差的正是插值平滑量。
+
+场景组件工厂因此分成两半：纯表现的由 `createRenderWorld` 建，工厂返回 `undefined`，
+宿主跳过。
+
+这里踩了一个**测试抓不到、浏览器一眼看见**的坑：`onEnter` 发生在加入房间**之前**，
+那时还没有场景组合，`setSceneActive(true)` 打在空处；等 `replaceScene` 装上新组合
+时没人再打一次，落叶就永远不激活。修法是让 `SceneRenderer` 记住当前的进入状态，
+换组合时补上去——主线程那批场景组件的宿主本来就是这么做的。
+
+**能力实验室搬进渲染世界**（最后半笔）：`AbilityLabSceneComponent` 曾经是玩法侧
+**唯一还能摸到活对象**的地方——先 `getActorRenderProxy(actorId)` 拿到活的
+`ThreeMeshProxy`，检查它身上有没有训练假人的 `abilityTargetRig`，再把这个 rig 交给
+一个住在主线程的视觉系统。整条链上每一环都过不了线程边界。
+
+拆开之后是这样的：`AbilityLabViewState`（血量、蓝量、冷却、日志）本来就是纯数据，
+`ThreeAbilityLabVisual` 本来就是纯表现。于是视觉系统整个搬到渲染侧，改名
+`ThreeAbilityLabVisual`；玩法侧只剩**三条返回 `void` 的命令**：
+
+| 命令 | 说的事 |
 | --- | --- |
-| 渲染循环整个进 worker | `SceneRenderer` 的 `root` / `beforeRender` / `WebGLRenderer` 那一层，以及 `transferControlToOffscreen` 本身 |
-| 拆 `ClientActorSystem` 的最外层 | Actor 世界这一侧干净了，但这个类仍同时持有渲染世界与悬停高亮 |
-| `GrasslandScene` 的装配归属 | 它同时握着输入、相机、玩家实体和渲染器；canvas 搬走时装配要跟着走 |
+| `setAbilityLabTarget(id)` | 绑谁。`NULL_PROXY_ID` 即解绑，和 `setInteractionMarker` 同一个套路 |
+| `setAbilityLabState(state, x, y, z)` | 这一帧什么状态。施法者位置拆成三个标量——`Vector3` 是 three 的词汇，边界上不认 |
+| `playAbilityLabAction(action, x, y, z, succeeded)` | 放一次技能。成不成由玩法侧判定，渲染侧只管演 |
 
-§3 的五项前置全部落地：渲染栈不碰 DOM、玩法侧不碰 Three、chunk 与 Actor 两条
-主干都按 game / render 切开、相机与合批内容都按字节过边界。**剩下的是搬运本身，
-不再是拆解。**
+「rig 缺失」的判断也跟着过去了：玩法侧看不见 rig，判断不了，所以由
+`ThreeAbilityLabVisual.bindTarget` 当场报错。这三条同时上了 `RenderScene` 接口与
+`RenderCommandQueue`——加接口的那一刻命令队列立刻编译不过，正是想要的效果。
 
-需要说清楚的是：这五项**一项都不省帧时间**（`render-batches` p50 只有
-0.06–0.17 ms）。它们是第 2 步与第 3 步共同的结构前提。
+于是 `getActorRenderProxy` 从 `SceneVisualSystem`、`SceneRenderer`、
+`ClientActorSystem` 三处一起删掉。测试要断言渲染结果，那条路留在
+`tests/renderProxyProbe.ts` 里，而且走明面上的两步（Actor 上取 `proxyId`，
+再去 `getRenderScene()` 里解析）——「谁在跨边界拿对象」于是在类型上就看得见：只有测试。
+
+**场景组件的棘轮清单现在是空的。**
+
+### 已经做了的：`ClientActorSystem` 交出渲染那一半 ✅
+
+清完场景组件之后，玩法侧还剩最后一个跨在边界上的类，而且是最大的那个：
+`ClientActorSystem` 的 `update` 里有四段，其中两段是渲染工作。
+
+| 曾经在这个玩法类里的东西 | 现在在哪 |
+| --- | --- |
+| `HighCountActorBatchSystem`（掉落堆合批，498 行 `InstancedMesh`） | `ThreeHighCountBatchVisual`，渲染世界里 |
+| `GeneratedPropFruitSystem`（树上果子） | `ThreeFruitBatchVisual`，渲染世界里 |
+| `get root(): THREE.Group` | 删了。它只是 `renderScene.root` 的转手——一个玩法类没有理由拿得到场景图节点 |
+| `beforeRender(WebGLRenderer, Camera)` | `ThreeRenderScene.beforeRender`，由渲染循环直接驱动 |
+| `update` 末尾那句 `renderScene.updateVisuals(...)` | `SceneRenderer.update` 的最后一句 |
+
+两个合批系统读的本来就只是 `RenderInstanceBuffer` 里的定长记录，不认识 Actor——
+它们借住在那里的唯一理由是「要排在 SoA 翻面之后」。新增一条 `submitInstances`
+命令（和 `submitTransforms` 同形状、同样不带载荷），这条理由就没了。
+
+它们要的原型表不走通道：那张表一整局都不变，**两侧各自调 `createArchetypeTable`
+从同一份场景定义建**，插入序确定，结果必然一致。和地形「两侧各按同一个种子推」
+是同一个套路，`PROP_ARCHETYPE` 存的正是这张表里的下标。
+
+`updateVisuals` 从「藏在一个玩法类 `update` 的末尾」变成「`SceneRenderer` 在玩法
+那一批全部跑完之后调的最后一句」。它以前排在最后是**数组顺序的巧合**，不是写下来的
+规则；现在「渲染读的永远是这一 tick 写完的字节」就是调用点本身的形状，
+而渲染循环进 worker 那天要搬走的，就是这一句以下的部分。
+
+`renderScene` 与 `transforms` 因此都变成必填，类型也从 `ThreeRenderScene` 收窄成
+边界接口 `RenderScene`：不传就自己 `new ThreeRenderScene(...)` 兜底，是这个文件
+import three 的最后一个理由。兜底搬进 `tests/renderProxyProbe.ts`——用例仍然要断言
+画出来的东西，但**往下转成后端这一步只发生在测试里**，在类型上看得见。
+
+于是 `ClientActorSystem` 是一个**完全不 import three 的玩法类**，
+`SceneFrameSystem` 而不是 `SceneVisualSystem`（没有 `root`）。新棘轮盯着玩法侧那五个
+主干文件：`ClientActorSystem`、`ChunkStreamer`、`TerrainWorld`、`SceneWorld`、
+`createLineArtScene`，清单是空的。
+
+### 已经做了的：一局的装配有了自己的归属 ✅
+
+`SceneRenderer` 是五件事，不是一件：画布与绘制循环、房间组合的生命周期、渲染侧的
+房间状态门面、**玩法侧三个世界的引用与释放**、物理调试线框。
+
+第四件最能说明问题：一个叫渲染器的类里有
+
+```ts
+this.collisionWorld?.clear();
+this.physicsWorld?.dispose();
+```
+
+新增 `src/scene/SceneCompositionHost.ts`（78 行）接管「建一张地图、按顺序拆上一张、
+把两半分别交给 `SceneWorld` 与 `SceneRenderer`」。它认识的是 `SceneComposition`
+这份数据和两个接收方，**既不认识 `THREE.Scene` 也不认识画布**——所以
+`SceneComposition.scene` 改成可选：空组合不带场景图，大厅背后那个什么都没有的画面
+归渲染侧自己铺。
+
+`SceneRenderer` 因此不再持有 `collisionWorld` / `terrainWorld` / `physicsWorld`：
+地形高亮问 `world.sampleGroundHeight`，物理线框问新增的 `world.debugRenderPhysics()`
+——一个世界只该被一个地方持有。`loadScene` / `showEmptyScene` / `replaceScene`
+换成一个 `adoptComposition(composition)`，只做「换掉画的东西」。
+
+顺手删掉的两处死代码，都是「递出活对象」的口子：
+
+- `addWorldObject` / `removeWorldObject`——落叶与能力实验室搬走之后一个调用方都没有了
+- `onBeforeRender(listener)`——渲染侧往主线程递一个活的 `THREE.Camera`。同样零注册方，
+  唯一的用处是让 `SceneComponent.ts` 不得不 import three。删掉之后场景组件那条棘轮
+  **整个目录都在扫描范围内，一个文件都不排除**，而「没人借相机」这条不变量从一条
+  断言升级成了类型系统的事实：方法不存在，写不出来。
+
+`SceneRenderer.renderWorld` 的类型也从 `RenderWorldHandle<ThreeRenderScene>` 收窄成
+`RenderWorldHandle`——玩家实体、远端玩家本来就只用边界接口，看得到后端就迟早会用。
+
+收窄之后浮出来一件事：**蒙皮拖拽有两次「等对面回话」**，见下一节。
+
+### 已经做了的：边界上最后一次「等对面回话」没了 ✅
+
+`beginSlimeSurfaceDrag(id, ray)` 返回「这一次按下有没有抓住外壳」，
+`isSlimeSurfaceDragging(id)` 返回「这条链路还活着没有」。两条都在 `RenderScene`
+**之外**，所以那条「每个方法返回 void」的棘轮一直看不见它们。
+
+这一笔和前面几笔不一样：判据**真的只有渲染侧有**。命中测试打的是每帧被求解器改写
+的软体外壳网格（外加一圈 `radius * 0.18` 的顶点容错），玩法侧根本没有那份几何。
+所以出路不是「玩法侧自己解析求交」——那是准星拾取那一笔的解法，这里用不上。
+
+出路是把「结果」从返回值改成**反向通知**：
+
+```
+玩法侧  →  beginSlimeSurfaceDrag(id, ray)     // void，射线是六个数
+渲染侧  →  setSlimeSurfaceDragListener 回报    // (id, dragging)
+```
+
+关键在于**手势的所有权在回报到达时才易主，不在按下那一刻**。认早了，点空地那一下
+会被拖拽吃掉、相机转不动；认晚了没关系，因为按下那一帧指针还没动过，
+`TopDownCameraOrbit` 那一帧攒下的量本来就是零。
+
+单线程下这条回报在 `beginDrag` 里同步就发了，所以逐帧行为和以前完全一致——
+现有那条端到端用例（`TopDownController.test.ts`）一个字都没改就仍然过。
+`tests/SlimeSurfaceDragChannel.test.ts` 专门把回报押后，盯的就是异步那一面：
+按下只发命令不认领、回报说抓住了才易手并补上这段位移、回报说没抓住则一切照旧、
+别人的 `ProxyId` 与我无关、proxy 中途消失能把手势收回来。
+
+反向通知这条路子不是新发明的：`ChunkViewSink.onGeneratorReady`（生成后端就位）
+已经是同一个形状，两条都不走命令队列，监听器留在主线程那一端的代理上。
+边界上现在**只有这两条反向通知**。
+
+于是那扇有名字的门（`SceneRenderer.slimeSurfaceDragSurface`）连同它那条专用棘轮
+一起删掉了：四个拖拽方法进了 `RenderScene`，由主棘轮盯着。
+`SlimeSurfaceDragSurface` 现在只是 `Pick<RenderScene, ...>`。
+
+### 已经做了的：渲染循环收进一个盒子 ✅
+
+搬进 worker 之前先要有**一个可搬的东西**。`SceneRenderer` 那时是主线程与渲染世界
+搅在一起的一层：它持有 `WebGLRenderer`，也持有玩法侧那批每帧系统；它量画布，
+也建场景图。
+
+新增 `src/render/RenderWorldRuntime.ts`：画布、`WebGLRenderer`、一张地图的渲染世界、
+每帧那两步（`update` 跑表现系统与 `updateVisuals`，`render` 读机位并画）。
+**它成立的判据只有一条：构造它只需要一个画布，此后所有输入都是命令与字节。**
+所以同一份代码在主线程（`HTMLCanvasElement`）和在 worker 里（`OffscreenCanvas`）都能跑。
+
+它收的整图级命令是 `RenderWorldCommands`，每一条都返回 `void`：
+
+| | |
+| --- | --- |
+| `loadRenderScene(definition, seed)` / `clearRenderScene()` | 换地图。渲染那一半**由这一侧自己按定义与种子建**，不从外面递进来 |
+| `setViewport(w, h, ratio)` | 画布尺寸由主线程量——`clientWidth` 与 `devicePixelRatio` 是 DOM 的事，画布元素不跟着绘制上下文走 |
+| `setWeather` / `setTimeOfDay` / `setSceneActive` / `setTerrainCells` / `setTerrainHighlight` | 原来是从组合里掏出来的目标对象，现在是命令 |
+| `setPhysicsDebug(buffers?)` | 物理线框改成**推**：物理世界归玩法那一半持有，渲染侧问不到它 |
+| `applyGrassImpulse` / `setFrameContext` | 草地脉冲、焦点与玩家身影 |
+
+于是 `createLineArtScene` 一分为二。`createGameWorld(definition, seed, channels)`
+只建玩法那一半，`channels` 就是渲染世界递出来的三个口子——**这正是第 3 步一路在铺
+的那条缝**。`SceneComposition` 里因此再没有一个 THREE 对象：`scene`、天气与昼夜的
+目标、草地写入口、表现系统全部留在画布那一边。
+
+`SceneRenderer` 剩下四件跨不过去的事：量画布、推时钟、把机位摊进字节并按同一份数据
+回答反投影用的视图、驱动**玩法侧**那批每帧系统。它**一个 `THREE` 都不 import 了**，
+和 `ClientActorSystem` 一起进了那条主干棘轮。
+
+顺手清掉的两处：`ClientActorSystem.environment`（一个玩法类收着渲染侧的材质包，
+两个用它的合批系统搬走之后就没人读了）、`MouseGrassInteractionSceneComponent` 那次
+「问渲染世界要一个草地对象」——「这张地图有没有草」是场景定义说的事，脉冲经
+`SceneWorld` 发过去就行。
+
+换 worker 那天要动的只有一行：`GrasslandScene` 里那句 `connectRenderWorldInProcess`。
+
+### 第 3 步做完了
+
+渲染栈不碰 DOM、玩法侧不碰 Three、chunk 与 Actor 两条主干都按 game / render 切开、
+相机与合批内容都按字节过边界、装配有了自己的归属、边界上一次「等对面回话」都没有，
+而且**渲染循环真的在另一条线程上**。
+
+回头看，前面那一长串拆解每一项单独看都不省帧时间——它们的价值全部兑现在这一步：
+一行连接换掉，主线程整帧 p50 从 9.26 ms 掉到 2.24 ms，而**没有一个调用方需要修改**。
 
 ## 第 4 步 · 换掉 Three.js（可无限期推迟）
 
@@ -745,6 +1088,42 @@ worker 已经在传的 `[globalCellX, globalCellZ, code, ...]`。
 路线图原话是「如果第 2 步做完帧时间已经够了，这一步的代价是零」；§2 的实测说明
 **帧时间不会因为第 2 步变够**——真要动帧时间，得从渲染侧下手。
 但这不改变结论：第 1 步定的那条边界本来就是自研渲染器需要的那条，换不换随时可决定。
+
+### 数学库：量过了，和这一步一起做
+
+考虑过现在就把 `shared/` + `server/` 的手写数学统一到 wgpu-matrix——那一侧不 import
+three，没有词汇冲突。量下来的结论是**推迟到这一步**，理由不是「不值得」，
+而是「现在做等于建一层以后要拆的适配」。
+
+先说测出来的两件事：
+
+1. **wgpu-matrix v3 吃不了 `{x, y, z}`**。`vec3d.distance({x:0,y:0,z:0}, {x:3,y:4,z:0})`
+   返回 `NaN`——它只认 `Float32Array` / `Float64Array` / `number[]`。而 `shared/` 与
+   `server/` 的数据模型**全是 `{x, y, z}` 对象**：`TransformComponent`、Rapier 的
+   API、快照，无一例外。所以每个调用点都要 pack → 运算 → unpack。
+2. **精度不是问题**。v3 有 `vec3d` / `quatd` 一组 `Float64Array` 命名空间
+   （v2 那个全局 `setDefaultType` 在 v3 已经没有了）。原本担心的「f32 会不会破坏
+   0.06 米两端一致性」不成立。
+
+再说那 58 处到底是什么。按 `Math.hypot|Math.sqrt` 数出来是 58，但拆开看：
+
+| | 数量 | wgpu-matrix 合不合适 |
+| --- | --- | --- |
+| `server/tests/` 里的断言 | 26 | 不是生产数学 |
+| XZ 平面距离 `hypot(a.x-b.x, a.z-b.z)` | 17 | 不合适：`vec3.distance` 会把 Y 算进去（行为变了），`vec2` 要逐次打包 |
+| 标量代数（二次方程的 `sqrt(discriminant)` 之类） | ~10 | 用不上 |
+| 真三维长度／归一化 | 5 | 合适 |
+| 四元数归一化 | 2 | 合适 |
+
+也就是**真正合适的只有 7 处**，代价是一个依赖，外加在服务端逐 tick 逐 Actor 的
+路径上每次调用多一次打包分配。
+
+那一侧真正的重复是「XZ 水平距离」这一个模式重复了 17 次，而那恰恰是 wgpu-matrix
+帮不上忙的一类——它需要的是一个**说 `{x,y,z}` 的**小模块，不是一个说数组的库。
+
+所以放到这一步一起做：那时 `THREE.Vector3` 的 84 处也要换，两侧的数据模型可以
+**同时**定型——是让 `{x,y,z}` 到处退成数组，还是留一层薄适配——一次决策、一次迁移。
+现在先建 `shared/math/`，等于先猜一个答案，然后在第 4 步再拆一遍。
 
 ---
 
@@ -780,7 +1159,7 @@ worker 已经在传的 `[globalCellX, globalCellZ, code, ...]`。
   这一层**不知道资产是什么**（§8.4：CoreLayer 那一格），文件里没有一个 Three 类型。
 - `src/render/renderAssets.ts`：进程级实例 + `releaseOwnResources()`。
   §8.4 把 GPU 资源划在渲染线程一侧，所以实例住在 `src/render/` 下。
-- 四条遍历式释放路径（`SceneRenderer`、`ThreeMeshProxy`、`AbilityLabVisualSystem`、
+- 四条遍历式释放路径（`SceneRenderer`、`ThreeMeshProxy`、`ThreeAbilityLabVisual`、
   `PlayerActorVisual`）改为经由它避让共享资源。
 
 **剩余工作**：这是「谁 acquire 谁 release；遍历场景树永远不 dispose」的过渡形态。
@@ -809,3 +1188,4 @@ worker 已经在传的 `[globalCellX, globalCellZ, code, ...]`。
 | 第 2 步与第 3 步的先后 | 按 §2 的实测，第 3 步的收益更大 | 下一次动线程之前 |
 | 物理引擎 | 保留 Rapier | 已由 §0.5b 的分析加固：两端同一份 `.wasm` 是 0.06 米容差的前提 |
 | 线协议 | 先不动 JSON | 和 SAB 布局一起换，别分两次 |
+| 数学库与向量的数据模型 | 暂不引入；`{x,y,z}` 与 `src/math/` 的数组类型并存 | 第 4 步——见上面「数学库：量过了」，那时两侧一起定型 |

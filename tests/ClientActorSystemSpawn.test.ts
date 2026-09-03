@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { ClientActorSystem } from '../src/actors/ClientActorSystem';
+import type { ClientActorSystem } from '../src/actors/ClientActorSystem';
+import { createTestActorSystem, stepActorFrame } from './renderProxyProbe';
 import type { SnapshotActor } from '../src/network/protocol';
 import type { SceneDefinition } from '../src/scenes/data/SceneDefinition';
 import { INTERPOLATION_DELAY_MS } from '../shared/networkTuning.mjs';
@@ -74,7 +75,7 @@ interface SpawnHarness {
 
 function createSystem(spawnBudgetMilliseconds: number): SpawnHarness {
   let now = 1_000;
-  const system = new ClientActorSystem({
+  const system = createTestActorSystem({
     definition,
     environment: { fogColor: '#ffffff', fogNear: 20, fogFar: 60 },
     now: () => now,
@@ -93,12 +94,12 @@ test('一帧只建预算之内的 Replica，剩下的下一帧接着建', () => 
   const snapshots = [crate('c1'), crate('c2'), crate('c3'), crate('c4'), crate('c5')];
   harness.system.syncSnapshots(snapshots, 1_000, 1_000);
 
-  harness.system.update(1 / 60, 0);
+  stepActorFrame(harness.system, 1 / 60, 0);
   const first = snapshots.filter((entry) => harness.exists(entry.id)).length;
   assert.ok(first > 0 && first < snapshots.length, `第一帧建了 ${first} 个，应当既有进度又没建完`);
 
   // 快照集合每帧都完整重放，所以不需要待建队列：没轮到的下一帧自己会再来。
-  for (let frame = 1; frame <= 5; frame += 1) harness.system.update(1 / 60, frame / 60);
+  for (let frame = 1; frame <= 5; frame += 1) stepActorFrame(harness.system, 1 / 60, frame / 60);
   for (const entry of snapshots) {
     assert.ok(harness.exists(entry.id), `${entry.id} 始终没有被建出来`);
   }
@@ -110,9 +111,9 @@ test('预算为 0 也保证每帧建一个，不会永远排不上', () => {
   const snapshots = [crate('c1'), crate('c2')];
   harness.system.syncSnapshots(snapshots, 1_000, 1_000);
 
-  harness.system.update(1 / 60, 0);
+  stepActorFrame(harness.system, 1 / 60, 0);
   assert.equal(snapshots.filter((entry) => harness.exists(entry.id)).length, 1);
-  harness.system.update(1 / 60, 1 / 60);
+  stepActorFrame(harness.system, 1 / 60, 1 / 60);
   assert.equal(snapshots.filter((entry) => harness.exists(entry.id)).length, 2);
   harness.system.dispose();
 });
@@ -120,7 +121,7 @@ test('预算为 0 也保证每帧建一个，不会永远排不上', () => {
 test('这一帧没轮到的 Actor 不会留下半个状态', () => {
   const harness = createSystem(0);
   harness.system.syncSnapshots([crate('c1'), crate('c2')], 1_000, 1_000);
-  harness.system.update(1 / 60, 0);
+  stepActorFrame(harness.system, 1 / 60, 0);
   // 只建了一个：另一个既不在世界里，也没有占住渲染世界的槽位。
   assert.equal(harness.system.getRenderScene().liveProxies().length, 1);
   harness.system.dispose();
@@ -134,11 +135,11 @@ test('分帧之后仍然「快照顺序不影响层级」：子节点排在父�
   const parent = { ...crate('parent'), archetypeId: 'raft' } as SnapshotActor;
   harness.system.syncSnapshots([child, parent], 1_000, 1_000);
 
-  harness.system.update(1 / 60, 0);
+  stepActorFrame(harness.system, 1 / 60, 0);
   assert.equal(harness.exists('parent'), true, '父节点应当被优先建出来');
   assert.equal(harness.exists('child'), false, '预算用完时子节点必须整个推到下一帧');
 
-  harness.system.update(1 / 60, 1 / 60);
+  stepActorFrame(harness.system, 1 / 60, 1 / 60);
   assert.equal(harness.exists('child'), true);
   assert.equal(harness.system.getActor('child')?.parent?.id, 'parent', '子节点没有挂到父节点上');
   harness.system.dispose();
@@ -147,14 +148,14 @@ test('分帧之后仍然「快照顺序不影响层级」：子节点排在父�
 test('排队期间 Actor 从快照里消失，就再也不会被建出来', () => {
   const harness = createSystem(0);
   harness.system.syncSnapshots([crate('c1'), crate('c2')], 1_000, 1_000);
-  harness.system.update(1 / 60, 0);
+  stepActorFrame(harness.system, 1 / 60, 0);
   assert.equal(harness.exists('c1'), true);
   assert.equal(harness.exists('c2'), false, '预算只够建一个');
 
   // c2 还没轮到就离开了视野。要让新快照真的被采样到，时间轴必须越过插值延迟。
   harness.system.syncSnapshots([crate('c1')], 1_100, 1_100);
   harness.setNow(1_100 + INTERPOLATION_DELAY_MS + 10);
-  for (let frame = 1; frame <= 3; frame += 1) harness.system.update(1 / 60, frame / 60);
+  for (let frame = 1; frame <= 3; frame += 1) stepActorFrame(harness.system, 1 / 60, frame / 60);
   assert.equal(harness.exists('c2'), false, '离开快照的 Actor 不该被补建');
   harness.system.dispose();
 });

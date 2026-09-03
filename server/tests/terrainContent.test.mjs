@@ -4,13 +4,16 @@ import {
   buildTerrainChunkData,
   encodeTerrainCell,
   sampleTerrain,
+  terrainCellBiome,
   terrainCellCodeAt,
   terrainCellCornerHeight,
   terrainCellHeightLevel,
   terrainCellShape,
   terrainCellSurface,
 } from '../../shared/world/terrainContent.mjs';
+import { terrainBiomeAt } from '../../shared/world/terrainBiome.mjs';
 import {
+  TERRAIN_BIOME,
   TERRAIN_CELL_COUNT,
   TERRAIN_CELL_SIZE,
   TERRAIN_GRID,
@@ -203,5 +206,59 @@ test('单高角与单低角都补齐四个方向，角点高度和表面采样�
     assert.ok(rise > 0.8, `shape ${shape} 没有沿正确角方向跨越一层`);
     assert.ok(namedCorner.normalY < 1);
     assert.ok(oppositeCorner.normalY < 1);
+  }
+});
+
+test('群系与高度、表面、形状在 code 里互不干扰', () => {
+  for (const biome of Object.values(TERRAIN_BIOME)) {
+    for (const heightLevel of [-128, -2, 0, 3, 127]) {
+      for (const surface of [TERRAIN_SURFACE.GROUND, TERRAIN_SURFACE.WATER]) {
+        for (const shape of [TERRAIN_SHAPE.FLAT, TERRAIN_SHAPE.RAMP_WEST, TERRAIN_SHAPE.CORNER_LOW_NORTH_WEST]) {
+          const code = encodeTerrainCell(heightLevel, surface, shape, biome);
+          assert.equal(terrainCellHeightLevel(code), heightLevel);
+          assert.equal(terrainCellSurface(code), surface);
+          assert.equal(terrainCellShape(code), shape);
+          assert.equal(terrainCellBiome(code), biome);
+        }
+      }
+    }
+  }
+  // 不传群系的旧调用方仍然得到草原，手写 code 的测试与编辑器不受影响。
+  assert.equal(
+    terrainCellBiome(encodeTerrainCell(1, TERRAIN_SURFACE.GROUND, TERRAIN_SHAPE.FLAT)),
+    TERRAIN_BIOME.GRASSLAND,
+  );
+});
+
+test('生成的格子带着所在片区的地皮，水底也一样', () => {
+  let waterCells = 0;
+  for (let cellZ = -40; cellZ < 40; cellZ += 1) {
+    for (let cellX = -40; cellX < 40; cellX += 1) {
+      const code = terrainCellCodeAt(DEFAULT_WORLD_SEED, cellX, cellZ);
+      assert.equal(terrainCellBiome(code), terrainBiomeAt(DEFAULT_WORLD_SEED, cellX, cellZ));
+      if (terrainCellSurface(code) === TERRAIN_SURFACE.WATER) waterCells += 1;
+    }
+  }
+  assert.ok(waterCells > 0, '扫描区里应该有水面，否则这条断言没盖到水底');
+});
+
+test('sampleTerrain 把群系一并交出来，meta 字节也留着它', () => {
+  const sample = sampleTerrain(DEFAULT_WORLD_SEED, 37.4, -58.9);
+  assert.equal(sample.biome, terrainBiomeAt(DEFAULT_WORLD_SEED, sample.globalCellX, sample.globalCellZ));
+
+  const chunkX = 1;
+  const chunkZ = -2;
+  const { meta } = buildTerrainChunkData(DEFAULT_WORLD_SEED, chunkX, chunkZ);
+  for (let localZ = 0; localZ < TERRAIN_GRID; localZ += 1) {
+    for (let localX = 0; localX < TERRAIN_GRID; localX += 1) {
+      assert.equal(
+        terrainCellBiome(meta[localZ * TERRAIN_GRID + localX]),
+        terrainBiomeAt(
+          DEFAULT_WORLD_SEED,
+          chunkX * TERRAIN_GRID + localX,
+          chunkZ * TERRAIN_GRID + localZ,
+        ),
+      );
+    }
   }
 });

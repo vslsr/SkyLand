@@ -134,6 +134,8 @@ SkyLand 有一米高的垂直块边，Rapier heightfield 无法表达，必须�
 
 既有 `simpleCollision` 仍是 Actor 和世界物件的 authoring 格式。`simpleCollisionToPhysics.mjs` 负责一次性翻译坐标、yaw、盒/圆柱和 layer，调用方不应手写第二套尺寸。
 
+**yaw 三处同号。** 线稿合批（`chunkGenerator.mjs`）、`simpleCollision` 的世界→局部变换、`PhysicsWorld` 的 `yawQuaternion` 用的都是绕 +Y 的正向旋转（局部→世界是 `[[cos, sin], [-sin, cos]]`，与 Three.js 的 `rotation.y` 一致）。任何一处取反，Rapier 里的盒子就相对看得见的模型镜像过去：正方形足迹（树干、全部圆柱）看不出来，长方形会偏出可观的距离——流式世界那块 0.48 × 0.40 的石头实测最多偏 0.26 米，表现为「被不存在的墙挡住，又能踩进石头里」。`server/tests/stepCharacter.test.mjs` 里「长方形碰撞盒转成 Rapier 之后朝向不变」逐角度锁死这一条。
+
 复杂外形可映射为多枚 collider。弹性蘑菇就是“细 stem + 薄 cap 支撑面”：只用 stem 会让角色从视觉菌盖被拉到细根顶；把整株放大成盒又会制造看不见的墙。木筏同理，支撑顶面要对齐甲板，不应使用模型最高装饰点作为整块实体墙。
 
 Layer 语义：

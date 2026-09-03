@@ -38,6 +38,13 @@ export interface FrameStatsPanelOptions {
  * `canvas.getContext('webgl2')`——浏览器对同一块画布只会给出同一个上下文，
  * 谁先调用谁的 attributes 生效。抢在渲染器前面调用，会让 `antialias`、
  * `alpha`、`powerPreference` 这些参数被静默丢弃。
+ *
+ * **渲染循环进 worker 之后这块面板装不上了**，而且这不是一个可以绕过去的实现细节：
+ * 画布的控制权被 `transferControlToOffscreen()` 转移走了，主线程这一侧再也拿不到
+ * 那个上下文——`getContext` 会直接抛 `InvalidStateError`。GPU 计时只能在渲染线程上
+ * 读（`EXT_disjoint_timer_query_webgl2` 在那边），而 `stats-gl` 的面板是 DOM，
+ * 只能在主线程上画。要恢复它得把「读」和「画」拆开：worker 读、报文回来、主线程画。
+ * 那是一件独立的事，所以这里先老实地退让并说清楚原因。
  */
 export async function createFrameStatsPanel(
   options: FrameStatsPanelOptions,
@@ -46,8 +53,18 @@ export async function createFrameStatsPanel(
 
   const { default: Stats } = await import('stats-gl');
   const stats = new Stats({ trackGPU: true, trackFPS: true, horizontal: true, precision: 1 });
-  // init 是异步的（WebGPU 那条路要等设备），WebGL2 这条路里它同步就走完了。
-  await stats.init(options.canvas);
+  try {
+    // init 是异步的（WebGPU 那条路要等设备），WebGL2 这条路里它同步就走完了。
+    await stats.init(options.canvas);
+  } catch (error) {
+    console.info(
+      '[debug] 帧率面板没装：画布的控制权已经交给渲染线程，主线程这边拿不到 WebGL 上下文。'
+      + ' GPU 计时要恢复，得由 worker 读了再发回来。',
+      error,
+    );
+    stats.dispose();
+    return undefined;
+  }
 
   const panel = stats.dom;
   panel.style.position = 'fixed';

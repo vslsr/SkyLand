@@ -7,6 +7,7 @@ import { TransformComponent } from '../shared/actor/components/TransformComponen
 import { LegGroundProbeComponent } from '../src/actors/components/LegGroundProbeComponent';
 import { RenderProxyComponent } from '../src/actors/components/RenderProxyComponent';
 import { ActorVisualParamSystem } from '../src/actors/systems/ActorVisualParamSystem';
+import { RenderProxyTable } from '../src/render/RenderProxyTable';
 import { RenderTransformBuffer } from '../src/render/RenderTransformBuffer';
 import {
   SLIME_GROUND_PROBE_AT_REST,
@@ -145,8 +146,11 @@ test('没有腿的槽位每帧被写成静止值，回收后不会继承上一�
 
   const legged = new Actor('legged', 'legged-slime');
   legged.addComponent(new TransformComponent({ position: [2, 1, -3], yaw: 0 }));
-  const proxy = scene.createMeshProxy({ name: 'legged', render: LEGGED_SLIME });
-  legged.addComponent(new RenderProxyComponent(proxy.id, scene));
+  // 槽位由玩法侧分配：渲染世界不回话（见 RenderScene.createMeshProxy）。
+  const proxyIds = new RenderProxyTable(scene);
+  const proxyId = proxyIds.acquire();
+  scene.createMeshProxy(proxyId, { name: 'legged', render: LEGGED_SLIME });
+  legged.addComponent(new RenderProxyComponent(proxyId, proxyIds));
   legged.addComponent(new LegGroundProbeComponent(
     () => 1,
     resolveSlimeLegGroundProbeLayout(LEGGED_SLIME),
@@ -156,7 +160,7 @@ test('没有腿的槽位每帧被写成静止值，回收后不会继承上一�
   transforms.publish();
 
   const readback = { ...SLIME_GROUND_PROBE_AT_REST };
-  readSlimeGroundProbeParams(transforms, proxy.id, readback);
+  readSlimeGroundProbeParams(transforms, proxyId, readback);
   assert.ok(readback.radius > 0);
   assert.equal(readback.centerY, 1);
 
@@ -164,14 +168,15 @@ test('没有腿的槽位每帧被写成静止值，回收后不会继承上一�
   world.removeActor(legged.id);
   const plain = new Actor('plain', 'training-dummy');
   plain.addComponent(new TransformComponent({ position: [2, 1, -3], yaw: 0 }));
-  const recycled = scene.createMeshProxy({ name: 'plain' });
-  assert.equal(recycled.id, proxy.id, '槽位应当被回收复用，否则这条不变量测不到');
-  plain.addComponent(new RenderProxyComponent(recycled.id, scene));
+  const recycled = proxyIds.acquire();
+  assert.equal(recycled, proxyId, '槽位应当被回收复用，否则这条不变量测不到');
+  scene.createMeshProxy(recycled, { name: 'plain' });
+  plain.addComponent(new RenderProxyComponent(recycled, proxyIds));
   world.addActor(plain);
   world.update(1 / 60, 0);
   transforms.publish();
 
-  readSlimeGroundProbeParams(transforms, recycled.id, readback);
+  readSlimeGroundProbeParams(transforms, recycled, readback);
   assert.deepEqual(readback, { ...SLIME_GROUND_PROBE_AT_REST });
 });
 
@@ -196,7 +201,8 @@ interface LegHarness {
 function createLegHarness(): LegHarness {
   const transforms = new RenderTransformBuffer(8);
   const scene = new ThreeRenderScene(new THREE.Group(), ENVIRONMENT);
-  const info = scene.createPlayerProxy({
+  const proxyId = new RenderProxyTable(scene).acquire();
+  scene.createPlayerProxy(proxyId, {
     name: 'legged-player',
     render: LEGGED_SLIME,
     walkSpeed: 3.2,
@@ -205,14 +211,14 @@ function createLegHarness(): LegHarness {
   const harness: LegHarness = {
     scene,
     transforms,
-    id: info.id,
+    id: proxyId,
     elapsed: 0,
     step(seconds, state) {
       const groundY = state.groundY ?? 0;
       const slope = state.slopeAlongX ?? 0;
-      transforms.write(info.id, state.x, groundY, state.z, state.yaw ?? 0);
-      writeSlimeMotionParams(transforms, info.id, { ...SLIME_MOTION_AT_REST, ...state.motion });
-      writeSlimeGroundProbeParams(transforms, info.id, {
+      transforms.write(proxyId, state.x, groundY, state.z, state.yaw ?? 0);
+      writeSlimeMotionParams(transforms, proxyId, { ...SLIME_MOTION_AT_REST, ...state.motion });
+      writeSlimeGroundProbeParams(transforms, proxyId, {
         centerY: groundY,
         eastY: groundY + slope * layout.radius,
         westY: groundY - slope * layout.radius,
@@ -435,23 +441,24 @@ test('离地时脚收到髋点正下方，落地后重新踩住地面', () => {
 test('没有地面采样的槽位退回 Actor 自己的脚底平面，而不是世界 Y=0', () => {
   const transforms = new RenderTransformBuffer(8);
   const scene = new ThreeRenderScene(new THREE.Group(), ENVIRONMENT);
-  const info = scene.createPlayerProxy({
+  const proxyId = new RenderProxyTable(scene).acquire();
+  scene.createPlayerProxy(proxyId, {
     name: 'legged-player',
     render: LEGGED_SLIME,
     walkSpeed: 3.2,
   });
   let elapsed = 0;
   for (let frame = 0; frame < 30; frame += 1) {
-    transforms.write(info.id, 0, 12, 0, 0);
-    writeSlimeMotionParams(transforms, info.id, SLIME_MOTION_AT_REST);
-    writeSlimeGroundProbeParams(transforms, info.id, SLIME_GROUND_PROBE_AT_REST);
+    transforms.write(proxyId, 0, 12, 0, 0);
+    writeSlimeMotionParams(transforms, proxyId, SLIME_MOTION_AT_REST);
+    writeSlimeGroundProbeParams(transforms, proxyId, SLIME_GROUND_PROBE_AT_REST);
     transforms.publish();
     scene.submitTransforms(transforms);
     elapsed += 1 / 60;
     scene.updateVisuals(transforms, 1 / 60, elapsed);
   }
 
-  const proxy = scene.resolve(info.id)!;
+  const proxy = scene.resolve(proxyId)!;
   proxy.root.updateWorldMatrix(true, true);
   const foot = proxy.root.getObjectByName('legged-slime-foot-0')!
     .getWorldPosition(new THREE.Vector3());

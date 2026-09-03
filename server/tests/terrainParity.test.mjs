@@ -5,6 +5,7 @@ import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { readWasmTerrainCellCode } from '../../shared/world/chunkGeneratorWasm.mjs';
 import {
+  terrainCellBiome,
   terrainCellCodeAt,
   terrainCellHeightLevel,
   terrainCellShape,
@@ -12,6 +13,7 @@ import {
   sampleTerrain,
 } from '../../shared/world/terrainContent.mjs';
 import {
+  TERRAIN_BIOME,
   TERRAIN_GRID,
   TERRAIN_CELL_SIZE,
   TERRAIN_SHAPE,
@@ -32,6 +34,9 @@ const CELL_MAXIMUM = (CHUNK_MAXIMUM + 1) * TERRAIN_GRID - 1;
 const SHAPE_NAME = Object.fromEntries(
   Object.entries(TERRAIN_SHAPE).map(([name, value]) => [value, name]),
 );
+const BIOME_NAME = Object.fromEntries(
+  Object.entries(TERRAIN_BIOME).map(([name, value]) => [value, name]),
+);
 
 async function instantiateTerrain() {
   const { instance } = await WebAssembly.instantiate(await readFile(WASM_PATH), {});
@@ -39,13 +44,14 @@ async function instantiateTerrain() {
 }
 
 /**
- * 扫一片格子，逐格比对两个后端，并统计实际覆盖到的形状与表面。
+ * 扫一片格子，逐格比对两个后端，并统计实际覆盖到的形状、表面与群系。
  * @param {WebAssembly.Instance} instance
  * @param {number} seed
  */
 function compareArea(instance, seed, minimum, maximum) {
   const shapes = new Map();
   const surfaces = new Map();
+  const biomes = new Map();
   let cells = 0;
   for (let cellZ = minimum; cellZ <= maximum; cellZ += 1) {
     for (let cellX = minimum; cellX <= maximum; cellX += 1) {
@@ -56,24 +62,28 @@ function compareArea(instance, seed, minimum, maximum) {
         assert.fail(
           `种子 ${seed >>> 0} 的格 (${cellX}, ${cellZ}) 两端不一致：`
           + `wasm 高度 ${terrainCellHeightLevel(fromWasm)} 表面 ${terrainCellSurface(fromWasm)} `
-          + `形状 ${SHAPE_NAME[terrainCellShape(fromWasm)]}，`
+          + `形状 ${SHAPE_NAME[terrainCellShape(fromWasm)]} `
+          + `地皮 ${BIOME_NAME[terrainCellBiome(fromWasm)]}，`
           + `js 高度 ${terrainCellHeightLevel(fromJavaScript)} 表面 ${terrainCellSurface(fromJavaScript)} `
-          + `形状 ${SHAPE_NAME[terrainCellShape(fromJavaScript)]}`,
+          + `形状 ${SHAPE_NAME[terrainCellShape(fromJavaScript)]} `
+          + `地皮 ${BIOME_NAME[terrainCellBiome(fromJavaScript)]}`,
         );
       }
       const shape = terrainCellShape(fromJavaScript);
       const surface = terrainCellSurface(fromJavaScript);
+      const biome = terrainCellBiome(fromJavaScript);
       shapes.set(shape, (shapes.get(shape) ?? 0) + 1);
       surfaces.set(surface, (surfaces.get(surface) ?? 0) + 1);
+      biomes.set(biome, (biomes.get(biome) ?? 0) + 1);
       cells += 1;
     }
   }
-  return { cells, shapes, surfaces };
+  return { cells, shapes, surfaces, biomes };
 }
 
-test('WASM 与 JS 的地形逐格相同，覆盖全部形状与水面', async () => {
+test('WASM 与 JS 的地形逐格相同，覆盖全部形状、水面与地皮', async () => {
   const instance = await instantiateTerrain();
-  const { cells, shapes, surfaces } = compareArea(
+  const { cells, shapes, surfaces, biomes } = compareArea(
     instance,
     DEFAULT_WORLD_SEED,
     CELL_MINIMUM,
@@ -92,6 +102,15 @@ test('WASM 与 JS 的地形逐格相同，覆盖全部形状与水面', async ()
   }
   assert.ok((surfaces.get(TERRAIN_SURFACE.GROUND) ?? 0) > 0, '扫描区里应该有陆地');
   assert.ok((surfaces.get(TERRAIN_SURFACE.WATER) ?? 0) > 0, '扫描区里应该有水面');
+
+  // 同一条护栏：群系写在 code 的第 5-7 位，只有扫到每一种地皮，
+  // 这次比对才真的盖住了 biome.rs 与 terrainBiome.mjs 之间的全部分支。
+  for (const [name, value] of Object.entries(TERRAIN_BIOME)) {
+    assert.ok(
+      (biomes.get(value) ?? 0) > 0,
+      `扫描区里没有出现地皮 ${name}，地形比对已经不覆盖全部群系分支`,
+    );
+  }
 });
 
 test('换种子仍然逐格相同，负坐标也一样', async () => {

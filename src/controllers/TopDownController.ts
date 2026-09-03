@@ -37,6 +37,7 @@ import {
 import { SimulationClock } from '../../shared/physics/simulationClock.mjs';
 import {
   RECONCILE_RATE,
+  RECONCILE_CONVERGENCE,
   RECONCILE_SNAP_DISTANCE,
   RECONCILE_TOLERANCE,
   SIMULATION_STEP_SECONDS,
@@ -411,8 +412,10 @@ export class TopDownController {
     const groundedChanged = predicted.grounded !== this.characterState.grounded;
 
     if (residualDistance <= RECONCILE_TOLERANCE && !groundedChanged) {
-      // 快照坐标按毫米量化。容差内把预测位置写回，避免每份快照都让 Rapier
-      // 从略有不同的地形三角面起点重新出发；速度等运动状态仍采用重放结果。
+      // 快照坐标按毫米量化，所以容差内不整个采用重放结果——那会让 Rapier 每份
+      // 快照都从略有不同的地形三角面起点重新出发。但也**不能原样保留预测**：
+      // 那样误差永远不收敛，会一直攒到 6cm 门槛，再由下面的分支一次性拉回，
+      // 走起来就是一秒一顿。这里按比例吃掉一部分，误差指数衰减。
       const reconciledMotion = {
         vx: this.characterState.vx,
         vy: this.characterState.vy,
@@ -420,10 +423,25 @@ export class TopDownController {
         grounded: this.characterState.grounded,
         jumpPressed: this.characterState.jumpPressed,
       };
+      const consumedX = errorX * RECONCILE_CONVERGENCE;
+      const consumedY = errorY * RECONCILE_CONVERGENCE;
+      const consumedZ = errorZ * RECONCILE_CONVERGENCE;
       copyCharacterState(this.characterState, predicted);
       Object.assign(this.characterState, reconciledMotion);
+      this.characterState.x -= consumedX;
+      this.characterState.y -= consumedY;
+      this.characterState.z -= consumedZ;
       this.physicsWorld.setCharacterTranslation(this.characterId, this.characterState);
       this.physicsWorld.prepareQueries();
+      // 吃掉的那一点同样走渲染偏移补偿，画面上看不出这一步收敛。
+      this.previousSimulationPosition.x -= consumedX;
+      this.previousSimulationPosition.y -= consumedY;
+      this.previousSimulationPosition.z -= consumedZ;
+      this.renderOffsetX += consumedX;
+      this.renderOffsetY += consumedY;
+      this.renderOffsetZ += consumedZ;
+      // 插值两端与偏移各自平移了同一个量，可见位置因此**逐点不变**，
+      // 不必也不该在这里重算它——那会把当前这一帧的插值相位一起抹掉。
       this.jumpAbility?.applyAuthoritativeState(
         this.characterState.vy,
         this.characterState.grounded,

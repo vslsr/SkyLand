@@ -1,5 +1,3 @@
-import * as THREE from 'three';
-import type { ChunkGenerator } from '../../shared/world/chunkGenerator.mjs';
 import { parseChunkKey, toChunkCoordinate, toChunkKey } from '../../shared/world/chunkKey.mjs';
 import { planChunkStream } from '../../shared/world/chunkStream.mjs';
 import { TerrainPatchStore } from '../../shared/world/terrainPatches.mjs';
@@ -20,12 +18,11 @@ import {
 } from './terrainCollisionJob';
 import { simpleCollisionGroupToPhysicsDefinitions } from '../../shared/physics/simpleCollisionToPhysics.mjs';
 import { readChunkColliders } from '../../shared/world/chunkColliders.mjs';
+import { generateChunkProps, PROP_BUFFER_LENGTH } from '../../shared/world/chunkContent.mjs';
 import {
   isPropSkipped,
   setPropSkipped as updatePropSkipMask,
 } from '../../shared/world/generatedProp.mjs';
-import type { GrassInteractionTarget } from '../grass';
-import type { FillMaterialEnvironment } from '../materials/createFillMaterial';
 
 /**
  * 同时在途的地形网格请求数。
@@ -34,14 +31,9 @@ import type { FillMaterialEnvironment } from '../materials/createFillMaterial';
  * 再多只是让工作线程提前算好一堆随时可能被重新规划掉的 chunk。
  */
 const TERRAIN_REQUESTS_IN_FLIGHT = 4;
-import { registerChunkTemplates, type ChunkTemplateOptions } from '../models/chunkTemplates';
-import type { SceneUpdateContext, SceneVisualSystem } from '../scene/SceneVisualSystem';
-import type {
-  OceanVisualDefinition,
-  WorldStreamingDefinition,
-} from '../scenes/data/SceneDefinition';
-import { ChunkViewHost } from './ChunkViewHost';
-import { createChunkGenerator } from './loadChunkGenerator';
+import type { SceneFrameSystem, SceneUpdateContext } from '../scene/SceneVisualSystem';
+import type { WorldStreamingDefinition } from '../scenes/data/SceneDefinition';
+import type { ChunkViewSink } from './ChunkViewHost';
 
 interface PendingChunk {
   chunkX: number;
@@ -51,9 +43,11 @@ interface PendingChunk {
 
 export interface ChunkStreamerOptions {
   world: WorldStreamingDefinition;
-  templates: ChunkTemplateOptions;
-  environment: FillMaterialEnvironment;
-  ocean?: OceanVisualDefinition;
+  /**
+   * 渲染那一半。**由装配传进来，不在这里建**——它属于渲染世界，
+   * 而这个类属于玩法世界（实现路径文档 §3）。
+   */
+  views: ChunkViewSink;
   seaLevel?: number;
   terrainPatches?: TerrainPatchStore;
   /** 房间分配的世界种子。种子决定这一局的世界，缺省时退回默认种子。 */
@@ -97,22 +91,16 @@ interface PropSkipMask {
  * 交给渲染那一半的**全是数据**：放置记录、几何数组，加上这一窗里被编辑过的
  * 格子。程序化底图那一侧自己按世界种子推得出来，所以过边界的只有编辑覆盖。
  *
- * 还没搬的是最外层：`root` 与 `beforeRender` 仍在这个类上，因为它是场景的
- * `SceneVisualSystem`。那一层要等渲染循环整个进线程时才动。
+ * 它已经**不往场景图里挂任何东西**：渲染那一半由装配建好后传进来，这个类只对它
+ * 发三条命令。所以它是 `SceneFrameSystem` 而不是 `SceneVisualSystem`——
+ * 没有 `root`，也没有 `beforeRender`。
  */
-export class ChunkStreamer implements SceneVisualSystem {
-  public readonly root = new THREE.Group();
-  public readonly grassInteraction?: GrassInteractionTarget;
+export class ChunkStreamer implements SceneFrameSystem {
   public readonly terrainPatches: TerrainPatchStore;
   public readonly terrainEditor: TerrainEditor;
 
-  /**
-   * 渲染那一半。这个类只对它发三条命令：挂上、卸掉、清空。
-   *
-   * 它是一个字段而不是继承／混入，就是为了让「哪些代码会跟着 canvas 走」
-   * 在文件层面一眼看得出来（实现路径文档 §3）。
-   */
-  private readonly views: ChunkViewHost;
+  /** 渲染那一半的命令口。只有三条：挂上、卸掉、清空。 */
+  private readonly views: ChunkViewSink;
   /** 已经挂上的 chunk。规划只需要知道键，不需要知道视图长什么样。 */
   private readonly mounted = new Set<string>();
 
@@ -123,6 +111,8 @@ export class ChunkStreamer implements SceneVisualSystem {
   private readonly onChunkUnmounted?: ChunkStreamerOptions['onChunkUnmounted'];
   /** 只保存被动过的 chunk，默认世界仍不占状态内存。 */
   private readonly skipMasks = new Map<string, PropSkipMask>();
+  /** 放置记录的复用缓冲。逐 chunk 重铺，不逐 chunk 分配。 */
+  private readonly propBuffer = new Int32Array(PROP_BUFFER_LENGTH);
   /** 已规划、还没往工作线程送的。 */
   private pending: PendingChunk[] = [];
   /**
@@ -145,7 +135,7 @@ export class ChunkStreamer implements SceneVisualSystem {
   }[] = [];
   private nextTerrainRequestId = 1;
   private readonly terrainRunner = createTerrainCollisionRunner();
-  private generator?: ChunkGenerator;
+  private generatorKind = 'none';
   private readonly worldSeed: number;
   private readonly cellCodeAt: (globalCellX: number, globalCellZ: number) => number;
   private readonly unsubscribeTerrainPatches: () => void;
@@ -154,7 +144,7 @@ export class ChunkStreamer implements SceneVisualSystem {
   private disposed = false;
 
   public constructor(options: ChunkStreamerOptions) {
-    this.root.name = 'chunk-streamer';
+
     this.world = options.world;
     this.collision = options.collision;
     this.physics = options.physics;
@@ -177,38 +167,25 @@ export class ChunkStreamer implements SceneVisualSystem {
         if (this.mounted.has(chunk.key)) this.rebuild(chunk.key);
       }
     });
-    this.views = new ChunkViewHost({
-      templates: options.templates,
-      environment: options.environment,
-      ocean: options.ocean,
-      seaLevel,
-      worldSeed: this.worldSeed,
-      grassPatches: options.world.grassPatches,
-    });
-    this.grassInteraction = this.views.grassInteraction;
-    this.root.add(this.views.root);
-
-    // 生成后端是异步取回来的；在它就位之前 update 不建任何东西，
-    // 世界会晚一两帧出现，这比先用一套参数铺一遍再重铺要划算。
-    void createChunkGenerator().then((generator) => {
+    this.views = options.views;
+    // 生成后端在渲染那一侧（它要 THREE 模板）。在它就位之前不规划任何东西：
+    // 先规划就会注册出一批「踩得到但看不见」的碰撞体。
+    this.views.onGeneratorReady((kind) => {
       if (this.disposed) return;
-      // 草继续由生成器产出同一批放置记录，但不再烘进静态 chunk；
-      // StreamingGrassSystem 会按这些原坐标生成可交互的实例叶片。
-      registerChunkTemplates(generator, {
-        ...options.templates,
-        content: { ...options.templates.content, grass: false },
-      });
-      this.setGenerator(generator);
+      this.generatorKind = kind;
+      this.clearChunks();
     });
   }
 
-  /** 当前用的是哪个生成后端，用于 HUD 与排查问题。 */
+  /** 当前用的是哪个生成后端，用于 HUD 与排查问题。渲染那一侧就位时告知一次。 */
   public get backendKind(): string {
-    return this.generator?.kind ?? 'none';
+    return this.generatorKind;
   }
 
   public get loadedCount(): number {
-    return this.views.mountedCount;
+    // 数玩法侧那张表，不问渲染那一半——它和 `mounted` 一直是同步的，
+    // 而跨线程之后「问一句」就成了一次往返。
+    return this.mounted.size;
   }
 
   public get pendingCount(): number {
@@ -236,7 +213,7 @@ export class ChunkStreamer implements SceneVisualSystem {
     const next = updatePropSkipMask(previous, propIndex, skipped);
     if (next.low === 0 && next.high === 0) this.skipMasks.delete(key);
     else this.skipMasks.set(key, next);
-    if (this.views.has(key)) this.rebuild(key);
+    if (this.mounted.has(key)) this.rebuild(key);
     return true;
   }
 
@@ -244,10 +221,8 @@ export class ChunkStreamer implements SceneVisualSystem {
    * 每帧调用。焦点通常是玩家位置；还没有玩家时是相机位置，
    * 这样大厅背后看到的也是一片正常的世界。
    */
-  public update(deltaSeconds: number, elapsedSeconds: number, context?: SceneUpdateContext): void {
-    // 草地与水面的时间量属于渲染那一半，和流送规划无关。
-    this.views.update(deltaSeconds, elapsedSeconds, context);
-    if (!this.generator || !context) return;
+  public update(_deltaSeconds: number, _elapsedSeconds: number, context?: SceneUpdateContext): void {
+    if (this.generatorKind === 'none' || !context) return;
 
     const centerX = toChunkCoordinate(context.focusX);
     const centerZ = toChunkCoordinate(context.focusZ);
@@ -269,25 +244,13 @@ export class ChunkStreamer implements SceneVisualSystem {
     this.drainBuildBudget();
   }
 
-  public beforeRender(renderer: THREE.WebGLRenderer): void {
-    this.views.beforeRender(renderer);
-  }
-
   /** 场景卸载时释放这个流式世界独占的显存。 */
   public dispose(): void {
     this.disposed = true;
     this.clearChunks();
-    this.views.dispose();
     this.unsubscribeTerrainPatches();
     this.terrainRunner.dispose();
     this.skipMasks.clear();
-    this.generator = undefined;
-  }
-
-  private setGenerator(generator: ChunkGenerator): void {
-    this.generator = generator;
-    generator.setSeed(this.worldSeed);
-    this.clearChunks();
   }
 
   /**
@@ -303,7 +266,7 @@ export class ChunkStreamer implements SceneVisualSystem {
     while (this.requestedTerrain.size < TERRAIN_REQUESTS_IN_FLIGHT) {
       const next = this.pending.shift();
       if (!next) return;
-      if (this.views.has(next.key) || this.requestedTerrain.has(next.key)) continue;
+      if (this.mounted.has(next.key) || this.requestedTerrain.has(next.key)) continue;
       this.requestTerrain(next);
     }
   }
@@ -383,16 +346,9 @@ export class ChunkStreamer implements SceneVisualSystem {
     terrainMesh?: TerrainCollisionResult,
     terrainOverrides?: Int32Array,
   ): boolean {
-    if (!this.generator) return false;
+    if (this.generatorKind === 'none') return false;
     try {
-      const skipMask = this.skipMasks.get(chunk.key);
-      // 这两个阶段分开打点是有目的的：`chunk-gen` 是纯计算（只是便宜到不值得搬）；
-      // 后面那一半里 `chunk-geometry` 建的是 Three 几何，跟着 canvas 走。
-      const data = frameTimeline.measure(
-        'chunk-gen',
-        () => this.generator!.buildChunk(chunk.chunkX, chunk.chunkZ, skipMask),
-      );
-      return this.mountView(chunk, data, skipMask, terrainMesh, terrainOverrides);
+      return this.mountView(chunk, terrainMesh, terrainOverrides);
     } catch (error) {
       // 单个 chunk 建不出来不该拖垮整个场景，跳过它，下次重新规划时再试。
       console.error(`[world] chunk ${chunk.key} 构建失败`, error);
@@ -401,33 +357,41 @@ export class ChunkStreamer implements SceneVisualSystem {
   }
 
   /**
-   * `mount` 的后一半：把生成结果分给渲染、物理和 Actor 三边。
+   * `mount` 的后一半：把这块 chunk 分给渲染、物理和 Actor 三边。
    *
-   * 这一段以前是三件事揉在一起。现在几何整个交给 `ChunkViewHost`——**给的是数据**：
-   * 放置记录、几何数组，加上这一窗里被编辑过的格子。传覆盖而不是传一个读
-   * patch store 的回调，是因为回调过不了线程边界（实现路径文档 §3）。
+   * 几何**不再从这里流过去**。它由渲染那一侧照 `(种子, chunkX, chunkZ)` 自己生成
+   * ——那需要 THREE 模板，而模板本来就在那边。这一侧要的是放置记录，
+   * 那是 `generateChunkProps`：同一个种子、同一份纯函数、不需要模板，
+   * 服务端 `ServerGeneratedPropActors` 早就直接调它（实现路径文档 §3）。
+   *
+   * 两侧各推各的，比把一份结果来回送更省事，也是这个世界从一开始就用的办法：
+   * 静态内容从不过网，两端各自按种子算。
    */
   private mountView(
     chunk: PendingChunk,
-    data: ReturnType<NonNullable<ChunkStreamer['generator']>['buildChunk']>,
-    skipMask: ReturnType<ChunkStreamer['skipMasks']['get']>,
     terrainMesh?: TerrainCollisionResult,
     terrainOverrides?: Int32Array,
   ): boolean {
+    const skipMask = this.skipMasks.get(chunk.key);
     this.views.mount({
       key: chunk.key,
       chunkX: chunk.chunkX,
       chunkZ: chunk.chunkZ,
-      data,
+      skipMask,
       // 走工作线程那条路时覆盖已经收过一次，直接复用；编辑重建那条现收。
       terrainOverrides: terrainOverrides
         ?? this.collectTerrainOverrides(chunk.chunkX, chunk.chunkZ),
     });
+    // 放置记录由这一侧按同一个种子推出来，喂给碰撞体与生成物件 Actor。
+    const propCount = frameTimeline.measure(
+      'chunk-props-generate',
+      () => generateChunkProps(this.worldSeed, chunk.chunkX, chunk.chunkZ, this.propBuffer),
+    );
     // 再分一层：`*-build` 是纯计算（能挪走），`*-register` 是往 Rapier 的 WASM 堆里
     // 塞碰撞体（必须和物理世界同线程）。这两个数决定第 2 步该搬什么。
     frameTimeline.measure('chunk-props-collide', () => {
       // 碰撞体由同一批放置记录派生，和几何体同生共死，不会出现「看得见但撞不到」。
-      const chunkColliders = readChunkColliders(data.props, data.propCount, [], {
+      const chunkColliders = readChunkColliders(this.propBuffer, propCount, [], {
         skipMask,
         chunkX: chunk.chunkX,
         chunkZ: chunk.chunkZ,
@@ -451,8 +415,8 @@ export class ChunkStreamer implements SceneVisualSystem {
       chunk.key,
       chunk.chunkX,
       chunk.chunkZ,
-      data.props,
-      data.propCount,
+      this.propBuffer,
+      propCount,
     );
     return true;
   }

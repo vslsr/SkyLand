@@ -21,7 +21,8 @@ import type {
   ActorArchetypeDefinition,
   SceneBounds,
 } from '../scenes/data/SceneDefinition';
-import type { MeshProxyInfo, ProxyId, RenderScene } from '../render/RenderScene';
+import type { ProxyId, RenderScene } from '../render/RenderScene';
+import type { RenderProxyTable, RenderWorldHandle } from '../render/RenderProxyTable';
 import type { RenderTransformBuffer } from '../render/RenderTransformBuffer';
 import {
   SLIME_MOTION_AT_REST,
@@ -107,7 +108,9 @@ export class PlayerEntity extends Actor {
    * 位置也走同一段 transform SoA——玩家不是 Replica，但它在边界上和别人一样，
    * 只是一个 ProxyId。
    */
-  private readonly renderProxy: MeshProxyInfo;
+  private readonly proxyId: ProxyId;
+  /** 槽位表既是分配器也是命令口：销毁和回收槽位必须是同一件事。 */
+  private readonly proxyIds: RenderProxyTable;
   private readonly renderScene: RenderScene;
   private readonly transforms: RenderTransformBuffer;
   /**
@@ -144,7 +147,7 @@ export class PlayerEntity extends Actor {
     bounds: SceneBounds,
     grassInteraction: PlayerWorldInteraction,
     archetype: ActorArchetypeDefinition,
-    renderWorld: { scene: RenderScene; transforms: RenderTransformBuffer },
+    renderWorld: RenderWorldHandle,
     topDownCameraOffset: Vec3 = DEFAULT_TOP_DOWN_CAMERA_OFFSET,
   ) {
     super(playerId, archetype.id);
@@ -176,7 +179,9 @@ export class PlayerEntity extends Actor {
     this.visual = resolvePlayerVisualShape(render);
     this.renderScene = renderWorld.scene;
     this.transforms = renderWorld.transforms;
-    this.renderProxy = this.renderScene.createPlayerProxy({
+    this.proxyIds = renderWorld.proxyIds;
+    this.proxyId = this.proxyIds.acquire();
+    this.renderScene.createPlayerProxy(this.proxyId, {
       name: 'local-player-slime',
       render,
       walkSpeed: movement.walkSpeed,
@@ -256,7 +261,7 @@ export class PlayerEntity extends Actor {
 
   /** 蒙皮拖拽等渲染侧交互按它寻址；玩法侧除了这个整数不知道渲染世界里有什么。 */
   public get renderProxyId(): ProxyId {
-    return this.renderProxy.id;
+    return this.proxyId;
   }
 
   /** 渲染位置。相机焦点、粒子效果等只需要读数值，不需要 Object3D。 */
@@ -407,20 +412,20 @@ export class PlayerEntity extends Actor {
    */
   private publishRenderState(): void {
     this.transforms.write(
-      this.renderProxy.id,
+      this.proxyId,
       this.transform.position.x,
       this.transform.position.y,
       this.transform.position.z,
       this.transform.rotation.y,
     );
-    writeSlimeMotionParams(this.transforms, this.renderProxy.id, this.motion);
+    writeSlimeMotionParams(this.transforms, this.proxyId, this.motion);
     // 本地玩家的拖拽整个在渲染侧完成，不经过这条复制通道；但槽位仍要每帧写，
     // 否则回收来的槽位会带着上一位玩家的残留把自己的外壳拉出去。
     // 自己的鼠标拖拽整个在渲染侧完成，不经过这条复制通道；走这里的只有被别人
     // 咬住那一份。没有的时候也要每帧写，否则回收来的槽位会带着上一位玩家的
     // 残留把自己的外壳拉出去。
-    writeSlimeDragParams(this.transforms, this.renderProxy.id, this.replicatedDrag);
-    writeSlimeBiteParams(this.transforms, this.renderProxy.id, this.biteTips);
+    writeSlimeDragParams(this.transforms, this.proxyId, this.replicatedDrag);
+    writeSlimeBiteParams(this.transforms, this.proxyId, this.biteTips);
     this.publishGroundProbe();
   }
 
@@ -433,13 +438,13 @@ export class PlayerEntity extends Actor {
     if (!legs) {
       writeSlimeGroundProbeParams(
         this.transforms,
-        this.renderProxy.id,
+        this.proxyId,
         SLIME_GROUND_PROBE_AT_REST,
       );
       return;
     }
     legs.refresh(this.transform.position.x, this.transform.position.y, this.transform.position.z);
-    writeSlimeGroundProbeParams(this.transforms, this.renderProxy.id, legs.probe);
+    writeSlimeGroundProbeParams(this.transforms, this.proxyId, legs.probe);
   }
 
   public override dispose(): void {
@@ -449,6 +454,6 @@ export class PlayerEntity extends Actor {
     this.reconciler.reset();
     this.pendingInputSteps.length = 0;
     super.dispose();
-    this.renderScene.destroyMeshProxy(this.renderProxy.id);
+    this.proxyIds.destroyMeshProxy(this.proxyId);
   }
 }

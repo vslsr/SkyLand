@@ -12,12 +12,15 @@
 
 import { hash32, valueNoise } from './hash.mjs';
 import {
+  terrainCellBiome,
   terrainCellCodeAtMillimeters,
   terrainCellHeightLevel,
   terrainCellShape,
   terrainCellSurface,
 } from './terrainContent.mjs';
 import {
+  TERRAIN_BIOME,
+  TERRAIN_BIOME_COUNT,
   TERRAIN_HEIGHT_STEP_MM,
   TERRAIN_SHAPE,
   TERRAIN_SURFACE,
@@ -73,6 +76,39 @@ const ROCK_SHARE = 32;
 const MUSHROOM_PLANT_SHARE_NUMERATOR = 3;
 const PLANT_SHARE_DENOMINATOR = 7;
 
+/**
+ * 每种地皮的物件风格，下标是 `TERRAIN_BIOME` 的值。
+ *
+ * 五个字段都是相对草原基准的千分之…不，是 255 分之几：255 表示与草原一模一样，
+ * 0 表示这种地皮上根本不长。`occupancy` 缩放整格的有物件概率，其余四个缩放各类
+ * 物件在剩下那次掷点里的权重。
+ *
+ * **草原一行全是 255 是刻意的**：这样草原上的世界与引入群系之前逐位相同，
+ * 「无边草原」这张图原本长什么样，加了群系之后在草地上还是什么样。
+ *
+ * 数值只减不增（`occupancy` 全部 ≤ 255），所以单 chunk 物件数上限不变，
+ * WASM 侧的静态缓冲区与顶点预算都不需要跟着调。
+ */
+const BIOME_PROP_STYLE = [
+  // 草原：树随密度成林，草铺底，蘑菇零星，石头点缀。
+  { occupancy: 255, tree: 255, rock: 255, mushroom: 255, grass: 255 },
+  // 沙地：空旷。风蚀石为主，偶有枯树，草稀疏，不长蘑菇。
+  { occupancy: 105, tree: 70, rock: 380, mushroom: 0, grass: 45 },
+  // 烂泥地：潮湿。蘑菇成片，草也旺，树和石头都少。
+  { occupancy: 240, tree: 70, rock: 60, mushroom: 420, grass: 200 },
+  // 雪地：稀疏。针叶树留着，石头露头，草被雪压住，不长蘑菇。
+  { occupancy: 135, tree: 210, rock: 260, mushroom: 0, grass: 35 },
+  // 石头地：碎石遍地，草挤在石缝里，树很少，背阴处偶有蘑菇。
+  { occupancy: 175, tree: 45, rock: 900, mushroom: 90, grass: 90 },
+];
+
+/** 越界地皮退回草原。生成路径只会给出 0..4，这条是给手写 code 的调用方兜底。 */
+function biomePropStyle(biome) {
+  return BIOME_PROP_STYLE[biome >= 0 && biome < TERRAIN_BIOME_COUNT
+    ? biome
+    : TERRAIN_BIOME.GRASSLAND];
+}
+
 /** 各种物件的缩放范围（千分数）。 */
 const SCALE_RANGE = {
   [PROP_KIND.TREE]: { minimum: 820, maximum: 1360 },
@@ -107,16 +143,43 @@ export function generateChunkProps(worldSeed, chunkX, chunkZ, target) {
 
       // 密度噪声决定这一带是密林还是空地，同一片区域的相邻格取值接近。
       const density = valueNoise(worldSeed ^ DENSITY_SALT, globalCellX, globalCellZ, DENSITY_SHIFT);
-      const occupancy = BASE_OCCUPANCY + ((density * OCCUPANCY_FROM_DENSITY) / 255 | 0);
-
       const occupancyHash = hash32(worldSeed, globalCellX, globalCellZ, OCCUPANCY_SALT);
+      const jitterHash = hash32(worldSeed, globalCellX, globalCellZ, JITTER_SALT);
+
+      // 先落点、再问地皮：占用率与种类都跟着脚下这一格的地皮走，所以地形必须
+      // 排在掷点之前。位置本身与地皮无关，两次哈希也没变，草原上的结果不受影响。
+      const xMm =
+        originX + cellX * PROP_CELL_SIZE_MM + PROP_MARGIN_MM + (jitterHash % JITTER_SPAN_MM);
+      const zMm =
+        originZ + cellZ * PROP_CELL_SIZE_MM + PROP_MARGIN_MM + ((jitterHash >>> 12) % JITTER_SPAN_MM);
+      const terrainCode = terrainCellCodeAtMillimeters(worldSeed, xMm, zMm);
+      if (
+        terrainCellSurface(terrainCode) !== TERRAIN_SURFACE.GROUND
+        || terrainCellShape(terrainCode) !== TERRAIN_SHAPE.FLAT
+      ) continue;
+
+      const style = biomePropStyle(terrainCellBiome(terrainCode));
+      const occupancy = (
+        (BASE_OCCUPANCY + ((density * OCCUPANCY_FROM_DENSITY) / 255 | 0)) * style.occupancy / 255
+      ) | 0;
       if ((occupancyHash & 0xff) >= occupancy) continue;
 
-      const treeShare = BASE_TREE_SHARE + ((density * TREE_SHARE_FROM_DENSITY) / 255 | 0);
-      const kindRoll = (occupancyHash >>> 8) & 0xff;
-      const rockLimit = treeShare + ROCK_SHARE;
-      const mushroomShare = (
-        (256 - rockLimit) * MUSHROOM_PLANT_SHARE_NUMERATOR / PLANT_SHARE_DENOMINATOR
+      // 四类物件的权重：树仍随密度成林，其余按地皮缩放，草拿走剩下的。
+      // 权重合计在草原上恰好是 256，掷点因此与引入群系之前完全一致。
+      const treeShare = (
+        (BASE_TREE_SHARE + ((density * TREE_SHARE_FROM_DENSITY) / 255 | 0)) * style.tree / 255
+      ) | 0;
+      const rockShare = (ROCK_SHARE * style.rock / 255) | 0;
+      const rockLimit = treeShare + rockShare;
+      const plantShare = Math.max(0, 256 - rockLimit);
+      const mushroomPlants = (
+        plantShare * MUSHROOM_PLANT_SHARE_NUMERATOR / PLANT_SHARE_DENOMINATOR
+      ) | 0;
+      const mushroomShare = (mushroomPlants * style.mushroom / 255) | 0;
+      const grassShare = ((plantShare - mushroomPlants) * style.grass / 255) | 0;
+      const kindRoll = (
+        ((occupancyHash >>> 8) & 0xff)
+        * (rockLimit + mushroomShare + grassShare) / 256
       ) | 0;
       const kind =
         kindRoll < treeShare
@@ -127,19 +190,8 @@ export function generateChunkProps(worldSeed, chunkX, chunkZ, target) {
               ? PROP_KIND.MUSHROOM
               : PROP_KIND.GRASS;
 
-      const jitterHash = hash32(worldSeed, globalCellX, globalCellZ, JITTER_SALT);
       const sizeHash = hash32(worldSeed, globalCellX, globalCellZ, SIZE_SALT);
       const scale = SCALE_RANGE[kind];
-
-      const xMm =
-        originX + cellX * PROP_CELL_SIZE_MM + PROP_MARGIN_MM + (jitterHash % JITTER_SPAN_MM);
-      const zMm =
-        originZ + cellZ * PROP_CELL_SIZE_MM + PROP_MARGIN_MM + ((jitterHash >>> 12) % JITTER_SPAN_MM);
-      const terrainCode = terrainCellCodeAtMillimeters(worldSeed, xMm, zMm);
-      if (
-        terrainCellSurface(terrainCode) !== TERRAIN_SURFACE.GROUND
-        || terrainCellShape(terrainCode) !== TERRAIN_SHAPE.FLAT
-      ) continue;
 
       const offset = count * PROP_STRIDE;
       target[offset + PROP_FIELD.KIND] = kind;

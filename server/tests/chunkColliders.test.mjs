@@ -89,25 +89,40 @@ test('单个物件派生出的碰撞体数量有固定上界', () => {
   }
 });
 
-test('树碰撞携带派生 Actor id，跳过掩码会整棵移除', () => {
-  const props = new Int32Array(PROP_BUFFER_LENGTH);
-  const count = generateChunkProps(SEED, -2, 1, props);
-  let propIndex = -1;
-  for (let index = 0; index < count; index += 1) {
-    if (props[index * PROP_STRIDE + PROP_FIELD.KIND] === PROP_KIND.TREE) {
-      propIndex = index;
-      break;
+/**
+ * 找一个同时长着树和石头的 chunk。
+ *
+ * 不写死坐标：物件跟着地皮走，哪一块 chunk 上有什么会随生成参数变化，
+ * 写死一个坐标只会让这条用例在下次调整地皮产出时莫名其妙地红掉。
+ */
+function findChunkWithTreeAndRock(props) {
+  for (let chunkZ = -3; chunkZ <= 3; chunkZ += 1) {
+    for (let chunkX = -3; chunkX <= 3; chunkX += 1) {
+      const count = generateChunkProps(SEED, chunkX, chunkZ, props);
+      let treeIndex = -1;
+      let rockIndex = -1;
+      for (let index = 0; index < count; index += 1) {
+        const kind = props[index * PROP_STRIDE + PROP_FIELD.KIND];
+        if (treeIndex < 0 && kind === PROP_KIND.TREE) treeIndex = index;
+        if (rockIndex < 0 && kind === PROP_KIND.ROCK) rockIndex = index;
+      }
+      if (treeIndex >= 0 && rockIndex >= 0) return { chunkX, chunkZ, treeIndex, rockIndex };
     }
   }
-  assert.ok(propIndex >= 0);
-  const actorId = formatGeneratedPropId(PROP_KIND.TREE, -2, 1, propIndex);
-  const baseline = buildChunkColliders(SEED, -2, 1);
+  throw new Error('扫描范围里没有同时长着树和石头的 chunk');
+}
+
+test('树碰撞携带派生 Actor id，跳过掩码会整棵移除', () => {
+  const props = new Int32Array(PROP_BUFFER_LENGTH);
+  const { chunkX, chunkZ, treeIndex: propIndex, rockIndex } = findChunkWithTreeAndRock(props);
+  const actorId = formatGeneratedPropId(PROP_KIND.TREE, chunkX, chunkZ, propIndex);
+  const baseline = buildChunkColliders(SEED, chunkX, chunkZ);
   assert.equal(baseline.filter((collider) => collider.actorId === actorId).length, 3);
 
   const masked = buildChunkColliders(
     SEED,
-    -2,
-    1,
+    chunkX,
+    chunkZ,
     undefined,
     setPropSkipped(undefined, propIndex, true),
   );
@@ -116,14 +131,6 @@ test('树碰撞携带派生 Actor id，跳过掩码会整棵移除', () => {
 
   // 岩石同样带 id：交互查询从碰撞世界反查 Actor 的这条路对所有种类一视同仁，
   // 哪些种类真的有 Actor 由原型注册表决定，碰撞体这一层不需要知道。
-  let rockIndex = -1;
-  for (let index = 0; index < count; index += 1) {
-    if (props[index * PROP_STRIDE + PROP_FIELD.KIND] === PROP_KIND.ROCK) {
-      rockIndex = index;
-      break;
-    }
-  }
-  assert.ok(rockIndex >= 0);
-  const rockId = formatGeneratedPropId(PROP_KIND.ROCK, -2, 1, rockIndex);
+  const rockId = formatGeneratedPropId(PROP_KIND.ROCK, chunkX, chunkZ, rockIndex);
   assert.equal(baseline.filter((collider) => collider.actorId === rockId).length, 1);
 });

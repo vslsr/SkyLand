@@ -19,9 +19,11 @@ import { RenderTransformSyncSystem } from '../src/actors/systems/RenderTransform
 import { RenderProxyComponent } from '../src/actors/components/RenderProxyComponent';
 import { RenderTransformBuffer } from '../src/render/RenderTransformBuffer';
 import type { ThreeMeshProxy } from '../src/render/three/ThreeMeshProxy';
+import { RenderProxyTable } from '../src/render/RenderProxyTable';
 import { ThreeRenderScene } from '../src/render/three/ThreeRenderScene';
 import { ActorSnapshotBuffer } from '../src/actors/ActorSnapshotBuffer';
-import { ClientActorSystem } from '../src/actors/ClientActorSystem';
+import type { ClientActorSystem } from '../src/actors/ClientActorSystem';
+import { createTestActorSystem, stepActorFrame } from './renderProxyProbe';
 import type { SceneDefinition } from '../src/scenes/data/SceneDefinition';
 import { INTERPOLATION_DELAY_MS } from '../shared/networkTuning.mjs';
 import type { SnapshotActor } from '../src/network/protocol';
@@ -74,9 +76,11 @@ function createMushroom(): {
     radius: DROP_RADIUS,
     settleSpeed: 0.1,
   }));
-  const info = scene.createMeshProxy({ name: 'actor-elastic-mushroom-01', render: RENDER });
-  actor.addComponent(new RenderProxyComponent(info.id, scene));
-  const render = scene.resolve(info.id) as ThreeMeshProxy;
+  const proxyIds = new RenderProxyTable(scene);
+  const proxyId = proxyIds.acquire();
+  scene.createMeshProxy(proxyId, { name: 'actor-elastic-mushroom-01', render: RENDER });
+  actor.addComponent(new RenderProxyComponent(proxyId, scene));
+  const render = scene.resolve(proxyId) as ThreeMeshProxy;
   world.addActor(actor);
   const step = (deltaSeconds: number, elapsedSeconds: number): void => {
     world.update(deltaSeconds, elapsedSeconds);
@@ -390,7 +394,7 @@ test('端到端：快照说我叼着它，按下交互键不再当场放下', ()
   } as unknown as SnapshotActor);
 
   let now = 1_000;
-  const system = new ClientActorSystem({
+  const system = createTestActorSystem({
     definition,
     environment: ENVIRONMENT,
     now: () => now,
@@ -426,7 +430,7 @@ test('端到端：快照说我叼着它，按下交互键不再当场放下', ()
       releaseRevision: 0, revision: 1,
     },
   })], now);
-  system.update(1 / 60, 0);
+  stepActorFrame(system, 1 / 60, 0);
   trigger();
   controller.update(frame);
   assert.deepEqual(sent, ['m1'], '拉着时按 E 没有发出请求');
@@ -444,7 +448,7 @@ test('端到端：快照说我叼着它，按下交互键不再当场放下', ()
     speed: 0, ackTick: 0, sequence: 0,
   }]);
   now += INTERPOLATION_DELAY_MS;
-  system.update(1 / 60, 1);
+  stepActorFrame(system, 1 / 60, 1);
   const attached = system.getActor('m1')!;
   const attachedTransform = attached.requireComponent(TRANSFORM_COMPONENT) as TransformComponent;
   assert.ok(Math.abs(attachedTransform.x - (2 + Math.sin(0.5) * 0.36)) < 1e-6);

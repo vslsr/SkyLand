@@ -16,6 +16,7 @@
 
 #![no_std]
 
+mod biome;
 mod hash;
 mod math;
 mod placement;

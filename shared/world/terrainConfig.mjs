@@ -29,6 +29,22 @@ export const TERRAIN_SURFACE = Object.freeze({
 });
 
 /**
+ * 群系。只描述「这一格是什么地皮」，不影响高度、形状与可通行性，
+ * 所以它可以是纯装饰层之外的任何东西：脚感、生成偏好、天气反应都能挂上来。
+ * 数值写进格 code，不能重排。
+ */
+export const TERRAIN_BIOME = Object.freeze({
+  GRASSLAND: 0,
+  SAND: 1,
+  MUD: 2,
+  SNOW: 3,
+  ROCK: 4,
+});
+
+/** 群系总数。code 里留了 3 位，最多容纳 8 种。 */
+export const TERRAIN_BIOME_COUNT = 5;
+
+/**
  * 方向表示斜坡的高边或角点；NORTH 对应世界 +Z，EAST 对应世界 +X。
  * CORNER_HIGH_* 只有命名角点在高层，CORNER_LOW_* 只有命名角点在低层。
  */
@@ -48,7 +64,12 @@ export const TERRAIN_SHAPE = Object.freeze({
   CORNER_LOW_NORTH_WEST: 12,
 });
 
-/** code 低四位保存形状，第 4 位保存表面类型，高字节保存有符号高度层。 */
+/**
+ * code 低四位保存形状，第 4 位保存表面类型，第 5-7 位保存群系，
+ * 高字节保存有符号高度层。低 8 位因此仍能整块塞进 `buildTerrainChunkData` 的 meta。
+ */
 export const TERRAIN_SHAPE_MASK = 0b1111;
 export const TERRAIN_SURFACE_SHIFT = 4;
+export const TERRAIN_BIOME_SHIFT = 5;
+export const TERRAIN_BIOME_MASK = 0b111;
 export const TERRAIN_HEIGHT_SHIFT = 8;

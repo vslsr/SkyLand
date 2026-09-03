@@ -11,5 +11,5 @@ export {
   type GrassPatch,
   type GrassPatchConfig,
 } from './grassPatchField';
-export { MouseGrassInteractor } from './MouseGrassInteractor';
+export { MouseGrassInteractor, type PointerViewport } from './MouseGrassInteractor';
 export { StreamingGrassSystem, type GrassChunkAnchor } from './StreamingGrassSystem';

@@ -10,8 +10,6 @@ import type { InventoryStackView, InventoryView } from '../../inventory/index';
  * 什么时候画、画哪一份，由 `InventoryController` 决定。
  */
 export class InventoryPage extends ModalWindow {
-  private readonly capacityText: HTMLElement;
-  private readonly meterFill: HTMLElement;
   private readonly ledgerText: HTMLElement;
   private readonly slotGrid: HTMLElement;
   private readonly pooledSection: HTMLElement;
@@ -30,24 +28,18 @@ export class InventoryPage extends ModalWindow {
       id: 'player-inventory',
       kicker: 'BACKPACK',
       title: '背包',
-      description: '角色只带得走一次收获：大宗资源存进船舱，弹药和基础工具不占货位。',
+      description: '角色只带得走一次收获：大宗资源存进船舱，弹药和基础工具不占格。',
       size: 'wide',
     });
     this.element.className += ' inventory-window';
 
-    const summary = document.createElement('section');
-    summary.className = 'inventory__summary';
-    this.capacityText = document.createElement('p');
-    this.capacityText.className = 'inventory__capacity';
-    const meter = document.createElement('div');
-    meter.className = 'inventory__meter';
-    this.meterFill = document.createElement('span');
-    this.meterFill.className = 'inventory__meter-fill';
-    meter.append(this.meterFill);
+    // 「货位 2 / 6」加一条进度条曾经占着最上面一整块。**那是个读数，不是信息**：
+    // 空格本来就画成虚线方格，还剩几格一眼数得出来；真正要说的只有「满了」，
+    // 而那一句在 ledger 里。所以整块去掉，剩下的只在有话说时才出现。
     this.ledgerText = document.createElement('p');
     this.ledgerText.className = 'inventory__ledger';
     this.ledgerText.setAttribute('role', 'status');
-    summary.append(this.capacityText, meter, this.ledgerText);
+    this.ledgerText.hidden = true;
 
     this.emptyNotice = document.createElement('p');
     this.emptyNotice.className = 'inventory__empty-notice';
@@ -59,29 +51,34 @@ export class InventoryPage extends ModalWindow {
     this.tabBar.setAttribute('role', 'tablist');
     this.tabBar.setAttribute('aria-label', '物品分类');
 
+    // 没有小标题：页签就在正上方，它已经说了下面这一格格是什么。
     const slotSection = document.createElement('section');
     slotSection.className = 'inventory__section';
-    const slotHeading = document.createElement('h3');
-    slotHeading.textContent = '随身货位';
     this.slotGrid = document.createElement('ul');
     this.slotGrid.className = 'inventory__grid';
     this.slotGrid.setAttribute('role', 'list');
-    slotSection.append(slotHeading, this.slotGrid);
+    slotSection.append(this.slotGrid);
 
     this.pooledSection = document.createElement('section');
     this.pooledSection.className = 'inventory__section';
     this.pooledSection.hidden = true;
     const pooledHeading = document.createElement('h3');
-    pooledHeading.textContent = '不占货位';
+    pooledHeading.textContent = '不占格';
     const pooledNote = document.createElement('p');
     pooledNote.className = 'inventory__note';
-    pooledNote.textContent = '弹药与基础工具各有上限，但不挤压随身货位。';
+    pooledNote.textContent = '弹药与基础工具各有上限，但不挤压随身格子。';
     this.pooledGrid = document.createElement('ul');
     this.pooledGrid.className = 'inventory__grid inventory__grid--pooled';
     this.pooledGrid.setAttribute('role', 'list');
     this.pooledSection.append(pooledHeading, pooledNote, this.pooledGrid);
 
-    this.bodyElement.append(summary, this.emptyNotice, this.tabBar, slotSection, this.pooledSection);
+    this.bodyElement.append(
+      this.emptyNotice,
+      this.ledgerText,
+      this.tabBar,
+      slotSection,
+      this.pooledSection,
+    );
 
     this.closeHint = document.createElement('p');
     this.closeHint.className = 'inventory__hint';
@@ -107,9 +104,7 @@ export class InventoryPage extends ModalWindow {
     this.view = view;
     this.emptyNotice.hidden = view !== undefined;
     if (!view) {
-      this.capacityText.textContent = '货位 —';
-      this.setMeter(0);
-      this.ledgerText.textContent = '';
+      this.setLedger('');
       this.tabBar.replaceChildren();
       this.slotGrid.replaceChildren();
       this.pooledSection.hidden = true;
@@ -117,9 +112,7 @@ export class InventoryPage extends ModalWindow {
       return;
     }
 
-    this.capacityText.textContent = `货位 ${view.usedSlots} / ${view.slotCapacity}`;
-    this.setMeter(view.slotCapacity > 0 ? view.usedSlots / view.slotCapacity : 0);
-    this.ledgerText.textContent = this.describeLedger(view);
+    this.setLedger(this.describeLedger(view));
     // 上一次停留的分类可能已经空了（东西用完或存进了箱子）；落回全部而不是留白。
     if (!view.pages.some((page) => page.id === this.activePageId)) this.activePageId = 'all';
     this.renderTabs(view);
@@ -135,7 +128,16 @@ export class InventoryPage extends ModalWindow {
       const selected = page.id === this.activePageId;
       tab.classList.toggle('is-active', selected);
       tab.setAttribute('aria-selected', String(selected));
-      tab.textContent = `${page.label} ${page.stacks.length}`;
+      // 标签和数量拆开：数量不是名字的一部分，它该是一个更淡、更小的附注。
+      const label = document.createElement('span');
+      label.className = 'inventory__tab-label';
+      label.textContent = page.label;
+      const count = document.createElement('span');
+      count.className = 'inventory__tab-count';
+      count.textContent = String(page.stacks.length);
+      count.setAttribute('aria-hidden', 'true');
+      tab.append(label, count);
+      tab.setAttribute('aria-label', `${page.label} ${page.stacks.length} 件`);
       tab.addEventListener('click', () => {
         if (this.activePageId === page.id || !this.view) return;
         this.activePageId = page.id;
@@ -166,19 +168,20 @@ export class InventoryPage extends ModalWindow {
     const parts: string[] = [];
     if (view.cargoValue > 0) parts.push(`待兑现 ${view.cargoValue} 金币`);
     if (view.contrabandCount > 0) parts.push(`携带 ${view.contrabandCount} 件违禁品，位置会被公开`);
-    if (view.freeSlots === 0) parts.push('货位已满，再采只能留在原地');
+    if (view.freeSlots === 0) parts.push('背包满了，再采只能留在原地');
     return parts.join(' · ');
   }
 
-  private setMeter(ratio: number): void {
-    const percent = Math.round(Math.min(1, Math.max(0, ratio)) * 100);
-    this.meterFill.setAttribute('style', `width:${percent}%`);
+  /** 没话说就整行收起来，不留一条空白。 */
+  private setLedger(text: string): void {
+    this.ledgerText.textContent = text;
+    this.ledgerText.hidden = text.length === 0;
   }
 
   private createEmptyCell(): HTMLElement {
     const cell = document.createElement('li');
     cell.className = 'inventory__cell inventory__cell--empty';
-    cell.setAttribute('aria-label', '空货位');
+    cell.setAttribute('aria-label', '空格子');
     return cell;
   }
 

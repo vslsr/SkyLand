@@ -7,8 +7,14 @@ import {
   createCharacterSimulationParams,
   stepCharacter,
 } from '../../shared/physics/stepCharacter.mjs';
-import { createSimpleCollisionFromRender } from '../../shared/actor/simpleCollision.mjs';
-import { simpleCollisionInstanceToPhysicsDefinitions } from '../../shared/physics/simpleCollisionToPhysics.mjs';
+import {
+  circleOverlapsSimpleCollisionFootprint,
+  createSimpleCollisionFromRender,
+} from '../../shared/actor/simpleCollision.mjs';
+import {
+  simpleCollisionGroupToPhysicsDefinitions,
+  simpleCollisionInstanceToPhysicsDefinitions,
+} from '../../shared/physics/simpleCollisionToPhysics.mjs';
 import { sampleBuoyancyBobOffset } from '../../shared/actor/buoyancyMotion.mjs';
 
 const DT = 1 / 60;
@@ -217,5 +223,57 @@ test('动态浮力目标产生可见上下起伏，角色 Y 仍由物理逐步�
     samplesPinnedToTarget < measuredSamples * 0.05,
     `角色 Y 疑似被直接钉到动态目标：${samplesPinnedToTarget}/${measuredSamples}`,
   );
+  physics.dispose();
+});
+
+test('长方形碰撞盒转成 Rapier 之后朝向不变', () => {
+  // 正方形足迹（树干、所有圆柱）看不出朝向错误，长方形才看得出来。流式世界的
+  // 石头就是 0.48 × 0.40 的盒子，随机 yaw 摆放：一旦这里的旋转与 simpleCollision
+  // 反号，Rapier 里的盒子相对看得见的模型镜像过去，玩家会被不存在的墙挡住，
+  // 又能踩进石头里——这条用例逐角度锁死两套模型的边界。
+  const instance = {
+    collision: {
+      shape: 'box',
+      centerX: 0,
+      centerZ: 0,
+      halfWidth: 0.65,
+      halfLength: 0.45,
+      minimumY: 0,
+      maximumY: 0.6,
+    },
+    transform: { x: 0, y: 0, z: 0, yaw: 4.116 },
+  };
+  const physics = new PhysicsWorld(getRapier(), { timestep: DT });
+  physics.setStaticColliderGroup('rotated', simpleCollisionGroupToPhysicsDefinitions([instance]));
+  physics.prepareQueries();
+
+  let worst = 0;
+  for (let degrees = 0; degrees < 360; degrees += 15) {
+    const angle = degrees * Math.PI / 180;
+    const directionX = Math.cos(angle);
+    const directionZ = Math.sin(angle);
+    // 二分出 simpleCollision 认为的径向边界。
+    let inside = 0;
+    let outside = 3;
+    for (let step = 0; step < 40; step += 1) {
+      const middle = (inside + outside) / 2;
+      const overlaps = circleOverlapsSimpleCollisionFootprint(
+        { x: directionX * middle, z: directionZ * middle },
+        1e-4,
+        instance,
+      );
+      if (overlaps) inside = middle;
+      else outside = middle;
+    }
+    // 同一方向上向盒心打一条射线，取 Rapier 的边界。
+    const hit = physics.castRay(
+      { x: directionX * 3, y: 0.3, z: directionZ * 3 },
+      { x: -directionX, y: 0, z: -directionZ },
+      6,
+    );
+    assert.ok(hit, `${degrees}° 方向没有打中盒子`);
+    worst = Math.max(worst, Math.abs(inside - (3 - hit.timeOfImpact)));
+  }
+  assert.ok(worst < 0.01, `两套模型的边界最大相差 ${worst.toFixed(3)} 米，朝向对不上`);
   physics.dispose();
 });
