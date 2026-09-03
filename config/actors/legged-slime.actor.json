@@ -36,7 +36,7 @@
       "thighLength": 0.42,
       "shinLength": 0.42,
       "legThickness": 0.028,
-      "footRadius": 0.08,
+      "footLength": 0.13,
       "stepLength": 0.28,
       "stepHeight": 0.13,
       "stepDuration": 0.22,
@@ -47,7 +47,6 @@
       "inkColor": "#152c36",
       "shadowColor": "#1e4a5a",
       "legColor": "#141210",
-      "jointColor": "#141210",
       "footShadowColor": "#6f6f6f"
     }
   }

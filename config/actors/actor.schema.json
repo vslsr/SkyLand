@@ -477,7 +477,7 @@
                 "thighLength",
                 "shinLength",
                 "legThickness",
-                "footRadius",
+                "footLength",
                 "stepLength",
                 "stepHeight",
                 "stepDuration",
@@ -488,7 +488,6 @@
                 "inkColor",
                 "shadowColor",
                 "legColor",
-                "jointColor",
                 "footShadowColor"
               ],
               "properties": {
@@ -500,7 +499,7 @@
                 "thighLength": { "type": "number", "exclusiveMinimum": 0, "maximum": 3 },
                 "shinLength": { "type": "number", "exclusiveMinimum": 0, "maximum": 3 },
                 "legThickness": { "type": "number", "exclusiveMinimum": 0, "maximum": 0.3 },
-                "footRadius": { "type": "number", "exclusiveMinimum": 0, "maximum": 0.6 },
+                "footLength": { "type": "number", "exclusiveMinimum": 0, "maximum": 0.6 },
                 "stepLength": { "type": "number", "exclusiveMinimum": 0, "maximum": 3 },
                 "stepHeight": { "type": "number", "minimum": 0, "maximum": 2 },
                 "stepDuration": { "type": "number", "exclusiveMinimum": 0, "maximum": 2 },
@@ -511,7 +510,6 @@
                 "inkColor": { "$ref": "#/$defs/color" },
                 "shadowColor": { "$ref": "#/$defs/color" },
                 "legColor": { "$ref": "#/$defs/color" },
-                "jointColor": { "$ref": "#/$defs/color" },
                 "footShadowColor": { "$ref": "#/$defs/color" }
               }
             },

@@ -44,10 +44,13 @@ export interface SlimeLegBoneVisual {
   readonly thigh: THREE.Mesh<THREE.CylinderGeometry, THREE.MeshBasicMaterial>;
   /** 小腿：从膝盖指向落脚点。 */
   readonly shin: THREE.Mesh<THREE.CylinderGeometry, THREE.MeshBasicMaterial>;
-  /** 膝关节的环，轴向沿大腿。 */
-  readonly knee: THREE.Mesh<THREE.TorusGeometry, THREE.MeshBasicMaterial>;
-  /** 落脚点的环，始终平躺。 */
-  readonly foot: THREE.Mesh<THREE.TorusGeometry, THREE.MeshBasicMaterial>;
+  /**
+   * 脚：从踝点朝正前方折出去的第三节骨头。
+   *
+   * 膝盖没有单独的节点——两节骨头之间的夹角本身就是那个关节，再画一个环只会让
+   * 线稿多一处噪点。
+   */
+  readonly foot: THREE.Mesh<THREE.CylinderGeometry, THREE.MeshBasicMaterial>;
   /** 落脚点那枚灰色贴地椭圆。抬腿时变淡缩小，是接触提示而不是光照阴影。 */
   readonly shadow: THREE.Mesh<THREE.CircleGeometry, ContactShadowMaterial>;
   /** 髋点在身体局部空间的偏移（+Z 是朝向）。 */

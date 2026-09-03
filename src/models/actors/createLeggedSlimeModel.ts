@@ -90,24 +90,8 @@ export function createLeggedSlimeModel(
     color: definition.legColor,
     toneMapped: false,
   });
-  const jointMaterial = new THREE.MeshBasicMaterial({
-    color: definition.jointColor,
-    toneMapped: false,
-  });
   const boneGeometry = createBoneGeometry(definition.legThickness);
-  const kneeGeometry = new THREE.TorusGeometry(
-    definition.legThickness * 2.4,
-    definition.legThickness * 0.7,
-    6,
-    12,
-  );
-  const footGeometry = new THREE.TorusGeometry(
-    definition.footRadius,
-    definition.legThickness * 0.8,
-    6,
-    16,
-  );
-  const shadowGeometry = new THREE.CircleGeometry(definition.footRadius * 1.9, 16);
+  const shadowGeometry = new THREE.CircleGeometry(definition.footLength * 1.6, 16);
 
   const legs: SlimeLegBoneVisual[] = [];
   for (let index = 0; index < definition.legCount; index += 1) {
@@ -118,13 +102,10 @@ export function createLeggedSlimeModel(
     const shin = new THREE.Mesh(boneGeometry, boneMaterial);
     shin.name = `legged-slime-shin-${index}`;
     shin.frustumCulled = false;
-    const knee = new THREE.Mesh(kneeGeometry, jointMaterial);
-    knee.name = `legged-slime-knee-${index}`;
-    knee.frustumCulled = false;
-    const foot = new THREE.Mesh(footGeometry, jointMaterial);
+    // 脚就是第三节骨头：从踝点朝正前方折出去的一小段。膝关节不再单画一个环——
+    // 两节骨头本身的夹角已经把关节画出来了。
+    const foot = new THREE.Mesh(boneGeometry, boneMaterial);
     foot.name = `legged-slime-foot-${index}`;
-    // 落脚环永远平躺，所以旋转在这里定死，每帧只改位置。
-    foot.rotation.x = -Math.PI / 2;
     foot.frustumCulled = false;
     // 影子的方向、长度和浓度跟着房间权威时刻走，见 createContactShadowMaterial。
     // 它是画出来的接触提示，不是实时阴影贴图。
@@ -136,11 +117,10 @@ export function createLeggedSlimeModel(
     shadow.rotation.x = -Math.PI / 2;
     shadow.renderOrder = 1;
     shadow.frustumCulled = false;
-    legRoot.add(thigh, shin, knee, foot, shadow);
+    legRoot.add(thigh, shin, foot, shadow);
     legs.push({
       thigh,
       shin,
-      knee,
       foot,
       shadow,
       hipLocalX: Math.sin(angle) * definition.legSpread,

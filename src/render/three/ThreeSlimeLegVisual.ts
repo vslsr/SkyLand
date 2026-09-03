@@ -20,8 +20,9 @@ const OVERSTRETCH_RATIO = 0.94;
 const DERIVED_VELOCITY_RESPONSE = 12;
 /** 玩法侧的速度小于它就当作「没给」，改用差分。 */
 const PARAM_VELOCITY_EPSILON = 1e-4;
+/** 脚尖向外撇的比例（相对朝前的分量）。见 applyPose 里为什么不能只朝正前方。 */
+const FOOT_SPLAY = 0.75;
 const UP = new THREE.Vector3(0, 1, 0);
-const RING_AXIS = new THREE.Vector3(0, 0, 1);
 
 interface LegGaitState {
   /** 落脚点的**世界**坐标。世界而不是局部：身体每帧都在动，踩住的地面不动。 */
@@ -77,6 +78,7 @@ export class ThreeSlimeLegVisual {
   private readonly hip = new THREE.Vector3();
   private readonly footLocal = new THREE.Vector3();
   private readonly knee = new THREE.Vector3();
+  private readonly toe = new THREE.Vector3();
   private readonly axis = new THREE.Vector3();
   private readonly pole = new THREE.Vector3();
   private readonly segment = new THREE.Vector3();
@@ -371,7 +373,7 @@ export class ThreeSlimeLegVisual {
       this.definition.hipHeight,
       this.definition.radius,
     ) + this.bodyLift;
-    const { thighLength, shinLength, stepHeight } = this.definition;
+    const { thighLength, shinLength, stepHeight, footLength } = this.definition;
     for (const [index, leg] of this.rig.legs.entries()) {
       const state = this.legs[index];
       this.hip.set(leg.hipLocalX, hipY - world.y, leg.hipLocalZ);
@@ -387,18 +389,25 @@ export class ThreeSlimeLegVisual {
       this.placeBone(leg.thigh, this.hip, this.knee);
       this.placeBone(leg.shin, this.knee, this.footLocal);
 
-      // 膝环套在大腿上：环的轴对齐骨头方向，看上去就是箍在腿上的一圈。
-      this.segment.subVectors(this.knee, this.hip);
-      if (this.segment.lengthSq() > 1e-10) {
-        this.segment.normalize();
-        leg.knee.quaternion.setFromUnitVectors(RING_AXIS, this.segment);
-      }
-      leg.knee.position.copy(this.knee);
-      leg.foot.position.copy(this.footLocal);
-
       // 影子留在接触点上，不跟着抬起来的脚走；抬得越高越淡越小。
       const lift = Math.max(0, this.footLocal.y - contactLocalY);
       const liftRatio = stepHeight > 0 ? clamp(lift / stepHeight, 0, 1) : 0;
+
+      // 脚是从踝点折出去的一小段。方向在 rig 局部空间里是常数，不跟着小腿转——
+      // 跟着小腿转就成了一根直杆，那个折角会消失。
+      //
+      // 除了朝前（局部 +Z 就是朝向），还朝**外侧**撇一点。只朝正前方的话，俯视
+      // 相机大致顺着 +Z 看下来，脚会被透视压成一个点，折角在画面上等于不存在。
+      // 向外撇既让它在各个朝向下都看得见，也更像一只真的脚。
+      //
+      // 抬起来时脚尖顺势垂一点，落地时收平。
+      this.toe
+        .set(Math.sign(leg.hipLocalX) * FOOT_SPLAY, -liftRatio * 0.55, 1)
+        .normalize()
+        .multiplyScalar(footLength)
+        .add(this.footLocal);
+      this.placeBone(leg.foot, this.footLocal, this.toe);
+
       leg.shadow.position.set(this.footLocal.x, contactLocalY + 0.014, this.footLocal.z);
       const shadowScale = 1 - liftRatio * 0.45;
       leg.shadow.scale.set(shadowScale, shadowScale, 1);

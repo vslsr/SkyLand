@@ -36,7 +36,7 @@ const LEGGED_SLIME = {
   thighLength: 0.42,
   shinLength: 0.42,
   legThickness: 0.028,
-  footRadius: 0.08,
+  footLength: 0.13,
   stepLength: 0.28,
   stepHeight: 0.13,
   stepDuration: 0.22,
@@ -47,7 +47,6 @@ const LEGGED_SLIME = {
   inkColor: '#152c36',
   shadowColor: '#1e4a5a',
   legColor: '#141210',
-  jointColor: '#141210',
   footShadowColor: '#6f6f6f',
 } as const satisfies Extract<ActorRenderDefinition, { model: 'line-art-legged-slime' }>;
 
@@ -264,7 +263,7 @@ function bonesOf(harness: LegHarness): { name: string; length: number }[] {
   return bones;
 }
 
-test('站立时两只脚踩在采样出来的地面上，膝盖不在髋点与脚的连线上', () => {
+test('站立时两只脚踩在采样出来的地面上，膝盖是两节骨头之间的一个折角', () => {
   const harness = createLegHarness();
   for (let frame = 0; frame < 30; frame += 1) harness.step(1 / 60, { x: 0, z: 0 });
 
@@ -285,9 +284,17 @@ test('站立时两只脚踩在采样出来的地面上，膝盖不在髋点与�
   }
 
   // 「腿部具有关节」的可验证形式：膝盖离开髋点与落脚点的连线。
+  //
+  // 膝盖没有自己的节点——小腿这根骨头的起点就是它。这正是这次改动的要点：
+  // 关节由两节骨头的夹角画出来，不再额外套一个环。
   const proxy = harness.scene.resolve(harness.id)!;
   proxy.root.updateWorldMatrix(true, true);
-  const knee = proxy.root.getObjectByName('legged-slime-knee-0')!
+  assert.equal(
+    proxy.root.getObjectByName('legged-slime-knee-0'),
+    undefined,
+    '膝盖不该再有单独的环',
+  );
+  const knee = proxy.root.getObjectByName('legged-slime-shin-0')!
     .getWorldPosition(new THREE.Vector3());
   const hip = new THREE.Vector3(
     LEGGED_SLIME.legSpread,
@@ -491,4 +498,36 @@ test('服务端推着走的 Replica 没有速度参数，步态从 transform 差
       `落脚点不该被落在身后：脚 ${foot.z}，身体 ${bodyZ}`,
     );
   }
+});
+
+test('脚是从踝点朝正前方折出去的一小段，不跟着小腿方向走', () => {
+  const harness = createLegHarness();
+  for (let frame = 0; frame < 30; frame += 1) harness.step(1 / 60, { x: 0, z: 0 });
+
+  const proxy = harness.scene.resolve(harness.id)!;
+  proxy.root.updateWorldMatrix(true, true);
+  const foot = proxy.root.getObjectByName('legged-slime-foot-0')!;
+  const ankle = foot.getWorldPosition(new THREE.Vector3());
+  const shin = proxy.root.getObjectByName('legged-slime-shin-0')!;
+
+  // 骨头几何沿 +Y 长 1，摆的时候只缩放 Y，所以 scale.y 就是这一段的长度。
+  assert.ok(
+    Math.abs(foot.scale.y - LEGGED_SLIME.footLength) < 1e-6,
+    `脚的长度应当是配置的 footLength，实际 ${foot.scale.y}`,
+  );
+
+  // 踝点就是小腿的终点：脚接在腿的末端，不是飘在旁边。
+  const shinEnd = shin.localToWorld(new THREE.Vector3(0, 1, 0));
+  assert.ok(shinEnd.distanceTo(ankle) < 1e-5, '脚必须接在小腿的末端');
+
+  // 折角朝前偏外，而不是顺着小腿的方向继续往下。
+  const toe = foot.localToWorld(new THREE.Vector3(0, 1, 0));
+  const forward = new THREE.Vector3().subVectors(toe, ankle);
+  assert.ok(forward.z > LEGGED_SLIME.footLength * 0.5, `脚尖应当朝前，实际 ${forward.z}`);
+  // 只朝正前方的话，俯视相机顺着 +Z 看下来会把折角压成一个点。0 号腿的髋点在
+  // +X 一侧，脚尖也该往 +X 撇。
+  assert.ok(forward.x > 0, `0 号腿的脚尖应当往 +X 外撇，实际 ${forward.x}`);
+
+  // 站着不动时脚是平的；这条和上面的 z 一起把「折角」钉死。
+  assert.ok(Math.abs(forward.y) < 1e-6, `站立时脚尖应当收平，实际 ${forward.y}`);
 });

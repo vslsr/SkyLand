@@ -700,7 +700,7 @@ function validateRender(raw, filename) {
         Number.EPSILON,
         0.3,
       ),
-      footRadius: requireNumber(render.footRadius, `${path}.footRadius`, Number.EPSILON, 0.6),
+      footLength: requireNumber(render.footLength, `${path}.footLength`, Number.EPSILON, 0.6),
       stepLength: requireNumber(render.stepLength, `${path}.stepLength`, Number.EPSILON, 3),
       stepHeight: requireNumber(render.stepHeight, `${path}.stepHeight`, 0, 2),
       stepDuration: requireNumber(render.stepDuration, `${path}.stepDuration`, Number.EPSILON, 2),
@@ -711,7 +711,6 @@ function validateRender(raw, filename) {
       inkColor: requireColor(render.inkColor, `${path}.inkColor`),
       shadowColor: requireColor(render.shadowColor, `${path}.shadowColor`),
       legColor: requireColor(render.legColor, `${path}.legColor`),
-      jointColor: requireColor(render.jointColor, `${path}.jointColor`),
       footShadowColor: requireColor(render.footShadowColor, `${path}.footShadowColor`),
     };
   }
