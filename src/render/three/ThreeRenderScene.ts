@@ -52,6 +52,7 @@ import { ThreeGuidePathVisual } from './ThreeGuidePathVisual';
 import { ThreeHybridSlimeVisual } from './ThreeHybridSlimeVisual';
 import { ThreeSlimeLegVisual } from './ThreeSlimeLegVisual';
 import { ThreeAttachmentVisual } from './ThreeAttachmentVisual';
+import { ThreeContainerLidVisual } from './ThreeContainerLidVisual';
 import { ThreeDropRollVisual } from './ThreeDropRollVisual';
 import { ThreeElasticTetherVisual } from './ThreeElasticTetherVisual';
 import { ThreeMeshProxy } from './ThreeMeshProxy';
@@ -155,6 +156,7 @@ export class ThreeRenderScene implements RenderScene {
   /** proxyId → 弹性拉伸 / 脱落翻滚。两者都只有弹性蘑菇那种模型才有。 */
   private readonly elasticTethers = new Map<ProxyId, ThreeElasticTetherVisual>();
   private readonly dropRolls = new Map<ProxyId, ThreeDropRollVisual>();
+  private readonly containerLids = new Map<ProxyId, ThreeContainerLidVisual>();
   private readonly attachmentVisual = new ThreeAttachmentVisual();
 
   public constructor(
@@ -200,6 +202,9 @@ export class ThreeRenderScene implements RenderScene {
     }
     if (model.dropRollRig) {
       this.dropRolls.set(proxy.id, new ThreeDropRollVisual(proxy.id, model.dropRollRig));
+    }
+    if (model.containerLidRig) {
+      this.containerLids.set(proxy.id, new ThreeContainerLidVisual(proxy.id, model.containerLidRig));
     }
     return describeProxy(proxy);
   }
@@ -301,6 +306,7 @@ export class ThreeRenderScene implements RenderScene {
     this.waterMotions.delete(id);
     this.elasticTethers.delete(id);
     this.dropRolls.delete(id);
+    this.containerLids.delete(id);
     this.attachmentVisual.forget(id);
     proxy.dispose();
   }
@@ -378,6 +384,7 @@ export class ThreeRenderScene implements RenderScene {
       tether.update(transforms, deltaSeconds, elapsedSeconds);
     }
     for (const drop of this.dropRolls.values()) drop.update(transforms);
+    for (const lid of this.containerLids.values()) lid.update(transforms, deltaSeconds);
     this.fireVisual.update(live, transforms, deltaSeconds, elapsedSeconds);
     for (const proxy of live) {
       proxy.markers.setTemperature(transforms.readParam(proxy.id, PARAM_TEMPERATURE));
@@ -538,6 +545,7 @@ export class ThreeRenderScene implements RenderScene {
     this.waterMotions.clear();
     this.elasticTethers.clear();
     this.dropRolls.clear();
+    this.containerLids.clear();
     for (const proxy of this.proxies) proxy?.dispose();
     this.proxies.length = 0;
     this.freeSlots.length = 0;

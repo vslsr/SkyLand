@@ -18,6 +18,8 @@ export class ModalWindow implements CommonUIPage {
   public readonly bodyElement: HTMLElement;
   public readonly footerElement: HTMLElement;
   public readonly closeOnEscape: boolean;
+  /** 标题在构造后还能改：容器界面要写当前这个箱子的名字，而不是一个泛称。 */
+  protected readonly titleElement: HTMLElement;
   public readonly passUnhandledEvents: boolean;
 
   private closeHandler?: () => void;
@@ -50,6 +52,7 @@ export class ModalWindow implements CommonUIPage {
     title.id = titleId;
     this.element.setAttribute('aria-labelledby', titleId);
     heading.append(title);
+    this.titleElement = title;
 
     if (options.description) {
       const description = document.createElement('p');

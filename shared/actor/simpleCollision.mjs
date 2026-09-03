@@ -101,6 +101,20 @@ export function createSimpleCollisionFromRender(render, dropMotion) {
       maximumY: height * 0.88,
     });
   }
+  if (model === 'line-art-storage-chest') {
+    const width = positiveNumber(render.width, 0.5);
+    const length = positiveNumber(render.length, 0.5);
+    const height = positiveNumber(render.height, 0.5);
+    // 盖沿与束带比箱体各向外探出一个板厚；碰撞包住模型的最外沿。
+    const thickness = Math.min(width, length) * 0.075;
+    return createSimpleCollisionDefinition({
+      halfWidth: (width + thickness) * 0.5,
+      halfLength: (length + thickness) * 0.5,
+      minimumY: 0,
+      // 只包到箱体加盖板，不含掀开后翻到背面去的那一块：盖子开着时人不该被挡住。
+      maximumY: height * 0.86,
+    });
+  }
   if (model === 'line-art-reef') {
     const radius = positiveNumber(render.radius, 0.5);
     const height = positiveNumber(render.height, radius);

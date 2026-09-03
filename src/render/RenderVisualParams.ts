@@ -131,5 +131,16 @@ export const PARAM_SLIME_GROUND_SOUTH_Y = 43;
 export const PARAM_SLIME_GROUND_NORTH_Y = 44;
 export const PARAM_SLIME_GROUND_PROBE_RADIUS = 45;
 
+/**
+ * 容器盖子的目标开合度：**1 表示有人正开着它**。
+ *
+ * 过边界的是目标而不是当前角度：开盖的那段弹簧回弹属于表现，让它在渲染侧积分，
+ * 玩法侧就不必每帧写一个连续量，掉帧或快照抖动也不会把盖子拽回去。
+ *
+ * 目标取的是「有几个人开着」而不是「我开着没有」：别人翻这个箱子时，我也该看见
+ * 盖子是掀起来的。
+ */
+export const PARAM_CONTAINER_OPEN_TARGET = 46;
+
 /** 每个 proxy 槽位的参数个数。新增参数就在上面加常量并把这里加一。 */
-export const RENDER_VISUAL_PARAM_COUNT = 46;
+export const RENDER_VISUAL_PARAM_COUNT = 47;

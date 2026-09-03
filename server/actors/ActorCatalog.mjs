@@ -752,6 +752,16 @@ function validateRender(raw, filename) {
       height: requireNumber(render.height, `${path}.height`, Number.EPSILON, 10),
     };
   }
+  if (render.model === 'line-art-storage-chest') {
+    return {
+      model: render.model,
+      color: requireColor(render.color, `${path}.color`),
+      accentColor: requireColor(render.accentColor, `${path}.accentColor`),
+      length: requireNumber(render.length, `${path}.length`, Number.EPSILON, 10),
+      width: requireNumber(render.width, `${path}.width`, Number.EPSILON, 10),
+      height: requireNumber(render.height, `${path}.height`, Number.EPSILON, 10),
+    };
+  }
   if (render.model === 'line-art-reef') {
     return {
       model: render.model,

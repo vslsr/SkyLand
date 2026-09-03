@@ -1,7 +1,11 @@
 export {
+  buildContainerView,
   buildInventoryView,
   ITEM_CATEGORY_LABELS,
   type InventoryModelLike,
+  type ContainerModelLike,
+  type ContainerRowView,
+  type ContainerView,
   type HotbarSlotView,
   type InventoryPageView,
   type InventoryStackView,

@@ -767,6 +767,20 @@ export class ServerScene {
       return true;
     }
 
+    if (interactable.action === 'container-open') {
+      const container = target.getComponent(CONTAINER_COMPONENT);
+      if (!container) return false;
+      const distance = Math.hypot(targetTransform.x - player.x, targetTransform.z - player.z);
+      if (distance > interactable.maximumDistance) return false;
+      // 再按一次是关上：和「手上那件」同一条规矩，一个已经建立的持续状态必须有一
+      // 个确定的退出入口。走远也会关，但那条由 updateContainerViewers 负责。
+      if (!(container.isOpenFor(playerId)
+        ? container.closeFor(playerId)
+        : container.openFor(playerId))) return false;
+      player.actorInteractionSequence = sequence;
+      return true;
+    }
+
     if (interactable.action === 'harvest-prop') {
       const prop = target.getComponent(GENERATED_PROP_COMPONENT);
       // Actor 只可能由服务端从世界种子推导出来，所以 Component 本身就是权威；

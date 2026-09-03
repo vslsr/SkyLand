@@ -105,7 +105,10 @@ export function resolveActorAction(target, context = {}) {
 
     case 'container-open':
       if (target.enabled === false) return undefined;
-      return allow('container-open', `打开${name}`);
+      // 开着的时候同一个键说的是「关上」——和手上那件一样，持续状态要有退出入口。
+      return target.containerOpen
+        ? allow('container-open', `关上${name}`)
+        : allow('container-open', `打开${name}`);
 
     case 'cargo-toggle': {
       if (target.enabled === false) return undefined;

@@ -269,3 +269,107 @@ function quantityOf(inventory: InventoryModelLike, itemType: string): number {
   for (const entry of inventory.pooled) if (entry.itemType === itemType) total += entry.quantity;
   return total;
 }
+
+/** 容器界面里的一行：同一种物品，箱内和身上的数量并排。 */
+export interface ContainerRowView {
+  readonly itemType: string;
+  readonly displayName: string;
+  readonly iconId: string;
+  readonly tint: string;
+  /** 身上有多少（可以存进去）。 */
+  readonly carried: number;
+  /** 箱内有多少（可以取出来）。 */
+  readonly stored: number;
+}
+
+export interface ContainerView {
+  readonly actorId: string;
+  readonly label: string;
+  readonly slotCapacity: number;
+  readonly usedSlots: number;
+  /** 除自己以外还有几个人开着这个箱子；不为 0 时东西会在眼前变化。 */
+  readonly otherViewerCount: number;
+  readonly rows: readonly ContainerRowView[];
+  readonly revision: number;
+}
+
+/** 容器 Component 里视图关心的部分；`ContainerComponent` 天然满足这个形状。 */
+export interface ContainerModelLike {
+  readonly label: string;
+  readonly slotCapacity: number;
+  readonly usedSlots: number;
+  readonly viewerCount: number;
+  readonly revision: number;
+  readonly slots: readonly { readonly itemType: string; readonly quantity: number }[];
+  readonly pooled: readonly { readonly itemType: string; readonly quantity: number }[];
+}
+
+/**
+ * 把容器和背包并成界面能直接画的一张表。
+ *
+ * 一行 = 一种物品，箱内和身上并排——这是「存 / 取」两个按钮能成立的前提：玩家要
+ * 决定搬哪一边，就得同时看见两边。分成两个面板再让人拖来拖去，是把这个判断拆散
+ * 之后再要求玩家自己拼回去。
+ *
+ * 行的顺序和背包界面用的是同一套（分类序、目录序），所以同一件东西在两个界面里
+ * 的相对位置一致。
+ */
+export function buildContainerView(
+  actorId: string,
+  container: ContainerModelLike,
+  inventory: InventoryModelLike | undefined,
+  catalog: ItemCatalogLike = itemCatalog as unknown as ItemCatalogLike,
+): ContainerView {
+  const order = catalogOrder(catalog);
+  const categories = Object.keys(ITEM_CATEGORY_LABELS) as ItemCategory[];
+  const totals = new Map<string, { carried: number; stored: number }>();
+  const accumulate = (
+    entries: readonly { readonly itemType: string; readonly quantity: number }[],
+    key: 'carried' | 'stored',
+  ): void => {
+    for (const entry of entries) {
+      const row = totals.get(entry.itemType) ?? { carried: 0, stored: 0 };
+      row[key] += entry.quantity;
+      totals.set(entry.itemType, row);
+    }
+  };
+  accumulate(container.slots, 'stored');
+  accumulate(container.pooled, 'stored');
+  if (inventory) {
+    accumulate(inventory.slots, 'carried');
+    accumulate(inventory.pooled, 'carried');
+  }
+
+  const rows: ContainerRowView[] = [];
+  for (const [itemType, counts] of totals) {
+    const definition = catalog.get(itemType);
+    // 目录里没有的物品不画：它进不了权威账本，出现在这里说明配置漏了登记。
+    if (!definition) continue;
+    rows.push({
+      itemType: definition.id,
+      displayName: definition.displayName,
+      iconId: definition.iconId,
+      tint: definition.tint,
+      carried: counts.carried,
+      stored: counts.stored,
+    });
+  }
+  rows.sort((left, right) => {
+    const leftCategory = catalog.get(left.itemType)?.category ?? '';
+    const rightCategory = catalog.get(right.itemType)?.category ?? '';
+    return categories.indexOf(leftCategory as ItemCategory)
+      - categories.indexOf(rightCategory as ItemCategory)
+      || (order.get(left.itemType) ?? 0) - (order.get(right.itemType) ?? 0);
+  });
+
+  return {
+    actorId,
+    label: container.label,
+    slotCapacity: container.slotCapacity,
+    usedSlots: container.usedSlots,
+    // 自己也算在服务端那个计数里，所以减掉自己才是「另有几个人」。
+    otherViewerCount: Math.max(0, container.viewerCount - 1),
+    rows,
+    revision: container.revision,
+  };
+}
