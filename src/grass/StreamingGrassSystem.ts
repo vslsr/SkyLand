@@ -10,7 +10,9 @@ import {
   createPlacedGrassGeometry,
   type GrassClusterPlacement,
   type GrassFieldBounds,
+  type GrassFieldGeometry,
 } from '../models/grass';
+import { createGrassPatchGeometry } from '../models/grassPatch';
 import type { SceneUpdateContext, SceneVisualSystem } from '../scene/SceneVisualSystem';
 import {
   GRASS_FILL_FRAGMENT_SHADER,
@@ -19,6 +21,10 @@ import {
   GRASS_OUTLINE_VERTEX_SHADER,
 } from '../shaders/grass';
 import { GrassBendField } from './GrassBendField';
+import {
+  generateChunkGrassPatches,
+  type GrassPatchConfig,
+} from './grassPatchField';
 import { GrassInteractionQueue, type GrassInteractionTarget } from './GrassInteraction';
 
 const GRASS_LOD_NEAR_DISTANCE = 10;
@@ -27,6 +33,13 @@ const GRASS_LOD_FAR_DISTANCE = 28;
 const DEFAULT_BEND_WINDOW_SIZE = 32;
 const DEFAULT_BEND_WINDOW_STEP = 4;
 const DEFAULT_BEND_TEXTURE_SIZE = 256;
+/**
+ * 单个 chunk 的密草叶片上限。
+ *
+ * 草丛数与半径都有上界，这里再兜一层：无论配置怎么写，keepRadius 内的草丛
+ * 实例数都是「chunk 数 × 这个常量」，不随世界面积增长。
+ */
+const MAX_PATCH_BLADES_PER_CHUNK = 4_000;
 
 interface StreamingGrassSystemOptions {
   color: THREE.ColorRepresentation;
@@ -34,12 +47,22 @@ interface StreamingGrassSystemOptions {
   bendTextureSize?: number;
   bendWindowSize?: number;
   bendWindowStep?: number;
+  /** 成片密草的生成参数；不给就只渲染生成器放置的稀疏草簇。 */
+  patches?: GrassPatchConfig;
+}
+
+/** 挂载一个 chunk 时，密草需要知道的世界信息。 */
+export interface GrassChunkAnchor {
+  worldSeed: number;
+  chunkX: number;
+  chunkZ: number;
+  /** 草根贴地采样；返回 undefined 表示该点不长草（水面等）。 */
+  sampleAnchor: (x: number, z: number) => number | undefined;
 }
 
 interface GrassChunkView {
   root: THREE.Group;
-  fillGeometry: THREE.InstancedBufferGeometry;
-  outlineGeometry: THREE.InstancedBufferGeometry;
+  geometries: GrassFieldGeometry[];
 }
 
 /**
@@ -56,6 +79,7 @@ export class StreamingGrassSystem implements SceneVisualSystem {
   private readonly fillMaterial: THREE.ShaderMaterial;
   private readonly outlineMaterial: THREE.ShaderMaterial;
   private readonly chunks = new Map<string, GrassChunkView>();
+  private readonly patchConfig?: GrassPatchConfig;
   private readonly requestedFieldBounds = new THREE.Vector4();
   private readonly renderedFieldBounds = new THREE.Vector4();
   private readonly bendWindowSize: number;
@@ -67,6 +91,7 @@ export class StreamingGrassSystem implements SceneVisualSystem {
   public constructor(options: StreamingGrassSystemOptions) {
     this.root.name = 'streaming-grass-system';
     this.interaction = this.interactionQueue;
+    this.patchConfig = options.patches;
     this.bendWindowSize = positiveFiniteOr(options.bendWindowSize, DEFAULT_BEND_WINDOW_SIZE);
     this.bendWindowStep = positiveFiniteOr(options.bendWindowStep, DEFAULT_BEND_WINDOW_STEP);
     const initialBounds = createBendWindowBounds(
@@ -128,28 +153,30 @@ export class StreamingGrassSystem implements SceneVisualSystem {
     };
   }
 
-  public mountChunk(key: string, data: ChunkGeometryData): void {
+  public mountChunk(key: string, data: ChunkGeometryData, anchor?: GrassChunkAnchor): void {
     this.unmountChunk(key);
+    const geometries: GrassFieldGeometry[] = [];
     const placements: GrassClusterPlacement[] = readChunkProps(data.props, data.propCount)
       .filter((prop) => prop.kind === PROP_KIND.GRASS);
-    if (placements.length === 0) return;
+    // 生成器放置的稀疏草簇一如既往地画出来；密草是叠加上去的第二层。
+    if (placements.length > 0) geometries.push(createPlacedGrassGeometry(placements));
+    const patchGeometry = this.createPatchGeometry(anchor);
+    if (patchGeometry) geometries.push(patchGeometry);
+    if (geometries.length === 0) return;
 
-    const geometry = createPlacedGrassGeometry(placements);
     const root = new THREE.Group();
-    const fill = new THREE.Mesh(geometry.fill, this.fillMaterial);
-    const outline = new THREE.LineSegments(geometry.outline, this.outlineMaterial);
     root.name = `grass-chunk-${key}`;
-    fill.frustumCulled = false;
-    outline.frustumCulled = false;
-    fill.renderOrder = 0;
-    outline.renderOrder = 1;
-    root.add(fill, outline);
+    for (const geometry of geometries) {
+      const fill = new THREE.Mesh(geometry.fill, this.fillMaterial);
+      const outline = new THREE.LineSegments(geometry.outline, this.outlineMaterial);
+      fill.frustumCulled = false;
+      outline.frustumCulled = false;
+      fill.renderOrder = 0;
+      outline.renderOrder = 1;
+      root.add(fill, outline);
+    }
     this.root.add(root);
-    this.chunks.set(key, {
-      root,
-      fillGeometry: geometry.fill,
-      outlineGeometry: geometry.outline,
-    });
+    this.chunks.set(key, { root, geometries });
   }
 
   public unmountChunk(key: string): void {
@@ -157,8 +184,10 @@ export class StreamingGrassSystem implements SceneVisualSystem {
     if (!chunk) return;
     this.chunks.delete(key);
     chunk.root.parent?.remove(chunk.root);
-    chunk.fillGeometry.dispose();
-    chunk.outlineGeometry.dispose();
+    for (const geometry of chunk.geometries) {
+      geometry.fill.dispose();
+      geometry.outline.dispose();
+    }
   }
 
   public update(
@@ -194,6 +223,21 @@ export class StreamingGrassSystem implements SceneVisualSystem {
     this.bendField.dispose();
     this.fillMaterial.dispose();
     this.outlineMaterial.dispose();
+  }
+
+  private createPatchGeometry(anchor?: GrassChunkAnchor): GrassFieldGeometry | undefined {
+    if (!this.patchConfig || !anchor) return undefined;
+    const patches = generateChunkGrassPatches(
+      anchor.worldSeed,
+      anchor.chunkX,
+      anchor.chunkZ,
+      this.patchConfig,
+    );
+    return createGrassPatchGeometry(patches, {
+      bladeDensity: this.patchConfig.bladeDensity,
+      sampleAnchor: anchor.sampleAnchor,
+      maximumBladeCount: MAX_PATCH_BLADES_PER_CHUNK,
+    });
   }
 
   private updateBendWindow(focusX: number, focusZ: number): void {

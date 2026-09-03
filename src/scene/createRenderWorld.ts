@@ -145,6 +145,8 @@ export function createRenderWorld(
       environment,
       ocean: renderer.content.ocean ? renderer.ocean : undefined,
       seaLevel: definition.gameplay.water?.seaLevel,
+      // 成片密草的参数：和 chunk 内容一样由场景定义说了算，不需要玩法侧递过来。
+      grassPatches: renderer.world.grassPatches,
       templates: {
         content: renderer.content,
         environment,

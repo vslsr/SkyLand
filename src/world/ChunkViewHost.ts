@@ -1,8 +1,10 @@
 import * as THREE from 'three';
 import type { ChunkGenerator } from '../../shared/world/chunkGenerator.mjs';
 import { createOverrideCellCodeAt } from '../../shared/world/terrainCollisionMesh.mjs';
+import { sampleTerrain } from '../../shared/world/terrainContent.mjs';
 import { frameTimeline } from '../platform/index';
 import { StreamingGrassSystem, type GrassInteractionTarget } from '../grass';
+import type { GrassPatchConfig } from '../grass/grassPatchField';
 import type { FillMaterialEnvironment } from '../materials/createFillMaterial';
 import { createOceanMaterials, type OceanMaterials } from '../materials/oceanMaterials';
 import { createWaterSplashMaterial } from '../materials/createWaterSplashMaterial';
@@ -53,12 +55,20 @@ export interface ChunkViewSink {
   onGeneratorReady(listener: (kind: string) => void): void;
 }
 
+/** 密草只关心这两项；sampleTerrain 写回的其余字段这里用不到。 */
+interface GrassAnchorSample {
+  groundY: number;
+  walkable: boolean;
+}
+
 export interface ChunkViewHostOptions {
   templates: ChunkTemplateOptions;
   environment: FillMaterialEnvironment;
   ocean?: OceanVisualDefinition;
   seaLevel?: number;
   worldSeed: number;
+  /** 成片密草的生成参数；不给就只画生成器放置的稀疏草簇。 */
+  grassPatches?: GrassPatchConfig;
 }
 
 /**
@@ -101,6 +111,8 @@ export class ChunkViewHost implements ChunkViewSink {
   private generator?: ChunkGenerator;
   private disposed = false;
   private readonly generatorReadyListeners: ((kind: string) => void)[] = [];
+  /** 复用的地形采样目标：密草每片叶子都要采一次，不为此产生临时对象。 */
+  private readonly terrainSample = {} as GrassAnchorSample;
 
   public constructor(options: ChunkViewHostOptions) {
     this.root.name = 'chunk-views';
@@ -123,6 +135,7 @@ export class ChunkViewHost implements ChunkViewSink {
       this.grass = new StreamingGrassSystem({
         color: options.templates.palette.grass,
         environment: options.environment,
+        patches: options.grassPatches,
       });
       this.grassInteraction = this.grass.interaction;
       this.root.add(this.grass.root);
@@ -171,8 +184,9 @@ export class ChunkViewHost implements ChunkViewSink {
 
   public mount(request: ChunkViewMountRequest): void {
     if (this.views.has(request.key) || !this.generator) return;
-    // `chunk-gen` 是纯计算（只是便宜到不值得搬）；`chunk-geometry` 建的是
-    // Three 对象。分开打点是为了看清哪一段值得动。
+    const cellCodeAt = createOverrideCellCodeAt(this.worldSeed, request.terrainOverrides);
+    // 三段分开打点：`chunk-gen` 是纯计算（只是便宜到不值得搬）、`chunk-geometry`
+    // 建的是 Three 对象、`chunk-grass` 是草地实例。分开是为了看清哪一段值得动。
     const data = frameTimeline.measure(
       'chunk-gen',
       () => this.generator!.buildChunk(request.chunkX, request.chunkZ, request.skipMask),
@@ -197,12 +211,38 @@ export class ChunkViewHost implements ChunkViewSink {
         showGround: this.templates.content.ground,
         oceanDefinition: this.ocean,
         seaLevel: this.seaLevel,
-        cellCodeAt: createOverrideCellCodeAt(this.worldSeed, request.terrainOverrides),
+        cellCodeAt,
       },
     ));
-    frameTimeline.measure('chunk-grass', () => this.grass?.mountChunk(request.key, data));
+    frameTimeline.measure('chunk-grass', () => this.grass?.mountChunk(request.key, data, {
+      worldSeed: this.worldSeed,
+      chunkX: request.chunkX,
+      chunkZ: request.chunkZ,
+      sampleAnchor: (x, z) => this.sampleGrassAnchor(x, z, cellCodeAt),
+    }));
     this.views.set(request.key, view);
     this.root.add(view.root);
+  }
+
+  /**
+   * 密草的草根高度。水面（含被海平面淹没的地块）不长草，返回 undefined。
+   *
+   * 采样走的是与地形几何同一套 cellCodeAt，因此编辑过的格子上草也跟着走。
+   */
+  private sampleGrassAnchor(
+    x: number,
+    z: number,
+    cellCodeAt: (globalCellX: number, globalCellZ: number) => number,
+  ): number | undefined {
+    const sample = sampleTerrain(
+      this.worldSeed,
+      x,
+      z,
+      this.terrainSample,
+      cellCodeAt,
+    ) as GrassAnchorSample;
+    if (!sample.walkable || sample.groundY < this.seaLevel) return undefined;
+    return sample.groundY;
   }
 
   public unmount(key: string): void {

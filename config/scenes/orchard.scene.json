@@ -52,7 +52,14 @@
     "world": {
       "loadRadius": 2,
       "keepRadius": 3,
-      "rockColor": "#d4d0c6"
+      "rockColor": "#d4d0c6",
+      "grassPatches": {
+        "maxPerChunk": 4,
+        "spawnChance": 0.65,
+        "minRadius": 2.4,
+        "maxRadius": 5.2,
+        "bladeDensity": 20
+      }
     }
   },
   "gameplay": {
