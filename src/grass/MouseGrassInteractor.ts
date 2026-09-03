@@ -1,6 +1,9 @@
 import * as THREE from 'three';
 import type { GrassInteractionTarget } from './GrassInteraction';
 
+/** 鼠标自成一条足迹，不和玩家的路径连起来。 */
+const MOUSE_TRAIL_SOURCE = 'mouse';
+
 interface PendingPointer {
   clientX: number;
   clientY: number;
@@ -48,6 +51,7 @@ export class MouseGrassInteractor {
       if (distance > 0.004) {
         const strength = THREE.MathUtils.clamp(distance / 0.24, 0.12, 1);
         this.target.applyImpulse({
+          sourceId: MOUSE_TRAIL_SOURCE,
           position: { x: this.worldPoint.x, z: this.worldPoint.z },
           direction: { x: directionX, z: directionZ },
           radius: 0.5 + strength * 0.28,

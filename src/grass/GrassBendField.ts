@@ -1,61 +1,157 @@
 import * as THREE from 'three';
 import type { GrassFieldBounds } from '../models/grass';
 import {
-  GRASS_BEND_FRAGMENT_SHADER,
-  GRASS_BEND_VERTEX_SHADER,
+  GRASS_TRAIL_STAMP_FRAGMENT_SHADER,
+  GRASS_TRAIL_STAMP_VERTEX_SHADER,
 } from '../shaders/grass';
-import type { NormalizedGrassBendImpulse } from './GrassInteraction';
+import type { GrassTrailPath, GrassTrailPoint } from './GrassTrailPath';
+import type { GrassTrailRecorder } from './GrassTrailRecorder';
 
+/** 弯曲纹理的默认边长。32 米窗口下约 0.125 米/像素，够画出脚印的宽度。 */
 const DEFAULT_BEND_TEXTURE_SIZE = 256;
-const DECAY_PER_60HZ_FRAME = 0.965;
 
+/** 中性状态：方向为零向量（编码成 0.5），强度为 0。 */
+const NEUTRAL_BEND_COLOR = Object.freeze(new THREE.Color(0.5, 0.5, 0));
+
+/** 每段路径盖章时，方向里混入多少「沿行进方向推倒」。其余是径向推开。 */
+const DEFAULT_ALONG_BIAS = 0.35;
+
+/** 每段线段占的浮点数：start.xy + end.xy + (radius, startStrength, endStrength)。 */
+const FLOATS_PER_SEGMENT_START = 2;
+const FLOATS_PER_SEGMENT_END = 2;
+const FLOATS_PER_SEGMENT_SHAPE = 3;
+
+export interface GrassBendFieldOptions {
+  textureSize?: number;
+  /** 线段实例的上界，直接决定这块显存有多大。 */
+  maxSegments?: number;
+  alongBias?: number;
+}
+
+/**
+ * 草地弯曲向量场。
+ *
+ * 它是**路径的一个纯函数**：每帧清成中性色，再把当前所有足迹路径按线段盖上去。
+ * 这一点是刻意的，换来三件以前做不到的事：
+ *
+ * - 滑动窗口移动时不需要把旧纹理重投影到新坐标——直接用新范围重画一遍即可，
+ *   边缘不再丢失压痕，大幅传送也不会拖着上一处的鬼影。
+ * - 新流进来的 chunk 立刻带着已有的足迹，而不是从中性状态慢慢重新被踩出来。
+ * - 场的内容可以从网络同步的路径重建，不再是只存在于 GPU 上的历史。
+ *
+ * 成本也从「每帧一次全屏 pass + 每个冲量再来一次」降到「每帧一次清屏 + 一次
+ * 实例化绘制」，绘制面积只覆盖足迹本身而不是整张纹理。
+ */
 export class GrassBendField {
   private readonly scene = new THREE.Scene();
+  /** 盖章着色器直接写裁剪空间坐标，这台相机只是 render() 的必填参数。 */
   private readonly camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
-  private readonly geometry = new THREE.PlaneBufferGeometry(2, 2);
+  private readonly geometry = new THREE.InstancedBufferGeometry();
   private readonly material: THREE.ShaderMaterial;
-  private readonly targets: readonly [THREE.WebGLRenderTarget, THREE.WebGLRenderTarget];
-  private readonly textureBounds: THREE.Vector4;
-  private readonly requestedBounds: THREE.Vector4;
-  private readIndex = 0;
-  private initialized = false;
+  private readonly target: THREE.WebGLRenderTarget;
+  private readonly bounds: THREE.Vector4;
+  private readonly maxSegments: number;
+  private readonly segmentStarts: Float32Array;
+  private readonly segmentEnds: Float32Array;
+  private readonly segmentShapes: Float32Array;
+  private readonly startAttribute: THREE.InstancedBufferAttribute;
+  private readonly endAttribute: THREE.InstancedBufferAttribute;
+  private readonly shapeAttribute: THREE.InstancedBufferAttribute;
+  private readonly scratchPoint: GrassTrailPoint = {
+    x: 0,
+    z: 0,
+    radius: 0,
+    strength: 0,
+    age: 0,
+  };
+  private readonly scratchClearColor = new THREE.Color();
+  private readonly previousPoint: GrassTrailPoint = {
+    x: 0,
+    z: 0,
+    radius: 0,
+    strength: 0,
+    age: 0,
+  };
+  private segmentCount = 0;
 
-  public constructor(bounds: GrassFieldBounds, textureSize = DEFAULT_BEND_TEXTURE_SIZE) {
-    const fieldBounds = new THREE.Vector4(
+  public constructor(bounds: GrassFieldBounds, options: GrassBendFieldOptions = {}) {
+    this.bounds = new THREE.Vector4(
       bounds.minimumX,
       bounds.minimumZ,
       bounds.maximumX,
       bounds.maximumZ,
     );
-    this.textureBounds = fieldBounds.clone();
-    this.requestedBounds = fieldBounds.clone();
-    this.targets = [createBendTarget(textureSize), createBendTarget(textureSize)];
+    this.maxSegments = Math.max(1, Math.floor(
+      positiveFiniteOr(options.maxSegments, 192),
+    ));
+    this.target = createBendTarget(
+      positiveFiniteOr(options.textureSize, DEFAULT_BEND_TEXTURE_SIZE),
+    );
+
+    const quad = new THREE.PlaneBufferGeometry(2, 2);
+    if (quad.index) this.geometry.setIndex(quad.index.clone());
+    for (const [name, attribute] of Object.entries(quad.attributes)) {
+      this.geometry.setAttribute(name, (attribute as THREE.BufferAttribute).clone());
+    }
+    quad.dispose();
+
+    this.segmentStarts = new Float32Array(this.maxSegments * FLOATS_PER_SEGMENT_START);
+    this.segmentEnds = new Float32Array(this.maxSegments * FLOATS_PER_SEGMENT_END);
+    this.segmentShapes = new Float32Array(this.maxSegments * FLOATS_PER_SEGMENT_SHAPE);
+    this.startAttribute = new THREE.InstancedBufferAttribute(
+      this.segmentStarts,
+      FLOATS_PER_SEGMENT_START,
+    );
+    this.endAttribute = new THREE.InstancedBufferAttribute(
+      this.segmentEnds,
+      FLOATS_PER_SEGMENT_END,
+    );
+    this.shapeAttribute = new THREE.InstancedBufferAttribute(
+      this.segmentShapes,
+      FLOATS_PER_SEGMENT_SHAPE,
+    );
+    this.startAttribute.setUsage(THREE.DynamicDrawUsage);
+    this.endAttribute.setUsage(THREE.DynamicDrawUsage);
+    this.shapeAttribute.setUsage(THREE.DynamicDrawUsage);
+    this.geometry.setAttribute('aSegmentStart', this.startAttribute);
+    this.geometry.setAttribute('aSegmentEnd', this.endAttribute);
+    this.geometry.setAttribute('aSegmentShape', this.shapeAttribute);
+    this.geometry.instanceCount = 0;
+
     this.material = new THREE.ShaderMaterial({
-      vertexShader: GRASS_BEND_VERTEX_SHADER,
-      fragmentShader: GRASS_BEND_FRAGMENT_SHADER,
+      vertexShader: GRASS_TRAIL_STAMP_VERTEX_SHADER,
+      fragmentShader: GRASS_TRAIL_STAMP_FRAGMENT_SHADER,
       uniforms: {
-        uPreviousTexture: { value: this.targets[0].texture },
-        uPreviousFieldBounds: { value: this.textureBounds },
-        uFieldBounds: { value: this.requestedBounds },
-        uImpulsePosition: { value: new THREE.Vector2() },
-        uImpulseStartPosition: { value: new THREE.Vector2() },
-        uImpulseDirection: { value: new THREE.Vector2(1, 0) },
-        uImpulseRadius: { value: 0.65 },
-        uImpulseStrength: { value: 0 },
-        uImpulseRadial: { value: 0 },
-        uDecay: { value: 1 },
+        uFieldBounds: { value: this.bounds },
+        uAlongBias: { value: clamp01(positiveFiniteOr(options.alongBias, DEFAULT_ALONG_BIAS)) },
       },
+      // 普通混合就够：越晚画的一段权重越高，新足迹自然覆盖旧足迹，
+      // 不需要浮点渲染目标去做有符号向量的累加。
+      transparent: true,
       depthTest: false,
       depthWrite: false,
     });
-    this.scene.add(new THREE.Mesh(this.geometry, this.material));
+
+    const mesh = new THREE.Mesh(this.geometry, this.material);
+    mesh.frustumCulled = false;
+    this.scene.add(mesh);
   }
 
   public get texture(): THREE.Texture {
-    return this.targets[this.readIndex].texture;
+    return this.target.texture;
   }
 
-  /** 下一次 step 会把旧纹理重投影到这个局部世界窗口。 */
+  /** 当前这一帧实际盖了多少段；供诊断与回归测试读取。 */
+  public get stampedSegmentCount(): number {
+    return this.segmentCount;
+  }
+
+  /**
+   * 设定局部世界窗口。
+   *
+   * 立即生效：场是路径的纯函数，换范围只要下一帧按新范围重画，
+   * 没有「旧纹理」需要重投影。
+   */
   public setBounds(bounds: GrassFieldBounds): void {
     if (
       !Number.isFinite(bounds.minimumX)
@@ -67,72 +163,118 @@ export class GrassBendField {
     ) {
       throw new RangeError('草地弯曲窗口必须是有限且非空的范围');
     }
-    this.requestedBounds.set(
-      bounds.minimumX,
-      bounds.minimumZ,
-      bounds.maximumX,
-      bounds.maximumZ,
-    );
+    this.bounds.set(bounds.minimumX, bounds.minimumZ, bounds.maximumX, bounds.maximumZ);
   }
 
-  public copyTextureBounds(target: THREE.Vector4): void {
-    target.copy(this.textureBounds);
+  public copyBounds(target: THREE.Vector4): void {
+    target.copy(this.bounds);
   }
 
-  public step(
-    renderer: THREE.WebGLRenderer,
-    deltaSeconds: number,
-    impulse?: NormalizedGrassBendImpulse,
-  ): void {
-    this.initialize(renderer);
-    const writeIndex = 1 - this.readIndex;
-    const readTarget = this.targets[this.readIndex];
-    const writeTarget = this.targets[writeIndex];
+  /** 重画整张场。窗口外的路径整条跳过，绘制量因此只跟看得见的足迹有关。 */
+  public render(renderer: THREE.WebGLRenderer, recorder: GrassTrailRecorder): void {
+    this.prepareSegments(recorder);
     const previousTarget = renderer.getRenderTarget();
+    const previousClearColor = renderer.getClearColor(this.scratchClearColor).clone();
+    const previousClearAlpha = renderer.getClearAlpha();
 
-    this.material.uniforms.uPreviousTexture.value = readTarget.texture;
-    this.material.uniforms.uDecay.value = Math.pow(
-      DECAY_PER_60HZ_FRAME,
-      Math.max(0, deltaSeconds) * 60,
-    );
-    this.material.uniforms.uImpulseStrength.value = impulse?.strength ?? 0;
-    this.material.uniforms.uImpulseRadial.value = impulse?.radial ? 1 : 0;
-    if (impulse) {
-      this.material.uniforms.uImpulsePosition.value.set(impulse.positionX, impulse.positionZ);
-      this.material.uniforms.uImpulseStartPosition.value.set(
-        impulse.startPositionX,
-        impulse.startPositionZ,
-      );
-      this.material.uniforms.uImpulseDirection.value.set(impulse.directionX, impulse.directionZ);
-      this.material.uniforms.uImpulseRadius.value = impulse.radius;
-    }
-
-    renderer.setRenderTarget(writeTarget);
-    renderer.render(this.scene, this.camera);
+    const previousAutoClear = renderer.autoClear;
+    renderer.setClearColor(NEUTRAL_BEND_COLOR, 1);
+    renderer.setRenderTarget(this.target);
+    // 自己清一次就够，render 再清一遍是白费一整张纹理的写入。
+    renderer.autoClear = false;
+    renderer.clear(true, false, false);
+    if (this.segmentCount > 0) renderer.render(this.scene, this.camera);
+    renderer.autoClear = previousAutoClear;
     renderer.setRenderTarget(previousTarget);
-    this.readIndex = writeIndex;
-    this.textureBounds.copy(this.requestedBounds);
+    renderer.setClearColor(previousClearColor, previousClearAlpha);
   }
 
   public dispose(): void {
     this.geometry.dispose();
     this.material.dispose();
-    for (const target of this.targets) target.dispose();
+    this.target.dispose();
   }
 
-  private initialize(renderer: THREE.WebGLRenderer): void {
-    if (this.initialized) return;
-    const previousTarget = renderer.getRenderTarget();
-    const previousColor = renderer.getClearColor(new THREE.Color()).clone();
-    const previousAlpha = renderer.getClearAlpha();
-    renderer.setClearColor(new THREE.Color(0.5, 0.5, 0), 1);
-    for (const target of this.targets) {
-      renderer.setRenderTarget(target);
-      renderer.clear(true, false, false);
+  /**
+   * 把路径拍平成线段实例，返回这一帧要盖的段数。
+   *
+   * 上界是 `maxSegments`：写满就停，不会因为世界里多了几个玩家而无限增长。
+   * 与窗口不相交的路径在这里整条跳过，省掉的是 GPU 的绘制而不只是像素。
+   *
+   * `render` 会先调用它。单独调用只用于在没有 GL 上下文的地方验证裁剪与上界。
+   */
+  public prepareSegments(recorder: GrassTrailRecorder): number {
+    this.segmentCount = 0;
+    recorder.forEachPath((path) => this.packPath(path));
+
+    const startCount = this.segmentCount * FLOATS_PER_SEGMENT_START;
+    const endCount = this.segmentCount * FLOATS_PER_SEGMENT_END;
+    const shapeCount = this.segmentCount * FLOATS_PER_SEGMENT_SHAPE;
+    this.startAttribute.updateRange = { offset: 0, count: startCount };
+    this.endAttribute.updateRange = { offset: 0, count: endCount };
+    this.shapeAttribute.updateRange = { offset: 0, count: shapeCount };
+    this.startAttribute.needsUpdate = true;
+    this.endAttribute.needsUpdate = true;
+    this.shapeAttribute.needsUpdate = true;
+    this.geometry.instanceCount = this.segmentCount;
+    return this.segmentCount;
+  }
+
+  private packPath(path: GrassTrailPath): void {
+    if (this.segmentCount >= this.maxSegments) return;
+    if (!path.intersectsBounds(this.bounds.x, this.bounds.y, this.bounds.z, this.bounds.w)) {
+      return;
     }
-    renderer.setRenderTarget(previousTarget);
-    renderer.setClearColor(previousColor, previousAlpha);
-    this.initialized = true;
+
+    // 只有一个点的路径退化成一段零长线段：盖章着色器把它当成一个圆点处理。
+    if (path.length === 1) {
+      path.readPoint(0, this.scratchPoint);
+      this.writeSegment(
+        this.scratchPoint.x,
+        this.scratchPoint.z,
+        this.scratchPoint.x,
+        this.scratchPoint.z,
+        this.scratchPoint.radius,
+        path.currentStrength(0),
+        path.currentStrength(0),
+      );
+      return;
+    }
+
+    for (let index = 1; index < path.length; index += 1) {
+      if (this.segmentCount >= this.maxSegments) return;
+      path.readPoint(index - 1, this.previousPoint);
+      path.readPoint(index, this.scratchPoint);
+      this.writeSegment(
+        this.previousPoint.x,
+        this.previousPoint.z,
+        this.scratchPoint.x,
+        this.scratchPoint.z,
+        Math.max(this.previousPoint.radius, this.scratchPoint.radius),
+        path.currentStrength(index - 1),
+        path.currentStrength(index),
+      );
+    }
+  }
+
+  private writeSegment(
+    startX: number,
+    startZ: number,
+    endX: number,
+    endZ: number,
+    radius: number,
+    startStrength: number,
+    endStrength: number,
+  ): void {
+    const index = this.segmentCount;
+    this.segmentStarts[index * FLOATS_PER_SEGMENT_START] = startX;
+    this.segmentStarts[index * FLOATS_PER_SEGMENT_START + 1] = startZ;
+    this.segmentEnds[index * FLOATS_PER_SEGMENT_END] = endX;
+    this.segmentEnds[index * FLOATS_PER_SEGMENT_END + 1] = endZ;
+    this.segmentShapes[index * FLOATS_PER_SEGMENT_SHAPE] = radius;
+    this.segmentShapes[index * FLOATS_PER_SEGMENT_SHAPE + 1] = clamp01(startStrength);
+    this.segmentShapes[index * FLOATS_PER_SEGMENT_SHAPE + 2] = clamp01(endStrength);
+    this.segmentCount += 1;
   }
 }
 
@@ -147,4 +289,13 @@ function createBendTarget(textureSize: number): THREE.WebGLRenderTarget {
   });
   target.texture.generateMipmaps = false;
   return target;
+}
+
+function clamp01(value: number): number {
+  if (!Number.isFinite(value)) return 0;
+  return Math.min(1, Math.max(0, value));
+}
+
+function positiveFiniteOr(value: number | undefined, fallback: number): number {
+  return Number.isFinite(value) && (value as number) > 0 ? value as number : fallback;
 }

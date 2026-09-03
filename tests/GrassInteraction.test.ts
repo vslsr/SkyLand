@@ -8,6 +8,7 @@ import {
   type WorldPositionSampler,
 } from '../src/actors/components/GrassDisplacementComponent';
 import { GrassInteractionQueue } from '../src/grass/GrassInteraction';
+import { DEFAULT_GRASS_TRAIL_SOURCE } from '../src/grass/GrassTrailRecorder';
 
 /**
  * 位置采样器。搬迁之前这是 `createObjectPositionSampler`——一个把 Object3D 挡在
@@ -25,6 +26,7 @@ function samplePosition(object: THREE.Object3D): WorldPositionSampler {
 test('grass interaction normalizes direction and clamps public input', () => {
   const queue = new GrassInteractionQueue();
   queue.applyImpulse({
+    sourceId: 'walker',
     position: { x: 3, z: -4 },
     direction: { x: 3, z: 4 },
     radius: 20,
@@ -32,6 +34,7 @@ test('grass interaction normalizes direction and clamps public input', () => {
   });
 
   assert.deepEqual(queue.drain(), [{
+    sourceId: 'walker',
     positionX: 3,
     positionZ: -4,
     startPositionX: 3,
@@ -62,7 +65,9 @@ test('radial grass interaction does not require a movement direction', () => {
     strength: 0.25,
   });
 
+  // 没写 sourceId 的输入并进公共路径，而不是各自开一条。
   assert.deepEqual(queue.drain(), [{
+    sourceId: DEFAULT_GRASS_TRAIL_SOURCE,
     positionX: 2,
     positionZ: -1,
     startPositionX: 2,

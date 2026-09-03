@@ -6,6 +6,13 @@ export const GRASS_DISPLACEMENT_COMPONENT = 'grass-displacement';
 export interface GrassDisplacementComponentOptions {
   radius?: number;
   pressurePerSecond?: number;
+  /**
+   * 这个 Actor 在草地足迹里的来源标识，通常就是它的 id。
+   *
+   * 每个来源各自攒一条有限长度的路径；省略的话所有 Actor 会被并进同一条，
+   * 两名玩家分头走时中间会连出一段谁都没走过的假足迹。
+   */
+  sourceId?: string;
 }
 
 /**
@@ -41,6 +48,7 @@ export class GrassDisplacementComponent extends ActorComponent {
   public enabled = true;
   public readonly radius: number;
   public readonly pressurePerSecond: number;
+  public readonly sourceId?: string;
   private readonly worldPosition = { x: 0, y: 0, z: 0 };
   private previousWorldX = 0;
   private previousWorldY = 0;
@@ -61,6 +69,7 @@ export class GrassDisplacementComponent extends ActorComponent {
       options.pressurePerSecond,
       DEFAULT_PRESSURE_PER_SECOND,
     );
+    this.sourceId = options.sourceId;
   }
 
   public update(deltaSeconds: number): void {
@@ -118,6 +127,7 @@ export class GrassDisplacementComponent extends ActorComponent {
   ): void {
     this.target.applyImpulse({
       mode: 'radial',
+      sourceId: this.sourceId,
       startPosition: { x: startPositionX, z: startPositionZ },
       position: { x: positionX, z: positionZ },
       direction: { x: directionX, z: directionZ },

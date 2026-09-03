@@ -623,6 +623,8 @@ export class WeatherSystem implements SceneVisualSystem, WeatherVisualTarget, We
     runtime.scatterStrength.value = clamp01(scatterStrength);
     runtime.cloudShadowStrength.value = cloudShadowStrength;
     runtime.cloudShadowOffset.value.set(this.cloudShadowOffsetX, this.cloudShadowOffsetZ);
+    // 草地的阵风与云影同源：一场暴风里草倒伏的方向必须和云影漂移的方向一致。
+    runtime.windVector.value.set(WIND_X * this.state.wind, WIND_Z * this.state.wind);
   }
 
   /** 云的受光面取当前日光色，背光面取天色，日落的云因此会朝太阳一侧亮起来。 */

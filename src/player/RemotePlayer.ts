@@ -90,7 +90,7 @@ export class RemotePlayer extends Actor {
         out.z = this.transform.z;
       },
       grassInteraction,
-      { radius: this.visual.radius * 1.65 },
+      { radius: this.visual.radius * 1.65, sourceId: this.id },
     )) as GrassDisplacementComponent;
   }
 

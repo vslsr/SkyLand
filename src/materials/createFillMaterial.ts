@@ -34,9 +34,22 @@ export interface SceneEnvironmentRuntime {
   readonly cloudShadowStrength: THREE.IUniform<number>;
   /** 云影噪声的滚动偏移，跟着风走。 */
   readonly cloudShadowOffset: THREE.IUniform<THREE.Vector2>;
+  /**
+   * 水平风向 × 风力。云影、雨雪与草叶读的是同一份，所以一场暴风里
+   * 云影漂移的方向和草倒伏的方向必然一致。
+   */
+  readonly windVector: THREE.IUniform<THREE.Vector2>;
   /** 墨线染色，已归一化到平均 1：夜里偏冷、黄昏偏暖，浓度不变。 */
   readonly inkTint: THREE.IUniform<THREE.Color>;
 }
+
+/**
+ * 默认风：方向与 `WeatherSystem` 的 `WIND_X` / `WIND_Z` 一致，
+ * 强度取晴天的档位。没有天气系统时草地就吹这一阵恒定微风。
+ */
+export const DEFAULT_WIND_VECTOR = Object.freeze(
+  new THREE.Vector2(0.86, 0.51).multiplyScalar(0.2),
+);
 
 /** 默认主光方向：没有昼夜系统时的固定斜上方来光。 */
 export const DEFAULT_SUN_DIRECTION = Object.freeze(
@@ -65,6 +78,7 @@ export function createSceneEnvironment(
       scatterStrength: { value: 0 },
       cloudShadowStrength: { value: 0 },
       cloudShadowOffset: { value: new THREE.Vector2() },
+      windVector: { value: DEFAULT_WIND_VECTOR.clone() },
       inkTint: { value: new THREE.Color(0xffffff) },
     },
   };
@@ -90,6 +104,7 @@ export function createEnvironmentUniforms(
     uScatterStrength: runtime?.scatterStrength ?? { value: 0 },
     uCloudShadowStrength: runtime?.cloudShadowStrength ?? { value: 0 },
     uCloudShadowOffset: runtime?.cloudShadowOffset ?? { value: new THREE.Vector2() },
+    uWindVector: runtime?.windVector ?? { value: DEFAULT_WIND_VECTOR.clone() },
     uInkTint: runtime?.inkTint ?? { value: new THREE.Color(0xffffff) },
     uFogColor: runtime?.fogColor ?? { value: new THREE.Color(environment.fogColor) },
     uFogNear: runtime?.fogNear ?? { value: environment.fogNear },

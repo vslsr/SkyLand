@@ -1,7 +1,19 @@
+import {
+  DEFAULT_GRASS_TRAIL_SOURCE,
+  GRASS_TRAIL_MAX_SOURCES,
+} from './GrassTrailRecorder';
+
 interface GrassBendImpulseBase {
   position: Readonly<{ x: number; z: number }>;
   radius?: number;
   strength?: number;
+  /**
+   * 谁踩的。相同 id 的冲量会连成同一条足迹路径，省略时并入公共路径。
+   *
+   * 分开记而不是全部并成一条：两名玩家分头走时，一条共用路径会在他们之间
+   * 连出一段谁都没走过的假足迹。
+   */
+  sourceId?: string;
 }
 
 export type GrassBendImpulse = GrassBendImpulseBase & (
@@ -22,6 +34,7 @@ export interface GrassInteractionTarget {
 }
 
 export interface NormalizedGrassBendImpulse {
+  sourceId: string;
   positionX: number;
   positionZ: number;
   startPositionX: number;
@@ -34,7 +47,8 @@ export interface NormalizedGrassBendImpulse {
 }
 
 const DEFAULT_RADIUS = 0.65;
-const MAX_QUEUE_SIZE = 12;
+/** 每个来源每帧最多写一条，队列上界因此按来源数上界的两倍取，留出鼠标与调试。 */
+const MAX_QUEUE_SIZE = GRASS_TRAIL_MAX_SOURCES * 2;
 const DEFAULT_RADIAL_DIRECTION = { x: 1, z: 0 } as const;
 
 export class GrassInteractionQueue implements GrassInteractionTarget {
@@ -62,6 +76,7 @@ export class GrassInteractionQueue implements GrassInteractionTarget {
 
     if (this.queued.length >= MAX_QUEUE_SIZE) this.queued.shift();
     this.queued.push({
+      sourceId: impulse.sourceId ?? DEFAULT_GRASS_TRAIL_SOURCE,
       positionX: impulse.position.x,
       positionZ: impulse.position.z,
       startPositionX: startPosition.x,
