@@ -5,6 +5,8 @@ import {
   type InventoryPort,
 } from '../src/controllers/InventoryController.ts';
 import type { InventoryView } from '../src/inventory/index.ts';
+import type { InventoryCommand } from '../src/network/messages.ts';
+import type { InventoryItemAction } from '../src/ui/InventoryItemMenu.ts';
 import type { InventoryPage } from '../src/ui/pages/InventoryPage.ts';
 import { InventoryComponent } from '../shared/actor/index.mjs';
 import { InputSubsystem } from '../src/input/core/InputSubsystem.ts';
@@ -15,6 +17,8 @@ import { VirtualInputDevice } from '../src/input/devices/VirtualInputDevice.ts';
 class FakeInventoryPage {
   public readonly renders: (InventoryView | undefined)[] = [];
   public closeHint: string | undefined;
+  /** 界面把菜单里选中的那一条交给 Controller 的入口。 */
+  public selectAction?: (action: InventoryItemAction, itemType: string) => void;
 
   public setInventory(view: InventoryView | undefined): void {
     this.renders.push(view);
@@ -22,6 +26,10 @@ class FakeInventoryPage {
 
   public setCloseHint(label: string | undefined): void {
     this.closeHint = label;
+  }
+
+  public onItemAction(handler: (action: InventoryItemAction, itemType: string) => void): void {
+    this.selectAction = handler;
   }
 }
 
@@ -31,6 +39,7 @@ interface Harness {
   readonly inventory: InventoryComponent;
   readonly input: InputSubsystem;
   readonly device: VirtualInputDevice;
+  readonly sent: InventoryCommand[];
   open: boolean;
   available: boolean;
   blocked: boolean;
@@ -52,6 +61,7 @@ function createHarness(): Harness {
     inventory,
     input,
     device,
+    sent: [] as InventoryCommand[],
     open: false,
     available: true,
     blocked: false,
@@ -61,6 +71,7 @@ function createHarness(): Harness {
     isOpen: () => harness.open,
     setOpen: (open) => { harness.open = open; },
     canOpen: () => harness.available && !harness.blocked,
+    send: (command) => { harness.sent.push(command); },
   };
   Object.defineProperty(harness, 'controller', {
     value: new InventoryController(view as unknown as InventoryPage, input, port),
@@ -148,4 +159,51 @@ test('Input.Player.Inventory 标签能打开背包，dispose 之后不再响应'
   harness.device.setDigital(control, true);
   harness.input.update();
   assert.equal(harness.open, false, 'dispose 之后不该再收到输入');
+});
+
+test('菜单里的「使用」只是上手并关掉背包，不代按一次使用键', () => {
+  const harness = createHarness();
+  harness.inventory.add('wood', 3);
+  harness.controller.open();
+
+  harness.view.selectAction?.('use', 'wood');
+  assert.deepEqual(harness.sent, [{ kind: 'hold', itemType: 'wood' }]);
+  // 投掷要蓄力、工具要面前有目标，从菜单里代按一次只会是一次软投或一次打空。
+  assert.equal(
+    harness.sent.some((command) => String(command.kind).startsWith('use:')),
+    false,
+    '菜单不该替玩家按使用键',
+  );
+  assert.equal(harness.open, false, '上手之后让开画面，玩家才用得上它');
+});
+
+test('「装备」配到物品栏的空格上，已经配着就落回原来那一格', () => {
+  const harness = createHarness();
+  harness.inventory.add('wood', 3);
+  harness.inventory.add('stone', 2);
+  harness.controller.open();
+
+  harness.view.selectAction?.('equip', 'wood');
+  assert.deepEqual(harness.sent, [{ kind: 'assign', slotIndex: 0, itemType: 'wood' }]);
+  assert.equal(harness.open, true, '装备不关背包：可能要连配好几件');
+
+  // 第一格已经被木材占了，第二件落到下一个空格。
+  harness.inventory.assignHotbarSlot(0, 'wood');
+  harness.view.selectAction?.('equip', 'stone');
+  assert.deepEqual(harness.sent.at(-1), { kind: 'assign', slotIndex: 1, itemType: 'stone' });
+
+  // 已经在栏上的那件回到它自己那一格，而不是再占一个空格。
+  harness.view.selectAction?.('equip', 'wood');
+  assert.deepEqual(harness.sent.at(-1), { kind: 'assign', slotIndex: 0, itemType: 'wood' });
+});
+
+test('「丢弃」走 drop:stack，不经过手', () => {
+  const harness = createHarness();
+  harness.inventory.add('stone', 2);
+  harness.controller.open();
+
+  harness.view.selectAction?.('drop', 'stone');
+  // 「先 hold 再 drop」也能把东西丢出去，代价是改写快捷栏、把手上握着的换下去。
+  assert.deepEqual(harness.sent, [{ kind: 'drop:stack', itemType: 'stone' }]);
+  assert.equal(harness.open, true, '丢一个不该顺手关掉背包');
 });

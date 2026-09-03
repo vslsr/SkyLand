@@ -197,6 +197,91 @@ body.has-interaction-target .crosshair {
   display: none;
 }
 
+/*
+ * 按住时的键位与进度环。贴在准星下方、交互提示的位置上——按住期间那条提示正好
+ * 是灭的，两者不会同时出现，也就不会互相挤。
+ */
+.hold-progress {
+  position: fixed;
+  top: calc(50% + 24px);
+  left: 50%;
+  z-index: var(--layer-hud);
+  display: grid;
+  justify-items: center;
+  gap: 6px;
+  pointer-events: none;
+  transform: translateX(-50%);
+}
+
+.hold-progress[hidden] {
+  display: none;
+}
+
+/*
+ * 进度环。conic-gradient 从 12 点开始顺时针扫，--hold-progress 由控制器每帧写入；
+ * 两端跑同一个 chargeRatio，所以扫满那一刻就是服务端判定满的那一刻。
+ */
+.hold-progress__dial {
+  display: grid;
+  place-items: center;
+  width: 46px;
+  height: 46px;
+  border-radius: 50%;
+  background: conic-gradient(
+    var(--hold-progress-color) var(--hold-progress, 0%),
+    rgba(138, 98, 56, 0.18) var(--hold-progress, 0%)
+  );
+}
+
+.hold-progress[data-kind='stow'] {
+  --hold-progress-color: rgba(79, 214, 149, 0.92);
+}
+
+.hold-progress[data-kind='charge'] {
+  --hold-progress-color: rgba(201, 120, 104, 0.92);
+}
+
+/* 井盖与键帽落在同一个网格单元里：先入列的画在下面，不必写 z-index。 */
+.hold-progress__well,
+.hold-progress__key {
+  grid-area: 1 / 1;
+}
+
+.hold-progress__well {
+  width: 38px;
+  height: 38px;
+  background: rgba(253, 251, 246, 0.94);
+  border: 1px solid rgba(138, 98, 56, 0.52);
+  border-radius: 50%;
+}
+
+.hold-progress__key {
+  max-width: 30px;
+  overflow: hidden;
+  color: rgba(28, 26, 23, 0.86);
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.hold-progress__key[hidden] {
+  display: none;
+}
+
+.hold-progress__label {
+  margin: 0;
+  padding: 4px 9px;
+  color: rgba(28, 26, 23, 0.86);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  white-space: nowrap;
+  background: rgba(253, 251, 246, 0.86);
+  border: 1px solid rgba(138, 98, 56, 0.52);
+}
+
 .vessel-status {
   position: fixed;
   top: clamp(68px, 9vw, 102px);
@@ -1217,6 +1302,69 @@ body.is-topdown .virtual-controls.is-desktop-debug {
 .inventory__cell--actionable:hover,
 .inventory__cell--actionable:focus-visible {
   border-color: rgba(138, 98, 56, 0.72);
+}
+
+/*
+ * 点一格弹出来的动作菜单。挂在页面根节点上（正文 overflow: auto 会裁掉它），
+ * 位置由 InventoryItemMenu 按被点那一格的位置写进 left/top。
+ *
+ * 绝对定位 + 排在正文之后入列，所以它自然画在格子上面，不需要 z-index。
+ */
+.inventory-menu {
+  position: absolute;
+  min-width: 132px;
+  padding: 6px;
+  /* 不透明：它盖在别的格子上，透出一点点下面的字就成了糊在一起的两层。 */
+  background: #fdfbf6;
+  border: 1px solid rgba(28, 26, 23, 0.5);
+  box-shadow: 5px 6px 0 rgba(28, 26, 23, 0.12);
+}
+
+.inventory-menu[hidden] {
+  display: none;
+}
+
+.inventory-menu__title {
+  margin: 0 0 5px;
+  padding: 0 6px;
+  color: rgba(28, 26, 23, 0.52);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.inventory-menu__list {
+  display: grid;
+}
+
+.inventory-menu__entry {
+  padding: 7px 10px;
+  color: rgba(28, 26, 23, 0.86);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-align: left;
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+}
+
+.inventory-menu__entry:hover,
+.inventory-menu__entry:focus-visible {
+  color: #1c1a17;
+  background: rgba(138, 98, 56, 0.14);
+}
+
+/* 做不了的那条留在原位：菜单在每一格上都长得一样，玩家不用重新数。 */
+.inventory-menu__entry.is-disabled {
+  color: rgba(28, 26, 23, 0.32);
+  cursor: not-allowed;
+}
+
+.inventory-menu__entry.is-disabled:hover {
+  background: transparent;
 }
 
 .inventory__cell.is-held {

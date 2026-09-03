@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { HotbarController } from '../src/controllers/HotbarController.ts';
 import { InventoryComponent } from '../shared/actor/index.mjs';
+import type { HeldItemProgress } from '../src/controllers/HotbarController.ts';
 import type { InventoryCommand } from '../src/network/messages.ts';
 import { PlayerInputTags } from '../src/input/config/playerInput.ts';
 
@@ -16,17 +17,19 @@ function harness(heldActorId: string | undefined) {
     },
   } as never;
   const sent: InventoryCommand[] = [];
+  const progress: (HeldItemProgress | undefined)[] = [];
   let clock = 0;
   const inventory = new InventoryComponent({ slotCapacity: 8, hotbarCapacity: 4, stowHoldSeconds: 0.6 });
   const controller = new HotbarController(input, {
     getInventory: () => inventory,
     getHeldActorId: () => heldActorId,
     isActive: () => true,
+    getInputLabel: () => 'E',
     send: (command) => sent.push(command),
-    setProgress: () => undefined,
+    setProgress: (next) => progress.push(next),
   }, () => clock);
   const press = (phase: string) => handlers.get(PlayerInputTags.WorldInteract)?.({ phase });
-  return { controller, sent, press, advance: (ms: number) => { clock += ms; } };
+  return { controller, sent, progress, press, advance: (ms: number) => { clock += ms; } };
 }
 
 test('叼着世界物件时，交互键也走按住计时——按下不结算，松手才发', () => {
@@ -68,6 +71,7 @@ test('按住中途手上那件没了，这次按住作废', () => {
     getInventory: () => new InventoryComponent({ slotCapacity: 8 }),
     getHeldActorId: () => held,
     isActive: () => true,
+    getInputLabel: () => 'E',
     send: (command) => sent.push(command),
     setProgress: () => undefined,
   }, () => 0);
@@ -79,4 +83,24 @@ test('按住中途手上那件没了，这次按住作废', () => {
   held = undefined;
   controller.update();
   assert.deepEqual(sent, [{ kind: 'stow:begin' }, { kind: 'stow:cancel' }]);
+});
+
+test('按住期间把要按着的那个键交给界面：提示这时正在淡出，圈旁边得自己写', () => {
+  const { controller, progress, press, advance } = harness('mushroom-1');
+
+  press('started');
+  advance(300);
+  controller.update();
+  const halfway = progress.at(-1);
+  assert.equal(halfway?.kind, 'stow');
+  assert.equal(halfway?.inputLabel, 'E');
+  assert.equal(halfway?.label, '收进背包');
+  assert.ok(halfway!.ratio > 0 && halfway!.ratio < 1, `进度应当在中途，实际 ${halfway?.ratio}`);
+
+  advance(400);
+  controller.update();
+  assert.equal(progress.at(-1)?.ratio, 1, '按满之后圈应当满');
+
+  press('completed');
+  assert.equal(progress.at(-1), undefined, '松手立刻收掉圈');
 });

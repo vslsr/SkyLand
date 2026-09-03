@@ -145,6 +145,41 @@ export function dropHeldItem(scene, player) {
 }
 
 /**
+ * 从背包里直接丢一个到身前。
+ *
+ * 它**不经过手**。走「先拿到手上再丢」那条路也能把东西丢出去，代价是顺手改写了
+ * 快捷栏的一格、把原本握着的东西换下去，丢完还会自动再抽一个同类的到手上——玩家
+ * 只想扔掉一个石头，回头发现锤子进了包、手里攥着另一块石头。所以这里自己扣账、
+ * 自己生成掉落物。
+ *
+ * 落点与 `dropHeldItem` 用同一套：身前 0.85 米、抬高 0.35 米。就地生成会和角色的
+ * 碰撞体重叠，把人卡住。
+ *
+ * @returns 是否真的丢出去了
+ */
+export function dropInventoryItem(scene, player, itemType, quantity = 1) {
+  const inventory = player?.getComponent(INVENTORY_COMPONENT);
+  const wanted = Math.trunc(Number(quantity));
+  if (!inventory || !itemType || !(wanted > 0)) return false;
+  // 先确认这件东西掉在地上长什么样：没有掉落原型就丢不出去，这时账不能先扣。
+  const archetypeId = findItemArchetypeId(scene.actorWorld.context.archetypes, itemType);
+  if (!archetypeId) return false;
+  const removed = inventory.remove(itemType, wanted);
+  if (removed <= 0) return false;
+  const distance = 0.85;
+  scene.spawnItemStack(archetypeId, {
+    position: [
+      player.x + Math.sin(player.yaw) * distance,
+      player.y + 0.35,
+      player.z + Math.cos(player.yaw) * distance,
+    ],
+    quantity: removed,
+    yaw: player.yaw,
+  });
+  return true;
+}
+
+/**
  * 把手上那件收回背包。
  *
  * 两种手持物都能收：物品堆按自己的 itemType 与数量回账；叼着的世界物件（蘑菇）

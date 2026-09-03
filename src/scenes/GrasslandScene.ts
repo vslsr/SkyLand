@@ -20,6 +20,8 @@ import { InventoryController } from '../controllers/InventoryController';
 import { HotbarController } from '../controllers/HotbarController';
 import { ContainerController } from '../controllers/ContainerController';
 import { ContainerPage } from '../ui/pages/ContainerPage';
+import type { TagLike } from '../tags';
+import { HoldProgressBadge } from '../ui/HoldProgressBadge';
 import { HotbarBar } from '../ui/HotbarBar';
 import { buildInventoryView } from '../inventory/index';
 import { TerrainEditController } from '../controllers/TerrainEditController';
@@ -94,6 +96,18 @@ export class GrasslandScene extends Scene {
   private readonly inventoryPage = new InventoryPage();
   private readonly inventory: InventoryController;
   private readonly hotbarBar = new HotbarBar();
+  private readonly holdProgress = new HoldProgressBadge();
+
+  /**
+   * 当前绑定下这个 Action 的键位显示名。
+   *
+   * 交互提示那条文字、世界里的按键牌和按住进度环读的是同一份，重绑定之后三处
+   * 一起变；分头各写一遍就会出现「提示说 E、圈上写着别的」。
+   */
+  private readonly resolveInputLabel = (tag: TagLike): string | undefined => {
+    const control = this.input.getMappedControls(tag)[0];
+    return control ? this.inputScheme.getControlLabel(control) : undefined;
+  };
   private readonly hotbar: HotbarController;
   private readonly containerPage = new ContainerPage();
   private readonly container: ContainerController;
@@ -256,10 +270,7 @@ export class GrasslandScene extends Scene {
       pick: (frame) => this.world.pickActorInteraction(frame),
       findNearby: (position) => this.world.findNearbyActorInteraction(position),
       findHeld: (playerId) => this.world.findHeldActorInteraction(playerId),
-      getInputLabel: (tag) => {
-        const control = this.input.getMappedControls(tag)[0];
-        return control ? this.inputScheme.getControlLabel(control) : undefined;
-      },
+      getInputLabel: (tag) => this.resolveInputLabel(tag),
       setHoveredActorId: (actorId) => this.world.setHoveredActorId(actorId),
       setInteractionMarkerActorId: (actorId, inputLabel, opacity) => {
         this.world.setInteractionMarkerActorId(actorId, inputLabel, opacity);
@@ -279,6 +290,7 @@ export class GrasslandScene extends Scene {
       },
       // 只在没有别的页面盖着时开，背包因此永远是栈顶那一页。
       canOpen: () => Boolean(this.joinedRoom && this.player) && this.commonUI.size === 0,
+      send: (command) => { this.roomClient.sendInventoryCommand(command); },
     });
     this.hotbar = new HotbarController(this.input, {
       getInventory: () => this.player?.getComponent(INVENTORY_COMPONENT) as
@@ -290,7 +302,13 @@ export class GrasslandScene extends Scene {
       // 界面盖着时不响应：背包开着按 1 应该翻页而不是换手。
       isActive: () => Boolean(this.joinedRoom && this.player) && this.commonUI.allowsGameInteraction,
       send: (command) => { this.roomClient.sendInventoryCommand(command); },
-      setProgress: (progress) => this.hotbarBar.setProgress(progress),
+      getInputLabel: (tag) => this.resolveInputLabel(tag),
+      // 两处画同一次按住：格子上那圈说的是「哪件东西」，准星下那圈说的是
+      // 「手该按着什么、还要多久」。叼着的蘑菇没有格子，只剩后者。
+      setProgress: (progress) => {
+        this.hotbarBar.setProgress(progress);
+        this.holdProgress.setProgress(progress);
+      },
     });
     this.container = new ContainerController(this.containerPage, {
       getInventory: () => this.player?.getComponent(INVENTORY_COMPONENT) as
@@ -305,16 +323,15 @@ export class GrasslandScene extends Scene {
       send: (command) => { this.roomClient.sendInventoryCommand(command); },
     });
     this.containerPage.onRequestClose(() => this.container.requestClose());
-    // 点一下快捷栏那一格 = 切到它；点一下背包里那件东西 = 放上快捷栏并握住。
-    // 两条都只发意图，握没握上以下一帧快照为准。
+    // 点一下快捷栏那一格 = 切到它；点一下背包里那件东西 = 弹出使用/装备/丢弃菜单。
+    // 两条都只发意图，成没成以下一帧快照为准。
     // 快捷栏挂在 HUD 层而不是 CommonUI 栈里：它在游戏进行中一直可见可点，
     // 不参与页面压栈，也不该被背包盖住。
     document.getElementById('hotbar-root')?.append(this.hotbarBar.element);
+    // 按住进度环是只读 HUD：贴在准星下方，pointer-events 关掉，不参与命中测试。
+    this.baseLayer.append(this.holdProgress.element);
     this.hotbarBar.onSelect((slotIndex) => {
       this.roomClient.sendInventoryCommand({ kind: 'select', slotIndex });
-    });
-    this.inventoryPage.onHold((itemType) => {
-      this.roomClient.sendInventoryCommand({ kind: 'hold', itemType });
     });
     this.controls.onModeChange((mode) => this.hud.setControlMode(mode));
 
@@ -794,6 +811,7 @@ export class GrasslandScene extends Scene {
     this.performanceOverlay?.dispose();
     this.hotbar.dispose();
     this.hotbarBar.dispose();
+    this.holdProgress.dispose();
     this.slimeSurfaceDrag = undefined;
     if (this.player) {
       this.controls.setPlayerController(undefined);

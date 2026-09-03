@@ -1,5 +1,11 @@
 import { ModalWindow } from '../common/ModalWindow';
 import { createItemIcon } from '../icons/ItemIconSprite';
+import {
+  InventoryItemMenu,
+  type InventoryItemAction,
+  type InventoryItemMenuEntry,
+} from '../InventoryItemMenu';
+import type { CommonUICloseReason } from '../common/CommonUIPage';
 import type { InventoryStackView, InventoryView } from '../../inventory/index';
 
 /**
@@ -21,7 +27,8 @@ export class InventoryPage extends ModalWindow {
   /** 当前页签。分类空掉时自动落回「全部」，不会停在一个打不开的页上。 */
   private activePageId: string = 'all';
   private view?: InventoryView;
-  private holdHandler?: (itemType: string) => void;
+  private readonly itemMenu: InventoryItemMenu;
+  private actionHandler?: (action: InventoryItemAction, itemType: string) => void;
 
   public constructor() {
     super({
@@ -85,6 +92,10 @@ export class InventoryPage extends ModalWindow {
     this.closeHint.textContent = this.closeHintText;
     this.footerElement.append(this.closeHint);
 
+    // 菜单挂在页面根节点上而不是正文里：正文 `overflow: auto` 会把它裁掉半截。
+    this.itemMenu = new InventoryItemMenu(this.element);
+    this.itemMenu.onSelect((action, itemType) => this.actionHandler?.(action, itemType));
+
     this.setInventory(undefined);
   }
 
@@ -94,13 +105,32 @@ export class InventoryPage extends ModalWindow {
     this.closeHint.textContent = this.closeHintText;
   }
 
-  /** 点一下某件物品会做什么：放上快捷栏并握在手上。由 Controller 接出去发意图。 */
-  public onHold(handler: (itemType: string) => void): void {
-    this.holdHandler = handler;
+  /**
+   * 点一下某件物品会弹出菜单，选中哪一条由这里交出去。
+   *
+   * View 只报意图：`use` / `equip` / `drop` 各自要发哪几条命令，是 Controller 的事。
+   */
+  public onItemAction(
+    handler: (action: InventoryItemAction, itemType: string) => void,
+  ): void {
+    this.actionHandler = handler;
+  }
+
+  /**
+   * 关掉背包（弹栈、清空、切场景都算）时把菜单收起来。
+   *
+   * 不只是为了下次开背包别看见一个挂在旧格子上的菜单：菜单开着时在 document 和
+   * window 上挂着关闭监听，这里是它们唯一的解绑点。
+   */
+  public onClose(_reason: CommonUICloseReason): void {
+    this.itemMenu.close();
   }
 
   /** 画一份背包；传 undefined 表示还没有权威数据（没进房间或角色已销毁）。 */
   public setInventory(view: InventoryView | undefined): void {
+    // 每次重画都会换掉全部格子，菜单挂着的那个锚点随之作废。这同时也是动作的
+    // 收尾：装备完、丢完都会带来一次新快照，菜单跟着自己收起来。
+    this.itemMenu.close();
     this.view = view;
     this.emptyNotice.hidden = view !== undefined;
     if (!view) {
@@ -178,6 +208,48 @@ export class InventoryPage extends ModalWindow {
     this.ledgerText.hidden = text.length === 0;
   }
 
+  /**
+   * 弹出这一格的动作菜单。
+   *
+   * 已经在同一格上开着就收起来：再点一次是「我不选了」，而不是把同一份菜单
+   * 重画一遍。
+   */
+  private openItemMenu(cell: HTMLElement, stack: InventoryStackView): void {
+    if (this.itemMenu.isOpen && this.itemMenu.itemType === stack.itemType) {
+      this.itemMenu.close();
+      return;
+    }
+    this.itemMenu.open(cell, stack.itemType, stack.displayName, this.menuEntries(stack));
+  }
+
+  /**
+   * 这一格现在能做哪几件事。
+   *
+   * 「装备」在它已经配在物品栏上时列出来但点不动：直接抹掉会让菜单在不同格子上
+   * 长得不一样，玩家得先数一遍才知道点的是哪一条。
+   */
+  private menuEntries(stack: InventoryStackView): InventoryItemMenuEntry[] {
+    const equipped = this.view?.hotbar.some((slot) => slot.itemType === stack.itemType) ?? false;
+    return [
+      {
+        action: 'use',
+        label: '使用',
+        hint: '拿到手上，并关掉背包',
+      },
+      {
+        action: 'equip',
+        label: '装备',
+        hint: equipped ? '已经在物品栏上了' : '配到物品栏的空格上，不换手',
+        disabled: equipped,
+      },
+      {
+        action: 'drop',
+        label: '丢弃',
+        hint: '把一个丢到身前的地上',
+      },
+    ];
+  }
+
   private createEmptyCell(): HTMLElement {
     const cell = document.createElement('li');
     cell.className = 'inventory__cell inventory__cell--empty';
@@ -188,17 +260,18 @@ export class InventoryPage extends ModalWindow {
   private createStackCell(stack: InventoryStackView, held: boolean): HTMLElement {
     const cell = document.createElement('li');
     cell.className = 'inventory__cell';
-    // 不做拖拽：一次点击就是这个界面的全部交互，所以格子本身是按钮。
+    // 不做拖拽：一次点击弹出菜单，动作在菜单里选，所以格子本身是按钮。
     // 拿不到手上的东西（弹药）保持成普通格子，点了没反应比点了没提示好。
     if (stack.holdable) {
       cell.classList.add('inventory__cell--actionable');
       cell.tabIndex = 0;
       cell.setAttribute('role', 'button');
-      cell.addEventListener('click', () => this.holdHandler?.(stack.itemType));
+      cell.setAttribute('aria-haspopup', 'menu');
+      cell.addEventListener('click', () => this.openItemMenu(cell, stack));
       cell.addEventListener('keydown', (event) => {
         if (event.key !== 'Enter' && event.key !== ' ') return;
         event.preventDefault();
-        this.holdHandler?.(stack.itemType);
+        this.openItemMenu(cell, stack);
       });
     }
     cell.classList.toggle('is-held', held);
@@ -209,7 +282,7 @@ export class InventoryPage extends ModalWindow {
     cell.setAttribute(
       'aria-label',
       `${stack.categoryLabel} ${stack.displayName}，${stack.quantity} 个，上限 ${stack.stackLimit}`
-      + (stack.holdable ? (held ? '，正拿在手上' : '，点击拿到手上') : ''),
+      + (stack.holdable ? (held ? '，正拿在手上' : '，点击打开动作菜单') : ''),
     );
 
     const swatch = document.createElement('span');

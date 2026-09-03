@@ -1,6 +1,8 @@
 import { PlayerInputTags } from '../input/config/playerInput';
 import type { InputSubsystem } from '../input/core/InputSubsystem';
 import { buildInventoryView, type InventoryModelLike } from '../inventory/index';
+import type { InventoryCommand } from '../network/messages';
+import type { InventoryItemAction } from '../ui/InventoryItemMenu';
 import type { InventoryPage } from '../ui/pages/InventoryPage';
 
 export interface InventoryPort {
@@ -12,6 +14,8 @@ export interface InventoryPort {
   setOpen(open: boolean): void;
   /** 现在能不能开背包：大厅、创建房间等页面盖着时不开。 */
   canOpen(): boolean;
+  /** 把一条意图发给服务端。改没改成以下一帧快照为准，这里不预测。 */
+  send(command: InventoryCommand): void;
 }
 
 /**
@@ -44,6 +48,49 @@ export class InventoryController {
       () => this.toggle(),
       { phases: ['triggered'] },
     );
+    this.view.onItemAction((action, itemType) => this.applyItemAction(action, itemType));
+  }
+
+  /**
+   * 背包菜单里那三条各自兑现成什么。
+   *
+   * **「使用」只是把它送到手上并让开画面**，不代按一次使用键。这个项目里的 `use`
+   * 是一个世界动作：投掷要蓄力（`mode: 'charge'`，菜单里按不出力度），工具要面前
+   * 正好有可采集的目标（背包盖着画面时玩家根本没在瞄）。代按一次得到的只会是一次
+   * 脚下的软投或一次打空的敲击——比什么都不做更糟。菜单能诚实做到的是上手。
+   */
+  private applyItemAction(action: InventoryItemAction, itemType: string): void {
+    if (action === 'use') {
+      this.port.send({ kind: 'hold', itemType });
+      this.close();
+      return;
+    }
+    if (action === 'drop') {
+      // 走 `drop:stack` 而不是「先 hold 再 drop」：后者会顺手改写快捷栏一格、
+      // 把原本握着的东西换下去，丢完还自动再抽一个同类的到手上。
+      this.port.send({ kind: 'drop:stack', itemType });
+      return;
+    }
+    const slotIndex = this.resolveEquipSlot(itemType);
+    if (slotIndex === undefined) return;
+    this.port.send({ kind: 'assign', slotIndex, itemType });
+  }
+
+  /**
+   * 装备放进哪一格：已经配着它的那格 → 第一个空格 → 当前选中格。
+   *
+   * 和 `InventoryComponent.holdItemType` 是同一套顺序，两条路进物品栏的落点因此
+   * 一致；服务端仍会自己校验序号，这里算错最多是一次没有效果的请求。
+   */
+  private resolveEquipSlot(itemType: string): number | undefined {
+    const hotbar = this.port.getInventory()?.hotbar;
+    if (!hotbar || hotbar.length === 0) return undefined;
+    const existing = hotbar.indexOf(itemType);
+    if (existing >= 0) return existing;
+    const firstEmpty = hotbar.indexOf(null);
+    if (firstEmpty >= 0) return firstEmpty;
+    const active = this.port.getInventory()?.activeHotbarIndex ?? 0;
+    return Math.max(0, active);
   }
 
   public toggle(): void {
