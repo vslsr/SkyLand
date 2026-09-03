@@ -30,7 +30,14 @@ import { readChunkColliders } from '../shared/world/chunkColliders.mjs';
 import { formatGeneratedPropId } from '../shared/world/generatedProp.mjs';
 import { DEFAULT_WORLD_SEED, PROP_KIND } from '../shared/world/worldConfig.mjs';
 import { selectWorldPropVariant } from '../shared/world/worldPropVariants.mjs';
-import { ClientActorSystem } from '../src/actors/ClientActorSystem';
+import type { ClientActorSystem } from '../src/actors/ClientActorSystem';
+import {
+  createTestActorSystem,
+  renderBackendOf,
+  renderProxyOf,
+  renderRootOf,
+  stepActorFrame,
+} from './renderProxyProbe';
 import {
   RENDER_PROXY_COMPONENT,
 } from '../src/actors/components/RenderProxyComponent';
@@ -43,6 +50,7 @@ import { RenderTransformBuffer } from '../src/render/RenderTransformBuffer';
 import { SLIME_DRAG_AT_REST, writeSlimeDragParams } from '../src/render/RenderSlimeDrag';
 import { createSlimeBiteParams, writeSlimeBiteParams } from '../src/render/RenderSlimeBite';
 import { resolvePlayerVisualShape } from '../src/player/playerVisualShape';
+import { RenderProxyTable } from '../src/render/RenderProxyTable';
 import { ThreeRenderScene } from '../src/render/three/ThreeRenderScene';
 import type { ThreeHybridSlimeVisual } from '../src/render/three/ThreeHybridSlimeVisual';
 import type {
@@ -427,12 +435,14 @@ function createPlayerVisualHarness(
   surfaceDrag?: SlimeSurfaceDragDefinition,
 ) {
   const scene = new ThreeRenderScene(new THREE.Group(), RENDER_ENVIRONMENT);
-  const info = scene.createPlayerProxy({ name, render, walkSpeed, surfaceDrag });
-  const proxy = scene.resolve(info.id)!;
-  const slime = scene.resolveSlimeVisual(info.id) as ThreeHybridSlimeVisual;
+  // 槽位由玩法侧分配：渲染世界不回话（见 RenderScene.createPlayerProxy）。
+  const proxyId = new RenderProxyTable(scene).acquire();
+  scene.createPlayerProxy(proxyId, { name, render, walkSpeed, surfaceDrag });
+  const proxy = scene.resolve(proxyId)!;
+  const slime = scene.resolveSlimeVisual(proxyId) as ThreeHybridSlimeVisual;
   return {
     scene,
-    proxyId: info.id as ProxyId,
+    proxyId: proxyId as ProxyId,
     root: proxy.root,
     get rig() {
       return slime.rig;
@@ -472,7 +482,9 @@ function createPlayerVisualHarness(
 
 test('普通玩家眼睛使用独立的无光照、无雾渲染层', () => {
   const scene = new ThreeRenderScene(new THREE.Group(), RENDER_ENVIRONMENT);
-  const info = scene.createPlayerProxy({
+  // 槽位由玩法侧分配：渲染世界不回话（见 RenderScene.createPlayerProxy）。
+  const proxyId = new RenderProxyTable(scene).acquire();
+  scene.createPlayerProxy(proxyId, {
     name: 'unlit-eye-player',
     walkSpeed: 3.2,
     render: {
@@ -486,7 +498,7 @@ test('普通玩家眼睛使用独立的无光照、无雾渲染层', () => {
       shadowColor: '#1e5a40',
     },
   });
-  const root = scene.resolve(info.id)!.root;
+  const root = scene.resolve(proxyId)!.root;
   const eyes = [
     root.getObjectByName('player-slime-eye-left'),
     root.getObjectByName('player-slime-eye-right'),
@@ -564,7 +576,7 @@ function createDeckPropSnapshot(localX = 0.72): SnapshotActor {
 
 test('客户端收到快照后才创建 Actor Replica 并应用权威 Component 状态', () => {
   let now = 1_000;
-  const system = new ClientActorSystem({
+  const system = createTestActorSystem({
     definition,
     environment: { fogColor: '#ffffff', fogNear: 20, fogFar: 60 },
     now: () => now,
@@ -575,12 +587,12 @@ test('客户端收到快照后才创建 Actor Replica 并应用权威 Component 
   assert.equal(system.getActor(snapshot.id), undefined);
 
   system.syncSnapshots([snapshot], 1_000);
-  system.update(0, 0);
+  stepActorFrame(system, 0, 0);
 
   const actor = system.getActor(snapshot.id)!;
   const transform = actor.requireComponent(TRANSFORM_COMPONENT) as TransformComponent;
   const buoyancy = actor.requireComponent(BUOYANCY_COMPONENT) as BuoyancyComponent;
-  const render = system.getActorRenderProxy(actor.id)!;
+  const render = renderProxyOf(system, actor.id)!;
   assert.deepEqual([transform.x, transform.y, transform.z, transform.yaw], [2, 0, -3, 0.4]);
   assert.equal(buoyancy.draft, 0.21);
   // 渲染世界拿到的是权威 transform 的 f32 镜像（边界上的 SoA 是 Float32Array），
@@ -588,7 +600,7 @@ test('客户端收到快照后才创建 Actor Replica 并应用权威 Component 
   assert.equal(render.root.position.x, 2);
   assert.equal(render.root.position.z, -3);
   assert.ok(Math.abs(render.root.rotation.y - 0.4) < 1e-6);
-  assert.ok(system.root.getObjectByName('actor-demo-raft-01-visual'));
+  assert.ok(renderRootOf(system).getObjectByName('actor-demo-raft-01-visual'));
   const collision = actor.requireComponent(SIMPLE_COLLISION_COMPONENT) as SimpleCollisionComponent;
   assert.equal(collision.halfWidth, 1.6);
   assert.equal(collision.halfLength, 2.4);
@@ -603,14 +615,14 @@ test('客户端收到快照后才创建 Actor Replica 并应用权威 Component 
   now = 1_100;
   system.syncSnapshots([owned], 1_100);
   now = 1_230;
-  system.update(0, 0);
+  stepActorFrame(system, 0, 0);
   assert.equal(system.findOwnedActorId('player-1'), snapshot.id);
   assert.equal(system.findControllableActorId(), undefined);
 });
 
 test('视觉波动只作用于 VisualRoot，且快照移除会销毁 Replica', () => {
   let now = 1_000;
-  const system = new ClientActorSystem({
+  const system = createTestActorSystem({
     definition,
     environment: { fogColor: '#ffffff', fogNear: 20, fogFar: 60 },
     now: () => now,
@@ -619,10 +631,10 @@ test('视觉波动只作用于 VisualRoot，且快照移除会销毁 Replica', (
     spawnBudgetMilliseconds: Number.POSITIVE_INFINITY,
   });
   system.syncSnapshots([snapshot], 1_000);
-  system.update(1 / 60, 1.25);
+  stepActorFrame(system, 1 / 60, 1.25);
 
   const actor = system.getActor(snapshot.id)!;
-  const render = system.getActorRenderProxy(actor.id)!;
+  const render = renderProxyOf(system, actor.id)!;
   assert.equal(render.root.position.y, snapshot.transform.y);
   assert.ok(Number.isFinite(render.visualRoot.position.y));
   assert.notEqual(render.visualRoot.position.y, render.root.position.y);
@@ -632,14 +644,14 @@ test('视觉波动只作用于 VisualRoot，且快照移除会销毁 Replica', (
   now = 1_100;
   system.syncSnapshots([], 1_100);
   now = 1_230;
-  system.update(0, 1.3);
+  stepActorFrame(system, 0, 1.3);
   assert.equal(system.getActor(snapshot.id), undefined);
-  assert.equal(system.root.children.length, 0);
+  assert.equal(renderRootOf(system).children.length, 0);
 });
 
 test('Actor Transform 在两份服务端快照之间插值而不做客户端外推', () => {
   let now = 1_000;
-  const system = new ClientActorSystem({
+  const system = createTestActorSystem({
     definition,
     environment: { fogColor: '#ffffff', fogNear: 20, fogFar: 60 },
     now: () => now,
@@ -657,7 +669,7 @@ test('Actor Transform 在两份服务端快照之间插值而不做客户端外�
   now = 1_100;
   system.syncSnapshots([to], 1_100, 1_100);
   now = 1_170;
-  system.update(0, 0);
+  stepActorFrame(system, 0, 0);
 
   const actor = system.getActor(snapshot.id)!;
   const transform = actor.requireComponent(TRANSFORM_COMPONENT) as TransformComponent;
@@ -667,7 +679,7 @@ test('Actor Transform 在两份服务端快照之间插值而不做客户端外�
 });
 
 test('能力实验室对象由 Actor 快照创建，训练假人暴露 visualRoot 内的目标 rig', () => {
-  const system = new ClientActorSystem({
+  const system = createTestActorSystem({
     definition,
     environment: { fogColor: '#ffffff', fogNear: 20, fogFar: 60 },
     now: () => 1_000,
@@ -680,16 +692,16 @@ test('能力实验室对象由 Actor 快照创建，训练假人暴露 visualRoo
     focusObeliskSnapshot,
     floorPlaqueSnapshot,
   ], 1_000);
-  system.update(0, 0);
+  stepActorFrame(system, 0, 0);
 
   const actor = system.getActor(trainingDummySnapshot.id)!;
-  const render = system.getActorRenderProxy(actor.id)!;
+  const render = renderProxyOf(system, actor.id)!;
   assert.equal(actor.archetypeId, 'training-dummy');
   assert.ok(render.abilityTargetRig);
   assert.equal(render.abilityTargetRig.targetRoot, render.visualRoot);
   assert.equal(render.abilityTargetRig.burningAura.visible, false);
   assert.equal(render.root.position.z, -1.5);
-  const focusRender = system.getActorRenderProxy(focusObeliskSnapshot.id)!;
+  const focusRender = renderProxyOf(system, focusObeliskSnapshot.id)!;
   assert.ok(focusRender.root.getObjectByName('focus-obelisk-crystal'));
   const plaqueCollision = system.getActor(floorPlaqueSnapshot.id)!
     .requireComponent(SIMPLE_COLLISION_COMPONENT) as SimpleCollisionComponent;
@@ -700,7 +712,7 @@ test('能力实验室对象由 Actor 快照创建，训练假人暴露 visualRoo
 
 test('客户端离散恢复父子关系，并只插值子 Actor 的权威世界坐标', () => {
   let now = 1_000;
-  const system = new ClientActorSystem({
+  const system = createTestActorSystem({
     definition,
     environment: { fogColor: '#ffffff', fogNear: 20, fogFar: 60 },
     now: () => now,
@@ -712,12 +724,12 @@ test('客户端离散恢复父子关系，并只插值子 Actor 的权威世界�
 
   // 故意把子节点放在父节点前，验证快照顺序不影响层级恢复。
   system.syncSnapshots([childFrom, snapshot], 1_000, 1_000);
-  system.update(1 / 60, 1.25);
+  stepActorFrame(system, 1 / 60, 1.25);
 
   const parent = system.getActor(snapshot.id)!;
   const child = system.getActor(childFrom.id)!;
-  const parentRender = system.getActorRenderProxy(parent.id)!;
-  const childRender = system.getActorRenderProxy(child.id)!;
+  const parentRender = renderProxyOf(system, parent.id)!;
+  const childRender = renderProxyOf(system, child.id)!;
   const childTransform = child.requireComponent(TRANSFORM_COMPONENT) as TransformComponent;
   let childGeometry: THREE.BufferGeometry | undefined;
   childRender.root.traverse((object) => {
@@ -748,7 +760,7 @@ test('客户端离散恢复父子关系，并只插值子 Actor 的权威世界�
   now = 1_100;
   system.syncSnapshots([snapshot, childTo], 1_100, 1_100);
   now = 1_170;
-  system.update(0, 1.3);
+  stepActorFrame(system, 0, 1.3);
   assert.ok(Math.abs(childRender.root.position.x - 1.22) < 1e-6);
   assert.equal(childTransform.localX, 1.72);
   parentRender.root.updateWorldMatrix(true, true);
@@ -763,23 +775,23 @@ test('客户端离散恢复父子关系，并只插值子 Actor 的权威世界�
   now = 1_200;
   system.syncSnapshots([detached], 1_200, 1_200);
   now = 1_330;
-  system.update(0, 1.4);
+  stepActorFrame(system, 0, 1.4);
   assert.equal(system.getActor(parent.id), undefined);
   assert.equal(system.getActor(child.id)?.parent, undefined);
-  assert.equal(childRender.root.parent, system.root);
+  assert.equal(childRender.root.parent, renderRootOf(system));
   assert.equal(childGeometryDisposeCount, 0);
 
   now = 1_400;
   system.syncSnapshots([], 1_400, 1_400);
   now = 1_530;
-  system.update(0, 1.5);
+  stepActorFrame(system, 0, 1.5);
   assert.equal(system.getActor(child.id), undefined);
   assert.equal(childGeometryDisposeCount, 1);
 });
 
 test('客户端按权威燃烧状态显示参考 LineLoop 火焰，稳定篝火始终可见', () => {
   let now = 1_000;
-  const system = new ClientActorSystem({
+  const system = createTestActorSystem({
     definition,
     environment: { fogColor: '#ffffff', fogNear: 20, fogFar: 60 },
     now: () => now,
@@ -801,12 +813,12 @@ test('客户端按权威燃烧状态显示参考 LineLoop 火焰，稳定篝火�
     thermal: { temperature: 20, burning: false, fuelRatio: 1, revision: 0 },
   };
   system.syncSnapshots([campfire, coldHay], 1_000, 1_000);
-  system.update(1 / 60, 0.5);
+  stepActorFrame(system, 1 / 60, 0.5);
 
   // rig 住在渲染世界里；Actor 上的 FireVisualComponent 只剩一个目标强度。
-  const campfireRig = system.getActorRenderProxy(campfire.id)!.fireVisualRig!;
+  const campfireRig = renderProxyOf(system, campfire.id)!.fireVisualRig!;
   const hayActor = system.getActor(coldHay.id)!;
-  const hayRig = system.getActorRenderProxy(hayActor.id)!.fireVisualRig!;
+  const hayRig = renderProxyOf(system, hayActor.id)!.fireVisualRig!;
   const hayFire = hayActor.requireComponent(FIRE_VISUAL_COMPONENT) as FireVisualComponent;
   assert.equal(
     (system.getActor(campfire.id)!
@@ -815,7 +827,7 @@ test('客户端按权威燃烧状态显示参考 LineLoop 火焰，稳定篝火�
     '静态热源的目标强度应当在 spawn 时就是 1',
   );
   assert.equal(hayFire.targetIntensity, 0, '没烧起来时目标强度是 0');
-  const temperatureMarker = system.getActorRenderProxy(hayActor.id)!.markers;
+  const temperatureMarker = renderProxyOf(system, hayActor.id)!.markers;
   assert.equal(campfireRig.root.visible, true);
   assert.equal(hayRig.root.visible, false);
   assert.equal(temperatureMarker.temperatureVisible, false);
@@ -826,11 +838,11 @@ test('客户端按权威燃烧状态显示参考 LineLoop 火焰，稳定篝火�
   system.setTemperatureVisible(true);
   assert.equal(temperatureMarker.temperatureVisible, true);
   assert.equal(temperatureMarker.temperatureLabel, '20.0 °C');
-  assert.ok(system.getActorRenderProxy(hayActor.id)!
+  assert.ok(renderProxyOf(system, hayActor.id)!
     .root.getObjectByName('actor-temperature-marker'));
   const camera = new THREE.PerspectiveCamera();
   camera.position.set(3, 4, 7);
-  system.beforeRender(FAKE_RENDERER, camera);
+  renderBackendOf(system).beforeRender(FAKE_RENDERER, camera);
 
   const burningHay: SnapshotActor = {
     ...coldHay,
@@ -840,7 +852,7 @@ test('客户端按权威燃烧状态显示参考 LineLoop 火焰，稳定篝火�
   now = 1_100;
   system.syncSnapshots([campfire, burningHay], 1_100, 1_100);
   now = 1_230;
-  system.update(0.1, 0.6);
+  stepActorFrame(system, 0.1, 0.6);
 
   const combustible = hayActor.requireComponent(COMBUSTIBLE_COMPONENT) as CombustibleComponent;
   assert.equal(combustible.burning, true);
@@ -875,7 +887,7 @@ test('客户端按权威燃烧状态显示参考 LineLoop 火焰，稳定篝火�
 });
 
 test('混合史莱姆用单球核心与休眠弹簧蒙皮，且不会改写权威 Actor 根节点', () => {
-  const system = new ClientActorSystem({
+  const system = createTestActorSystem({
     definition,
     environment: { fogColor: '#ffffff', fogNear: 20, fogFar: 60 },
     now: () => 1_000,
@@ -890,16 +902,16 @@ test('混合史莱姆用单球核心与休眠弹簧蒙皮，且不会改写权�
     transform: { x: 1.5, y: 0, z: -2.8, yaw: 0.2 },
   };
   system.syncSnapshots([pbfSlime], 1_000, 1_000);
-  system.update(0, 0);
+  stepActorFrame(system, 0, 0);
 
   const actor = system.getActor(pbfSlime.id)!;
-  const render = system.getActorRenderProxy(actor.id)!;
+  const render = renderProxyOf(system, actor.id)!;
   const visual = system.getRenderScene().resolveSlimeVisual(render.id)!;
   const initialSurface = Float32Array.from(
     visual.rig.surfacePosition.array as ArrayLike<number>,
   );
   for (let frame = 1; frame <= 120; frame += 1) {
-    system.update(1 / 60, frame / 60);
+    stepActorFrame(system, 1 / 60, frame / 60);
   }
 
   for (const [actual, expected] of [
@@ -938,7 +950,7 @@ test('混合史莱姆用单球核心与休眠弹簧蒙皮，且不会改写权�
     Math.abs(value - initialSurface[index]) < 1e-7
   )), '没有外部碰撞时，出生后的休眠外壳不应自行改变结构');
   for (let frame = 121; frame <= 360; frame += 1) {
-    system.update(1 / 60, frame / 60);
+    stepActorFrame(system, 1 / 60, frame / 60);
   }
   let previousSurface = Float32Array.from(
     visual.rig.surfacePosition.array as ArrayLike<number>,
@@ -946,7 +958,7 @@ test('混合史莱姆用单球核心与休眠弹簧蒙皮，且不会改写权�
   let maximumSettledSurfaceDelta = 0;
   let maximumSettledPlanarCenter = 0;
   for (let frame = 361; frame <= 480; frame += 1) {
-    system.update(1 / 60, frame / 60);
+    stepActorFrame(system, 1 / 60, frame / 60);
     maximumSettledPlanarCenter = Math.max(
       maximumSettledPlanarCenter,
       Math.hypot(visual.simulation.center[0], visual.simulation.center[2]),
@@ -1089,7 +1101,7 @@ test('混合史莱姆用单球核心与休眠弹簧蒙皮，且不会改写权�
 
 test('无模型 GuidePath Actor 只在快照存在时创建客户端 Three.js 表现', () => {
   let now = 1_000;
-  const system = new ClientActorSystem({
+  const system = createTestActorSystem({
     definition,
     environment: { fogColor: '#ffffff', fogNear: 20, fogFar: 60 },
     now: () => now,
@@ -1113,11 +1125,11 @@ test('无模型 GuidePath Actor 只在快照存在时创建客户端 Three.js �
   };
 
   system.syncSnapshots([guideSnapshot], 1_000);
-  system.update(1 / 60, 0);
+  stepActorFrame(system, 1 / 60, 0);
 
   const actor = system.getActor(guideSnapshot.id)!;
   const state = actor.requireComponent(GUIDE_PATH_COMPONENT) as GuidePathComponent;
-  const render = system.getActorRenderProxy(actor.id)!;
+  const render = renderProxyOf(system, actor.id)!;
   // 表现住在渲染世界里；Actor 上只剩 shared/ 的权威 GuidePathComponent。
   const guide = system.getRenderScene().resolveGuidePath(render.id)!.guide;
   assert.equal(actor.hasComponents(SIMPLE_COLLISION_COMPONENT), false);
@@ -1131,9 +1143,9 @@ test('无模型 GuidePath Actor 只在快照存在时创建客户端 Three.js �
   now = 1_100;
   system.syncSnapshots([], 1_100);
   now = 1_230;
-  system.update(0, 0);
+  stepActorFrame(system, 0, 0);
   assert.equal(system.getActor(guideSnapshot.id), undefined);
-  assert.equal(system.root.getObjectByName('actor-guide-path-01-root'), undefined);
+  assert.equal(renderRootOf(system).getObjectByName('actor-guide-path-01-root'), undefined);
   system.dispose();
 });
 
@@ -1142,12 +1154,13 @@ test('咬住按一个向量把静止外形拔出一个尖：连续、对称、�
   assert.ok(render?.model === 'line-art-pbf-slime');
   const scene = new ThreeRenderScene(new THREE.Group(), RENDER_ENVIRONMENT);
   const transforms = new RenderTransformBuffer(4);
-  const info = scene.createPlayerProxy({ name: 'bitten-player', render, walkSpeed: 3.2 });
-  const slime = scene.resolveSlimeVisual(info.id)!;
+  const proxyId = new RenderProxyTable(scene).acquire();
+  scene.createPlayerProxy(proxyId, { name: 'bitten-player', render, walkSpeed: 3.2 });
+  const slime = scene.resolveSlimeVisual(proxyId)!;
   const bite = createSlimeBiteParams();
   const step = (frames: number, from = 0): void => {
     for (let frame = 0; frame < frames; frame += 1) {
-      writeSlimeBiteParams(transforms, info.id, bite);
+      writeSlimeBiteParams(transforms, proxyId, bite);
       transforms.publish();
       scene.submitTransforms(transforms);
       scene.updateVisuals(transforms, 1 / 60, (from + frame) / 60);
@@ -1222,12 +1235,13 @@ test('几张嘴一起咬：每张一个向量，位移相加，两个尖同时�
   assert.ok(render?.model === 'line-art-pbf-slime');
   const scene = new ThreeRenderScene(new THREE.Group(), RENDER_ENVIRONMENT);
   const transforms = new RenderTransformBuffer(4);
-  const info = scene.createPlayerProxy({ name: 'double-bitten', render, walkSpeed: 3.2 });
-  const slime = scene.resolveSlimeVisual(info.id)!;
+  const proxyId = new RenderProxyTable(scene).acquire();
+  scene.createPlayerProxy(proxyId, { name: 'double-bitten', render, walkSpeed: 3.2 });
+  const slime = scene.resolveSlimeVisual(proxyId)!;
   const bite = createSlimeBiteParams();
   const step = (frames: number, from = 0): void => {
     for (let frame = 0; frame < frames; frame += 1) {
-      writeSlimeBiteParams(transforms, info.id, bite);
+      writeSlimeBiteParams(transforms, proxyId, bite);
       transforms.publish();
       scene.submitTransforms(transforms);
       scene.updateVisuals(transforms, 1 / 60, (from + frame) / 60);
@@ -1290,17 +1304,18 @@ test('远端玩家的拖拽形变从参数段复现，松手后回弹', () => {
   assert.ok(dragDefinition);
   const scene = new ThreeRenderScene(new THREE.Group(), RENDER_ENVIRONMENT);
   const transforms = new RenderTransformBuffer(4);
-  const info = scene.createPlayerProxy({
+  const proxyId = new RenderProxyTable(scene).acquire();
+  scene.createPlayerProxy(proxyId, {
     name: 'remote-drag-player',
     render,
     walkSpeed: 3.2,
     surfaceDrag: dragDefinition,
   });
-  const slime = scene.resolveSlimeVisual(info.id)!;
+  const slime = scene.resolveSlimeVisual(proxyId)!;
   const drag = { ...SLIME_DRAG_AT_REST };
   const step = (frames: number): void => {
     for (let frame = 0; frame < frames; frame += 1) {
-      writeSlimeDragParams(transforms, info.id, drag);
+      writeSlimeDragParams(transforms, proxyId, drag);
       transforms.publish();
       scene.submitTransforms(transforms);
       scene.updateVisuals(transforms, 1 / 60, frame / 60);
@@ -1364,14 +1379,22 @@ test('一次手势只有一个所有者：本地正在拖的外壳不接受复�
   const dragDefinition = pbfSlimeArchetype.components.slimeSurfaceDrag;
   assert.ok(render?.model === 'line-art-pbf-slime');
   const visual = createPlayerVisualHarness('owned-drag-player', render, 3.2, dragDefinition);
-  assert.equal(visual.scene.beginSlimeSurfaceDrag(visual.proxyId, {
+  // 手势本身由渲染侧回报，不是玩法侧回头去读——收在这里当作那一侧的缓存。
+  let reported = { contactX: 0, contactY: 0, contactZ: 0, pullX: 0, pullY: 0, pullZ: 0 };
+  let dragging = false;
+  visual.scene.setSlimeSurfaceDragListener((report) => {
+    dragging = report.dragging;
+    if (report.dragging) reported = { ...report };
+  });
+  visual.scene.beginSlimeSurfaceDrag(visual.proxyId, {
     origin: [0, 3, 0],
     direction: [0, -1, 0],
-  }), true);
-  assert.equal(visual.scene.updateSlimeSurfaceDrag(visual.proxyId, {
+  });
+  assert.equal(dragging, true, '抓住了要回报一条 true');
+  visual.scene.updateSlimeSurfaceDrag(visual.proxyId, {
     origin: [3, 3, 0],
     direction: [0, -1, 0],
-  }), true);
+  });
   for (let frame = 0; frame < 60; frame += 1) {
     visual.update(1 / 60, frame / 60, 0, 0, { velocityX: 0, velocityZ: 0 });
   }
@@ -1391,9 +1414,8 @@ test('一次手势只有一个所有者：本地正在拖的外壳不接受复�
   });
   transforms.publish();
   visual.scene.updateVisuals(transforms, 1 / 60, 1);
-  const state = { contactX: 0, contactY: 0, contactZ: 0, pullX: 0, pullY: 0, pullZ: 0 };
-  assert.equal(visual.scene.readSlimeSurfaceDrag(visual.proxyId, state), true);
-  assert.ok(state.pullX > 0, `本地手势仍朝原方向，实际 ${state.pullX}`);
+  assert.equal(visual.scene.isSlimeSurfaceDragging(visual.proxyId), true);
+  assert.ok(reported.pullX > 0, `本地手势仍朝原方向，实际 ${reported.pullX}`);
   assert.ok(
     visual.slime.simulation.positions[0] * owned[0] >= 0,
     '复制过来的反向拉力没有被应用',
@@ -1416,15 +1438,25 @@ test('史莱姆表面拖拽带动整团软体，命中处最强，接近上限�
   // 动态几何的标准三角拾取短暂漏报时，窄范围顶点容错仍应命中肉眼可见表面。
   const surfaceRaycast = visual.rig.surface.raycast;
   visual.rig.surface.raycast = () => undefined;
-  assert.equal(visual.scene.beginSlimeSurfaceDrag(visual.proxyId, {
+  // beginSlimeSurfaceDrag 返回 void：抓没抓住由反向通知回报，也照样能直接问渲染侧。
+  const dragReports: Array<[number, boolean]> = [];
+  visual.scene.setSlimeSurfaceDragListener(
+    (report) => dragReports.push([report.id, report.dragging]),
+  );
+  visual.scene.beginSlimeSurfaceDrag(visual.proxyId, {
     origin: [0, 3, 0],
     direction: [0, -1, 0],
-  }), true);
+  });
+  assert.deepEqual(dragReports, [[visual.proxyId, true]], '抓住了要回报一条 true');
+  assert.equal(visual.scene.isSlimeSurfaceDragging(visual.proxyId), true);
   visual.rig.surface.raycast = surfaceRaycast;
-  assert.equal(visual.scene.updateSlimeSurfaceDrag(visual.proxyId, {
+  // updateSlimeSurfaceDrag 返回 void：拖没拖动看的是形变本身（下面那几条断言），
+  // 以及这条链路还活着没有。
+  visual.scene.updateSlimeSurfaceDrag(visual.proxyId, {
     origin: [3, 3, 0],
     direction: [0, -1, 0],
-  }), true);
+  });
+  assert.equal(visual.scene.isSlimeSurfaceDragging(visual.proxyId), true);
   for (let frame = 0; frame < 150; frame += 1) {
     visual.update(1 / 60, frame / 60, 0, 0, { velocityX: 0, velocityZ: 0 });
   }
@@ -1977,7 +2009,7 @@ test('混合史莱姆起跳首帧移除平底，并让水滴圆头向上、尖�
 });
 
 test('高数量物品 Actor 保留交互与碰撞身份，但用批次绘制而没有独立 Object3D', () => {
-  const system = new ClientActorSystem({
+  const system = createTestActorSystem({
     definition,
     environment: { fogColor: '#ffffff', fogNear: 20, fogFar: 60 },
     now: () => 1_000,
@@ -1996,7 +2028,7 @@ test('高数量物品 Actor 保留交互与碰撞身份，但用批次绘制而�
     thermal: { temperature: 20, burning: false, fuelRatio: 1, revision: 0 },
   };
   system.syncSnapshots([wood], 1_000, 1_000);
-  system.update(0, 0);
+  stepActorFrame(system, 0, 0);
 
   const actor = system.getActor(wood.id)!;
   assert.equal(actor.getComponent(RENDER_PROXY_COMPONENT), undefined);
@@ -2004,7 +2036,7 @@ test('高数量物品 Actor 保留交互与碰撞身份，但用批次绘制而�
   assert.ok(actor.getComponent(SIMPLE_COLLISION_COMPONENT));
   assert.equal(system.findNearbyInteractableActor({ x: 1, z: 2 })?.quantity, 12);
 
-  const batchRoot = system.root.getObjectByName('high-count-actor-batches')!;
+  const batchRoot = renderRootOf(system).getObjectByName('high-count-actor-batches')!;
   const fills: THREE.InstancedMesh[] = [];
   const outlines: THREE.LineSegments[] = [];
   batchRoot.traverse((object) => {
@@ -2020,7 +2052,7 @@ test('高数量物品 Actor 保留交互与碰撞身份，但用批次绘制而�
 test('准星也拾得到合批掉落物——它们没有 proxy，但有碰撞体', () => {
   // 合并成一条解析路径之前，「有 proxy 的打场景图、没 proxy 的解析算」是两段
   // 代码。这条用例钉住合并之后没 proxy 的那一半还在。
-  const system = new ClientActorSystem({
+  const system = createTestActorSystem({
     definition,
     environment: { fogColor: '#ffffff', fogNear: 20, fogFar: 60 },
     now: () => 1_000,
@@ -2036,7 +2068,7 @@ test('准星也拾得到合批掉落物——它们没有 proxy，但有碰撞�
     residency: { state: 'sleeping', revision: 1 },
   };
   system.syncSnapshots([wood], 1_000, 1_000);
-  system.update(0, 0);
+  stepActorFrame(system, 0, 0);
   assert.equal(system.getActor('drop-wood')?.getComponent(RENDER_PROXY_COMPONENT), undefined);
   assert.equal(
     system.pickInteractableActor([0, 0.2, 2], [0, 0, -1])?.actorId,
@@ -2048,7 +2080,7 @@ test('准星也拾得到合批掉落物——它们没有 proxy，但有碰撞�
 });
 
 test('木堆与石堆各自成批：合批系统按渲染模型分派模板，不是只认木堆', () => {
-  const system = new ClientActorSystem({
+  const system = createTestActorSystem({
     definition,
     environment: { fogColor: '#ffffff', fogNear: 20, fogFar: 60 },
     now: () => 1_000,
@@ -2075,9 +2107,9 @@ test('木堆与石堆各自成批：合批系统按渲染模型分派模板，�
     residency: { state: 'sleeping', revision: 1 },
   };
   system.syncSnapshots([wood, stone], 1_000, 1_000);
-  system.update(0, 0);
+  stepActorFrame(system, 0, 0);
 
-  const batchRoot = system.root.getObjectByName('high-count-actor-batches')!;
+  const batchRoot = renderRootOf(system).getObjectByName('high-count-actor-batches')!;
   const fills: THREE.InstancedMesh[] = [];
   batchRoot.traverse((object) => {
     if ((object as THREE.InstancedMesh).isInstancedMesh) fills.push(object as THREE.InstancedMesh);
@@ -2100,7 +2132,7 @@ test('木堆与石堆各自成批：合批系统按渲染模型分派模板，�
 
 test('圆木使用参考项目的八边形单根模型，并按权威位移滚动', () => {
   let now = 1_000;
-  const system = new ClientActorSystem({
+  const system = createTestActorSystem({
     definition,
     environment: { fogColor: '#ffffff', fogNear: 20, fogFar: 60 },
     now: () => now,
@@ -2121,8 +2153,8 @@ test('圆木使用参考项目的八边形单根模型，并按权威位移滚�
   });
 
   system.syncSnapshots([snapshot(0)], 1_000, now);
-  system.update(0, 0);
-  const fill = system.root.getObjectByName(
+  stepActorFrame(system, 0, 0);
+  const fill = renderRootOf(system).getObjectByName(
     'wood-log:active:normal:single-fill',
   ) as THREE.InstancedMesh;
   assert.ok(fill, '单根圆木应进入独立的高数量合批');
@@ -2141,7 +2173,7 @@ test('圆木使用参考项目的八边形单根模型，并按权威位移滚�
   now = 1_100;
   system.syncSnapshots([snapshot(0.55)], 1_100, now);
   now = 1_220;
-  system.update(0, 0);
+  stepActorFrame(system, 0, 0);
   const after = new THREE.Quaternion();
   fill.getMatrixAt(0, matrix);
   matrix.decompose(position, after, scale);
@@ -2201,7 +2233,7 @@ const orchardDefinition = {
 
 test('单颗果实按权威位移旋转，sleeping 后不再累积滚动角', () => {
   let now = 1_000;
-  const system = new ClientActorSystem({
+  const system = createTestActorSystem({
     definition: orchardDefinition,
     environment: { fogColor: '#ffffff', fogNear: 20, fogFar: 60 },
     now: () => now,
@@ -2222,7 +2254,7 @@ test('单颗果实按权威位移旋转，sleeping 后不再累积滚动角', ()
   });
 
   system.syncSnapshots([snapshot(0, 'active')], 1_000, now);
-  system.update(0, 0);
+  stepActorFrame(system, 0, 0);
   const collision = system.getActor('drop-fruit-roll')!
     .requireComponent(SIMPLE_COLLISION_COMPONENT) as SimpleCollisionComponent;
   assert.equal(collision.halfWidth, 0.14, '滚动物使用配置的球半径，不沿用整堆碰撞盒');
@@ -2230,8 +2262,8 @@ test('单颗果实按权威位移旋转，sleeping 后不再累积滚动角', ()
   now = 1_100;
   system.syncSnapshots([snapshot(0.7, 'active')], 1_100, now);
   now = 1_220;
-  system.update(0, 0);
-  const activeFill = system.root.getObjectByName(
+  stepActorFrame(system, 0, 0);
+  const activeFill = renderRootOf(system).getObjectByName(
     'fruit-pile:active:normal:single-fill',
   ) as THREE.InstancedMesh;
   const matrix = new THREE.Matrix4();
@@ -2245,8 +2277,8 @@ test('单颗果实按权威位移旋转，sleeping 后不再累积滚动角', ()
   now = 1_300;
   system.syncSnapshots([snapshot(0.7, 'sleeping')], 1_200, now);
   now = 1_420;
-  system.update(0, 0);
-  const sleepingFill = system.root.getObjectByName(
+  stepActorFrame(system, 0, 0);
+  const sleepingFill = renderRootOf(system).getObjectByName(
     'fruit-pile:sleeping:normal:single-fill',
   ) as THREE.InstancedMesh;
   const sleepingRotation = new THREE.Quaternion();
@@ -2275,7 +2307,7 @@ const mixedForestDefinition = {
 
 test('客户端用同一世界种子为每棵树选择确定的普通树或果树原型', () => {
   const worldSeed = 0x5c1a2d0b;
-  const system = new ClientActorSystem({
+  const system = createTestActorSystem({
     definition: mixedForestDefinition,
     environment: { fogColor: '#ffffff', fogNear: 20, fogFar: 60 },
     worldSeed,
@@ -2306,8 +2338,8 @@ test('客户端用同一世界种子为每棵树选择确定的普通树或果�
   }
   assert.ok(treeArchetypes.includes('generated-tree'));
   assert.ok(treeArchetypes.includes('fruit-tree'));
-  system.update(0, 0);
-  const fruitRoot = system.root.getObjectByName('generated-prop-fruit')!;
+  stepActorFrame(system, 0, 0);
+  const fruitRoot = renderRootOf(system).getObjectByName('generated-prop-fruit')!;
   const fruitFill = fruitRoot.children.find(
     (child) => (child as THREE.InstancedMesh).isInstancedMesh,
   ) as THREE.InstancedMesh;
@@ -2326,7 +2358,7 @@ test('客户端用同一世界种子为每棵树选择确定的普通树或果�
 
 test('果子按服务端时钟自己熟：冷却中不画也不能交互，到期后无需新快照就恢复', () => {
   let now = 1_000_000;
-  const system = new ClientActorSystem({
+  const system = createTestActorSystem({
     definition: orchardDefinition,
     environment: { fogColor: '#ffffff', fogNear: 20, fogFar: 60 },
     now: () => now,
@@ -2350,9 +2382,9 @@ test('果子按服务端时钟自己熟：冷却中不画也不能交互，到�
   const serverTime = now - 300_000;
   system.syncSnapshots([], serverTime, now);
   system.mountGeneratedPropChunk('-1:0', -1, 0, props, propCount);
-  system.update(0, 0);
+  stepActorFrame(system, 0, 0);
 
-  const fruitRoot = system.root.getObjectByName('generated-prop-fruit')!;
+  const fruitRoot = renderRootOf(system).getObjectByName('generated-prop-fruit')!;
   assert.ok(fruitRoot, '有果树的地图才挂这一层');
   const fill = fruitRoot.children.find(
     (child) => (child as THREE.InstancedMesh).isInstancedMesh,
@@ -2375,13 +2407,13 @@ test('果子按服务端时钟自己熟：冷却中不画也不能交互，到�
   }], serverTime + 1, now);
   // 快照缓冲有 120ms 插值延迟，要等这一帧真的被采样到。
   now += 200;
-  system.update(0, 0);
+  stepActorFrame(system, 0, 0);
   assert.equal(fill.count, ripeCount - fruitCount, '这一棵配置数量的果子应该消失');
   assert.equal(interactable.enabled, false, '冷却中不该还提示可采');
 
   // 时间过去，没有任何新快照，果子自己回来。
   now += 121_000;
-  system.update(0, 0);
+  stepActorFrame(system, 0, 0);
   assert.equal(fill.count, ripeCount, '到期后无需新快照就恢复');
   assert.equal(interactable.enabled, true);
   system.dispose();
@@ -2391,7 +2423,7 @@ test('流式树按 Chunk 构造无网格 Actor，偏离态可在无 Transform �
   let now = 1_000;
   const collision = new CollisionWorld();
   const overrides: Array<{ chunkX: number; chunkZ: number; propIndex: number; removed: boolean }> = [];
-  const system = new ClientActorSystem({
+  const system = createTestActorSystem({
     definition,
     environment: { fogColor: '#ffffff', fogNear: 20, fogFar: 60 },
     collision,
@@ -2419,7 +2451,7 @@ test('流式树按 Chunk 构造无网格 Actor，偏离态可在无 Transform �
     chunkZ: 0,
   }));
   system.mountGeneratedPropChunk('-1:0', -1, 0, props, propCount);
-  system.update(0, 0);
+  stepActorFrame(system, 0, 0);
 
   const actorId = formatGeneratedPropId(PROP_KIND.TREE, -1, 0, propIndex);
   const actor = system.getActor(actorId)!;
@@ -2436,7 +2468,7 @@ test('流式树按 Chunk 构造无网格 Actor，偏离态可在无 Transform �
     revision: 3,
     propState: { health: 0, removed: true },
   }], 1_000);
-  system.update(0, 0);
+  stepActorFrame(system, 0, 0);
   const tree = actor.requireComponent(GENERATED_PROP_COMPONENT) as GeneratedPropComponent;
   assert.equal(tree.removed, true);
   assert.deepEqual(overrides.at(-1), { chunkX: -1, chunkZ: 0, propIndex, removed: true });
@@ -2444,7 +2476,7 @@ test('流式树按 Chunk 构造无网格 Actor，偏离态可在无 Transform �
   now = 1_100;
   system.syncSnapshots([], 1_100);
   now = 1_230;
-  system.update(0, 0);
+  stepActorFrame(system, 0, 0);
   assert.equal(system.getActor(actorId), actor);
   system.unmountGeneratedPropChunk('-1:0');
   assert.equal(system.getActor(actorId), undefined);

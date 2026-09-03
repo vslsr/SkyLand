@@ -2,12 +2,9 @@ import type { ContainerModelLike } from '../inventory/index';
 import type * as THREE from 'three';
 import type { Actor } from '../../shared/actor/Actor.mjs';
 import type { CollisionWorld } from '../../shared/collision/index.mjs';
-import type { DayNightVisualTarget } from '../environment/EnvironmentTypes';
-import type { SceneEnvironmentRuntime } from '../materials/createFillMaterial';
-import type { GrassInteractionTarget } from '../grass';
-import type { ThreeMeshProxy } from '../render/three/ThreeMeshProxy';
-import type { ThreeRenderScene } from '../render/three/ThreeRenderScene';
+import type { RenderScene } from '../render/RenderScene';
 import type { RenderTransformBuffer } from '../render/RenderTransformBuffer';
+import type { RenderProxyTable } from '../render/RenderProxyTable';
 import type { SnapshotActor, SnapshotPlayer } from '../network/protocol';
 import type { ActorFloatState, ActorEventType } from '../network/protocol';
 import type { WeatherType } from '../weather/index';
@@ -25,14 +22,35 @@ export interface SceneUpdateContext {
   /** 角色高度等局部表现可选用；chunk、天气与草地流送只读取 XZ。 */
   focusY?: number;
   focusZ: number;
+  /**
+   * 玩家这一帧的**渲染位置**（含插值平滑），没有玩家时省略。
+   *
+   * 和 focus 不是一回事：focus 的 XZ 取权威位置，流送要的是那个；
+   * 而扫过落叶这类表现跟的是眼睛看到的身影，差的那一点正是平滑量。
+   * 分成两组而不是复用，是因为它们真的是两个东西。
+   */
+  playerRenderX?: number;
+  playerRenderY?: number;
+  playerRenderZ?: number;
 }
 
-export interface SceneVisualSystem {
-  readonly root: THREE.Object3D;
+/**
+ * 每帧要被驱动的东西。**渲染器只需要这三样**——它从不碰 `root`。
+ *
+ * 和 `SceneVisualSystem` 分开，是因为流送规划、Actor 世界这类东西也要每帧被驱动，
+ * 但它们不往场景图里挂任何几何。以前它们为了进这张表得凭空长出一个 `root`，
+ * 那个字段除了骗过类型检查没有别的用处（实现路径文档 §3）。
+ */
+export interface SceneFrameSystem {
   update(deltaSeconds: number, elapsedSeconds: number, context?: SceneUpdateContext): void;
   beforeRender?(renderer: THREE.WebGLRenderer, camera: THREE.Camera): void;
   /** 场景被换掉时释放这个系统独占的资源。 */
   dispose?(): void;
+}
+
+/** 还往场景图里挂几何的那些。装配时 `scene.add(root)`。 */
+export interface SceneVisualSystem extends SceneFrameSystem {
+  readonly root: THREE.Object3D;
 }
 
 export interface WeatherVisualTarget {
@@ -48,11 +66,6 @@ export interface ActorSnapshotTarget {
     externalActors?: readonly SnapshotPlayer[],
   ): void;
   getActor(actorId: string): Actor | undefined;
-  /**
-   * 按 Actor id 取渲染世界里的 proxy。Actor 上只有 proxyId，Object3D 住在渲染侧，
-   * 所以还留在客户端的表现代码（能力实验室的目标 rig）经由这里查。
-   */
-  getActorRenderProxy(actorId: string): ThreeMeshProxy | undefined;
   findOwnedActorId(playerId: string): string | undefined;
   findControllableActorId(): string | undefined;
   pickInteractableActor(
@@ -100,14 +113,16 @@ export interface VesselHudState {
   lastEvent: { type: ActorEventType; targetId: string } | null;
 }
 
+/**
+ * 一张地图的**玩法那一半**（`createGameWorld` 的产物）。
+ *
+ * 这里曾经也装着渲染那一半（`THREE.Scene`、天气与昼夜的目标、草地写入口、
+ * 表现系统）。渲染循环搬进 worker 之后那些东西根本到不了这一侧——它们由
+ * `RenderWorldRuntime` 在画布那一边自己建，玩法侧只经由命令口说话。
+ */
 export interface SceneComposition {
-  scene: THREE.Scene;
-  visualSystems: SceneVisualSystem[];
-  weatherTarget?: WeatherVisualTarget;
-  dayNightTarget?: DayNightVisualTarget;
-  /** 场景级共享光照/雾 uniform；场景 Component 建的表现也接到同一份上。 */
-  environmentRuntime?: SceneEnvironmentRuntime;
-  grassInteraction?: GrassInteractionTarget;
+  /** 玩法侧的每帧系统（流送规划、Actor 世界），按更新顺序排好。 */
+  visualSystems: SceneFrameSystem[];
   actorSnapshotTarget?: ActorSnapshotTarget;
   /**
    * 这张地图的渲染世界与它那段边界字节。
@@ -116,8 +131,10 @@ export interface SceneComposition {
    * 但它们的 proxy 必须和 Actor 的 proxy 落在同一个渲染世界、同一段 SoA 里，
    * 否则「一个 ProxyId 指一个东西」就不成立了。
    */
-  renderScene?: ThreeRenderScene;
+  renderScene?: RenderScene;
   renderTransforms?: RenderTransformBuffer;
+  /** 槽位表在玩法侧；玩家实体要和 Actor 共用同一张。 */
+  renderProxyIds?: RenderProxyTable;
   /**
    * 旧 CollisionWorld 只保留给非玩家 Actor 推出、交互宽相与兼容调试。
    * 玩家和相机均使用下面的 Rapier PhysicsWorld。

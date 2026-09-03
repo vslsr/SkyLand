@@ -7,7 +7,8 @@ import { GrassDisplacementComponent } from '../actors/components/GrassDisplaceme
 import type { GrassInteractionTarget } from '../grass';
 import type { InterpolatedPlayerState } from '../network/protocol';
 import type { ActorArchetypeDefinition } from '../scenes/data/SceneDefinition';
-import type { MeshProxyInfo, RenderScene } from '../render/RenderScene';
+import type { ProxyId, RenderScene } from '../render/RenderScene';
+import type { RenderProxyTable, RenderWorldHandle } from '../render/RenderProxyTable';
 import type { RenderTransformBuffer } from '../render/RenderTransformBuffer';
 import {
   SLIME_MOTION_AT_REST,
@@ -39,7 +40,9 @@ import {
 /** 同房间的另一名玩家：位置来自快照插值；混合软体只做不回写状态的客户端表现。 */
 export class RemotePlayer extends Actor {
   public name: string;
-  private readonly renderProxy: MeshProxyInfo;
+  private readonly proxyId: ProxyId;
+  /** 槽位表既是分配器也是命令口：销毁和回收槽位必须是同一件事。 */
+  private readonly proxyIds: RenderProxyTable;
   private readonly renderScene: RenderScene;
   private readonly transforms: RenderTransformBuffer;
   /** 玩法侧的 f64 权威副本；渲染侧那份是镜像。和本地玩家同一套结构。 */
@@ -65,7 +68,7 @@ export class RemotePlayer extends Actor {
       samplePlayerHeight?(x: number, z: number, buoyancyDraft?: number): number;
     },
     archetype: ActorArchetypeDefinition,
-    renderWorld: { scene: RenderScene; transforms: RenderTransformBuffer },
+    renderWorld: RenderWorldHandle,
   ) {
     super(state.id, archetype.id);
     const render = archetype.components.render;
@@ -84,7 +87,9 @@ export class RemotePlayer extends Actor {
     this.transforms = renderWorld.transforms;
     // 配色种子就是玩家 id：过边界的是身份，不是六个颜色值——哪种身份配哪套颜色
     // 是渲染侧的决定。
-    this.renderProxy = this.renderScene.createPlayerProxy({
+    this.proxyIds = renderWorld.proxyIds;
+    this.proxyId = this.proxyIds.acquire();
+    this.renderScene.createPlayerProxy(this.proxyId, {
       name: `remote-player-${state.id}`,
       render,
       paletteSeed: state.id,
@@ -163,15 +168,15 @@ export class RemotePlayer extends Actor {
 
   private publishRenderState(): void {
     this.transforms.write(
-      this.renderProxy.id,
+      this.proxyId,
       this.transform.x,
       this.transform.y,
       this.transform.z,
       this.transform.yaw,
     );
-    writeSlimeMotionParams(this.transforms, this.renderProxy.id, this.motion);
-    writeSlimeDragParams(this.transforms, this.renderProxy.id, this.drag);
-    writeSlimeBiteParams(this.transforms, this.renderProxy.id, this.biteTips);
+    writeSlimeMotionParams(this.transforms, this.proxyId, this.motion);
+    writeSlimeDragParams(this.transforms, this.proxyId, this.drag);
+    writeSlimeBiteParams(this.transforms, this.proxyId, this.biteTips);
     const legs = this.legGroundProbe;
     if (legs) {
       legs.refresh(this.transform.x, this.transform.y, this.transform.z);
@@ -180,7 +185,7 @@ export class RemotePlayer extends Actor {
     // 玩家的腿踩在别处的地面上。
     writeSlimeGroundProbeParams(
       this.transforms,
-      this.renderProxy.id,
+      this.proxyId,
       legs ? legs.probe : SLIME_GROUND_PROBE_AT_REST,
     );
   }
@@ -194,6 +199,6 @@ export class RemotePlayer extends Actor {
 
   public override dispose(): void {
     super.dispose();
-    this.renderScene.destroyMeshProxy(this.renderProxy.id);
+    this.proxyIds.destroyMeshProxy(this.proxyId);
   }
 }

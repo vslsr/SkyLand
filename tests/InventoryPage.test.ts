@@ -136,7 +136,7 @@ function inventoryView(slotCapacity: number, entries: [string, number][]) {
   return buildInventoryView(inventory as never);
 }
 
-test('背包界面把空货位也画成格子，货位统计跟着内容走', () => {
+test('还剩几格靠空格子自己说，不再另画一行读数', () => {
   withFakeDocument(() => {
     const page = new InventoryPage();
     page.setInventory(inventoryView(6, [['wood', 12], ['spice-bundle', 1]]));
@@ -145,12 +145,28 @@ test('背包界面把空货位也画成格子，货位统计跟着内容走', ()
     assert.equal(cells.length, 6, '两格有货 + 四格空位');
     const empty = cellsOf(page, 'inventory__cell--empty');
     assert.equal(empty.length, 4);
-    assert.equal(empty[0].getAttribute('aria-label'), '空货位');
+    assert.equal(empty[0].getAttribute('aria-label'), '空格子');
 
-    const capacity = cellsOf(page, 'inventory__capacity')[0];
-    assert.equal(capacity.textContent, '货位 2 / 6');
-    const meter = cellsOf(page, 'inventory__meter-fill')[0];
-    assert.equal(meter.getAttribute('style'), 'width:33%');
+    // 「货位 2 / 6」加一条进度条是把同一件事又说了一遍：空格本来就画成虚线方格。
+    assert.equal(cellsOf(page, 'inventory__capacity').length, 0);
+    assert.equal(cellsOf(page, 'inventory__meter').length, 0);
+    // 剩下的那一行只说「有话要说」的事（待兑现、违禁品、满了），不报数。
+    const ledger = cellsOf(page, 'inventory__ledger')[0];
+    assert.ok(!ledger.textContent.includes('/'), `不该再有读数：${ledger.textContent}`);
+
+    // 没话说的时候整行收起来，不留一条空白。
+    page.setInventory(inventoryView(6, []));
+    assert.equal(cellsOf(page, 'inventory__ledger')[0].hidden, true);
+  });
+});
+
+test('装满了才出那一句提醒，而且说的是「满了」不是一个数', () => {
+  withFakeDocument(() => {
+    const page = new InventoryPage();
+    page.setInventory(inventoryView(2, [['wood', 3], ['stone', 4]]));
+    const ledger = cellsOf(page, 'inventory__ledger')[0];
+    assert.equal(ledger.hidden, false);
+    assert.ok(ledger.textContent.includes('背包满了'), ledger.textContent);
   });
 });
 
@@ -204,9 +220,14 @@ test('分类页签第一页是全部，空分类不出现', () => {
     page.setInventory(inventoryView(6, [['wood', 3], ['light-ammo', 60]]));
     const tabs = cellsOf(page, 'inventory__tab');
     assert.deepEqual(
-      tabs.map((tab) => tab.text.replace(/\s*\d+$/, '')),
+      cellsOf(page, 'inventory__tab-label').map((label) => label.textContent),
       ['全部', '材料', '弹药'],
       '只有身上真有的分类才给页签',
+    );
+    // 数量是独立的一个附注元素，不再拼进标签文字里——「全部 0」读起来像一个词。
+    assert.deepEqual(
+      cellsOf(page, 'inventory__tab-count').map((count) => count.textContent),
+      ['2', '1', '1'],
     );
     assert.ok(tabs[0].className.includes('is-active'), '默认停在全部页');
   });
@@ -237,8 +258,8 @@ test('没有权威数据时显示空态，关闭提示跟着按键走', () => {
 
     page.setInventory(undefined);
     assert.equal(notice.hidden, false);
-    assert.equal(cellsOf(page, 'inventory__capacity')[0].textContent, '货位 —');
     assert.equal(cellsOf(page, 'inventory__cell').length, 0);
+    assert.equal(cellsOf(page, 'inventory__tab').length, 0);
 
     const hint = cellsOf(page, 'inventory__hint')[0];
     assert.equal(hint.textContent, 'Esc 关闭');

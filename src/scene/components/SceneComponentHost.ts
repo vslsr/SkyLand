@@ -19,7 +19,11 @@ export class SceneComponentHost {
     this.clear();
     const created: SceneRuntimeComponent[] = [];
     try {
-      for (const definition of definitions) created.push(this.factory(definition, context));
+      for (const definition of definitions) {
+        // undefined = 这一类归渲染世界建，见 createSceneRuntimeComponent。
+        const component = this.factory(definition, context);
+        if (component) created.push(component);
+      }
       if (this.active) this.activate(created);
       this.components = created;
     } catch (error) {

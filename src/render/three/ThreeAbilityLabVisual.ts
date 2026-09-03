@@ -1,8 +1,8 @@
 import * as THREE from 'three';
-import type { ThreeMeshProxy } from '../../render/three/ThreeMeshProxy';
+import type { ThreeMeshProxy } from './ThreeMeshProxy';
 import { releaseOwnResources } from '../../render/renderAssets';
 import { createAbilityLabModel } from '../../models/abilityLab';
-import type { AbilityLabAction, AbilityLabViewState } from './AbilityLabSimulation';
+import type { AbilityLabAction, AbilityLabViewState } from '../../abilities/lab/AbilityLabSimulation';
 
 interface AbilityProjectile {
   readonly object: THREE.Group;
@@ -16,7 +16,7 @@ function disposeObject(root: THREE.Object3D): void {
   root.traverse(releaseOwnResources);
 }
 
-export class AbilityLabVisualSystem {
+export class ThreeAbilityLabVisual {
   private readonly model = createAbilityLabModel();
   private readonly projectiles: AbilityProjectile[] = [];
   private readonly targetPosition = new THREE.Vector3();

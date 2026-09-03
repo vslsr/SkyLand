@@ -75,10 +75,14 @@ export interface SkyStateSource {
 
 /** 场景渲染器同步房间权威时刻的入口。 */
 export interface DayNightVisualTarget {
-  readonly timeOfDay: number;
   /**
-   * @param timeOfDay 房间权威时刻（小时）
-   * @param dayLengthSeconds 一整天走多少真实秒；0 表示时钟被冻结
+   * 把当前时刻写进渲染世界（引擎迁移路线图 第 3 步）。
+   *
+   * 原来这里是 `readonly timeOfDay` + `applyServerTime`——也就是时钟住在渲染侧，
+   * 「现在几点」要读回来。时钟是纯状态，现在归主线程，这里只收结果。
+   *
+   * @param timeOfDay 当前时刻（小时）
+   * @param running 时钟走不走；冻结时星空不再旋转
    */
-  applyServerTime(timeOfDay: number, dayLengthSeconds: number): void;
+  setTimeOfDay(timeOfDay: number, running: boolean): void;
 }

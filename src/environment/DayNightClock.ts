@@ -35,6 +35,12 @@ export class DayNightClock {
     return this.dayLengthSeconds > 0;
   }
 
+  /** 换地图：按新场景的配置重开，不保留上一张地图的时刻。 */
+  public reset(startHour: number, dayLengthSeconds: number): void {
+    this.currentTimeOfDay = normalizeTimeOfDay(startHour);
+    this.dayLengthSeconds = Math.max(0, dayLengthSeconds);
+  }
+
   /** 用房间快照校正本地时钟。 */
   public applyServerTime(timeOfDay: number, dayLengthSeconds: number): void {
     if (Number.isFinite(dayLengthSeconds)) {

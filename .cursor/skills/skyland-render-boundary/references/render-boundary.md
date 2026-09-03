@@ -32,7 +32,18 @@ Nothing on the left holds a `THREE.Object3D`. Nothing on the right holds an `Act
 
 ### 1. Spawn descriptors — facts fixed at creation
 
-`createMeshProxy(desc)` / `createPlayerProxy(desc)` take a **configuration description**, never an object, and return a `MeshProxyInfo` carrying the `ProxyId` plus a few derived numbers the gameplay side needs (notably `simpleCollision`, derived from the model's real dimensions).
+`createMeshProxy(id, desc)` / `createPlayerProxy(id, desc)` take a slot number and a
+**configuration description**, never an object, and **return nothing**.
+
+The slot comes from `RenderProxyTable` on the gameplay side. This used to be the other
+way round — the render world allocated and returned a `MeshProxyInfo` — and that return
+value was the last thing blocking `transferControlToOffscreen`. `MeshProxyInfo` also
+carried `simpleCollision`, which turned out to be a pure round trip: the render world
+computed it by calling `createSimpleCollisionFromRender(render)`, a shared pure function
+of the archetype JSON that gameplay already holds and the server already calls directly.
+`tests/RenderProxyCollisionParity.test.ts` pins that equivalence for all 15 models, so
+the day someone measures a collision box off real geometry instead, that test fails
+first.
 
 The interface deliberately offers no generic `createProxy(kind, desc)`. A new content class gets a new named entry point, so the boundary stays a fixed set of shapes rather than a variable-length primitive table.
 
@@ -66,8 +77,8 @@ A guide path is a list of waypoints of unknown length that changes rarely, so it
 
 | Channel | Layout | Writer | Reader |
 | --- | --- | --- | --- |
-| dropped piles / logs | `propInstanceLayout.ts` | `ActorInstanceSystem` | `HighCountActorBatchSystem` |
-| fruit on trees | `fruitInstanceLayout.ts` | `ActorFruitInstanceSystem` | `GeneratedPropFruitSystem` |
+| dropped piles / logs | `propInstanceLayout.ts` | `ActorInstanceSystem` | `ThreeHighCountBatchVisual` |
+| fruit on trees | `fruitInstanceLayout.ts` | `ActorFruitInstanceSystem` | `ThreeFruitBatchVisual` |
 
 Why these need their own channel: `createReplica` returns early for any archetype with `itemStack` **without creating a proxy**, and fruit are not Actors at all. There is no slot in the transform SoA to write to.
 
@@ -118,18 +129,54 @@ Player entities (local and remote) also write into this SoA, and they run **befo
 | Chunk planning, terrain overrides, collider registration | Game | `ChunkStreamer` |
 | Chunk geometry, materials, grass, ocean | Render | `ChunkViewHost` |
 | Proxy models, markers, visual params | Render | `ThreeRenderScene` / `ThreeMeshProxy` |
-| Batched piles, fruit | Render | `HighCountActorBatchSystem`, `GeneratedPropFruitSystem` |
+| Batched piles, fruit | Render | `ThreeHighCountBatchVisual`, `ThreeFruitBatchVisual`, driven from `updateVisuals` |
 | Canvas, camera, draw call | Render | `SceneRenderer` |
 
-`ChunkStreamer` still exposes `root` and `beforeRender` because it is the scene's `SceneVisualSystem`. That outer layer moves when the render loop itself moves.
+## The two threads
+
+`RenderWorldRuntime` is the render thread's whole world: the canvas, the `WebGLRenderer`, one map's render half, and the per-frame `update()` + `render()`. It is constructible from an `OffscreenCanvas`, and after construction every input is a command or a shared buffer — that is the property that let it move.
+
+`connectRenderWorldInWorker(canvas)` returns the same `RenderWorldConnection` shape as the in-process version, so switching threads changed exactly one line in `GrasslandScene`. Three things go over at startup and never again: the canvas (transferred), and the camera + transform SoA (shared `SharedArrayBuffer`s). After that, one `postMessage` per frame carrying that frame's command batch — empty frames send nothing. **The frame loop lives on the render thread**: the main thread posts and writes bytes; when to draw is the worker's own `requestAnimationFrame`.
+
+Two hazards this shape creates, both silent when you get them wrong:
+
+- **A missed reverse notification looks like nothing happening.** `ChunkStreamer` plans no chunks until `generatorReady` arrives; forgetting to route that message back left streaming maps with Actors but no terrain, trees, or rocks, and no error anywhere.
+- **A grown `SharedArrayBuffer` is a different buffer.** `RenderTransformBuffer` reallocates when it outgrows its capacity; the render thread keeps reading the old block unless an `adoptTransforms` command hands it the new one.
+
+The instance channel is deliberately *copied* rather than shared: it is rebuilt whole every frame and has no double buffer, so a snapshot per frame (a few KB, transferred) is both cheaper and safer than adding one.
+
+## Who owns a room
+
+`SceneCompositionHost` builds a room (`createLineArtScene`), hands the game half to `SceneWorld` and the render half to `SceneRenderer`, and owns the teardown order when the next room arrives: stop the frame systems, then clear collision and dispose physics, then install. It knows `SceneComposition` and two recipients — not `THREE.Scene`, not the canvas — so it stays put when the render loop moves.
+
+That ownership used to sit on `SceneRenderer`, which therefore held its own `collisionWorld`/`physicsWorld` references in order to `clear()` and `dispose()` them. A class named "renderer" disposing the physics world is what unowned assembly looks like. `SceneRenderer` now has one `adoptComposition(composition)` that only swaps what gets drawn, and asks `SceneWorld` for ground height and physics debug buffers.
+
+Neither `ClientActorSystem` nor `ChunkStreamer` has a `root` or a `beforeRender`: they are `SceneFrameSystem`s, not `SceneVisualSystem`s. A gameplay class that can reach a scene-graph node can hand one out, and a `beforeRender` taking a `WebGLRenderer` is the render loop leaking into gameplay. `ThreeRenderScene.beforeRender` is driven by the render loop directly, so it moves with the canvas.
+
+## The frame has two phases
+
+`SceneRenderer.update` runs the game phase — every `SceneFrameSystem` in composition order, ending with `ClientActorSystem`, whose `RenderTransformSyncSystem` publishes the SoA — and only then the render phase: one call to `renderScene.updateVisuals(transforms, dt, elapsed)`.
+
+That last call used to sit at the end of `ClientActorSystem.update`. It worked because that System happened to be last in the array — an accident of ordering, not a stated rule. Putting it in the caller makes "the render world reads bytes this tick already finished writing" the shape of the call site, and marks exactly what moves when the render loop moves onto a worker: that line and everything in `render()`.
 
 ## The ratchets
 
-`tests/RenderSceneBoundary.test.ts` holds three lists that may only shrink:
+`tests/RenderSceneBoundary.test.ts` holds several lists that may only shrink:
 
-1. **Actor Components importing render modules** — currently empty.
-2. **ActorWorld Systems** — must equal `ClientActorSystem`'s actual `world.addSystem(...)` calls, and none may import a render implementation. Without the equality check, a new System would slip past the import check unnoticed.
-3. **Render-side files touching `document`/`window`** — currently only `SceneRenderer`, whose `devicePixelRatio` moves with the canvas it owns.
+1. **Every method on `RenderScene` returns `void`** — the boundary is one-way. Checked against the source text, not the types: "returns something nobody uses" type-checks and still breaks on a worker.
+2. **Actor Components importing render modules** — currently empty.
+3. **ActorWorld Systems** — must equal `ClientActorSystem`'s actual `world.addSystem(...)` calls, and none may import a render implementation. Without the equality check, a new System would slip past the import check unnoticed.
+4. **Render-side files touching `document`/`window`** — currently only `SceneRenderer`, whose `devicePixelRatio` moves with the canvas it owns.
+5. **Scene components importing `three`** — currently empty, with no file excluded from the scan. A scene component that builds its own `Object3D` and pushes it into the scene graph blocks the worker move exactly like a Component holding one does. The way out is the one the falling leaves and the ability lab took: move the visual into the render world and send it descriptions. (`addWorldObject`/`removeWorldObject` and `onBeforeRender` — the two methods that handed out an `Object3D` slot and a live `THREE.Camera` — no longer exist, so those routes are now type errors rather than ratchet failures.)
+6. **Gameplay trunk files importing `three`** — `ClientActorSystem`, `ChunkStreamer`, `TerrainWorld`, `SceneWorld`, `createLineArtScene`. Currently empty. These are the snapshot, streaming, and assembly trunks; anything on this list is pinned to the main thread.
+There are exactly **two reverse notifications** on the boundary, and both exist for the same reason: the fact lives on the render side and the game side cannot derive it.
+
+| Notification | Why it cannot be a return value |
+| --- | --- |
+| `ChunkViewSink.onGeneratorReady` | which chunk generator backend loaded (WASM or JS) is only known once the module resolves |
+| `RenderScene.setSlimeSurfaceDragListener` | whether a press caught the slime's shell — the hit test rays the soft-body mesh, rewritten every frame by the solver |
+
+Neither rides the command queue; the listener stays on the caller's side of the thread and the render side calls it. For the drag, the rule that makes the asynchrony harmless is that **the gesture changes owner when the report arrives, not when the button goes down**: claiming early would eat the click that orbits the camera, while claiming late costs nothing because the pointer has not moved yet on the press frame.
 
 `RenderProxyComponent` importing from `src/render/` is intentional and allowed: it references the boundary types (`ProxyId`, the command sink), which is exactly what it should reference. The rule targets render *implementations*.
 

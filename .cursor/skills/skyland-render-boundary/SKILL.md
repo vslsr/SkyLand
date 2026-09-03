@@ -7,18 +7,28 @@ description: Work across SkyLand's Game World / Render World boundary — Render
 
 The client is split in two. **Game World** owns simulation: Actors, Components, collision, interaction. **Render World** owns everything Three.js touches. They communicate only through bytes and commands — never by sharing objects.
 
-This is not stylistic. The boundary exists so the render world can move onto a worker with `transferControlToOffscreen()`. Anything that holds a `THREE.Object3D` from the gameplay side blocks that move, because objects do not cross a thread boundary.
+This is not stylistic, and it is not hypothetical: **the render world already runs on a worker.** `GrasslandScene` builds it with `connectRenderWorldInWorker`, which hands the canvas over with `transferControlToOffscreen()` and thereafter talks only in commands and shared bytes. Anything that holds a `THREE.Object3D` from the gameplay side breaks at runtime, because objects do not cross a thread boundary.
 
-## The one rule that matters
+## Two rules that matter
 
-**Gameplay code must not import Three.js.** Specifically:
+**1. The boundary is one-way.** Every method on `RenderScene` returns `void`.
+
+A return value means the caller waits for the other side to answer, and a thread
+boundary has no "hold on". So identity is allocated on the gameplay side
+(`RenderProxyTable`) and passed *in*; nothing is passed back. When you need a value
+that the render world happens to compute, check first whether it is a pure function of
+data gameplay already holds — `simpleCollision` looked like a render measurement and
+was actually `createSimpleCollisionFromRender(render)`, a shared pure function of the
+archetype JSON. That round trip is gone.
+
+**2. Gameplay code must not import Three.js.** Specifically:
 
 - No Actor Component under `src/actors/components/` may import `three`, `models/`, `guidance/`, `slime/`, `grass/` or `materials/`.
 - No System registered into `ActorWorld` may import them either.
 
 Both are enforced by `tests/RenderSceneBoundary.test.ts`, which also asserts that its list of ActorWorld Systems **equals** the actual `world.addSystem(...)` calls in `ClientActorSystem`. Adding a System means registering it in that list, and the price of registering is passing the import check.
 
-A third ratchet lists the render-side files still touching `document` or `window`. All three lists may only get shorter.
+Further ratchets list the render-side files still touching `document` or `window`, the scene components still importing `three` (empty), the gameplay trunk files still importing `three` (empty: `ClientActorSystem`, `ChunkStreamer`, `TerrainWorld`, `SceneWorld`, `createLineArtScene`). Every list may only get shorter.
 
 ## Read before editing
 
@@ -32,7 +42,7 @@ There are four ways across, and the right one follows from how the data behaves 
 
 | The data is… | Channel | Where |
 | --- | --- | --- |
-| a fact fixed at spawn (model, colour, which markers exist) | `MeshProxyDesc` / `PlayerProxyDesc` | `createMeshProxy(...)` returns a `ProxyId` |
+| a fact fixed at spawn (model, colour, which markers exist) | `MeshProxyDesc` / `PlayerProxyDesc` | `createMeshProxy(id, desc)`, with the id from `RenderProxyTable` |
 | a fixed set of scalars that changes every frame | transform + visual-param SoA | `RenderTransformBuffer` |
 | variable-length, or only changes occasionally | a command | `RenderCommandSink` |
 | one record per instance, high count, no proxy of its own | an instance channel | `RenderInstanceBuffer` + a layout module |
@@ -77,6 +87,8 @@ Inside `ClientActorSystem`, System order is load-bearing:
 
 `publish()` copies the new read bank back onto the write bank, so a slot nobody wrote holds last frame's value rather than a two-frame-old one.
 
+The frame then has one more step, and it belongs to the caller: after every `SceneFrameSystem` has run, `SceneRenderer.update` calls `renderScene.updateVisuals(...)` once. Batched piles and fruit sync there too, off the instance buffers the game phase just wrote. Nothing on the gameplay side drives the render world's frame.
+
 ## Answer "which side?" before writing code
 
 Ask what the code needs in order to run.
@@ -92,6 +104,7 @@ Gameplay queries that used to ask the renderer now live on `SceneWorld` (terrain
 - The SoA carries **world** transforms. Parent-child relationships cross only as `parentSlot`; resolving local space is the render backend's business.
 - Every live slot is rewritten every frame. No dirty flags — double buffering makes a missed write degrade to "hold last frame".
 - `ProxyId` is the only identifier that crosses. Actor ids stay on the gameplay side.
+- **Slots are allocated by `RenderProxyTable`, on the gameplay side.** It is also the command sink, and that is deliberate: destroying a proxy and recycling its slot are one act. Split them and someone will do half, and the next Actor gets a slot that still has a model on it.
 - A proxy created but not yet owned by an Actor is a leak. `createMeshProxy` through `addActor` is a try/finally: on failure the proxy is destroyed.
 - Slot recycling means a released slot must be cleared in **both** banks, or the next Actor inherits the previous one's residue.
 - Render-side code may not touch `document` or `window`. Use `createDrawingSurface()` from `src/platform/` for offscreen 2D work.

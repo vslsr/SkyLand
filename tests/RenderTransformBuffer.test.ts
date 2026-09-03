@@ -133,3 +133,30 @@ test('扩容与槽位回收都覆盖参数段', () => {
   buffer.publish();
   assert.equal(buffer.readParam(slot, PARAM_FIRE_TARGET_INTENSITY), 0);
 });
+
+test('另一条线程凭那段字节就能还原出同一份缓冲', () => {
+  // 第 3 步：渲染线程收到的只有 SAB，容量写在表头里，不需要额外被告知。
+  const source = new RenderTransformBuffer(8);
+  source.write(3 as ProxyId, 1.5, 2.5, 3.5, 0.25);
+  source.publish();
+
+  const mirror = RenderTransformBuffer.fromBytes(source.bytes);
+  assert.equal(mirror.capacity, source.capacity);
+  assert.equal(mirror.frameId, source.frameId);
+  const out = { x: 0, y: 0, z: 0, yaw: 0 };
+  assert.equal(mirror.readTransform(3 as ProxyId, out).x, 1.5);
+  assert.equal(out.yaw, 0.25);
+
+  // SAB 时是同一块内存：写入方翻面，读出方立刻看得到。
+  source.write(3 as ProxyId, 9, 0, 0, 0);
+  source.publish();
+  assert.equal(mirror.readTransform(3 as ProxyId, out).x, 9);
+  assert.equal(mirror.frameId, source.frameId);
+});
+
+test('不像那段字节就当场报错，而不是读出一堆垃圾', () => {
+  assert.throws(
+    () => RenderTransformBuffer.fromBytes(new ArrayBuffer(64)),
+    /容量/,
+  );
+});

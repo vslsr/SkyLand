@@ -1,6 +1,10 @@
 import type { Actor } from '../../../shared/actor/Actor.mjs';
 
 import { AbilityLabController } from '../../abilities/lab';
+import {
+  RENDER_PROXY_COMPONENT,
+  type RenderProxyComponent,
+} from '../../actors/components/RenderProxyComponent';
 import type { SceneComponentDefinition } from '../../scenes/data/SceneDefinition';
 import type { SceneComponentContext, SceneRuntimeComponent } from './SceneComponent';
 
@@ -23,8 +27,7 @@ export class AbilityLabSceneComponent implements SceneRuntimeComponent {
     this.controller = new AbilityLabController({
       input: context.input,
       uiRoot: context.uiRoot,
-      addWorldObject: (object) => context.renderer.addWorldObject(object),
-      removeWorldObject: (object) => context.renderer.removeWorldObject(object),
+      render: context.renderer,
     });
   }
 
@@ -55,15 +58,15 @@ export class AbilityLabSceneComponent implements SceneRuntimeComponent {
     this.controller.deactivate();
     this.boundTarget = undefined;
     if (!target) return;
-    const render = this.context.renderer.getActorRenderProxy(this.definition.targetActorId);
-    if (!render?.abilityTargetRig) {
-      throw new Error(
-        `能力实验室目标 Actor ${this.definition.targetActorId} 缺少训练假人视觉 rig`,
-      );
+    // 这里原来是 `getActorRenderProxy`：拿到活的 proxy，检查它身上有没有训练假人的
+    // rig，再把 rig 交出去。现在只取一个整数——rig 在渲染世界里，缺了由那一侧报错。
+    const proxy = target.getComponent(RENDER_PROXY_COMPONENT) as RenderProxyComponent | undefined;
+    if (!proxy) {
+      throw new Error(`能力实验室目标 Actor ${this.definition.targetActorId} 没有渲染 proxy`);
     }
     const player = this.context.player;
     if (!player) return;
-    this.controller.activate(player, player.renderPosition, target, render);
+    this.controller.activate(player, player.renderPosition, target, proxy.proxyId);
     this.boundTarget = target;
   }
 }

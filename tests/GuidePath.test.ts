@@ -11,6 +11,7 @@ import { Actor } from '../shared/actor/Actor.mjs';
 import { ActorWorld } from '../shared/actor/ActorWorld.mjs';
 import { RenderProxyComponent } from '../src/actors/components/RenderProxyComponent';
 import { ActorGuidePathSyncSystem } from '../src/actors/systems/ActorGuidePathSyncSystem';
+import { RenderProxyTable } from '../src/render/RenderProxyTable';
 import { ThreeRenderScene } from '../src/render/three/ThreeRenderScene';
 
 test('GuidePathGeometry 为每个采样点创建屏幕空间线带所需的成对顶点', () => {
@@ -108,7 +109,9 @@ test('客户端视觉只应用服务器 GuidePathComponent 的离散状态', () 
   const scene = new ThreeRenderScene(new THREE.Group(), {
     fogColor: '#ffffff', fogNear: 20, fogFar: 60,
   });
-  const info = scene.createMeshProxy({
+  const proxyIds = new RenderProxyTable(scene);
+  const proxyId = proxyIds.acquire();
+  scene.createMeshProxy(proxyId, {
     name: 'actor-guide',
     guidePath: {
       lineColor: '#fffdf4',
@@ -123,13 +126,13 @@ test('客户端视觉只应用服务器 GuidePathComponent 的离散状态', () 
   const world = new ActorWorld();
   const actor = new Actor('guide-1', 'guide-path');
   actor.addComponent(state);
-  actor.addComponent(new RenderProxyComponent(info.id, scene));
+  actor.addComponent(new RenderProxyComponent(proxyId, scene));
   world.addActor(actor);
   const sync = new ActorGuidePathSyncSystem(scene);
   // 实体等第一条带路点的命令才建，所以先 sync 再取。
-  assert.equal(scene.resolveGuidePath(info.id), undefined);
+  assert.equal(scene.resolveGuidePath(proxyId), undefined);
   sync.update(world, 0, 0);
-  const guide = scene.resolveGuidePath(info.id)!.guide;
+  const guide = scene.resolveGuidePath(proxyId)!.guide;
   assert.equal(guide.currentMarkerIndex, 0);
 
   state.advance();

@@ -4,7 +4,7 @@ import * as THREE from 'three';
 import { ActorWorld } from '../shared/actor/ActorWorld.mjs';
 import { InteractiveParticleEffectActor } from '../src/actors/InteractiveParticleEffectActor';
 import { InteractiveParticleEffectSystem } from '../src/actors/systems/InteractiveParticleEffectSystem';
-import { InteractiveParticleEffectSceneComponent } from '../src/scene/components/InteractiveParticleEffectSceneComponent';
+import { InteractiveParticleEffectHost } from '../src/particles/InteractiveParticleEffectHost';
 import { createLineArtLeafGeometry, LINE_ART_LEAF_GEOMETRY_STATS } from '../src/models/particles/lineArtLeaf';
 import {
   LINE_ART_LEAF_PARTICLE_LIMITS,
@@ -142,13 +142,10 @@ test('streamed leaf clusters are deterministic and stay inside negative-coordina
 });
 
 test('streamed leaf clusters stay bounded and discard old chunks after a large focus jump', () => {
-  const mounted = new Set<THREE.Object3D>();
   let focus = { focusX: 0, focusY: 0, focusZ: 0 };
-  const renderer = {
-    environmentRuntime: undefined,
-    addWorldObject: (object: THREE.Object3D) => mounted.add(object),
-    removeWorldObject: (object: THREE.Object3D) => mounted.delete(object),
-  };
+  // `addWorldObject` / `removeWorldObject` 已经从 `SceneRenderer` 上删掉了：
+  // 落叶挂在渲染世界自己的根下，没有任何东西再往场景图里塞 `Object3D`。
+  const renderer = { environmentRuntime: undefined };
   // 地形采样搬去 SceneWorld 了：渲染器只剩渲染核心（实现路径文档 §3）。
   const world = {
     isWaterAt: () => false,
@@ -170,34 +167,36 @@ test('streamed leaf clusters stay bounded and discard old chunks after a large f
     interactionRadius: 0.9,
     impulseStrength: 3.4,
   } as const;
-  const component = new InteractiveParticleEffectSceneComponent(definition, {
-    definition: {
+  // 落叶归渲染世界建，收的是几个数和一块地形，不再是主线程的渲染器与 SceneWorld
+  //（实现路径文档 §3）。挂载点因此是它自己的根，不是 renderer.addWorldObject。
+  const root = new THREE.Group();
+  const component = new InteractiveParticleEffectHost(definition, {
+    sceneDefinition: {
       renderer: {
         fog: { color: '#fdfbf6', near: 22, far: 52 },
         world: { loadRadius: 2, keepRadius: 3 },
       },
     } as never,
-    renderer: renderer as never,
-    world: world as never,
     worldSeed: 0x12345678,
-    getFocus: () => focus,
-  } as never);
+    root,
+    terrain: world,
+  });
 
   component.activate();
-  for (let frame = 0; frame < 30; frame += 1) component.update(1 / 60, frame / 60);
-  assert.equal(mounted.size, 25);
+  for (let frame = 0; frame < 30; frame += 1) component.update(1 / 60, frame / 60, focus);
+  assert.equal(root.children.length, 25);
 
   focus = { focusX: 160, focusY: 0, focusZ: 0 };
-  component.update(1 / 60, 1);
+  component.update(1 / 60, 1, focus);
   assert.ok(
-    mounted.size <= 6,
+    root.children.length <= 6,
     '传送后只保留 keepRadius 边缘的迟滞列，并且每帧只补一个新 chunk',
   );
-  for (let frame = 0; frame < 30; frame += 1) component.update(1 / 60, 2 + frame / 60);
-  assert.ok(mounted.size <= 49, '常驻落叶团始终受 keepRadius 的 7×7 chunk 窗口约束');
+  for (let frame = 0; frame < 30; frame += 1) component.update(1 / 60, 2 + frame / 60, focus);
+  assert.ok(root.children.length <= 49, '常驻落叶团始终受 keepRadius 的 7×7 chunk 窗口约束');
 
   component.dispose();
-  assert.equal(mounted.size, 0);
+  assert.equal(root.children.length, 0);
 });
 
 test('每片落叶落在自己脚下的地表，而不是整团挂在落点中心的高度', () => {
@@ -310,11 +309,7 @@ test('被踢起的落叶按落点当地的地表停下，而不是起飞点的�
 
 test('落叶团在停用时释放地形订阅，不把监听器留在旧场景里', () => {
   const listeners = new Set<() => void>();
-  const renderer = {
-    environmentRuntime: undefined,
-    addWorldObject: () => undefined,
-    removeWorldObject: () => undefined,
-  };
+  const renderer = { environmentRuntime: undefined };
   let level = 0;
   const world = {
     isWaterAt: () => false,
@@ -339,13 +334,13 @@ test('落叶团在停用时释放地形订阅，不把监听器留在旧场景�
     interactionRadius: 0.9,
     impulseStrength: 3.4,
   } as const;
-  const component = new InteractiveParticleEffectSceneComponent(definition, {
-    definition: {
+  const component = new InteractiveParticleEffectHost(definition, {
+    sceneDefinition: {
       renderer: { fog: { color: '#fdfbf6', near: 22, far: 52 } },
     } as never,
-    renderer: renderer as never,
-    world: world as never,
-  } as never);
+    root: new THREE.Group(),
+    terrain: world,
+  });
 
   component.activate();
   assert.equal(listeners.size, 1);

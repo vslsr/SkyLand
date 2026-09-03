@@ -3,6 +3,7 @@ import type { PhysicsWorld } from '../../shared/physics/PhysicsWorld.mjs';
 import { TERRAIN_CELL_SIZE } from '../../shared/world/terrainConfig.mjs';
 import type { ContainerModelLike } from '../inventory/index';
 import type { GrassBendImpulse, GrassInteractionTarget } from '../grass';
+import type { RenderWorldCommands } from '../render/RenderWorldRuntime';
 import type { SnapshotActor, SnapshotPlayer } from '../network/protocol';
 import type { TerrainWorld } from '../world/TerrainWorld';
 import type {
@@ -31,13 +32,20 @@ export class SceneWorld implements GrassInteractionTarget {
   private terrainWorld?: TerrainWorld;
   private physicsWorld?: PhysicsWorld;
   private actorSnapshotTarget?: ActorSnapshotTarget;
-  private grassInteraction?: GrassInteractionTarget;
   /**
    * 没有地形世界的固定水面场景（线稿海域）用这两个值代替地形采样。
    * 它们本来就是「这张地图的玩法事实」，不是渲染状态。
    */
   private fixedWaterWorld = false;
   private fixedWaterLevel = 0;
+
+  /**
+   * 往渲染世界发命令的口子。
+   *
+   * **不随场景走**：草地脉冲、地形编辑镜像发给的是渲染循环本身，而它从大厅到
+   * 房间再回大厅一直是同一个。单线程下是真对象，上 worker 之后是命令队列。
+   */
+  public constructor(private readonly render: RenderWorldCommands) {}
 
   /** 换场景：把新组合里属于玩法的那几个句柄接过来。 */
   public adopt(composition: SceneComposition, water: {
@@ -47,7 +55,6 @@ export class SceneWorld implements GrassInteractionTarget {
     this.terrainWorld = composition.terrainWorld;
     this.physicsWorld = composition.physicsWorld;
     this.actorSnapshotTarget = composition.actorSnapshotTarget;
-    this.grassInteraction = composition.grassInteraction;
     this.fixedWaterWorld = water.fixedWaterWorld;
     this.fixedWaterLevel = water.fixedWaterLevel;
   }
@@ -56,9 +63,18 @@ export class SceneWorld implements GrassInteractionTarget {
     this.terrainWorld = undefined;
     this.physicsWorld = undefined;
     this.actorSnapshotTarget = undefined;
-    this.grassInteraction = undefined;
     this.fixedWaterWorld = false;
     this.fixedWaterLevel = 0;
+  }
+
+  /**
+   * 物理调试线框这一帧的顶点与颜色；没有物理世界时是 `undefined`。
+   *
+   * 画线框的是渲染侧，但**数据源在这一半**——`SceneRenderer` 曾经自己留一份
+   * `physicsWorld` 引用来调它，那是同一个世界被两个地方持有。
+   */
+  public debugRenderPhysics(): { vertices: Float32Array; colors: Float32Array } | undefined {
+    return this.physicsWorld?.debugRender();
   }
 
   // --- 地形 ---------------------------------------------------------------
@@ -117,6 +133,9 @@ export class SceneWorld implements GrassInteractionTarget {
     const terrain = this.terrainWorld;
     if (!terrain) return;
     for (const cell of cells) terrain.setCellCode(cell.cellX, cell.cellZ, cell.code);
+    // 渲染世界按同一个种子自己推地形，编辑是它推不出来的那部分——雨要落在
+    // 改过的高度上，就得把同一批格子也发过去。
+    this.render.setTerrainCells(cells);
   }
 
   /** 当前场景任意来源的地形 patch 通知。 */
@@ -147,7 +166,7 @@ export class SceneWorld implements GrassInteractionTarget {
 
   /** 玩家、场景组件或玩法效果写入当前场景草地的统一入口。 */
   public applyImpulse(impulse: GrassBendImpulse): void {
-    this.grassInteraction?.applyImpulse(impulse);
+    this.render.applyGrassImpulse(impulse);
   }
 
   // --- Actor --------------------------------------------------------------

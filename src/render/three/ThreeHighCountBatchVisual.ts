@@ -12,8 +12,8 @@ import {
   PROP_YAW,
   PROP_Z,
   residencyName,
-} from '../../render/propInstanceLayout';
-import type { RenderInstanceBuffer } from '../../render/RenderInstanceBuffer';
+} from '../propInstanceLayout';
+import type { RenderInstanceBuffer } from '../RenderInstanceBuffer';
 import { createFillMaterial, type FillMaterialEnvironment } from '../../materials/createFillMaterial';
 import {
   FRUIT_PILE_PIECES,
@@ -279,7 +279,7 @@ function createPileTemplate(
 }
 
 /** 一个批次固定两次绘制：一份 InstancedMesh 填充 + 一份合并轮廓线。 */
-export class HighCountActorBatchSystem {
+export class ThreeHighCountBatchVisual {
   public readonly root = new THREE.Group();
   private readonly batches = new Map<string, BatchEntry>();
   private readonly matrix = new THREE.Matrix4();

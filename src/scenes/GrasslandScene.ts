@@ -33,7 +33,10 @@ import { collectBiters, resolveBiteTips } from '../player/slimeBiteTip';
 import { createSlimeBiteParams, type SlimeBiteParams } from '../render/RenderSlimeBite';
 import type { SlimeSurfaceDragState } from '../render/RenderScene';
 import { SceneRenderer } from '../rendering/SceneRenderer';
+import { connectRenderWorldInWorker } from '../render/worker/connectRenderWorldInWorker';
+import { SceneCompositionHost } from '../scene/SceneCompositionHost';
 import { SceneWorld } from '../scene/SceneWorld';
+import type { SceneUpdateContext } from '../scene/SceneVisualSystem';
 import { createSceneRuntimeComponent, SceneComponentHost } from '../scene/components';
 import {
   INPUT_SEND_INTERVAL_SECONDS,
@@ -73,6 +76,7 @@ export class GrasslandScene extends Scene {
   private readonly virtualControls: VirtualControls;
   private readonly renderer: SceneRenderer;
   private readonly world: SceneWorld;
+  private readonly composition: SceneCompositionHost;
   private readonly sceneComponents = new SceneComponentHost(createSceneRuntimeComponent);
   private readonly flyController: FlyController;
   private readonly controls: SceneControlRouter;
@@ -203,9 +207,16 @@ export class GrasslandScene extends Scene {
       this.refreshDebugMenuShortcut();
       this.refreshInventoryShortcut();
     });
-    // 场景的两半:渲染核心与玩法查询。第 3 步搬 canvas 时只有前者跟着走。
-    this.world = new SceneWorld();
-    this.renderer = new SceneRenderer(options.canvas, this.world);
+    // 渲染那一侧只在这一行里被决定。整个渲染循环跑在另一条线程上：
+    // 画布经 `transferControlToOffscreen` 转移过去，相机与 transform SoA 是两块
+    // `SharedArrayBuffer`，其余全是命令。下面三个类看不出区别。
+    const render = connectRenderWorldInWorker(options.canvas);
+    // 场景的两半：渲染核心与玩法查询。第 3 步搬 canvas 时只有前者跟着走。
+    this.world = new SceneWorld(render.port);
+    this.renderer = new SceneRenderer(options.canvas, this.world, render);
+    // 一局的装配。它认识的是 `SceneComposition` 这份数据和两个接收方，
+    // 既不认识 `THREE.Scene` 也不认识画布——canvas 搬进 worker 时它留在原地。
+    this.composition = new SceneCompositionHost(this.world, render.port, this.renderer);
     this.remotePlayers = new RemotePlayerGroup(this.world);
     this.flyController = new FlyController(options.canvas, {
       position: [0, 4.2, 13.5],
@@ -394,13 +405,18 @@ export class GrasslandScene extends Scene {
    * 世界应该围绕谁展开：有玩家时是玩家，还没有玩家时是相机。
    * 流式加载靠它决定加载哪些 chunk，大厅背后看到的因此也是一片正常的世界。
    */
-  private currentFocus(): { focusX: number; focusY: number; focusZ: number } {
+  private currentFocus(): SceneUpdateContext {
     const player = this.player?.controller.position;
     if (player) {
+      const render = this.player?.renderPosition;
       return {
         focusX: player.x,
-        focusY: this.player?.renderPosition.y ?? 0,
+        focusY: render?.y ?? 0,
         focusZ: player.z,
+        // 表现侧要的是眼睛看到的那个身影，不是权威位置。
+        playerRenderX: render?.x,
+        playerRenderY: render?.y,
+        playerRenderZ: render?.z,
       };
     }
     const [cameraX, cameraY, cameraZ] = this.controls.frame.position;
@@ -409,6 +425,8 @@ export class GrasslandScene extends Scene {
 
   protected onEnter(): void {
     this.sceneComponents.setActive(true);
+    // 渲染世界里那批表现组件（落叶）跟着同一个开关。
+    this.renderer.setSceneActive(true);
     if (this.joinedRoom) {
       return;
     }
@@ -419,6 +437,7 @@ export class GrasslandScene extends Scene {
 
   protected onLeave(): void {
     this.sceneComponents.setActive(false);
+    this.renderer.setSceneActive(false);
     this.virtualControls.reset();
     this.input.setEnabled(false);
     this.controls.setInputEnabled(false);
@@ -485,7 +504,9 @@ export class GrasslandScene extends Scene {
     this.vesselControls.reset();
     this.actorInteractions.reset();
     this.hotbar.reset();
-    this.renderer.loadScene(joined.scene, joined.room.worldSeed);
+    // 装配归 SceneCompositionHost；渲染器只接住渲染那一半。
+    this.renderer.resetEnvironment(joined.scene);
+    this.composition.load(joined.scene, joined.room.worldSeed);
     this.flyController.configure(joined.scene.camera);
     const playerArchetype = joined.scene.actorArchetypes.find(
       (definition) => definition.id === joined.scene.gameplay.playerActor.archetypeId,
@@ -717,8 +738,9 @@ export class GrasslandScene extends Scene {
       renderWorld,
       topDownCameraOffset,
     );
-    // 蒙皮拖拽属于渲染侧：指针、相机和外壳都在这一边，玩家实体只经由
-    // setMouseFacingSuppressed 收到「一次手势归谁」那一个布尔。
+    // 蒙皮拖拽是两侧之间的适配器：指针与相机在这一边，外壳在渲染世界，
+    // 玩家实体只经由 setMouseFacingSuppressed 收到「一次手势归谁」那一个布尔。
+    // 四个拖拽方法现在都在 `RenderScene` 上，所以它收的就是边界接口本身。
     this.slimeSurfaceDrag = new SlimeSurfaceDragController(
       this.canvas,
       this.input,
@@ -751,7 +773,8 @@ export class GrasslandScene extends Scene {
       this.player.dispose();
       this.player = undefined;
     }
-    this.renderer.showEmptyScene();
+    this.renderer.resetEnvironment();
+    this.composition.clear();
   }
 
   /**

@@ -3,6 +3,7 @@ import test from 'node:test';
 import * as THREE from 'three';
 import { DAY_PHASE_HOURS } from '../shared/dayNight.mjs';
 import { DayNightSystem } from '../src/environment/index';
+import { DayNightClock } from '../src/environment/DayNightClock';
 import { CELESTIAL_RADIUS } from '../src/models/sky/createCelestialVisuals';
 import { CONTACT_SHADOW_UNIFORMS } from '../src/materials/createContactShadowMaterial';
 import { createSceneEnvironment } from '../src/materials/createFillMaterial';
@@ -12,19 +13,83 @@ import { WeatherSystem } from '../src/weather/index';
 
 const BACKGROUND = '#c9e6f2';
 
+/**
+ * 把时钟和昼夜表现接在一起——**和 `SceneRenderer` 现在做的是同一件事**。
+ *
+ * 时钟（`DayNightClock`）原来住在 `DayNightSystem` 里，于是「现在几点」要从渲染世界
+ * 读回来。它是纯状态，现在归主线程：那边推进、那边校正，每帧把小时数发过去
+ * （引擎迁移路线图 第 3 步）。用例照着同样的方式驱动，测的才是真实接法。
+ */
+class DayNightHarness {
+  public readonly system: DayNightSystem;
+  private readonly clock: DayNightClock;
+
+  public constructor(
+    definition: SceneDayNightDefinition,
+    environment: { backgroundColor?: string; groundColor?: string } = {},
+  ) {
+    this.system = new DayNightSystem({
+      backgroundColor: environment.backgroundColor ?? BACKGROUND,
+      ...(environment.groundColor ? { groundColor: environment.groundColor } : {}),
+      dayNight: definition,
+    });
+    this.clock = new DayNightClock(
+      definition.startHour,
+      definition.enabled && !definition.paused ? definition.dayLengthSeconds : 0,
+    );
+    this.#push();
+  }
+
+  public get timeOfDay(): number {
+    return this.clock.timeOfDay;
+  }
+
+  public get root(): THREE.Object3D {
+    return this.system.root;
+  }
+
+  public applyServerTime(timeOfDay: number, dayLengthSeconds: number): void {
+    this.clock.applyServerTime(timeOfDay, dayLengthSeconds);
+    this.#push();
+  }
+
+  public update(deltaSeconds: number, elapsedSeconds: number): void {
+    this.clock.advance(Math.max(0, Math.min(deltaSeconds, 0.1)));
+    this.#push();
+    this.system.update(deltaSeconds, elapsedSeconds);
+  }
+
+  public getSkyState(): ReturnType<DayNightSystem['getSkyState']> {
+    return this.system.getSkyState();
+  }
+
+  public setWeatherSource(source: Parameters<DayNightSystem['setWeatherSource']>[0]): void {
+    this.system.setWeatherSource(source);
+  }
+
+  public beforeRender(renderer: THREE.WebGLRenderer, camera: THREE.Camera): void {
+    this.system.beforeRender(renderer, camera);
+  }
+
+  public dispose(): void {
+    this.system.dispose();
+  }
+
+  #push(): void {
+    this.system.setTimeOfDay(this.clock.timeOfDay, this.clock.running);
+  }
+}
+
 function createDayNight(
   overrides: Partial<SceneDayNightDefinition> = {},
-): DayNightSystem {
-  return new DayNightSystem({
-    backgroundColor: BACKGROUND,
-    dayNight: {
-      enabled: true,
-      paused: false,
-      startHour: DAY_PHASE_HOURS.noon,
-      dayLengthSeconds: 240,
-      allowPlayerControl: true,
-      ...overrides,
-    },
+): DayNightHarness {
+  return new DayNightHarness({
+    enabled: true,
+    paused: false,
+    startHour: DAY_PHASE_HOURS.noon,
+    dayLengthSeconds: 240,
+    allowPlayerControl: true,
+    ...overrides,
   });
 }
 
@@ -129,7 +194,7 @@ test('天气叠在昼夜天空之上：暴雨压灰天色、云层遮住日轮�
     fogNear: 22,
     fogFar: 52,
     runtime: environment.runtime,
-    sky: dayNight,
+    sky: dayNight.system,
     sampleGroundHeight: () => 0,
   });
   dayNight.setWeatherSource(weather);
@@ -180,24 +245,23 @@ test('太阳角度与云量驱动散射雾、半球染色、云影、墨色与�
   scene.fog = new THREE.Fog(paper, 22, 52);
   const environment = createSceneEnvironment(paper, 22, 52);
   const runtime = environment.runtime!;
-  const dayNight = new DayNightSystem({
-    backgroundColor: paper,
-    groundColor: '#f1eddf',
-    dayNight: {
+  const dayNight = new DayNightHarness(
+    {
       enabled: true,
       paused: true,
       startHour: DAY_PHASE_HOURS.noon,
       dayLengthSeconds: 0,
       allowPlayerControl: true,
     },
-  });
+    { backgroundColor: paper, groundColor: '#f1eddf' },
+  );
   const weather = new WeatherSystem(scene, {
     backgroundColor: paper,
     fogColor: paper,
     fogNear: 22,
     fogFar: 52,
     runtime,
-    sky: dayNight,
+    sky: dayNight.system,
     groundColor: '#f1eddf',
     sampleGroundHeight: () => 0,
   });

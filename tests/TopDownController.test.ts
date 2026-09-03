@@ -3,6 +3,7 @@ import test from 'node:test';
 import { Group, Object3D } from 'three';
 import { TopDownCameraOrbit } from '../src/camera/TopDownCameraOrbit';
 import { SlimeSurfaceDragController } from '../src/controllers/SlimeSurfaceDragController';
+import { RenderProxyTable } from '../src/render/RenderProxyTable';
 import { RenderTransformBuffer } from '../src/render/RenderTransformBuffer';
 import { ThreeRenderScene } from '../src/render/three/ThreeRenderScene';
 import { TopDownController } from '../src/controllers/TopDownController';
@@ -568,9 +569,15 @@ test('旧房间缺少拖拽配置时渲染侧仍自动装配蒙皮拖拽，并�
     },
   };
   // 蒙皮拖拽整条链路都在渲染侧：玩家只贡献一个 ProxyId。
+  const dragScene = new ThreeRenderScene(
+    new Group(),
+    { fogColor: '#ffffff', fogNear: 20, fogFar: 60 },
+  );
   const renderWorld = {
-    scene: new ThreeRenderScene(new Group(), { fogColor: '#ffffff', fogNear: 20, fogFar: 60 }),
+    scene: dragScene,
     transforms: new RenderTransformBuffer(),
+    // 槽位由玩法侧分配：渲染世界不回话（见 RenderScene.createPlayerProxy）。
+    proxyIds: new RenderProxyTable(dragScene),
   };
   const player = new PlayerEntity(
     'surface-drag-player',

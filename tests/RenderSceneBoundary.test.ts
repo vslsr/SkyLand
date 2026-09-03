@@ -12,6 +12,7 @@ import {
 import { ActorTransformSystem } from '../src/actors/systems/ActorTransformSystem';
 import { RenderTransformSyncSystem } from '../src/actors/systems/RenderTransformSyncSystem';
 import { RenderTransformBuffer } from '../src/render/RenderTransformBuffer';
+import { RenderProxyTable } from '../src/render/RenderProxyTable';
 import { ThreeRenderScene } from '../src/render/three/ThreeRenderScene';
 import type { ActorRenderDefinition } from '../src/scenes/data/SceneDefinition';
 
@@ -30,16 +31,19 @@ const CRATE: ActorRenderDefinition = {
 function createWorld() {
   const root = new THREE.Group();
   const scene = new ThreeRenderScene(root, ENVIRONMENT);
+  // 槽位由玩法侧分配：渲染世界不回话（见 RenderScene.createMeshProxy）。
+  const proxyIds = new RenderProxyTable(scene);
   const transforms = new RenderTransformBuffer(8);
   const world = new ActorWorld();
   world.addSystem(new ActorTransformSystem(transforms));
   world.addSystem(new RenderTransformSyncSystem(transforms, scene));
-  return { root, scene, transforms, world };
+  return { root, scene, proxyIds, transforms, world };
 }
 
 function spawn(
   world: ActorWorld,
   scene: ThreeRenderScene,
+  proxyIds: RenderProxyTable,
   id: string,
   transform: { x: number; y: number; z: number; yaw: number },
   render?: ActorRenderDefinition,
@@ -49,15 +53,16 @@ function spawn(
     position: [transform.x, transform.y, transform.z],
     yaw: transform.yaw,
   }));
-  const info = scene.createMeshProxy({ name: `actor-${id}`, render });
-  actor.addComponent(new RenderProxyComponent(info.id, scene));
+  const proxyId = proxyIds.acquire();
+  scene.createMeshProxy(proxyId, { name: `actor-${id}`, render });
+  actor.addComponent(new RenderProxyComponent(proxyId, proxyIds));
   world.addActor(actor);
   return actor as Actor;
 }
 
 test('Actor 只持有 proxyId，渲染世界不认识 Actor', () => {
-  const { scene, world } = createWorld();
-  const actor = spawn(world, scene, 'crate-01', { x: 1, y: 0, z: 2, yaw: 0 }, CRATE);
+  const { scene, proxyIds, world } = createWorld();
+  const actor = spawn(world, scene, proxyIds, 'crate-01', { x: 1, y: 0, z: 2, yaw: 0 }, CRATE);
   const proxy = actor.requireComponent(RENDER_PROXY_COMPONENT) as RenderProxyComponent;
 
   // 这是第 1 步的硬约束：Actor 那一侧只剩一个整数。
@@ -79,8 +84,8 @@ test('Actor 只持有 proxyId，渲染世界不认识 Actor', () => {
 });
 
 test('Game World 只写 SoA，位置由渲染世界从字节兑现', () => {
-  const { root, scene, transforms, world } = createWorld();
-  const actor = spawn(world, scene, 'crate-01', { x: 1, y: 0.5, z: 2, yaw: 0.25 }, CRATE);
+  const { root, scene, proxyIds, transforms, world } = createWorld();
+  const actor = spawn(world, scene, proxyIds, 'crate-01', { x: 1, y: 0.5, z: 2, yaw: 0.25 }, CRATE);
   const proxy = actor.requireComponent(RENDER_PROXY_COMPONENT) as RenderProxyComponent;
   const render = scene.resolve(proxy.proxyId)!;
 
@@ -96,9 +101,9 @@ test('Game World 只写 SoA，位置由渲染世界从字节兑现', () => {
 });
 
 test('父子关系只以 parentProxyId 过边界，局部坐标在渲染侧反算', () => {
-  const { root, scene, world } = createWorld();
-  const parent = spawn(world, scene, 'raft', { x: 10, y: 1, z: 0, yaw: Math.PI / 2 }, CRATE);
-  const child = spawn(world, scene, 'crate', { x: 10, y: 1.6, z: 2, yaw: Math.PI / 2 }, CRATE);
+  const { root, scene, proxyIds, world } = createWorld();
+  const parent = spawn(world, scene, proxyIds, 'raft', { x: 10, y: 1, z: 0, yaw: Math.PI / 2 }, CRATE);
+  const child = spawn(world, scene, proxyIds, 'crate', { x: 10, y: 1.6, z: 2, yaw: Math.PI / 2 }, CRATE);
   world.setActorParent(child.id, parent.id, { worldPositionStays: true });
   world.update(1 / 60, 0);
 
@@ -125,8 +130,8 @@ test('父子关系只以 parentProxyId 过边界，局部坐标在渲染侧反�
 });
 
 test('Actor 销毁会回收 proxy，槽位复用不会读到上一个 proxy 的残留', () => {
-  const { root, scene, world } = createWorld();
-  const actor = spawn(world, scene, 'crate-01', { x: 3, y: 0, z: 0, yaw: 0 }, CRATE);
+  const { root, scene, proxyIds, world } = createWorld();
+  const actor = spawn(world, scene, proxyIds, 'crate-01', { x: 3, y: 0, z: 0, yaw: 0 }, CRATE);
   const firstId = (actor.requireComponent(RENDER_PROXY_COMPONENT) as RenderProxyComponent).proxyId;
   assert.equal(root.children.length, 1);
 
@@ -134,7 +139,7 @@ test('Actor 销毁会回收 proxy，槽位复用不会读到上一个 proxy 的�
   assert.equal(scene.resolve(firstId), undefined);
   assert.equal(root.children.length, 0);
 
-  const reused = spawn(world, scene, 'crate-02', { x: -4, y: 0, z: 0, yaw: 0 }, CRATE);
+  const reused = spawn(world, scene, proxyIds, 'crate-02', { x: -4, y: 0, z: 0, yaw: 0 }, CRATE);
   const secondId = (reused.requireComponent(RENDER_PROXY_COMPONENT) as RenderProxyComponent).proxyId;
   assert.equal(secondId, firstId, '空槽位应当被复用，proxyId 空间不会无限增长');
   world.update(1 / 60, 0);
@@ -186,20 +191,110 @@ test('还在 import 渲染侧模块的 Actor Component 只有已知的那几个'
 });
 
 /**
+ * 玩法侧那几个「大类」也不许 import three。
+ *
+ * Component 与 System 已经各有一条棘轮，但真正决定第 2 步（Sim Worker）能不能成的
+ * 是这几个：它们是快照、流送、场景装配这三条主干本身，外加主线程那个渲染门面。
+ * `ClientActorSystem` 曾经握着两层 `InstancedMesh`、一个 `root` getter、一个收
+ * `WebGLRenderer` 的 `beforeRender`，还在自己的 `update` 末尾驱动渲染世界的一帧；
+ * `SceneRenderer` 曾经**就是**那个 `WebGLRenderer` 的持有者，现在它只量画布、
+ * 推时钟、发命令——真正画画的是 `RenderWorldRuntime`，那才是要进 worker 的东西。
+ *
+ * 这份清单是空的。任何一项回到这里，都意味着那条主干又被钉在了主线程上。
+ */
+const GAMEPLAY_FILES_STILL_IMPORTING_THREE: string[] = [];
+
+test('玩法侧的主干文件一个都不 import three', () => {
+  const files = [
+    ['../src/actors/', 'ClientActorSystem.ts'],
+    ['../src/world/', 'ChunkStreamer.ts'],
+    ['../src/world/', 'TerrainWorld.ts'],
+    ['../src/scene/', 'SceneWorld.ts'],
+    ['../src/scene/', 'createGameWorld.ts'],
+    ['../src/scene/', 'SceneCompositionHost.ts'],
+    ['../src/rendering/', 'SceneRenderer.ts'],
+  ] as const;
+  const offenders = files
+    .filter(([folder, name]) => (
+      /from 'three'/.test(readFileSync(new URL(name, new URL(folder, import.meta.url)), 'utf8'))
+    ))
+    .map(([, name]) => name)
+    .sort();
+
+  assert.deepEqual(
+    offenders,
+    GAMEPLAY_FILES_STILL_IMPORTING_THREE,
+    '这份清单只能变短：玩法主干碰 three，第 2 步就搬不动',
+  );
+});
+
+/**
  * 第 3 步的棘轮（`doc/engine-migration-implementation-plan.md` §3）。
  *
+ * **边界必须是单向的**：`RenderScene` 上每一个方法都返回 `void`。
+ *
+ * 有返回值就意味着调用方要等对面回话，而线程边界上没有「等一下」——
+ * `createMeshProxy` 曾经回送槽位号与碰撞盒，那是 canvas 进渲染线程的最后一个
+ * 阻塞点。槽位改由 `RenderProxyTable` 在玩法侧分配，碰撞盒改由玩法侧自己按
+ * 同一个 shared 纯函数算（见 `RenderProxyCollisionParity.test.ts`）。
+ *
+ * 这条按源码文本检查而不是按类型：类型上 `void` 与「返回了但没人用」区分不开，
+ * 而后者一样会在 worker 上炸。
+ *
+ * 最后一个下来的是蒙皮拖拽：`beginSlimeSurfaceDrag` 曾经回送「抓住了没有」，而且
+ * 它当时**不在这个接口上**，所以这条断言看不见它。判据确实只有渲染侧有（命中测试
+ * 打的是每帧被求解器改写的软体外壳网格），所以出路不是「玩法侧自己算」，而是
+ * 把结果改成一条反向通知（`setSlimeSurfaceDragListener`）。方法进了接口，
+ * 这条断言从此盯得住它。
+ */
+test('RenderScene 上每一个方法都返回 void——边界是单向的', () => {
+  const source = readFileSync(
+    new URL('../src/render/RenderScene.ts', import.meta.url),
+    'utf8',
+  );
+  // 只看两个接口体内部的方法签名。
+  const bodies = [...source.matchAll(
+    /export interface (RenderCommandSink|RenderScene)[^{]*\{([\s\S]*?)\n\}/g,
+  )];
+  assert.equal(bodies.length, 2, '接口改名了？这条棘轮要跟着改');
+  const signatures = bodies.flatMap(([, , body]) => (
+    [...body.matchAll(/^\s{2}(\w+)\(([^)]*)\):\s*([^;]+);/gm)]
+  ));
+  assert.ok(signatures.length >= 5, '没扫到方法签名，正则和源码对不上了');
+  for (const [, name, , returnType] of signatures) {
+    assert.equal(
+      returnType.trim(),
+      'void',
+      `RenderScene.${name} 有返回值——调用方就得等渲染世界回话，`
+      + '而线程边界上没有「等一下」。要回送的东西请另找一条通道。',
+    );
+  }
+});
+
+/**
  * canvas 交给渲染线程之后，渲染栈跑在**没有 `document`、没有 `window`** 的地方。
  * 所以这份清单盯的是「渲染侧还有几处伸手摸 DOM」。
  *
- * 它只能变短。现在只剩一项，而且那一项是对的：`SceneRenderer` 今天就是持有
- * canvas 的那一个，`devicePixelRatio` 会跟着 canvas 一起搬走，不是要清理的债。
+ * 渲染循环**已经在**渲染线程上了，所以这条不再是「以后会崩」的预警，而是当场就崩。
+ * 扫的是那条线程真正打包进去的那些目录；主线程那一侧的门面（`SceneRenderer`）
+ * 故意不在里面——量画布本来就是它的活。
+ *
+ * 只剩一项，而且那一项是**读到即用**的写法：`loadChunkGenerator` 在模块加载时
+ * 读一次 `?chunkgen=js`（主线程读得到，worker 读不到，因为 worker 的 `location`
+ * 是它自己脚本的地址），随后由开工那条报文把结果补给渲染线程。清单只能变短。
  */
-const RENDER_FILES_TOUCHING_DOM = ['SceneRenderer.ts'];
+const RENDER_FILES_TOUCHING_DOM = ['loadChunkGenerator.ts'];
 
 const DOM_ACCESS = /\b(document|window)\s*[.[]/;
 
 test('渲染栈里还摸 DOM 的只有已知的那几个', () => {
-  const roots = ['../src/rendering/', '../src/render/', '../src/models/', '../src/materials/'];
+  // 渲染线程真正打包进去的那些目录。`src/rendering/SceneRenderer.ts`
+  // **故意不在里面**：它是主线程那一侧的门面，量画布本来就是它的活。
+  const roots = [
+    '../src/render/', '../src/models/', '../src/materials/', '../src/world/',
+    '../src/grass/', '../src/weather/', '../src/environment/', '../src/particles/',
+    '../src/ocean/', '../src/scene/',
+  ];
   const offenders: string[] = [];
   for (const root of roots) {
     const directory = new URL(root, import.meta.url);
@@ -233,15 +328,56 @@ test('渲染栈里还摸 DOM 的只有已知的那几个', () => {
 });
 
 /**
- * 第 1.75 步的棘轮（`doc/engine-migration-implementation-plan.md` §1.75）。
+ * 第 3 步的棘轮：**场景组件**（`doc/engine-migration-implementation-plan.md` §3）。
  *
- * Component 干净了还不够：Actor 世界里跑的 **System** 也得干净，否则第 2 步
- * 一样搬不进 worker。这四个是 `ClientActorSystem` 注册进 `ActorWorld` 的全部
- * System——两个写 SoA、一个发命令、一个翻面，谁都不认识 `THREE`。
+ * 这是最后一类还在主线程上握着 `THREE.Object3D` 的东西，形状和第 1.5 步那八个
+ * 表现 Component 一模一样——那一轮把清单从 8 磨到 0，这一轮同理。
  *
- * 名单写死在这里是有意的：新增一个 ActorWorld System 就要在这里登记，
- * 而登记的代价是它必须先通过这条断言。
+ * 它们曾经靠 `renderer.addWorldObject(object)` 把自己建的对象塞进场景图。
+ * 渲染循环进线程之后那条路就断了：对象过不了线程边界。出路也和上一轮一样——
+ * 要么把建模搬进渲染世界、玩法侧只发描述，要么整个组件搬过去。
+ *
+ * `addWorldObject` / `removeWorldObject` 现在已经从 `SceneRenderer` 上删掉了，
+ * 所以这条正则的第二个分支是双保险：真写了也编译不过。
+ *
+ * `onBeforeRender`（渲染侧往主线程递一个活的 `THREE.Camera`）也删掉了——它一个
+ * 注册方都没有了，唯一的用处是让 `SceneComponent.ts` 不得不 import three。
+ * 那条曾经的棘轮现在由类型系统兜着：方法不存在，写不出来。所以这个目录**整个**
+ * 都在扫描范围内，一个文件都不排除。
+ *
+ * 清单现在是空的。落叶由 `createRenderWorld` 建，挂在渲染世界自己的根下，
+ * 收到的只是几个数和一块地形；能力实验室的整套动画在 `ThreeAbilityLabVisual` 里，
+ * 玩法侧只发三条返回 `void` 的命令（绑谁、这一帧什么状态、放一次技能）。
+ *
+ * 空清单是这条断言最有价值的形态：任何一个新组件只要 `import ... from 'three'`
+ * 或者去碰 `addWorldObject`，这里立刻红。
  */
+const SCENE_COMPONENTS_STILL_HOLDING_THREE: string[] = [];
+
+test('还在主线程建 THREE 对象的场景组件只有已知的那几个', () => {
+  const directory = new URL('../src/scene/components/', import.meta.url);
+  const offenders = readdirSync(directory)
+    .filter((name) => name.endsWith('.ts'))
+    .filter((name) => {
+      const source = readFileSync(new URL(name, directory), 'utf8');
+      const code = source
+        .split('\n')
+        .filter((line) => {
+          const trimmed = line.trimStart();
+          return !trimmed.startsWith('*') && !trimmed.startsWith('//');
+        })
+        .join('\n');
+      return /from 'three'/.test(code) || /addWorldObject/.test(code);
+    })
+    .sort();
+
+  assert.deepEqual(
+    offenders,
+    SCENE_COMPONENTS_STILL_HOLDING_THREE,
+    '这份清单只能变短：渲染循环进线程之后，addWorldObject 那条路就断了',
+  );
+});
+
 const ACTOR_WORLD_SYSTEMS = [
   'ActorTransformSystem.ts',
   'ActorVisualParamSystem.ts',
@@ -281,24 +417,29 @@ test('装配中途抛出不会泄漏 proxy 槽位', () => {
   // createMeshProxy 占了槽位，但要到 addActor 之后才由 RenderProxyComponent 的
   // 生命周期负责回收。中间任何一步抛出，槽位既不在 freeSlots 里也没有 Actor 持有
   // 它——泄漏一个挂在场景图上的模型。这里直接对着渲染世界复现那个窗口。
-  const { root, scene } = createWorld();
-  const first = scene.createMeshProxy({ name: 'actor-a', render: CRATE });
+  const { root, scene, proxyIds } = createWorld();
+  const first = proxyIds.acquire();
+  scene.createMeshProxy(first, { name: 'actor-a', render: CRATE });
   assert.equal(root.children.length, 1);
+  assert.equal(proxyIds.liveCount, 1);
 
-  // 模拟装配失败：立刻把 proxy 还回去。
-  scene.destroyMeshProxy(first.id);
-  assert.equal(scene.resolve(first.id), undefined);
+  // 模拟装配失败：立刻把 proxy 还回去。销毁走槽位表，因为「销毁」和「回收槽位」
+  // 是同一件事——只做一半，下一个 Actor 就会拿到一个还挂着模型的槽位。
+  proxyIds.destroyMeshProxy(first);
+  assert.equal(scene.resolve(first), undefined);
   assert.equal(root.children.length, 0, '失败路径必须把模型从场景图上摘下来');
+  assert.equal(proxyIds.liveCount, 0, '槽位也要还回去，否则编号一路涨');
 
-  // 槽位回到自由表，下一个 Actor 拿到同一个下标，不会一路涨上去。
-  const second = scene.createMeshProxy({ name: 'actor-b', render: CRATE });
-  assert.equal(second.id, first.id);
+  // 槽位回到自由表，下一个 Actor 拿到同一个下标。
+  const second = proxyIds.acquire();
+  scene.createMeshProxy(second, { name: 'actor-b', render: CRATE });
+  assert.equal(second, first);
 });
 
 test('渲染世界的释放不依赖「每个 proxy 都有活着的 Actor」这条不变量', () => {
-  const { root, scene } = createWorld();
-  scene.createMeshProxy({ name: 'actor-a', render: CRATE });
-  scene.createMeshProxy({ name: 'actor-b', render: CRATE });
+  const { root, scene, proxyIds } = createWorld();
+  scene.createMeshProxy(proxyIds.acquire(), { name: 'actor-a', render: CRATE });
+  scene.createMeshProxy(proxyIds.acquire(), { name: 'actor-b', render: CRATE });
   assert.equal(root.children.length, 2);
 
   scene.dispose();

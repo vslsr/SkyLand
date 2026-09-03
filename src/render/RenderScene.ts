@@ -1,8 +1,12 @@
-import type { ActorSimpleCollision } from '../models/actors/ActorVisualModel';
+import type {
+  AbilityLabAction,
+  AbilityLabViewState,
+} from '../abilities/lab/AbilityLabSimulation';
 import type {
   ActorArchetypeDefinition,
   ActorRenderDefinition,
 } from '../scenes/data/SceneDefinition';
+import type { RenderInstanceBuffer } from './RenderInstanceBuffer';
 import type { RenderTransformBuffer } from './RenderTransformBuffer';
 
 /**
@@ -56,7 +60,7 @@ export interface MeshProxyDesc {
    * 这个 proxy 要不要交互标记 / 温度牌。
    *
    * 「要不要」是 spawn 时的一次性事实，所以走 desc 而不是每帧的参数段；
-   * 锚点不在这里——它们由模型自己产出，本来就在渲染侧（见 MeshProxyInfo）。
+   * 锚点不在这里——它们由模型自己产出，本来就在渲染侧，也不回送。
    */
   readonly interactionMarker?: boolean;
   readonly temperatureMarker?: boolean;
@@ -121,7 +125,10 @@ export interface PlayerProxyDesc {
   readonly surfaceDrag?: SlimeSurfaceDragDefinition;
 }
 
-/** 一条世界射线。指针与相机都在渲染这一侧，所以它不跨边界，只在渲染世界内部走。 */
+/**
+ * 一条世界射线。指针与相机都在主线程，所以这条射线是从那一侧发过来的：
+ * 六个数，结构化克隆过得去。
+ */
 export interface SlimeSurfaceDragRay {
   readonly origin: readonly [number, number, number];
   readonly direction: readonly [number, number, number];
@@ -132,7 +139,7 @@ export interface SlimeSurfaceDragRay {
  *
  * 射线不跨边界，这个结构却要：玩法侧得把本地玩家的手势发给房间，其他客户端
  * 才能复现同一次形变。过去的是**六个数字**，不是外壳的四百多个顶点——接收端
- * 用自己那套参数在自己的求解器上重放。读取写进调用方自带的结构，不分配。
+ * 用自己那套参数在自己的求解器上重放。
  */
 export interface SlimeSurfaceDragState {
   contactX: number;
@@ -144,16 +151,21 @@ export interface SlimeSurfaceDragState {
 }
 
 /**
- * `createMeshProxy` 回给 Game World 的东西：**全是数值，没有一个 Object3D**。
- * 这些量本身是玩法数据（碰撞盒、船体长宽），只是恰好和模型 authoring 同时产出。
+ * 渲染世界回报「哪个 proxy 的蒙皮正被拖着，拖成什么样」。
+ *
+ * 这是**边界上仅有的两条反向通知之一**（另一条是 `ChunkViewSink.onGeneratorReady`）。
+ * 它存在的理由很具体：抓没抓住外壳、抓在哪一点，判据只有渲染侧有——命中测试打的是
+ * 每帧被求解器改写的软体网格。玩法侧发命令，渲染侧回报事实，两边都不用等对方。
+ *
+ * 手势本身（六个本地坐标）也走这条回报，而不是让玩法侧回头去读：那是一次跨线程
+ * 阻塞查询，正是这条边界不做的事。玩法侧把最后一次回报缓存下来，上报房间时读缓存。
  */
-export interface MeshProxyInfo {
+export interface SlimeSurfaceDragReport extends SlimeSurfaceDragState {
   readonly id: ProxyId;
-  readonly length: number;
-  readonly width: number;
-  readonly interactionAnchorY: number;
-  readonly simpleCollision: ActorSimpleCollision;
+  readonly dragging: boolean;
 }
+
+export type SlimeSurfaceDragListener = (report: SlimeSurfaceDragReport) => void;
 
 /**
  * 引导路径每帧可能变的那部分。**变长**，所以它走命令而不是参数段。
@@ -184,10 +196,80 @@ export interface RenderCommandSink {
   setGuidePath(id: ProxyId, state: GuidePathState, pathChanged: boolean): void;
 }
 
+/**
+ * 渲染世界的**全部**入口。
+ *
+ * 「全部」是有意义的：玩法侧只准通过这个接口说话。够到具体后端（`ThreeRenderScene`）
+ * 就绕过了那条「每个方法返回 void」的棘轮——而那条棘轮是 canvas 能不能进线程的
+ * 唯一保障。
+ *
+ * 一个**没有**列在这里的方法：`ThreeRenderScene.beforeRender(renderer, camera)`。
+ * 它收的是 Three 的渲染器与相机——引导线宽要 resize 之后的真实画布尺寸，世界 UI
+ * 要相机朝向。两个参数都是**渲染循环自己手里的东西**，跨边界发过来毫无意义，
+ * 所以它由渲染循环直接驱动，跟着 canvas 一起进线程。
+ *
+ * 它曾经经由 `ClientActorSystem.beforeRender` 路过一趟，那让一个玩法类拿到了
+ * `WebGLRenderer` 与 `Camera`。现在玩法侧没有任何一处碰得到它们。
+ */
 export interface RenderScene extends RenderCommandSink {
-  createMeshProxy(desc: MeshProxyDesc): MeshProxyInfo;
+  /**
+   * 在指定槽位建一个 Actor 网格 proxy。
+   *
+   * **槽位号由调用方给，这里不回话**——返回值是 canvas 进渲染线程的阻塞点，
+   * 函数调用要等对面，而线程边界上没有「等一下」。分配在
+   * `RenderProxyTable`（Game World 那一侧）。
+   *
+   * 这里原来还回送碰撞盒与模型尺寸。尺寸玩法侧一次都没读过；碰撞盒是一次纯粹的
+   * 往返——渲染侧算它的方式就是调 `createSimpleCollisionFromRender(render)`，
+   * 一个输入只有 render 定义的 shared 纯函数。见
+   * `tests/RenderProxyCollisionParity.test.ts`。
+   */
+  createMeshProxy(id: ProxyId, desc: MeshProxyDesc): void;
   /** 玩家史莱姆。见 `PlayerProxyDesc`：另一类内容，另一个具名入口。 */
-  createPlayerProxy(desc: PlayerProxyDesc): MeshProxyInfo;
+  createPlayerProxy(id: ProxyId, desc: PlayerProxyDesc): void;
+  /**
+   * 准星选中了谁 / 悬停高亮谁。`NULL_PROXY_ID` 表示没有。
+   *
+   * 标记牌与高亮盒整个在渲染世界里建与释放，玩法侧只说「是哪一个」——
+   * 没有 proxy 的 Actor（生成物件、合批掉落物）和「没有选中」是同一种输入。
+   */
+  setInteractionMarker(id: ProxyId, label: string, opacity?: number): void;
+  setHoveredProxy(id: ProxyId): void;
+  /**
+   * 能力实验室的三条命令（只有开发用的实验室地图会发）。
+   *
+   * 这三条曾经是玩法侧最后一处**递出活对象**：`AbilityLabSceneComponent` 先
+   * `getActorRenderProxy` 拿到活的 `ThreeMeshProxy`，把 `abilityTargetRig` 交给一个
+   * 住在主线程的视觉系统。整套动画现在在渲染世界里，玩法侧只说三件事：
+   * 绑谁（`NULL_PROXY_ID` 即解绑）、这一帧什么状态、放一次技能。
+   *
+   * `AbilityLabViewState` 是纯数据（血量、蓝量、冷却、日志），过得了线程边界；
+   * 施法者位置拆成三个标量，因为 `Vector3` 是 three 的词汇，边界上不认。
+   */
+  setAbilityLabTarget(id: ProxyId): void;
+  setAbilityLabState(
+    state: AbilityLabViewState | undefined,
+    casterX: number,
+    casterY: number,
+    casterZ: number,
+  ): void;
+  playAbilityLabAction(
+    action: AbilityLabAction,
+    casterX: number,
+    casterY: number,
+    casterZ: number,
+    succeeded: boolean,
+  ): void;
+  /** 两个调试开关。它们是渲染世界自己的状态，不在 Actor 上镜像。 */
+  setTemperatureMarkersVisible(visible: boolean): void;
+  setSimpleCollisionVisible(visible: boolean): void;
+  /** 渲染世界自己的表现系统跑一帧。读的是刚翻面的那一段字节。 */
+  updateVisuals(
+    transforms: RenderTransformBuffer,
+    deltaSeconds: number,
+    elapsedSeconds: number,
+  ): void;
+  dispose(): void;
   /**
    * 把这一帧的 transform SoA 兑现到渲染世界。
    *
@@ -195,4 +277,25 @@ export interface RenderScene extends RenderCommandSink {
    * 落地形式。上 worker 之后调用方变成渲染线程，实现不变。
    */
   submitTransforms(transforms: RenderTransformBuffer): void;
+  /**
+   * 把这一帧的合批内容兑现到渲染世界。
+   *
+   * 和 `submitTransforms` 同一个形状、同一个理由：掉落堆与树上果子都是几百上千个
+   * 同模型实例，一个一个建 proxy 是纯浪费，所以它们走定长记录的实例通道。
+   * 渲染侧据此重建 `InstancedMesh`——**这一侧不知道那是什么**。
+   */
+  submitInstances(props: RenderInstanceBuffer, fruit: RenderInstanceBuffer): void;
+  /**
+   * 蒙皮拖拽。射线由主线程按指针与相机算好（六个数），命中测试在渲染侧做。
+   *
+   * `beginSlimeSurfaceDrag` 曾经返回「抓住了没有」，是这条边界上最后一次
+   * 「等对面回话」。现在它返回 `void`，结果经 `setSlimeSurfaceDragListener`
+   * 回报——单线程下那条通知同步就发了，上 worker 之后晚一帧到，而按下那一帧
+   * 指针还没动过，所以没有可见差别。
+   */
+  beginSlimeSurfaceDrag(id: ProxyId, ray: SlimeSurfaceDragRay): void;
+  updateSlimeSurfaceDrag(id: ProxyId, ray: SlimeSurfaceDragRay): void;
+  endSlimeSurfaceDrag(id: ProxyId): void;
+  /** 谁来收上面那条反向通知。同一时刻只有一个拖拽控制器，所以是「设一个」。 */
+  setSlimeSurfaceDragListener(listener?: SlimeSurfaceDragListener): void;
 }

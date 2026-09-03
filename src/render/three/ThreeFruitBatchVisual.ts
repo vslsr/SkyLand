@@ -10,8 +10,8 @@ import {
   FRUIT_Y,
   FRUIT_YAW,
   FRUIT_Z,
-} from '../../render/fruitInstanceLayout';
-import type { RenderInstanceBuffer } from '../../render/RenderInstanceBuffer';
+} from '../fruitInstanceLayout';
+import type { RenderInstanceBuffer } from '../RenderInstanceBuffer';
 import { createFillMaterial, type FillMaterialEnvironment } from '../../materials/createFillMaterial';
 
 const FRUIT_RADIUS = 0.14;
@@ -33,7 +33,7 @@ function nextCapacity(required: number): number {
  * 「长回来」不需要服务端再发一条快照：`readyAt` 是绝对服务端时间，这里每帧拿
  * 换算过的服务端时钟比一次就知道熟没熟，顺带把交互提示也开关掉。
  */
-export class GeneratedPropFruitSystem {
+export class ThreeFruitBatchVisual {
   public readonly root = new THREE.Group();
   private readonly fillGeometry: THREE.SphereGeometry;
   private readonly fillMaterial: THREE.Material;

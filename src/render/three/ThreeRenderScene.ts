@@ -1,4 +1,9 @@
 import * as THREE from 'three';
+import { frameTimeline } from '../../platform/index';
+import type {
+  AbilityLabAction,
+  AbilityLabViewState,
+} from '../../abilities/lab/AbilityLabSimulation';
 import type { FillMaterialEnvironment } from '../../materials/createFillMaterial';
 import type { OceanVisualDefinition } from '../../scenes/data/SceneDefinition';
 import { createActorVisualModel } from '../../models/actors/createActorVisualModel';
@@ -17,19 +22,19 @@ import {
   type GuidePathState,
   type GuidePathStyle,
   type MeshProxyDesc,
-  type MeshProxyInfo,
   type PlayerProxyDesc,
   type ProxyId,
   type RenderScene,
+  type SlimeSurfaceDragListener,
   type SlimeSurfaceDragRay,
-  type SlimeSurfaceDragState,
-  toProxyId,
 } from '../RenderScene';
 import {
   readSlimeMotionParams,
   SLIME_MOTION_AT_REST,
   type SlimeMotionParams,
 } from '../RenderSlimeMotion';
+import type { RenderInstanceBuffer } from '../RenderInstanceBuffer';
+import { EMPTY_ARCHETYPE_TABLE, type ArchetypeTable } from '../propInstanceLayout';
 import {
   SLIME_DRAG_AT_REST,
   readSlimeDragParams,
@@ -50,6 +55,9 @@ import { PARAM_SLIME_SPEED, PARAM_TEMPERATURE } from '../RenderVisualParams';
 import { ThreeFireVisual } from './ThreeFireVisual';
 import { ThreeGuidePathVisual } from './ThreeGuidePathVisual';
 import { ThreeHybridSlimeVisual } from './ThreeHybridSlimeVisual';
+import { ThreeAbilityLabVisual } from './ThreeAbilityLabVisual';
+import { ThreeFruitBatchVisual } from './ThreeFruitBatchVisual';
+import { ThreeHighCountBatchVisual } from './ThreeHighCountBatchVisual';
 import { ThreeSlimeLegVisual } from './ThreeSlimeLegVisual';
 import { ThreeAttachmentVisual } from './ThreeAttachmentVisual';
 import { ThreeContainerLidVisual } from './ThreeContainerLidVisual';
@@ -102,16 +110,6 @@ function createEmptyModel(name: string): ActorVisualModel {
   };
 }
 
-function describeProxy(proxy: ThreeMeshProxy): MeshProxyInfo {
-  return {
-    id: proxy.id,
-    length: proxy.length,
-    width: proxy.width,
-    interactionAnchorY: proxy.interactionAnchorY,
-    simpleCollision: proxy.simpleCollision,
-  };
-}
-
 function normalizeAngle(value: number): number {
   let angle = value;
   while (angle > Math.PI) angle -= Math.PI * 2;
@@ -122,13 +120,15 @@ function normalizeAngle(value: number): number {
 export class ThreeRenderScene implements RenderScene {
   /** 槽位即 ProxyId，回收后复用；空洞用 undefined 占位，保持下标稳定。 */
   private readonly proxies: (ThreeMeshProxy | undefined)[] = [];
-  private readonly freeSlots: number[] = [];
   private readonly world: RenderTransform = { x: 0, y: 0, z: 0, yaw: 0 };
   private readonly parentWorld: RenderTransform = { x: 0, y: 0, z: 0, yaw: 0 };
   private simpleCollisionVisible = false;
   private temperatureMarkersVisible = false;
   /** 当前选中的交互目标；NULL_PROXY_ID 表示没有选中。 */
   private selectedInteractionProxy: ProxyId = NULL_PROXY_ID;
+  /** 当前悬停高亮的目标与它的包围盒。两者都是渲染世界自己的状态。 */
+  private hoveredProxy: ProxyId = NULL_PROXY_ID;
+  private hoverHelper?: THREE.BoxHelper;
   /** 渲染世界自己的表现系统。它们只认识 ProxyId，不认识 Actor。 */
   private readonly fireVisual = new ThreeFireVisual();
   /** proxyId → 引导路径表现。只有引导 Actor 有，所以用 Map 而不是按槽位的数组。 */
@@ -143,6 +143,14 @@ export class ThreeRenderScene implements RenderScene {
   private readonly slimeLegs = new Map<ProxyId, ThreeSlimeLegVisual>();
   /** proxyId → 蒙皮拖拽。只有玩家 proxy 会建。 */
   private readonly slimeDrags = new Map<ProxyId, ThreeSlimeSurfaceDrag>();
+  /** 上一次回报出去的拖拽状态，用来在松手那一下只发一次通知。 */
+  private readonly reportedSlimeDrag = new Map<ProxyId, boolean>();
+  /** 回报用的那一份，逐帧复用不分配。 */
+  private readonly slimeDragReport = {
+    id: NULL_PROXY_ID as ProxyId, dragging: false,
+    contactX: 0, contactY: 0, contactZ: 0, pullX: 0, pullY: 0, pullZ: 0,
+  };
+  private slimeDragListener?: SlimeSurfaceDragListener;
   /** 逐帧复用的参数读出缓冲，避免每个史莱姆每帧分配一个对象。 */
   private readonly slimeMotion: SlimeMotionParams = { ...SLIME_MOTION_AT_REST };
   private readonly slimeDrag: SlimeDragParams = { ...SLIME_DRAG_AT_REST };
@@ -158,16 +166,63 @@ export class ThreeRenderScene implements RenderScene {
   private readonly dropRolls = new Map<ProxyId, ThreeDropRollVisual>();
   private readonly containerLids = new Map<ProxyId, ThreeContainerLidVisual>();
   private readonly attachmentVisual = new ThreeAttachmentVisual();
+  /**
+   * 能力实验室的表现（引擎迁移路线图 第 3 步）。
+   *
+   * 它以前住在主线程：`AbilityLabSceneComponent` 先 `getActorRenderProxy` 拿到活的
+   * proxy，再把 rig 交给一个主线程的视觉系统。那是玩法侧最后一处**递出活对象**。
+   *
+   * 现在整套动画在这一侧，玩法侧只发三条命令：绑谁、这一帧什么状态、放一次技能。
+   * 按需建——绝大多数地图没有能力实验室。
+   */
+  private abilityLab?: ThreeAbilityLabVisual;
+  private abilityLabState?: AbilityLabViewState;
+  private readonly abilityLabCaster = new THREE.Vector3();
+
+  /**
+   * 合批内容的两层实例化网格（引擎迁移路线图 第 3 步）。
+   *
+   * 这两个曾经归 `ClientActorSystem` 建、由它每帧 `sync` 进场景图——一个玩法类
+   * 握着 `InstancedMesh`。它们读的本来就只是 `RenderInstanceBuffer` 里的定长记录
+   * （原型下标、几个状态位、位置与数量），不认识 Actor，所以整个属于这一侧。
+   *
+   * 原型表两侧各自从同一份场景定义建（`createArchetypeTable`），不走通道。
+   */
+  private readonly highCountBatches: ThreeHighCountBatchVisual;
+  private readonly fruitBatches: ThreeFruitBatchVisual;
+  private readonly archetypeOrder: readonly string[];
+  /** 玩法侧这一帧交上来的两段实例记录。没交过就是 undefined——这张图没有合批内容。 */
+  private propInstances?: RenderInstanceBuffer;
+  private fruitInstances?: RenderInstanceBuffer;
 
   public constructor(
     public readonly root: THREE.Group,
     private readonly environment: FillMaterialEnvironment,
     ocean?: OceanVisualDefinition,
+    /**
+     * 合批内容的原型表。默认是空表——没有掉落堆和果树的地图（以及绝大多数用例）
+     * 本来就不需要它。两侧各自从同一份场景定义建，见 `createArchetypeTable`。
+     */
+    archetypes: ArchetypeTable = EMPTY_ARCHETYPE_TABLE,
   ) {
+    this.archetypeOrder = archetypes.order;
+    this.highCountBatches = new ThreeHighCountBatchVisual(environment, archetypes.byId);
+    this.fruitBatches = new ThreeFruitBatchVisual(environment);
     this.waterMotionVisual = ocean ? new ThreeWaterMotionVisual(ocean) : undefined;
   }
 
-  public createMeshProxy(desc: MeshProxyDesc): MeshProxyInfo {
+  /**
+   * 这一帧的合批内容就绪。
+   *
+   * 和 `submitTransforms` 同一个形状：参数是**那段字节**，不是画出来的东西。
+   * 上 worker 之后同一个 SAB 一开始就在两侧，这条命令因此不带载荷。
+   */
+  public submitInstances(props: RenderInstanceBuffer, fruit: RenderInstanceBuffer): void {
+    this.propInstances = props;
+    this.fruitInstances = fruit;
+  }
+
+  public createMeshProxy(id: ProxyId, desc: MeshProxyDesc): void {
     const model = desc.render
       ? createActorVisualModel(this.environment, desc.render)
       : createEmptyModel(desc.name);
@@ -175,7 +230,7 @@ export class ThreeRenderScene implements RenderScene {
       model.root.name = `${desc.name}-root`;
       model.visualRoot.name = `${desc.name}-visual`;
     }
-    const proxy = this.#adopt(model);
+    const proxy = this.#adopt(id, model);
     if (desc.interactionMarker) proxy.markers.attachInteraction(proxy.interactionAnchorY);
     if (desc.temperatureMarker) {
       proxy.markers.attachTemperature(proxy.temperatureAnchorX, proxy.interactionAnchorY, 0);
@@ -206,7 +261,6 @@ export class ThreeRenderScene implements RenderScene {
     if (model.containerLidRig) {
       this.containerLids.set(proxy.id, new ThreeContainerLidVisual(proxy.id, model.containerLidRig));
     }
-    return describeProxy(proxy);
   }
 
   /**
@@ -215,19 +269,19 @@ export class ThreeRenderScene implements RenderScene {
    * 玩家不是 Replica，但它的 proxy 必须和 Actor 的 proxy 落在同一张槽位表、
    * 同一段 SoA 里——`ProxyId` 是边界上唯一的标识，两套编号就没有边界可言了。
    */
-  public createPlayerProxy(desc: PlayerProxyDesc): MeshProxyInfo {
+  public createPlayerProxy(id: ProxyId, desc: PlayerProxyDesc): void {
     if (desc.render.model === 'line-art-player-slime') {
       const model = createPlayerSlimeModel(
         desc.render,
         desc.paletteSeed === undefined ? undefined : createSlimePalette(desc.paletteSeed),
       );
       model.root.name = desc.name;
-      const proxy = this.#adopt(model);
+      const proxy = this.#adopt(id, model);
       this.slimeAnimators.set(
         proxy.id,
         new ThreeSlimeAnimator(model, { referenceSpeed: desc.walkSpeed, shadow: model.shadow }),
       );
-      return describeProxy(proxy);
+      return;
     }
     if (desc.render.model === 'line-art-legged-slime') {
       const model = createLeggedSlimeModel(
@@ -237,15 +291,15 @@ export class ThreeRenderScene implements RenderScene {
       const rig = model.slimeLegVisualRig;
       if (!rig) throw new Error(`骨骼腿史莱姆缺少 VisualRig：${desc.name}`);
       model.root.name = desc.name;
-      const proxy = this.#adopt(model);
+      const proxy = this.#adopt(id, model);
       this.#adoptLegs(proxy.id, rig, desc.render, desc.walkSpeed);
-      return describeProxy(proxy);
+      return;
     }
     const model = createPbfSlimeModel(desc.render);
     const rig = model.pbfSlimeVisualRig;
     if (!rig) throw new Error(`混合软体玩家史莱姆缺少 VisualRig：${desc.name}`);
     model.root.name = desc.name;
-    const proxy = this.#adopt(model);
+    const proxy = this.#adopt(id, model);
     const slime = new ThreeHybridSlimeVisual(rig, desc.render);
     this.slimeVisuals.set(proxy.id, slime);
     this.slimeDrags.set(proxy.id, new ThreeSlimeSurfaceDrag(
@@ -253,7 +307,6 @@ export class ThreeRenderScene implements RenderScene {
       slime.simulation,
       desc.surfaceDrag ?? createDefaultSlimeSurfaceDragDefinition(desc.render.radius),
     ));
-    return describeProxy(proxy);
   }
 
   /**
@@ -276,11 +329,15 @@ export class ThreeRenderScene implements RenderScene {
     this.slimeLegs.set(id, new ThreeSlimeLegVisual(rig, render));
   }
 
-  /** 分槽位、登记、挂进场景图。两个入口共用同一张槽位表。 */
-  #adopt(model: ActorVisualModel): ThreeMeshProxy {
-    const slot = this.freeSlots.pop() ?? this.proxies.length;
-    const proxy = new ThreeMeshProxy(toProxyId(slot), model);
-    this.proxies[slot] = proxy;
+  /**
+   * 在调用方给的槽位上登记并挂进场景图。
+   *
+   * 槽位不再由这里分配：那需要一个返回值，而返回值过不了线程边界。
+   * 分配在 `RenderProxyTable`（Game World 那一侧），两个入口共用它那一张表。
+   */
+  #adopt(id: ProxyId, model: ActorVisualModel): ThreeMeshProxy {
+    const proxy = new ThreeMeshProxy(id, model);
+    this.proxies[id] = proxy;
     proxy.setSimpleCollisionVisible(this.simpleCollisionVisible);
     this.root.add(proxy.root);
     return proxy;
@@ -290,7 +347,6 @@ export class ThreeRenderScene implements RenderScene {
     const proxy = this.proxies[id];
     if (!proxy) return;
     this.proxies[id] = undefined;
-    this.freeSlots.push(id);
     this.fireVisual.forget(id);
     if (this.selectedInteractionProxy === id) this.selectedInteractionProxy = NULL_PROXY_ID;
     // 引导路径先摘：它的子树挂在 visualRoot 下，要赶在 disposeSubtree 之前
@@ -300,6 +356,9 @@ export class ThreeRenderScene implements RenderScene {
     this.guidePathStyles.delete(id);
     this.slimeDrags.get(id)?.dispose();
     this.slimeDrags.delete(id);
+    // proxy 没了，拖拽链路当然也断了。不补这一条，控制器会一直以为自己还拖着。
+    this.#reportSlimeSurfaceDrag(id, false);
+    this.reportedSlimeDrag.delete(id);
     this.slimeVisuals.delete(id);
     this.slimeAnimators.delete(id);
     this.slimeLegs.delete(id);
@@ -369,6 +428,31 @@ export class ThreeRenderScene implements RenderScene {
     deltaSeconds: number,
     elapsedSeconds: number,
   ): void {
+    // 悬停盒跟着目标走。放在最前是因为它读的是上一帧摆好的世界矩阵，
+    // 和玩法侧原来在 sim-colliders 里调 hoverHelper.update() 的时机等价。
+    this.hoverHelper?.update();
+    // 合批内容排在最前：它读的是玩法侧刚写完的那段实例记录，和 transform 翻面
+    // 是同一个 tick 的。挂载按需——没有合批内容的地图不会多出两层空节点。
+    if (this.propInstances && this.fruitInstances) {
+      frameTimeline.measure('render-batches', () => {
+        this.highCountBatches.sync(this.propInstances!, this.archetypeOrder);
+        this.fruitBatches.sync(this.fruitInstances!);
+        if (this.fruitBatches.instanceCount > 0 && !this.fruitBatches.root.parent) {
+          this.root.add(this.fruitBatches.root);
+        }
+        if (this.highCountBatches.root.children.length > 0 && !this.highCountBatches.root.parent) {
+          this.root.add(this.highCountBatches.root);
+        }
+      });
+    }
+    if (this.abilityLab && this.abilityLabState) {
+      this.abilityLab.update(
+        deltaSeconds,
+        elapsedSeconds,
+        this.abilityLabState,
+        this.abilityLabCaster,
+      );
+    }
     const live = this.liveProxies();
     // 顺序照搬搬迁之前 Actor 世界里的那一段：波动先算（附着要读父级摆好的
     // visualRoot），附着居中，弹性拉伸在脱落翻滚之前（翻滚会覆盖它摆好的姿态）。
@@ -434,19 +518,51 @@ export class ThreeRenderScene implements RenderScene {
   }
 
   /**
-   * 蒙皮拖拽。指针、相机和外壳全在渲染这一侧，所以这三个方法是渲染世界内部调用，
-   * 不是边界；玩法侧只会经由控制器收到「拖拽开始/结束」一个布尔。
+   * 蒙皮拖拽的三条命令，外加一条**反向通知**。
+   *
+   * 「这一次按下有没有抓住外壳」的判据在这一侧：命中测试打的是每帧被求解器改写的
+   * 软体外壳网格，玩法侧根本没有那份几何。所以 `beginSlimeSurfaceDrag` 曾经
+   * **有返回值**——那是这条边界上最后一次「等对面回话」。
+   *
+   * 现在改成：命令照发（返回 `void`），抓没抓住由这一侧经
+   * `setSlimeSurfaceDragListener` 回报。单线程下这条通知在 `beginDrag` 里同步就发了，
+   * 所以行为和以前逐帧一致；上 worker 之后它晚一帧到，而按下那一帧指针还没动过，
+   * 相机轨道那一帧攒下的量是零。
    */
-  public beginSlimeSurfaceDrag(id: ProxyId, ray: SlimeSurfaceDragRay): boolean {
-    return this.slimeDrags.get(id)?.beginDrag(ray) ?? false;
+  public beginSlimeSurfaceDrag(id: ProxyId, ray: SlimeSurfaceDragRay): void {
+    const drag = this.slimeDrags.get(id);
+    if (!drag) return;
+    drag.beginDrag(ray);
+    this.#reportSlimeSurfaceDrag(id, drag.isDragging);
   }
 
-  public updateSlimeSurfaceDrag(id: ProxyId, ray: SlimeSurfaceDragRay): boolean {
-    return this.slimeDrags.get(id)?.updateDrag(ray) ?? false;
+  /**
+   * 命中与否只影响这一侧：拖不动就是不动，没什么可回话的。
+   *
+   * 但**手势变了要回报**：拉扯量是这一步算出来的，而玩法侧要把它上报给房间。
+   * 这条调用的节奏就是手势本身的节奏（指针动一次、每帧一次），不需要额外的扫描。
+   */
+  public updateSlimeSurfaceDrag(id: ProxyId, ray: SlimeSurfaceDragRay): void {
+    const drag = this.slimeDrags.get(id);
+    if (!drag) return;
+    drag.updateDrag(ray);
+    this.#reportSlimeSurfaceDrag(id, drag.isDragging);
   }
 
   public endSlimeSurfaceDrag(id: ProxyId): void {
-    this.slimeDrags.get(id)?.endDrag();
+    const drag = this.slimeDrags.get(id);
+    if (!drag) return;
+    drag.endDrag();
+    this.#reportSlimeSurfaceDrag(id, drag.isDragging);
+  }
+
+  /**
+   * 谁来收这条反向通知。同一时刻只有一个拖拽控制器（本地玩家那一个），
+   * 所以是「设一个」而不是「订阅一堆」——设与清都返回 `void`，
+   * 上 worker 之后这个监听器留在主线程那一侧的代理上，不跟着报文走。
+   */
+  public setSlimeSurfaceDragListener(listener?: SlimeSurfaceDragListener): void {
+    this.slimeDragListener = listener;
   }
 
   public isSlimeSurfaceDragging(id: ProxyId): boolean {
@@ -454,11 +570,25 @@ export class ThreeRenderScene implements RenderScene {
   }
 
   /**
-   * 取出本地玩家这一次手势，供玩法侧发给房间。射线不跨边界，这六个本地坐标要：
-   * 其他客户端拿到它们才能在自己的求解器上重放同一次形变。
+   * 回报一次拖拽状态。
+   *
+   * 拖着的时候**每帧都报**：手势本身（六个本地坐标）要上行给房间，其他客户端才
+   * 重放得出同一次形变。曾经这一步是玩法侧回头调 `readSlimeSurfaceDrag`——
+   * 那是一次跨线程阻塞查询。改成回报之后，收报的一侧把最后一次缓存下来就够了。
+   * 没在拖的时候只在状态翻转那一下报一次。
    */
-  public readSlimeSurfaceDrag(id: ProxyId, out: SlimeSurfaceDragState): boolean {
-    return this.slimeDrags.get(id)?.captureState(out) ?? false;
+  #reportSlimeSurfaceDrag(id: ProxyId, dragging: boolean): void {
+    if (!dragging && this.reportedSlimeDrag.get(id) === false) return;
+    this.reportedSlimeDrag.set(id, dragging);
+    if (!this.slimeDragListener) return;
+    const report = this.slimeDragReport;
+    report.id = id;
+    report.dragging = dragging;
+    if (!dragging || !this.slimeDrags.get(id)?.captureState(report)) {
+      report.contactX = 0; report.contactY = 0; report.contactZ = 0;
+      report.pullX = 0; report.pullY = 0; report.pullZ = 0;
+    }
+    this.slimeDragListener(report);
   }
 
   /** 渲染侧查找软体表现（能力实验室与测试用）。 */
@@ -513,6 +643,85 @@ export class ThreeRenderScene implements RenderScene {
     }
   }
 
+  /**
+   * 悬停高亮。
+   *
+   * 这个包围盒以前由 `ClientActorSystem` 自己 `new THREE.BoxHelper(...)`——它得先
+   * `resolve()` 拿到活的 proxy 才建得出来，而**递出一个活对象是线程边界过不去的**。
+   * 现在玩法侧只发一个 `ProxyId`（没有选中就是 `NULL_PROXY_ID`），盒子在这一侧建、
+   * 在这一侧释放，和 `setInteractionMarker` 是同一个套路。
+   */
+  public setAbilityLabTarget(id: ProxyId): void {
+    if (id === NULL_PROXY_ID) {
+      this.abilityLab?.reset();
+      this.abilityLab?.unbindTarget();
+      this.abilityLabState = undefined;
+      return;
+    }
+    const proxy = this.proxies[id];
+    if (!proxy) return;
+    if (!this.abilityLab) {
+      this.abilityLab = new ThreeAbilityLabVisual();
+      this.root.add(this.abilityLab.root);
+    }
+    // rig 缺失在这一侧当场报错：玩法侧看不见 rig，也就判断不了。
+    this.abilityLab.bindTarget(proxy);
+    this.abilityLab.reset();
+  }
+
+  public setAbilityLabState(
+    state: AbilityLabViewState | undefined,
+    casterX: number,
+    casterY: number,
+    casterZ: number,
+  ): void {
+    this.abilityLabState = state;
+    this.abilityLabCaster.set(casterX, casterY, casterZ);
+  }
+
+  public playAbilityLabAction(
+    action: AbilityLabAction,
+    casterX: number,
+    casterY: number,
+    casterZ: number,
+    succeeded: boolean,
+  ): void {
+    if (!this.abilityLab) return;
+    if (action === 'reset') {
+      this.abilityLab.reset();
+      return;
+    }
+    this.abilityLabCaster.set(casterX, casterY, casterZ);
+    this.abilityLab.play(action, this.abilityLabCaster, succeeded);
+  }
+
+  public setHoveredProxy(id: ProxyId): void {
+    if (id === this.hoveredProxy) return;
+    this.#disposeHoverHelper();
+    this.hoveredProxy = id;
+    const proxy = id === NULL_PROXY_ID ? undefined : this.proxies[id];
+    if (!proxy) return;
+    // 包围盒按当前世界矩阵算，所以要先把这一支刷新到位。
+    proxy.root.updateWorldMatrix(true, true);
+    const helper = new THREE.BoxHelper(proxy.visualRoot, 0x8a6238);
+    helper.name = 'actor-interaction-highlight';
+    const material = helper.material as THREE.LineBasicMaterial;
+    material.transparent = true;
+    material.opacity = 0.9;
+    material.depthTest = false;
+    this.hoverHelper = helper;
+    this.root.add(helper);
+  }
+
+  #disposeHoverHelper(): void {
+    if (!this.hoverHelper) return;
+    this.hoverHelper.parent?.remove(this.hoverHelper);
+    this.hoverHelper.geometry.dispose();
+    (this.hoverHelper.material as THREE.Material).dispose();
+    this.hoverHelper = undefined;
+    this.hoveredProxy = NULL_PROXY_ID;
+  }
+
   /** 温度牌的全局开关。和 setSimpleCollisionVisible 一样是渲染世界自己的状态。 */
   public setTemperatureMarkersVisible(visible: boolean): void {
     this.temperatureMarkersVisible = visible;
@@ -523,7 +732,20 @@ export class ThreeRenderScene implements RenderScene {
     return this.temperatureMarkersVisible;
   }
 
-  /** 让所有世界 UI 正对相机。由 beforeRender 驱动——它拿得到相机。 */
+  /**
+   * 渲染世界内部的每帧动作，由渲染循环在画完之前驱动。
+   *
+   * 这两件都**不在边界接口上**，而且不该在：线宽是像素单位，要 resize 之后的
+   * 真实画布尺寸；世界 UI 的朝向要相机。两个参数都是渲染循环自己手里的东西，
+   * 跨边界发过来毫无意义。曾经借 `ClientActorSystem.beforeRender` 路过一趟，
+   * 那让一个玩法类拿到了 `WebGLRenderer` 与 `Camera`。
+   */
+  public beforeRender(renderer: THREE.WebGLRenderer, camera: THREE.Camera): void {
+    this.setGuidePathResolution(renderer.domElement.width, renderer.domElement.height);
+    this.faceCameras(camera);
+  }
+
+  /** 让所有世界 UI 正对相机。 */
   public faceCameras(camera: THREE.Camera): void {
     for (const proxy of this.proxies) proxy?.markers.faceCamera(camera);
   }
@@ -535,11 +757,23 @@ export class ThreeRenderScene implements RenderScene {
   }
 
   public dispose(): void {
+    this.#disposeHoverHelper();
+    this.highCountBatches.dispose();
+    this.fruitBatches.dispose();
+    this.propInstances = undefined;
+    this.fruitInstances = undefined;
+    this.abilityLab?.dispose();
+    this.abilityLab = undefined;
+    this.abilityLabState = undefined;
     for (const guide of this.guidePaths.values()) guide.dispose();
     this.guidePaths.clear();
     this.guidePathStyles.clear();
-    for (const drag of this.slimeDrags.values()) drag.dispose();
+    for (const [id, drag] of this.slimeDrags) {
+      drag.dispose();
+      this.#reportSlimeSurfaceDrag(id, false);
+    }
     this.slimeDrags.clear();
+    this.reportedSlimeDrag.clear();
     this.slimeVisuals.clear();
     this.slimeAnimators.clear();
     this.waterMotions.clear();
@@ -548,6 +782,5 @@ export class ThreeRenderScene implements RenderScene {
     this.containerLids.clear();
     for (const proxy of this.proxies) proxy?.dispose();
     this.proxies.length = 0;
-    this.freeSlots.length = 0;
   }
 }
