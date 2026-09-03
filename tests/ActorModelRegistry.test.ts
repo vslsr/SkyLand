@@ -8,6 +8,7 @@ import {
   modelsWithTrait,
 } from '../shared/actor/models/index.mjs';
 import { PLAYER_SHELL_MODELS } from '../src/render/RenderScene';
+import { createActorVisualModel, hasRenderModel, renderModelIds } from '../src/models/actors/registry';
 
 /**
  * 模型注册表的 trait 这一面。
@@ -74,4 +75,29 @@ test('带 trait 的模型都在注册表里', () => {
       assert.ok(ids.has(model), `${model} 带着 ${trait} 却不在注册表里`);
     }
   }
+});
+
+/**
+ * 模型注册表的两半。
+ *
+ * `shared/actor/models/` 那半不能 import three（房间 DS 也要读它），
+ * `src/models/actors/registry.ts` 这半全是几何构造。两边各自登记，所以要有一条
+ * 用例确认它们说的是同一批模型——否则某个模型「有碰撞盒但建不出来」或者反过来，
+ * 都要等到 spawn 才发现。
+ */
+test('渲染侧注册表与 shared 注册表的模型集合一致', () => {
+  assert.deepEqual([...renderModelIds()].sort(), [...actorModelIds()].sort());
+});
+
+test('未登记的模型抛错，而不是静默退化成另一种模型', () => {
+  // 以前这里是 `if` 链的最后一支落到礁石：拿着别的模型的字段去建礁石，
+  // 画出来是什么样没人说得准，报错也只会说「礁石缺字段」。
+  assert.equal(hasRenderModel('line-art-not-registered'), false);
+  assert.throws(
+    () => createActorVisualModel(
+      { fogColor: '#ffffff', fogNear: 20, fogFar: 60 },
+      { model: 'line-art-not-registered' } as never,
+    ),
+    /line-art-not-registered/,
+  );
 });

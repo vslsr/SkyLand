@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import type { FillMaterialEnvironment } from '../../materials/createFillMaterial';
 import type { OceanVisualDefinition } from '../../scenes/data/SceneDefinition';
-import { createActorVisualModel } from '../../models/actors/createActorVisualModel';
+import { createActorVisualModel } from '../../models/actors/registry';
 import type {
   ActorVisualModel,
   SlimeLegVisualRig,

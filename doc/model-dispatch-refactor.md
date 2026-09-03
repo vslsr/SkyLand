@@ -338,11 +338,58 @@ schema 仍是手写的，和各自的 `validate*` 之间仍然没有比对——
 无法复现。该用例起真实 HTTP 服务并拉起房间子进程，对负载敏感；
 render 字段校验与套接字时序之间也没有可解释的通路。记在这里，不当作已解决。
 
-**Step 4 · 渲染侧注册表（1 天，下一步）**
+**Step 4 · 渲染侧注册表 ✅ 已完成**
 
-建 `src/models/actors/registry.ts` + 键一致性测试，`createActorVisualModel` 改为查表并抛错。
-**建议排在 `engine-migration-roadmap-vlqccr` 合并之后**——那条分支新增的
-`src/render/renderModelFacts.ts` 正好该并进这张表，先做会撞车。
+`src/models/actors/registry.ts` 取代了 `createActorVisualModel.ts`（后者已删除，
+唯一的调用方 `ThreeRenderScene` 改导入新路径）。
+
+关键在于这张表的类型：
+
+```ts
+type ActorModelRenderers = {
+  [M in ActorRenderDefinition['model']]: (
+    environment: FillMaterialEnvironment,
+    definition: Extract<ActorRenderDefinition, { model: M }>,
+  ) => ActorVisualModel;
+};
+```
+
+于是**漏登记一种模型是编译错误**，而且每个条目的 `definition` 参数按自己那一种
+模型收窄，工厂接错键也是编译错误。变异验证：
+
+- 删掉 `'line-art-dry-hay'` 一项 → `TS2741 Property "line-art-dry-hay" is missing`
+- 把礁石工厂接到篝火键上 → `TS2322`，并逐字段说明哪两个类型对不上
+
+对比原来那条 `if` 链：它最后一支是 `return createReefModel(...)`，类型上勉强成立
+（联合里正好只剩礁石），但新增模型时作者看到的报错是「礁石缺字段」而不是
+「你忘了登记」；而拿别的模型的字段去建一个礁石，画出来是什么样没人说得准。
+
+**验证**：新旧实现对 16 种模型（用 `config/actors/` 里的真实 authoring 值）建出来的
+东西逐项比对——完整节点树（到 4 层）、`simpleCollision`、`length`/`width`、
+`interactionAnchorY`，以及六个可选 rig 是否存在——**全部相同**。
+另加一条「两半注册表键集合一致」的用例，删掉 shared 一侧任一模型即变红。
+`npm test` 677 项全绿，`npx tsc --noEmit` 干净，`npm run build` 通过。
+
+**与 `engine-migration-roadmap-vlqccr` 的合并注意**：该分支新增的
+`tests/RenderProxyCollisionParity.test.ts` 从 `src/models/actors/createActorVisualModel`
+导入，而这个文件已删除——合并时需要把那一行改成 `src/models/actors/registry`。
+该分支的 `src/render/renderModelFacts.ts`（`FIRE_VISUAL_MODELS`）也应当并进
+`registry.ts`，作为渲染侧的第二类事实。这两处都是合并时的小改动，但**不会产生
+文本冲突**，需要有人记得——所以记在这里。
+
+**登记点现状**：新增一个普通道具模型现在要手改 **6 个文件**（原来 7 个）——
+但真正变了的不是数量，是**没人核对的登记点从 5 处降到 0 处**：
+
+| 要改的地方 | 漏改会怎样 |
+| --- | --- |
+| `config/actors/X.actor.json` | 真正的新内容 |
+| `src/models/actors/createXModel.ts` | 真正的新内容 |
+| `shared/actor/models/x.model.mjs` | 登记：碰撞、字段、trait |
+| `shared/actor/models/index.mjs` | **测试变红**（两半键集合不一致） |
+| `src/models/actors/registry.ts` | **编译错误** |
+| `src/scenes/data/SceneDefinition.ts` | **测试变红**（联合与注册表不一致） |
+| ~~`config/actors/actor.schema.json`~~ | 生成物，`npm test` 挡住漂移 |
+| ~~`server/actors/ActorCatalog.mjs`~~ | 不用动 |
 
 **Step 5 · 可选**
 
