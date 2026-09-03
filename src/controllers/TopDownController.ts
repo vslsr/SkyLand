@@ -396,6 +396,9 @@ export class TopDownController {
     this.physicsWorld.prepareQueries();
     const ordered = [...pendingInputs].sort((left, right) => left.tick - right.tick);
     for (const input of ordered) {
+      // 与服务端逐步同构：每一步都按**这一步的位置**重判水域。少了这一句，
+      // 重放会用和解那一刻的速度跑完全部未确认步，进出水时必然对不上。
+      this.refreshWaterStepParams(input.tick);
       stepCharacter(
         this.characterState,
         input,
@@ -688,6 +691,25 @@ export class TopDownController {
     if (!this.characterState) this.resolveLanding();
   }
 
+  /**
+   * 按角色**当前所在位置**重算与水域相关的固定步参数。
+   *
+   * 服务端在每个固定步之前都做这件事（`ServerScene` 的 `syncWaterMovementEffect` +
+   * `walkSpeed` + `buoyancyHeight`）。客户端过去只在每帧开头做一次，重放时干脆
+   * 一次都不做——于是一进水，重放的每一步都在用错的速度和浮力，落点是服务端从
+   * 未到过的地方，每份快照都要把人往回拉一次。旱地上这两个值恒定，所以这个错
+   * 只在带水域的地图上露出来。
+   */
+  private refreshWaterStepParams(tick: number): void {
+    if (!this.characterParams) return;
+    this.updateMovementState?.();
+    const resolved = this.resolveWalkSpeed?.();
+    if (Number.isFinite(resolved)) {
+      this.characterParams.walkSpeed = Math.max(0, resolved as number);
+    }
+    this.characterParams.buoyancyHeight = this.resolveBuoyancyHeight?.(tick);
+  }
+
   private updateCharacterMotion(
     deltaSeconds: number,
     moveX: number,
@@ -712,7 +734,9 @@ export class TopDownController {
         yaw: normalizeAngle(this.facingYaw),
       };
       this.nextInputTick += 1;
-      this.characterParams!.buoyancyHeight = this.resolveBuoyancyHeight?.(input.tick);
+      // 一帧可能跑好几个固定步，位置逐步在变——涉水参数必须跟着逐步重算，
+      // 否则同一帧内的第二步还在用进水之前的速度。
+      this.refreshWaterStepParams(input.tick);
       stepCharacter(
         this.characterState!,
         input,

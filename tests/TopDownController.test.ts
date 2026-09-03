@@ -532,6 +532,94 @@ test('本地玩家和解只纠正逻辑误差，并保留固定步相位与可�
   input.dispose();
 });
 
+test('重放逐步重判水域：涉水参数不能冻在和解那一刻', () => {
+  const root = new Object3D();
+  const scheme = createPlayerInputScheme({ storage: null });
+  const input = new InputSubsystem({
+    actions: scheme.actions,
+    config: scheme.config,
+    contexts: scheme.contexts,
+    devices: [],
+  });
+  const physics = new PhysicsWorld(getRapier(), { timestep: SIMULATION_STEP_SECONDS });
+  physics.setActorCollider('ground', {
+    shape: 'box', x: 0, y: 0, z: 0, yaw: 0,
+    halfWidth: 40, halfLength: 40, minimumY: -1, maximumY: 0,
+  });
+  physics.prepareQueries();
+  const { canvas } = createCanvas();
+
+  // 记下每一步问到的位置：服务端就是这样逐步重判的，客户端必须同构。
+  const walkSpeedQueries: number[] = [];
+  const buoyancyTicks: number[] = [];
+  let movementStateSyncs = 0;
+  const controller = new TopDownController(canvas, root, input, {
+    enabled: false,
+    movement: { walkSpeed: 3.2, sprintMultiplier: 1.65 },
+    jumpAbility: new PlayerJumpComponent({
+      impulse: 7, gravity: 22, maximumFallSpeed: 20, airControl: 0.85,
+    }),
+    physicsWorld: physics,
+    characterId: 'water-replay-player',
+    collisionRadius: 0.42,
+    collisionHeight: 0.84,
+    updateMovementState: () => { movementStateSyncs += 1; },
+    resolveWalkSpeed: () => {
+      walkSpeedQueries.push(controller.position.x);
+      // 过了 x=0 就算入水，速度减半——服务端 Effect.Movement.WaterSlow 的形状。
+      return controller.position.x > 0 ? 1.6 : 3.2;
+    },
+    resolveBuoyancyHeight: (tick) => {
+      buoyancyTicks.push(tick);
+      return undefined;
+    },
+  });
+
+  controller.update(SIMULATION_STEP_SECONDS);
+  controller.drainInputSteps();
+  walkSpeedQueries.length = 0;
+  buoyancyTicks.length = 0;
+  movementStateSyncs = 0;
+
+  const anchorState = {
+    x: controller.position.x,
+    y: controller.verticalPosition,
+    z: controller.position.z,
+    vx: 0,
+    vy: controller.verticalVelocity,
+    vz: 0,
+    grounded: controller.isGrounded,
+  };
+  const pending = [200, 201, 202, 203].map((tick) => ({
+    tick,
+    move: { x: 1, z: 0 },
+    sprint: false,
+    jump: false,
+    yaw: 0,
+  }));
+  controller.rewindAndReplay(anchorState, pending);
+
+  assert.equal(
+    walkSpeedQueries.length,
+    pending.length,
+    '重放的每一步都必须重新解析行走速度，而不是沿用和解那一刻的值',
+  );
+  assert.equal(movementStateSyncs, pending.length, '每一步都要重判涉水状态');
+  assert.deepEqual(buoyancyTicks, pending.map((step) => step.tick), '浮力要按每一步的 tick 求值');
+  // 位置在重放过程中确实推进了，所以后一次问到的位置比前一次靠前——
+  // 这正是「按这一步的位置判水域」的前提。
+  for (let index = 1; index < walkSpeedQueries.length; index += 1) {
+    assert.ok(
+      walkSpeedQueries[index] > walkSpeedQueries[index - 1],
+      '每一步解析速度时看到的应当是这一步的位置',
+    );
+  }
+
+  controller.dispose();
+  physics.dispose();
+  input.dispose();
+});
+
 test('容差内的误差会逐拍衰减，不会攒到门槛再被一次性拉回', () => {
   const root = new Object3D();
   const scheme = createPlayerInputScheme({ storage: null });
