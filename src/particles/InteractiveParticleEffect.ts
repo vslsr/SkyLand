@@ -23,5 +23,7 @@ export interface InteractiveParticleEffect {
   readonly root: THREE.Object3D;
   update(deltaSeconds: number, elapsedSeconds: number): void;
   applyWorldImpulse(impulse: InteractiveParticleImpulse): number;
+  /** 贴地实现在地形被改写后重新采样表面；不贴地的效果可以不实现。 */
+  refreshSurfaceHeights?(): void;
   dispose(): void;
 }

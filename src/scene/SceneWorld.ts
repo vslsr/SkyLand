@@ -66,6 +66,15 @@ export class SceneWorld implements GrassInteractionTarget {
     return this.terrainWorld?.sampleGroundHeight(x, z) ?? 0;
   }
 
+  /**
+   * 贴地表现（落叶、地面装饰）该站的可见表面：水域取水面，其余取地面。
+   * 固定水面场景没有地形数据，直接退回那张地图的水位或 0。
+   */
+  public sampleSurfaceHeight(x: number, z: number): number {
+    if (this.terrainWorld) return this.terrainWorld.sampleSurfaceHeight(x, z);
+    return this.fixedWaterWorld ? this.fixedWaterLevel : 0;
+  }
+
   public samplePlayerHeight(x: number, z: number, buoyancyDraft?: number): number {
     if (this.terrainWorld) return this.terrainWorld.sampleMovementHeight(x, z, buoyancyDraft);
     return this.fixedWaterWorld && Number.isFinite(buoyancyDraft)

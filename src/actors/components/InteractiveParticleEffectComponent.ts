@@ -22,6 +22,10 @@ export class InteractiveParticleEffectComponent extends ActorComponent {
     return this.disposed ? 0 : this.effect.applyWorldImpulse(impulse);
   }
 
+  public refreshSurfaceHeights(): void {
+    if (!this.disposed) this.effect.refreshSurfaceHeights?.();
+  }
+
   public override onEndPlay(): void {
     this.disposeEffect();
   }
