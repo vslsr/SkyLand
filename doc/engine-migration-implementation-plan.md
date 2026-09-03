@@ -747,12 +747,34 @@ worker 已经在传的 `[globalCellX, globalCellZ, code, ...]`。
 （它现在多一个 `proxyIds`，玩家实体和 Actor 必须共用同一张槽位表——两套编号就
 没有边界可言了）。
 
+### 已经做了的：拆掉最后两处 `resolve()` ✅
+
+`RenderScene` 上每个方法都返回 `void` 之后，还剩两处**递出活着的 `ThreeMeshProxy`**——
+那和返回值一样过不了线程边界。
+
+- **悬停高亮**：`THREE.BoxHelper` 原来由玩法侧 `new` 出来，得先 `resolve()` 拿到活
+  proxy 才建得出。现在整个搬进 `ThreeRenderScene`，玩法侧只发一个 `ProxyId`
+  （没有悬停就是 `NULL_PROXY_ID`），和 `setInteractionMarker` 同一个套路。
+  盒子的每帧 `update()` 也跟着挪进 `updateVisuals`——它读的本来就是上一帧摆好的
+  世界矩阵，时机等价。
+- **火焰**：「这个模型会不会长出火焰」原来是 `resolve()` 出 proxy 再看它有没有 rig。
+  实际上它只取决于 `render.model`——只有 campfire 与 dry-hay 两种。新增
+  `src/render/renderModelFacts.ts`；放在 `src/render/` 是因为**答案由渲染侧的模型
+  工厂决定**，哪天某个模型也长出火焰，改的是那边。用例把表和工厂钉在一起：
+  多列或漏列都会先炸在那里，而不是变成「火点着了却不显示」。
+
+顺带补上一个**棘轮漏洞**：那条「每个方法返回 `void`」只看 `RenderScene` 与
+`RenderCommandSink` 两个接口，而玩法侧其实还在具体类上调另外八个方法——往
+`ThreeRenderScene` 上加一个有返回值的方法，棘轮看不见。所以把其中形状属于边界的
+六个都声明到了 `RenderScene` 上。
+
 ### 还没做的
 
 | | 说明 |
 | --- | --- |
 | 渲染循环整个进 worker | `SceneRenderer` 的 `root` / `beforeRender` / `WebGLRenderer` 那一层，以及 `transferControlToOffscreen` 本身 |
-| `ClientActorSystem` 里剩下的两处 `resolve()` | 一处问「这个模型有没有火焰绑定」（是渲染定义的 spawn 时事实，可以从同一份定义推）；一处是悬停高亮的 `THREE.BoxHelper`，整个该搬进渲染世界。注意 `resolve` 不在 `RenderScene` 接口上——**边界接口本身已经干净**，这两处是伸手够到了具体后端 |
+| `getActorRenderProxy` | 玩法侧最后一处 `resolve()`，只有能力实验室那个场景组件在用（它要 `abilityTargetRig`）。它不在 `RenderScene` 接口上——边界接口本身是干净的，这是伸手够到了具体后端 |
+| `faceCameras` / `setGuidePathResolution` | 收的是 `THREE.Camera` 与画布尺寸，是渲染世界**内部**的每帧动作，眼下经由 `ClientActorSystem.beforeRender` 路过。渲染循环进线程之后跟着走，不会出现在边界上 |
 | `GrasslandScene` 的装配归属 | 它同时握着输入、相机、玩家实体和渲染器；canvas 搬走时装配要跟着走 |
 
 §3 的前置全部落地：渲染栈不碰 DOM、玩法侧不碰 Three、chunk 与 Actor 两条主干都按
