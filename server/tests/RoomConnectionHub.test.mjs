@@ -21,6 +21,7 @@ class MockRoomManager extends EventEmitter {
   leaveRoom(...args) { this.calls.push(['leaveRoom', ...args]); }
   getRoom(roomId) { return { id: roomId, sceneId: 'grass-test' }; }
   sendInput(...args) { this.calls.push(['sendInput', ...args]); }
+  sendSlimeDrag(...args) { this.calls.push(['sendSlimeDrag', ...args]); }
   startPlayerTransformLog(...args) {
     this.calls.push(['startPlayerTransformLog', ...args]);
     return true;
@@ -57,6 +58,18 @@ test('RoomConnectionHub 在传输之外处理会话，并标记广播通道', ()
     'room-1',
     'player-1',
     { type: 'player:input', sequence: 1 },
+  ]);
+
+  const drag = {
+    contactX: 0, contactY: 0.9, contactZ: 0,
+    pullX: 0.3, pullY: 0, pullZ: 0,
+  };
+  session.receive({ type: 'player:slime-drag', drag });
+  assert.deepEqual(roomManager.calls.shift(), [
+    'sendSlimeDrag',
+    'room-1',
+    'player-1',
+    drag,
   ]);
 
   session.receive({ type: 'weather:set', weather: 'rain' });

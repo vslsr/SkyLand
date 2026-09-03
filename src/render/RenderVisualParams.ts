@@ -82,5 +82,20 @@ export const PARAM_DROP_ROTATION_Y = 21;
 export const PARAM_DROP_ROTATION_Z = 22;
 export const PARAM_DROP_ROTATION_W = 23;
 
+/**
+ * 从快照复制过来的拖拽形变（见 `RenderSlimeDrag.ts`）。本地玩家的拖拽不走这里：
+ * 指针、相机和外壳都在渲染侧，那条路径整个在渲染世界内部。
+ *
+ * **revision 为 0 表示没有拖拽。** 和 AIRBORNE 同一个道理：「不驱动这项表现的
+ * 槽位每帧写 0」是参数段的通用规则，所以静止值必须是 0，而服务端的抓取计数从 1 起。
+ */
+export const PARAM_SLIME_DRAG_REVISION = 24;
+export const PARAM_SLIME_DRAG_CONTACT_X = 25;
+export const PARAM_SLIME_DRAG_CONTACT_Y = 26;
+export const PARAM_SLIME_DRAG_CONTACT_Z = 27;
+export const PARAM_SLIME_DRAG_PULL_X = 28;
+export const PARAM_SLIME_DRAG_PULL_Y = 29;
+export const PARAM_SLIME_DRAG_PULL_Z = 30;
+
 /** 每个 proxy 槽位的参数个数。新增参数就在上面加常量并把这里加一。 */
-export const RENDER_VISUAL_PARAM_COUNT = 24;
+export const RENDER_VISUAL_PARAM_COUNT = 31;

@@ -67,6 +67,11 @@ import { TERRAIN_CELL_SIZE, TERRAIN_SURFACE } from '../../shared/world/terrainCo
 import { sampleTerrain } from '../../shared/world/terrainContent.mjs';
 import { TerrainEditor } from '../../shared/world/terrainEditing.mjs';
 import { TerrainPatchStore } from '../../shared/world/terrainPatches.mjs';
+import {
+  SLIME_DRAG_TIMEOUT_MS,
+  isSlimeDragRegrab,
+  sanitizeSlimeDragState,
+} from '../../shared/slimeSurfaceDrag.mjs';
 import { terrainMovementHeight } from '../../shared/world/terrainMovement.mjs';
 
 function roundCoordinate(value) {
@@ -731,6 +736,48 @@ export class ServerScene {
   }
 
   /** 按 tick 重放客户端实际执行过的 60Hz 输入步；协议不接受客户端 dt。 */
+  /**
+   * 记录一名玩家的鼠标拖拽形变。服务端不模拟拖拽，只净化数值、判断是不是新的一次
+   * 抓取，然后随快照转发；权威坐标、碰撞与玩法都不受影响。
+   */
+  applySlimeDrag(playerId, drag) {
+    const player = this.players.get(playerId);
+    if (!player) return;
+    const sanitized = sanitizeSlimeDragState(drag);
+    if (!sanitized) {
+      player.slimeDrag = undefined;
+      return;
+    }
+    const previous = player.slimeDrag;
+    player.slimeDrag = {
+      ...sanitized,
+      // 换了命中点就是新的一次抓取，接收端据此重建影响权重而不是继续拉旧的那块蒙皮。
+      revision: isSlimeDragRegrab(previous, sanitized)
+        ? (previous?.revision ?? 0) + 1
+        : previous.revision,
+      updatedAt: this.now(),
+    };
+  }
+
+  /** 客户端掉线或漏发松手时，拖拽不能永远留在快照里。 */
+  activeSlimeDrag(player) {
+    const drag = player.slimeDrag;
+    if (!drag) return undefined;
+    if (this.now() - drag.updatedAt > SLIME_DRAG_TIMEOUT_MS) {
+      player.slimeDrag = undefined;
+      return undefined;
+    }
+    return {
+      revision: drag.revision,
+      contactX: roundCoordinate(drag.contactX),
+      contactY: roundCoordinate(drag.contactY),
+      contactZ: roundCoordinate(drag.contactZ),
+      pullX: roundCoordinate(drag.pullX),
+      pullY: roundCoordinate(drag.pullY),
+      pullZ: roundCoordinate(drag.pullZ),
+    };
+  }
+
   applyInput(playerId, message) {
     const player = this.players.get(playerId);
     const debugEnabled = this.playerTransformDebug?.isEnabled(playerId) === true;
@@ -1043,25 +1090,29 @@ export class ServerScene {
       serverTime: this.now(),
       ...this.environment.snapshot(),
       actors: createActorSnapshots(this.actorWorld, { viewer }),
-      players: Array.from(this.players.values(), (player) => ({
-        id: player.id,
-        name: player.name,
-        x: roundCoordinate(player.x),
-        y: roundCoordinate(player.y),
-        z: roundCoordinate(player.z),
-        yaw: roundCoordinate(player.yaw),
-        speed: roundCoordinate(player.speed),
-        ackTick: player.ackTick,
-        sequence: player.ackTick,
-        verticalVelocity: roundCoordinate(player.characterState.vy),
-        velocityX: roundCoordinate(player.characterState.vx),
-        velocityZ: roundCoordinate(player.characterState.vz),
-        grounded: player.characterState.grounded,
-        inventory: player.requireComponent(INVENTORY_COMPONENT).snapshot(),
-        inventoryRevision: player.requireComponent(INVENTORY_COMPONENT).revision,
-        heldActorId: player.getComponent(PICKUP_DROP_COMPONENT)?.heldActorId ?? null,
-        pickupDropRevision: player.getComponent(PICKUP_DROP_COMPONENT)?.revision ?? 0,
-      })),
+      players: Array.from(this.players.values(), (player) => {
+        const slimeDrag = this.activeSlimeDrag(player);
+        return {
+          id: player.id,
+          name: player.name,
+          x: roundCoordinate(player.x),
+          y: roundCoordinate(player.y),
+          z: roundCoordinate(player.z),
+          yaw: roundCoordinate(player.yaw),
+          speed: roundCoordinate(player.speed),
+          ackTick: player.ackTick,
+          sequence: player.ackTick,
+          verticalVelocity: roundCoordinate(player.characterState.vy),
+          velocityX: roundCoordinate(player.characterState.vx),
+          velocityZ: roundCoordinate(player.characterState.vz),
+          grounded: player.characterState.grounded,
+          inventory: player.requireComponent(INVENTORY_COMPONENT).snapshot(),
+          inventoryRevision: player.requireComponent(INVENTORY_COMPONENT).revision,
+          heldActorId: player.getComponent(PICKUP_DROP_COMPONENT)?.heldActorId ?? null,
+          pickupDropRevision: player.getComponent(PICKUP_DROP_COMPONENT)?.revision ?? 0,
+          ...(slimeDrag ? { slimeDrag } : {}),
+        };
+      }),
     };
   }
 }

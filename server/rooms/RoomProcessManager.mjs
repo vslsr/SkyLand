@@ -152,6 +152,12 @@ export class RoomProcessManager extends EventEmitter {
     record.child.send({ type: 'player:input', playerId, input });
   }
 
+  sendSlimeDrag(roomId, playerId, drag) {
+    const record = this.rooms.get(roomId);
+    if (!record || !record.players.has(playerId)) return;
+    record.child.send({ type: 'player:slime-drag', playerId, drag });
+  }
+
   startPlayerTransformLog(roomId, playerId, sessionId) {
     const record = this.rooms.get(roomId);
     if (!record || !record.players.has(playerId) || !record.child.connected) return false;

@@ -24,10 +24,14 @@ import { frameTimeline } from '../platform/index';
 import { PlayerEntity } from '../player/PlayerEntity';
 import { SlimeSurfaceDragController } from '../controllers/SlimeSurfaceDragController';
 import { RemotePlayerGroup } from '../player/RemotePlayerGroup';
+import type { SlimeSurfaceDragState } from '../render/RenderScene';
 import { SceneRenderer } from '../rendering/SceneRenderer';
 import { SceneWorld } from '../scene/SceneWorld';
 import { createSceneRuntimeComponent, SceneComponentHost } from '../scene/components';
-import { INPUT_SEND_INTERVAL_SECONDS } from '../../shared/networkTuning.mjs';
+import {
+  INPUT_SEND_INTERVAL_SECONDS,
+  SLIME_DRAG_SEND_INTERVAL_SECONDS,
+} from '../../shared/networkTuning.mjs';
 import {
   INVENTORY_COMPONENT,
   type InventoryComponent,
@@ -87,6 +91,13 @@ export class GrasslandScene extends Scene {
   private player?: PlayerEntity;
   private slimeSurfaceDrag?: SlimeSurfaceDragController;
   private timeSinceInputSent = 0;
+  private timeSinceSlimeDragSent = 0;
+  /** 上一次成功上报的拖拽是否处于按住状态；决定松手后要不要补发一次结束。 */
+  private slimeDragReplicated = false;
+  /** 复用的上报缓冲：拖拽每帧都可能被读一次，不该每次都分配一个对象。 */
+  private readonly slimeDragState: SlimeSurfaceDragState = {
+    contactX: 0, contactY: 0, contactZ: 0, pullX: 0, pullY: 0, pullZ: 0,
+  };
 
   /** 暴露当前场景的实时绑定方案，供设置页或调试面板调用 rebind/reset。 */
   public get inputBindings(): InputSchemeRuntime {
@@ -302,6 +313,7 @@ export class GrasslandScene extends Scene {
     this.hud.setVesselStatus(playerId ? this.world.getVesselHudState(playerId) : undefined);
     this.sceneComponents.update(deltaSeconds, elapsedSeconds);
     this.sendPlayerInput(deltaSeconds);
+    this.sendSlimeDrag(deltaSeconds);
   }
 
   public render(): void {
@@ -680,5 +692,22 @@ export class GrasslandScene extends Scene {
       lastInput,
       transform: this.player.captureTransformDebugState(),
     });
+  }
+
+  /**
+   * 拖拽形变按快照频率上行：服务端只转发不重放，报得比快照还密只会白占输入
+   * 令牌桶，把真正需要重放的移动输入挤掉。拖拽期间必须持续续期，服务端才不会
+   * 按超时清掉它；松手那一刻不等节流，立刻补发一次 null，其他玩家不用等超时
+   * 就能看到史莱姆弹回去。
+   */
+  private sendSlimeDrag(deltaSeconds: number): void {
+    if (!this.slimeSurfaceDrag || !this.joinedRoom) return;
+    this.timeSinceSlimeDragSent += deltaSeconds;
+    const dragging = this.slimeSurfaceDrag.captureReplicationState(this.slimeDragState);
+    if (!dragging && !this.slimeDragReplicated) return;
+    if (dragging && this.timeSinceSlimeDragSent < SLIME_DRAG_SEND_INTERVAL_SECONDS) return;
+    if (!this.roomClient.sendSlimeDrag(dragging ? this.slimeDragState : null)) return;
+    this.timeSinceSlimeDragSent = 0;
+    this.slimeDragReplicated = dragging;
   }
 }

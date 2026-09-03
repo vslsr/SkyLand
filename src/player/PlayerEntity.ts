@@ -28,6 +28,7 @@ import {
   writeSlimeMotionParams,
   type SlimeMotionParams,
 } from '../render/RenderSlimeMotion';
+import { SLIME_DRAG_AT_REST, writeSlimeDragParams } from '../render/RenderSlimeDrag';
 import {
   isPlayerRenderDefinition,
   resolvePlayerVisualShape,
@@ -357,6 +358,9 @@ export class PlayerEntity extends Actor {
       this.transform.rotation.y,
     );
     writeSlimeMotionParams(this.transforms, this.renderProxy.id, this.motion);
+    // 本地玩家的拖拽整个在渲染侧完成，不经过这条复制通道；但槽位仍要每帧写，
+    // 否则回收来的槽位会带着上一位玩家的残留把自己的外壳拉出去。
+    writeSlimeDragParams(this.transforms, this.renderProxy.id, SLIME_DRAG_AT_REST);
   }
 
   public override dispose(): void {

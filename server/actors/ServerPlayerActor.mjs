@@ -66,6 +66,8 @@ export class ServerPlayerActor extends Actor {
     });
     this.characterParams = createCharacterSimulationParams(player.id, movement, this.jump);
     this.speed = 0;
+    // 鼠标拖拽形变：客户端上报、服务端只转发的纯表现状态，没有拖拽时是 undefined。
+    this.slimeDrag = undefined;
     this.ackTick = 0;
     this.sequence = 0;
     this.actorInteractionSequence = 0;

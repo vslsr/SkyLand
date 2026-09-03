@@ -1,5 +1,25 @@
 import type { WeatherType } from '../weather/index';
 
+/**
+ * 鼠标拖拽史莱姆的复制状态，坐标全部在 Actor 本地空间。
+ * 服务端不模拟它，只净化、超时并转发，供其他客户端复现同一次形变。
+ */
+export interface SlimeDragState {
+  /** 命中点，Actor 本地坐标。 */
+  contactX: number;
+  contactY: number;
+  contactZ: number;
+  /** 命中点到指针目标的位移，Actor 本地坐标。 */
+  pullX: number;
+  pullY: number;
+  pullZ: number;
+}
+
+/** 快照里的拖拽状态：revision 变化表示重新抓取，接收端需要重建影响权重。 */
+export interface SnapshotSlimeDrag extends SlimeDragState {
+  revision: number;
+}
+
 /** 房间快照里的单名玩家，坐标由服务端权威计算。 */
 export interface SnapshotPlayer {
   id: string;
@@ -23,6 +43,8 @@ export interface SnapshotPlayer {
   /** PickupDrop Component 的运行态；口部挂点来自玩家 Actor 原型。 */
   heldActorId?: string | null;
   pickupDropRevision?: number;
+  /** 正在进行的鼠标拖拽形变；没有拖拽时不下发。 */
+  slimeDrag?: SnapshotSlimeDrag;
 }
 
 export type ActorFloatState = 'afloat' | 'overloaded' | 'flooding' | 'sinking';
@@ -172,4 +194,5 @@ export interface InterpolatedPlayerState {
   velocityX?: number;
   velocityZ?: number;
   grounded?: boolean;
+  slimeDrag?: SnapshotSlimeDrag;
 }
