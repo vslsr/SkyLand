@@ -20,3 +20,7 @@ export {
   type ThreadingCapabilities,
   type ThreadingScope,
 } from './threading';
+export {
+  createDrawingSurface,
+  type DrawingSurface,
+} from './drawingSurface';

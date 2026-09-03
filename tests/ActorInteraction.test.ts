@@ -428,3 +428,104 @@ test('弹性蘑菇 Replica 拉长并在释放后回弹，标记组件始终可�
   assert.ok(Math.abs(returnedScale - 1) < 0.2);
   system.dispose();
 });
+
+/**
+ * 准星拾取改成解析求交之后的行为（实现路径文档 §3 的待决事项，已拍板）。
+ *
+ * 这一组盯的是「换掉 `THREE.Raycaster` 之后还成不成立」的那几条：最近的赢、
+ * 打偏了不算、朝向要算进去、超距不算、关掉的不算，以及**没有 proxy 的合批
+ * 掉落物仍然拾得到**——合并之前那是单独一条代码路径。
+ */
+
+const pickSystem = (): ClientActorSystem => new ClientActorSystem({
+  definition,
+  environment: { fogColor: '#ffffff', fogNear: 20, fogFar: 60 },
+  now: () => 1_000,
+  spawnBudgetMilliseconds: Number.POSITIVE_INFINITY,
+});
+
+/** 0.9×0.9×0.72 的货箱，放在指定位置。 */
+const crateAt = (id: string, x: number, z: number, yaw = 0): SnapshotActor => ({
+  ...cargoSnapshot,
+  id,
+  transform: { x, y: 0, z, yaw },
+});
+
+test('准星拾取取最近的那一个，不是查询里第一个', () => {
+  const system = pickSystem();
+  // 沿 -Z 排两个货箱：远的先入世界，命中必须仍是近的。
+  system.syncSnapshots([crateAt('far', 0, -6), crateAt('near', 0, -2)], 1_000);
+  system.update(0, 0);
+  assert.equal(system.pickInteractableActor([0, 0.4, 2], [0, 0, -1])?.actorId, 'near');
+  // 反过来从另一头打，最近的换成另一个。
+  assert.equal(system.pickInteractableActor([0, 0.4, -10], [0, 0, 1])?.actorId, 'far');
+  system.dispose();
+});
+
+test('打偏了就是没命中——解析求交不是「离得近就算」', () => {
+  const system = pickSystem();
+  system.syncSnapshots([crateAt('crate', 0, -3)], 1_000);
+  system.update(0, 0);
+  // 半宽 0.45，横向偏 2 米：射线从旁边过去。
+  assert.equal(system.pickInteractableActor([2, 0.4, 2], [0, 0, -1]), undefined);
+  // 抬高到箱顶以上也一样：高度区间是求交的一部分，不只看 XZ。
+  assert.equal(system.pickInteractableActor([0, 4, 2], [0, 0, -1]), undefined);
+  system.dispose();
+});
+
+test('盒子的朝向算数：转过来的箱子挡得住，原朝向挡不住', () => {
+  // 时钟是固定的，改了快照再同步一次不会生效（插值取的是过去某一刻），
+  // 所以两种朝向各起一个系统，而不是原地转一下。
+  const pickAt = (yaw: number): string | undefined => {
+    const system = pickSystem();
+    system.syncSnapshots([crateAt('crate', 0, -3, yaw)], 1_000);
+    system.update(0, 0);
+    // 半宽 0.49（由模型尺寸派生），这条射线在 0.58 处贴着边缘过去。
+    const picked = system.pickInteractableActor([0.58, 0.3, 2], [0, 0, -1])?.actorId;
+    system.dispose();
+    return picked;
+  };
+  assert.equal(pickAt(0), undefined, '正朝向时半宽 0.49，0.58 打在外面');
+  assert.equal(
+    pickAt(Math.PI / 4),
+    'crate',
+    '转 45° 之后对角线伸到 0.69，同一条射线就挡住了',
+  );
+});
+
+test('超出射程与 enabled=false 都不算命中', () => {
+  const system = pickSystem();
+  system.syncSnapshots([crateAt('crate', 0, -20)], 1_000);
+  system.update(0, 0);
+  assert.equal(system.pickInteractableActor([0, 0.4, 0], [0, 0, -1])?.actorId, 'crate');
+  assert.equal(
+    system.pickInteractableActor([0, 0.4, 0], [0, 0, -1], 5),
+    undefined,
+    '射程 5 米够不到 20 米外',
+  );
+  system.dispose();
+
+  const disabled = pickSystem();
+  disabled.syncSnapshots([{
+    ...crateAt('crate', 0, -20),
+    interactable: { action: 'cargo-toggle', label: '测试货箱', enabled: false, revision: 0 },
+  }], 1_000);
+  disabled.update(0, 0);
+  assert.equal(disabled.pickInteractableActor([0, 0.4, 0], [0, 0, -1]), undefined);
+  disabled.dispose();
+});
+
+test('方向向量不必是单位长度，射程按米算而不是按它的长度算', () => {
+  const system = pickSystem();
+  system.syncSnapshots([crateAt('crate', 0, -20)], 1_000);
+  system.update(0, 0);
+  // 传一个长度 10 的方向：射程仍是 30 米，够得到 20 米外的箱子。
+  assert.equal(
+    system.pickInteractableActor([0, 0.4, 0], [0, 0, -10])?.actorId,
+    'crate',
+  );
+  // 零向量不该让求交崩掉，也不该命中任何东西。
+  assert.equal(system.pickInteractableActor([0, 0.4, 0], [0, 0, 0]), undefined);
+  system.dispose();
+});
+

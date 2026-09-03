@@ -46,6 +46,7 @@ import {
   COLLISION_LAYER,
   COLLISION_LAYER_SOLID,
   CollisionWorld,
+  sweepSphereAgainstSimpleCollision,
 } from '../../shared/collision/index.mjs';
 import type { PhysicsWorld } from '../../shared/physics/PhysicsWorld.mjs';
 import { simpleCollisionInstanceToPhysicsDefinitions } from '../../shared/physics/simpleCollisionToPhysics.mjs';
@@ -226,12 +227,14 @@ export class ClientActorSystem implements SceneVisualSystem {
   private readonly archetypes: Map<string, SceneDefinition['actorArchetypes'][number]>;
   private readonly snapshots = new ActorSnapshotBuffer();
   private readonly now: () => number;
-  private readonly raycaster = new THREE.Raycaster();
-  private readonly rayOrigin = new THREE.Vector3();
-  private readonly rayDirection = new THREE.Vector3();
-  private readonly pointToActor = new THREE.Vector3();
-  private readonly actorWorldPoint = new THREE.Vector3();
-  private readonly closestRayPoint = new THREE.Vector3();
+  /** 准星射线的两端，复用同一对数组，避免每帧产生临时对象。 */
+  private readonly pickStart: [number, number, number] = [0, 0, 0];
+  private readonly pickEnd: [number, number, number] = [0, 0, 0];
+  /** 解析求交要的就是这两样，逐 Actor 改字段而不是每次新建对象。 */
+  private readonly pickProbe: { collision: SimpleCollisionComponent; transform: TransformComponent } = {
+    collision: undefined as unknown as SimpleCollisionComponent,
+    transform: undefined as unknown as TransformComponent,
+  };
   private readonly collision: CollisionWorld;
   private readonly physics?: PhysicsWorld;
   private readonly highCountBatches: HighCountActorBatchSystem;
@@ -675,56 +678,67 @@ export class ClientActorSystem implements SceneVisualSystem {
     this.renderScene.setTemperatureMarkersVisible(visible);
   }
 
+  /**
+   * 准星指向的可交互 Actor。
+   *
+   * **解析求交，不打场景图**（实现路径文档 §3 的待决事项，已拍板）。
+   *
+   * 这里以前拿 `THREE.Raycaster` 打 proxy 的场景图。第 3 步把渲染世界搬进线程之后
+   * 那件事就地做不了，而它的调用方（交互控制器）是同步的玩法逻辑。两条路可选：
+   * 让渲染线程每帧回送「准星命中了谁」，或者在玩法侧用碰撞体重做一次求交。
+   *
+   * 选后者，三条理由：
+   *
+   * 1. **回送会晚一帧。** 准星拾取直接喂 HUD 提示与按键判定，玩家看得见这一帧的
+   *    延迟；而且那样一来玩法的响应节奏就被渲染帧率绑住了。
+   * 2. **这一半本来就已经这么做了。** 合批掉落物没有独立 Object3D，它们的拾取
+   *    一直是拿权威 Transform 加碰撞半径解析算的。合并之后只剩一条路径。
+   * 3. **每个可交互 Actor 都带 `SimpleCollisionComponent`。** 它由渲染世界在建
+   *    proxy 时按模型尺寸派生（`info.simpleCollision`），所以这个盒子本来就是那个
+   *    模型的紧包围盒——不是另编的一套近似。
+   *
+   * 代价是精度：射线打的是三角形，这里打的是有向盒／圆柱。对准星拾取来说这个
+   * 方向是对的——玩家瞄的是轮廓，不是树冠枝叶之间的缝。
+   */
   public pickInteractableActor(
     origin: readonly [number, number, number],
     direction: readonly [number, number, number],
     maximumDistance = 30,
   ): ActorInteractionCandidate | undefined {
-    this.rayOrigin.set(...origin);
-    this.rayDirection.set(...direction).normalize();
-    this.raycaster.set(this.rayOrigin, this.rayDirection);
-    this.raycaster.near = 0;
-    this.raycaster.far = maximumDistance;
-    this.raycaster.params.Line = { threshold: 0.08 };
-    let nearest: { distance: number; candidate: ActorInteractionCandidate } | undefined;
-    for (const actor of this.world.query(
-      INTERACTABLE_COMPONENT,
-      RENDER_PROXY_COMPONENT,
-    ) as Actor[]) {
-      const interactable = actor.requireComponent(INTERACTABLE_COMPONENT) as InteractableComponent;
-      if (!interactable.enabled) continue;
-      const render = this.resolveRender(actor);
-      if (!render) continue;
-      render.root.updateWorldMatrix(true, true);
-      const hit = this.raycaster.intersectObject(render.root, true)[0];
-      if (!hit || (nearest && hit.distance >= nearest.distance)) continue;
-      nearest = {
-        distance: hit.distance,
-        candidate: this.createInteractionCandidate(actor, interactable),
-      };
-    }
-    // 合批 Actor 没有独立 Object3D；用权威 Transform + 碰撞半径做解析射线命中。
+    const length = Math.hypot(direction[0], direction[1], direction[2]);
+    if (length < 1e-6) return undefined;
+    const scale = maximumDistance / length;
+    this.pickStart[0] = origin[0];
+    this.pickStart[1] = origin[1];
+    this.pickStart[2] = origin[2];
+    this.pickEnd[0] = origin[0] + direction[0] * scale;
+    this.pickEnd[1] = origin[1] + direction[1] * scale;
+    this.pickEnd[2] = origin[2] + direction[2] * scale;
+
+    let nearest: { fraction: number; candidate: ActorInteractionCandidate } | undefined;
     for (const actor of this.world.query(
       INTERACTABLE_COMPONENT,
       TRANSFORM_COMPONENT,
-      ITEM_STACK_COMPONENT,
+      SIMPLE_COLLISION_COMPONENT,
     ) as Actor[]) {
       const interactable = actor.requireComponent(INTERACTABLE_COMPONENT) as InteractableComponent;
       if (!interactable.enabled) continue;
-      const transform = actor.requireComponent(TRANSFORM_COMPONENT) as TransformComponent;
-      const collision = actor.requireComponent(SIMPLE_COLLISION_COMPONENT) as SimpleCollisionComponent;
-      this.actorWorldPoint.set(
-        transform.x,
-        transform.y + (collision.minimumY + collision.maximumY) * 0.5,
-        transform.z,
+      this.pickProbe.collision = actor.requireComponent(
+        SIMPLE_COLLISION_COMPONENT,
+      ) as SimpleCollisionComponent;
+      this.pickProbe.transform = actor.requireComponent(TRANSFORM_COMPONENT) as TransformComponent;
+      // 半径 0 就是一条线段——扫掠球退化成射线，盒与圆柱两种形状、朝向、
+      // 中心偏移和高度区间全都由这一个函数负责，和相机悬臂用的是同一份实现。
+      const fraction = sweepSphereAgainstSimpleCollision(
+        this.pickStart,
+        this.pickEnd,
+        0,
+        this.pickProbe,
       );
-      this.pointToActor.copy(this.actorWorldPoint).sub(this.rayOrigin);
-      const distance = this.pointToActor.dot(this.rayDirection);
-      if (distance < 0 || distance > maximumDistance || (nearest && distance >= nearest.distance)) continue;
-      this.closestRayPoint.copy(this.rayDirection).multiplyScalar(distance).add(this.rayOrigin);
-      const radius = Math.max(collision.halfWidth, collision.halfLength, 0.2);
-      if (this.closestRayPoint.distanceToSquared(this.actorWorldPoint) > radius * radius) continue;
-      nearest = { distance, candidate: this.createInteractionCandidate(actor, interactable) };
+      // 返回 1 表示整段都没碰到。
+      if (fraction >= 1) continue;
+      if (nearest && fraction >= nearest.fraction) continue;
+      nearest = { fraction, candidate: this.createInteractionCandidate(actor, interactable) };
     }
     return nearest?.candidate;
   }
