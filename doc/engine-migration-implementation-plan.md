@@ -959,16 +959,61 @@ import three 的最后一个理由。兜底搬进 `tests/renderProxyProbe.ts`—
 主干文件：`ClientActorSystem`、`ChunkStreamer`、`TerrainWorld`、`SceneWorld`、
 `createLineArtScene`，清单是空的。
 
+### 已经做了的：一局的装配有了自己的归属 ✅
+
+`SceneRenderer` 是五件事，不是一件：画布与绘制循环、房间组合的生命周期、渲染侧的
+房间状态门面、**玩法侧三个世界的引用与释放**、物理调试线框。
+
+第四件最能说明问题：一个叫渲染器的类里有
+
+```ts
+this.collisionWorld?.clear();
+this.physicsWorld?.dispose();
+```
+
+新增 `src/scene/SceneCompositionHost.ts`（78 行）接管「建一张地图、按顺序拆上一张、
+把两半分别交给 `SceneWorld` 与 `SceneRenderer`」。它认识的是 `SceneComposition`
+这份数据和两个接收方，**既不认识 `THREE.Scene` 也不认识画布**——所以
+`SceneComposition.scene` 改成可选：空组合不带场景图，大厅背后那个什么都没有的画面
+归渲染侧自己铺。
+
+`SceneRenderer` 因此不再持有 `collisionWorld` / `terrainWorld` / `physicsWorld`：
+地形高亮问 `world.sampleGroundHeight`，物理线框问新增的 `world.debugRenderPhysics()`
+——一个世界只该被一个地方持有。`loadScene` / `showEmptyScene` / `replaceScene`
+换成一个 `adoptComposition(composition)`，只做「换掉画的东西」。
+
+顺手删掉的两处死代码，都是「递出活对象」的口子：
+
+- `addWorldObject` / `removeWorldObject`——落叶与能力实验室搬走之后一个调用方都没有了
+- `onBeforeRender(listener)`——渲染侧往主线程递一个活的 `THREE.Camera`。同样零注册方，
+  唯一的用处是让 `SceneComponent.ts` 不得不 import three。删掉之后场景组件那条棘轮
+  **整个目录都在扫描范围内，一个文件都不排除**，而「没人借相机」这条不变量从一条
+  断言升级成了类型系统的事实：方法不存在，写不出来。
+
+`SceneRenderer.renderWorld` 的类型也从 `RenderWorldHandle<ThreeRenderScene>` 收窄成
+`RenderWorldHandle`——玩家实体、远端玩家本来就只用边界接口，看得到后端就迟早会用。
+
+收窄之后浮出来一件事，记在这里：**蒙皮拖拽有两次「等对面回话」**。
+`beginSlimeSurfaceDrag`（这一次按下有没有抓住外壳）与 `isSlimeSurfaceDragging`
+都有返回值，而它们不在 `RenderScene` 上，所以那条「每个方法返回 void」的棘轮盯不到。
+判据确实在渲染侧——命中测试打的是每帧被改写的软体外壳网格，玩法侧没有那份几何——
+所以不能像准星拾取那样改成「玩法侧自己解析求交」。出路是先乐观开拖、下一帧读渲染侧
+回报的状态位，和玩家本地预测同一个套路：一帧的误判在 16ms 内自己纠正过来。
+
+在那之前，这两条被关在一扇**有名字的门**后面（`SceneRenderer.slimeSurfaceDragSurface`，
+只暴露四个拖拽方法），另有一条棘轮盯着这扇门上还剩几个非 `void` 的方法。
+`updateSlimeSurfaceDrag` 的返回值三个调用点一个都没用过，已经改成 `void`。
+
 ### 还没做的
 
 | | 说明 |
 | --- | --- |
-| 渲染循环整个进 worker | `SceneRenderer` 的 `root` / `beforeRender` / `WebGLRenderer` 那一层，以及 `transferControlToOffscreen` 本身。要搬的正好是 `SceneRenderer.update` 末尾那句 `updateVisuals` 与 `render()` 全体 |
-| `GrasslandScene` 的装配归属 | 它同时握着输入、相机、玩家实体和渲染器；canvas 搬走时装配要跟着走 |
+| 渲染循环整个进 worker | `SceneRenderer` 的 `WebGLRenderer` 那一层与 `transferControlToOffscreen` 本身。要搬的正好是 `update` 末尾那句 `updateVisuals`、`adoptComposition` 与 `render()` |
+| 蒙皮拖拽那两次等回话 | `beginSlimeSurfaceDrag` / `isSlimeSurfaceDragging`。判据在渲染侧，出路是乐观开拖 + 状态位回报，见上一节。有棘轮盯着 |
 
 §3 的前置全部落地：渲染栈不碰 DOM、玩法侧不碰 Three、chunk 与 Actor 两条主干都按
-game / render 切开、相机与合批内容都按字节过边界，**而且边界是单向的**。
-剩下的两项是搬运本身，不再是拆解。
+game / render 切开、相机与合批内容都按字节过边界、装配有了自己的归属，
+**而且边界是单向的**。剩下的两项是搬运本身，不再是拆解。
 
 需要说清楚的是：这两项**一项都不省帧时间**（`render-batches` p50 只有
 0.06–0.17 ms）。它们是第 2 步与第 3 步共同的结构前提。

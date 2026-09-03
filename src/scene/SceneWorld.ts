@@ -63,6 +63,16 @@ export class SceneWorld implements GrassInteractionTarget {
     this.setRenderTerrainCells = undefined;
   }
 
+  /**
+   * 物理调试线框这一帧的顶点与颜色；没有物理世界时是 `undefined`。
+   *
+   * 画线框的是渲染侧，但**数据源在这一半**——`SceneRenderer` 曾经自己留一份
+   * `physicsWorld` 引用来调它，那是同一个世界被两个地方持有。
+   */
+  public debugRenderPhysics(): { vertices: Float32Array; colors: Float32Array } | undefined {
+    return this.physicsWorld?.debugRender();
+  }
+
   // --- 地形 ---------------------------------------------------------------
 
   public sampleGroundHeight(x: number, z: number): number {

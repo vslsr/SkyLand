@@ -142,13 +142,10 @@ test('streamed leaf clusters are deterministic and stay inside negative-coordina
 });
 
 test('streamed leaf clusters stay bounded and discard old chunks after a large focus jump', () => {
-  const mounted = new Set<THREE.Object3D>();
   let focus = { focusX: 0, focusY: 0, focusZ: 0 };
-  const renderer = {
-    environmentRuntime: undefined,
-    addWorldObject: (object: THREE.Object3D) => mounted.add(object),
-    removeWorldObject: (object: THREE.Object3D) => mounted.delete(object),
-  };
+  // `addWorldObject` / `removeWorldObject` 已经从 `SceneRenderer` 上删掉了：
+  // 落叶挂在渲染世界自己的根下，没有任何东西再往场景图里塞 `Object3D`。
+  const renderer = { environmentRuntime: undefined };
   // 地形采样搬去 SceneWorld 了：渲染器只剩渲染核心（实现路径文档 §3）。
   const world = {
     isWaterAt: () => false,
@@ -312,11 +309,7 @@ test('被踢起的落叶按落点当地的地表停下，而不是起飞点的�
 
 test('落叶团在停用时释放地形订阅，不把监听器留在旧场景里', () => {
   const listeners = new Set<() => void>();
-  const renderer = {
-    environmentRuntime: undefined,
-    addWorldObject: () => undefined,
-    removeWorldObject: () => undefined,
-  };
+  const renderer = { environmentRuntime: undefined };
   let level = 0;
   const world = {
     isWaterAt: () => false,

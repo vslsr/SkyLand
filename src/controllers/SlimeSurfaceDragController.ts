@@ -11,11 +11,19 @@ const CAMERA_FIELD_OF_VIEW_RADIANS = 50 * Math.PI / 180;
 /**
  * 渲染世界里能被拖拽蒙皮的那一面。`ThreeRenderScene` 结构上满足它，
  * 所以这个文件不 import 任何渲染实现，只认识 `ProxyId`。
+ *
+ * **前两个方法有返回值**，是这条边界上仅剩的两次「等对面回话」。判据确实在渲染侧
+ * ——命中测试打的是每帧被改写的软体外壳网格，玩法侧没有那份几何。渲染循环进
+ * worker 时的出路是「先乐观开拖，下一帧读渲染侧回报的状态位」，和玩家本地预测
+ * 同一个套路：一帧的误判在 16ms 内自己纠正过来。
+ *
+ * 这两条不在 `RenderScene` 上，所以那条「每个方法返回 void」的棘轮盯不到它们；
+ * `tests/RenderSceneBoundary.test.ts` 里另有一份清单专门盯这里。
  */
 export interface SlimeSurfaceDragSurface {
   isSlimeSurfaceDragging(id: ProxyId): boolean;
   beginSlimeSurfaceDrag(id: ProxyId, ray: SlimeSurfaceDragRay): boolean;
-  updateSlimeSurfaceDrag(id: ProxyId, ray: SlimeSurfaceDragRay): boolean;
+  updateSlimeSurfaceDrag(id: ProxyId, ray: SlimeSurfaceDragRay): void;
   endSlimeSurfaceDrag(id: ProxyId): void;
 }
 

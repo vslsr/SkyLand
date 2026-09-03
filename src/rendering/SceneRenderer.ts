@@ -1,6 +1,5 @@
 import * as THREE from 'three';
 import { TERRAIN_CELL_SIZE } from '../../shared/world/terrainConfig.mjs';
-import type { CollisionWorld } from '../../shared/collision/index.mjs';
 import type {
   AbilityLabAction,
   AbilityLabViewState,
@@ -18,7 +17,6 @@ const CAMERA_FIELD_OF_VIEW = 50;
 import { type GrassInteractionTarget } from '../grass';
 import { frameTimeline } from '../platform/index';
 import { releaseOwnResources } from '../render/renderAssets';
-import { createLineArtScene } from '../scene/createLineArtScene';
 import type { DayNightVisualTarget } from '../environment/EnvironmentTypes';
 import type { SceneEnvironmentRuntime } from '../materials/createFillMaterial';
 import type {
@@ -31,11 +29,9 @@ import type {
 import type { ThreeRenderScene } from '../render/three/ThreeRenderScene';
 import type { ProxyId } from '../render/RenderScene';
 import type { RenderWorldHandle } from '../render/RenderProxyTable';
-import type { SceneBeforeRenderListener } from '../scene/components';
+import type { SlimeSurfaceDragSurface } from '../controllers/SlimeSurfaceDragController';
 import type { SceneDefinition } from '../scenes/data/SceneDefinition';
 import type { SceneWorld } from '../scene/SceneWorld';
-import type { TerrainWorld } from '../world/TerrainWorld';
-import type { PhysicsWorld } from '../../shared/physics/PhysicsWorld.mjs';
 import { DEFAULT_WEATHER, type WeatherType } from '../weather/index';
 import { DEFAULT_START_HOUR } from '../../shared/dayNight.mjs';
 import { DayNightClock } from '../environment/DayNightClock';
@@ -67,17 +63,16 @@ export class SceneRenderer {
   private grassInteraction?: GrassInteractionTarget;
   private actorSnapshotTarget?: ActorSnapshotTarget;
   /** 当前地图的渲染世界。整张对象随场景一起换掉，所以引用可以直接比身份。 */
+  /**
+   * 具体后端只留在这一侧。对外的 `renderWorld` 收窄成 `RenderWorldHandle`
+   * ——玩家实体、远端玩家、蒙皮拖拽本来就只用边界接口，看得到后端就迟早会用。
+   */
   private renderWorldHandle?: RenderWorldHandle<ThreeRenderScene>;
   private weatherTarget?: WeatherVisualTarget;
   private dayNightTarget?: DayNightVisualTarget;
   private sceneEnvironmentRuntime?: SceneEnvironmentRuntime;
-  private collisionWorld?: CollisionWorld;
-  private terrainWorld?: TerrainWorld;
-  private physicsWorld?: PhysicsWorld;
   private physicsDebug?: THREE.LineSegments;
   private terrainHighlight?: THREE.LineSegments;
-  private fixedWaterWorld = false;
-  private fixedWaterLevel = 0;
   private currentWeather: WeatherType = DEFAULT_WEATHER;
   private simpleCollisionVisible = false;
   private temperatureVisible = false;
@@ -108,7 +103,6 @@ export class SceneRenderer {
    */
   private sceneActive = false;
   private readonly cameraFrame = createRenderCamera();
-  private readonly beforeRenderListeners = new Set<SceneBeforeRenderListener>();
 
   /**
    * `world` 是这张地图**不属于渲染**的那一半（地形、物理、Actor 查询）。
@@ -177,7 +171,6 @@ export class SceneRenderer {
       frame.position[2] + frame.forward[2],
     );
     this.camera.lookAt(this.lookTarget);
-    for (const listener of this.beforeRenderListeners) listener(this.camera);
     for (const system of this.visualSystems) {
       system.beforeRender?.(this.renderer, this.camera);
     }
@@ -194,25 +187,24 @@ export class SceneRenderer {
    * 它们不是 Replica，但必须和 Actor 共用同一个渲染世界、同一段边界字节，
    * 以及同一张槽位表。
    */
-  public get renderWorld(): RenderWorldHandle<ThreeRenderScene> | undefined {
+  public get renderWorld(): RenderWorldHandle | undefined {
     return this.renderWorldHandle;
   }
 
-  public addWorldObject(object: THREE.Object3D): void {
-    this.dynamicWorld.add(object);
-  }
-
-  public removeWorldObject(object: THREE.Object3D): void {
-    this.dynamicWorld.remove(object);
+  /**
+   * 蒙皮拖拽那一面。**这是 `renderWorld` 收窄之后仅剩的一扇够到具体后端的门**，
+   * 而且是有名字的一扇：它只暴露四个拖拽方法，不是整个后端。
+   *
+   * 之所以还需要它：`beginSlimeSurfaceDrag` / `isSlimeSurfaceDragging` 有返回值，
+   * 因为判据在渲染侧（命中测试打的是每帧被改写的软体外壳网格）。这两条不在
+   * `RenderScene` 上，`tests/RenderSceneBoundary.test.ts` 里另有清单盯着。
+   */
+  public get slimeSurfaceDragSurface(): SlimeSurfaceDragSurface | undefined {
+    return this.renderWorldHandle?.scene;
   }
 
   public get grassInteractionTarget(): GrassInteractionTarget | undefined {
     return this.grassInteraction;
-  }
-
-  public onBeforeRender(listener: SceneBeforeRenderListener): () => void {
-    this.beforeRenderListeners.add(listener);
-    return () => this.beforeRenderListeners.delete(listener);
   }
 
   public update(
@@ -290,20 +282,21 @@ export class SceneRenderer {
 
   /** 高亮一格地形；传 undefined 收起高亮。 */
   public setTerrainHighlight(cell?: { cellX: number; cellZ: number }): void {
-    if (!cell || !this.terrainWorld) {
+    if (!cell) {
       if (this.terrainHighlight) this.terrainHighlight.visible = false;
       return;
     }
     if (!this.terrainHighlight) {
       this.terrainHighlight = createTerrainHighlight();
-      this.addWorldObject(this.terrainHighlight);
+      this.dynamicWorld.add(this.terrainHighlight);
     }
     const centerX = (cell.cellX + 0.5) * TERRAIN_CELL_SIZE;
     const centerZ = (cell.cellZ + 0.5) * TERRAIN_CELL_SIZE;
-    // 贴着格心的地面画，抬高一点避免和地形共面闪烁。
+    // 贴着格心的地面画，抬高一点避免和地形共面闪烁。高度问玩法那一半——
+    // 这一侧不留 `terrainWorld` 引用。
     this.terrainHighlight.position.set(
       centerX,
-      this.terrainWorld.sampleGroundHeight(centerX, centerZ) + 0.05,
+      this.world.sampleGroundHeight(centerX, centerZ) + 0.05,
       centerZ,
     );
     this.terrainHighlight.visible = true;
@@ -366,43 +359,20 @@ export class SceneRenderer {
   }
 
   /**
-   * 加载场景。worldSeed 来自房间，决定流式世界长什么样；
-   * 不做流式加载的场景会忽略它。
+   * 接住新组合里属于渲染的那一半（`SceneRenderHost`）。
+   *
+   * 建组合、按顺序拆上一张地图、把玩法那一半交给 `SceneWorld`——那些是
+   * `SceneCompositionHost` 的事。这个类以前把它们全揽着，还自己留着
+   * `collisionWorld` / `physicsWorld` 两个引用去 `clear()` 和 `dispose()`。
+   *
+   * 现在这里只做「换掉画的东西」。渲染循环进 worker 那天，搬走的就是这个方法
+   * 和它下面那几行。
    */
-  public loadScene(definition: SceneDefinition, worldSeed?: number): void {
-    if (definition.renderer.type !== 'line-art') {
-      throw new Error(`不支持的场景渲染器：${definition.renderer.type as string}`);
-    }
-    this.currentWeather = DEFAULT_WEATHER;
-    this.fixedWaterWorld = definition.renderer.content.ocean === true
-      && definition.renderer.content.ground === false;
-    this.fixedWaterLevel = definition.gameplay.water?.seaLevel ?? 0;
-    // 时钟按这张地图的配置重开：关掉昼夜或冻结时长度为 0，时刻停在 startHour。
-    const dayNight = definition.environment.dayNight;
-    this.dayNightClock.reset(
-      dayNight.startHour,
-      dayNight.enabled && !dayNight.paused ? dayNight.dayLengthSeconds : 0,
-    );
-    this.replaceScene(createLineArtScene(definition, worldSeed));
-  }
-
-  public showEmptyScene(): void {
-    this.currentWeather = DEFAULT_WEATHER;
-    this.fixedWaterWorld = false;
-    this.fixedWaterLevel = 0;
-    this.replaceScene({ scene: createEmptyScene(), visualSystems: [] });
-    this.world.clear();
-  }
-
-  private replaceScene(composition: SceneComposition): void {
-    for (const system of this.visualSystems) system.dispose?.();
+  public adoptComposition(composition: SceneComposition): void {
     this.scene.remove(this.dynamicWorld);
     disposeScene(this.scene);
-    // 碰撞世界随场景走：上一张地图的 chunk 与 Actor 碰撞体一起被丢掉，
-    // 不会有残留的盒子挡住新地图里的路。
-    this.collisionWorld?.clear();
-    this.physicsWorld?.dispose();
-    this.scene = composition.scene;
+    // 空组合不带场景图：大厅背后那个什么都没有的画面归这一侧自己铺。
+    this.scene = composition.scene ?? createEmptyScene();
     this.visualSystems = composition.visualSystems;
     this.weatherTarget = composition.weatherTarget;
     this.dayNightTarget = composition.dayNightTarget;
@@ -412,10 +382,6 @@ export class SceneRenderer {
     // 换了组合就把当前的进入状态补上去，否则先 onEnter 后加载的场景永远不激活。
     this.setRenderSceneActive?.(this.sceneActive);
     this.actorSnapshotTarget = composition.actorSnapshotTarget;
-    this.world.adopt(composition, {
-      fixedWaterWorld: this.fixedWaterWorld,
-      fixedWaterLevel: this.fixedWaterLevel,
-    });
     this.renderWorldHandle = composition.renderScene
       && composition.renderTransforms
       && composition.renderProxyIds
@@ -425,20 +391,36 @@ export class SceneRenderer {
         proxyIds: composition.renderProxyIds,
       }
       : undefined;
-    this.collisionWorld = composition.collisionWorld;
-    this.terrainWorld = composition.terrainWorld;
-    this.physicsWorld = composition.physicsWorld;
-    if (this.physicsDebug) this.physicsDebug.visible = Boolean(this.physicsWorld)
-      && this.simpleCollisionVisible;
+    // 线框由 updatePhysicsDebug 每帧按「开关开着 + 这张图有物理世界」重新决定。
+    if (this.physicsDebug) this.physicsDebug.visible = false;
     this.actorSnapshotTarget?.setSimpleCollisionVisible(this.simpleCollisionVisible);
     this.actorSnapshotTarget?.setTemperatureVisible(this.temperatureVisible);
     this.weatherTarget?.setWeather(this.currentWeather);
     this.scene.add(this.dynamicWorld);
   }
 
+  /**
+   * 这张地图的天气与时钟从头开始。
+   *
+   * 和 `adoptComposition` 分开是因为它们的时机不同：换组合是每次都做的，
+   * 而「重开时钟」只在真的换了一张地图时做——退回空场景不该把时刻拨回早上。
+   */
+  public resetEnvironment(definition?: SceneDefinition): void {
+    this.currentWeather = DEFAULT_WEATHER;
+    if (!definition) return;
+    // 关掉昼夜或冻结时长度为 0，时刻停在 startHour。
+    const dayNight = definition.environment.dayNight;
+    this.dayNightClock.reset(
+      dayNight.startHour,
+      dayNight.enabled && !dayNight.paused ? dayNight.dayLengthSeconds : 0,
+    );
+  }
+
   private updatePhysicsDebug(): void {
-    if (!this.simpleCollisionVisible || !this.physicsWorld) return;
-    const buffers = this.physicsWorld.debugRender();
+    if (!this.simpleCollisionVisible) return;
+    // 数据源在玩法那一半：物理世界只该被一个地方持有。
+    const buffers = this.world.debugRenderPhysics();
+    if (!buffers) return;
     if (!this.physicsDebug) {
       this.physicsDebug = new THREE.LineSegments(
         new THREE.BufferGeometry(),

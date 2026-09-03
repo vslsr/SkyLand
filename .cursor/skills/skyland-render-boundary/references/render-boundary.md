@@ -132,6 +132,12 @@ Player entities (local and remote) also write into this SoA, and they run **befo
 | Batched piles, fruit | Render | `ThreeHighCountBatchVisual`, `ThreeFruitBatchVisual`, driven from `updateVisuals` |
 | Canvas, camera, draw call | Render | `SceneRenderer` |
 
+## Who owns a room
+
+`SceneCompositionHost` builds a room (`createLineArtScene`), hands the game half to `SceneWorld` and the render half to `SceneRenderer`, and owns the teardown order when the next room arrives: stop the frame systems, then clear collision and dispose physics, then install. It knows `SceneComposition` and two recipients — not `THREE.Scene`, not the canvas — so it stays put when the render loop moves.
+
+That ownership used to sit on `SceneRenderer`, which therefore held its own `collisionWorld`/`physicsWorld` references in order to `clear()` and `dispose()` them. A class named "renderer" disposing the physics world is what unowned assembly looks like. `SceneRenderer` now has one `adoptComposition(composition)` that only swaps what gets drawn, and asks `SceneWorld` for ground height and physics debug buffers.
+
 Neither `ClientActorSystem` nor `ChunkStreamer` has a `root` or a `beforeRender`: they are `SceneFrameSystem`s, not `SceneVisualSystem`s. A gameplay class that can reach a scene-graph node can hand one out, and a `beforeRender` taking a `WebGLRenderer` is the render loop leaking into gameplay. `ThreeRenderScene.beforeRender` is driven by the render loop directly, so it moves with the canvas.
 
 ## The frame has two phases
@@ -148,8 +154,9 @@ That last call used to sit at the end of `ClientActorSystem.update`. It worked b
 2. **Actor Components importing render modules** — currently empty.
 3. **ActorWorld Systems** — must equal `ClientActorSystem`'s actual `world.addSystem(...)` calls, and none may import a render implementation. Without the equality check, a new System would slip past the import check unnoticed.
 4. **Render-side files touching `document`/`window`** — currently only `SceneRenderer`, whose `devicePixelRatio` moves with the canvas it owns.
-5. **Scene components importing `three` or calling `addWorldObject`** — currently empty. A scene component that builds its own `Object3D` and pushes it into the scene graph blocks the worker move exactly like a Component holding one does. The way out is the one the falling leaves and the ability lab took: move the visual into the render world and send it descriptions.
-6. **Callers of `onBeforeRender`** — currently only `SceneRenderer` itself. That callback hands out a live `THREE.Camera`; anything needing the camera takes `RenderCamera` (nine floats) instead.
+5. **Scene components importing `three`** — currently empty, with no file excluded from the scan. A scene component that builds its own `Object3D` and pushes it into the scene graph blocks the worker move exactly like a Component holding one does. The way out is the one the falling leaves and the ability lab took: move the visual into the render world and send it descriptions. (`addWorldObject`/`removeWorldObject` and `onBeforeRender` — the two methods that handed out an `Object3D` slot and a live `THREE.Camera` — no longer exist, so those routes are now type errors rather than ratchet failures.)
+6. **Gameplay trunk files importing `three`** — `ClientActorSystem`, `ChunkStreamer`, `TerrainWorld`, `SceneWorld`, `createLineArtScene`. Currently empty. These are the snapshot, streaming, and assembly trunks; anything on this list is pinned to the main thread.
+7. **Non-`void` methods on `SlimeSurfaceDragSurface`** — `beginSlimeSurfaceDrag` and `isSlimeSurfaceDragging`. That interface is the one named door through which gameplay-side code reaches the concrete backend, so the `RenderScene` void rule cannot see it. The verdict genuinely lives on the render side (the hit test rays the soft-body shell mesh, rewritten every frame), so the fix is optimistic start plus a state bit reported back — the same shape as player prediction.
 
 `RenderProxyComponent` importing from `src/render/` is intentional and allowed: it references the boundary types (`ProxyId`, the command sink), which is exactly what it should reference. The rule targets render *implementations*.
 

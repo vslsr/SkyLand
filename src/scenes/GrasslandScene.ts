@@ -25,6 +25,7 @@ import { PlayerEntity } from '../player/PlayerEntity';
 import { SlimeSurfaceDragController } from '../controllers/SlimeSurfaceDragController';
 import { RemotePlayerGroup } from '../player/RemotePlayerGroup';
 import { SceneRenderer } from '../rendering/SceneRenderer';
+import { SceneCompositionHost } from '../scene/SceneCompositionHost';
 import { SceneWorld } from '../scene/SceneWorld';
 import type { SceneUpdateContext } from '../scene/SceneVisualSystem';
 import { createSceneRuntimeComponent, SceneComponentHost } from '../scene/components';
@@ -63,6 +64,7 @@ export class GrasslandScene extends Scene {
   private readonly virtualControls: VirtualControls;
   private readonly renderer: SceneRenderer;
   private readonly world: SceneWorld;
+  private readonly composition: SceneCompositionHost;
   private readonly sceneComponents = new SceneComponentHost(createSceneRuntimeComponent);
   private readonly flyController: FlyController;
   private readonly controls: SceneControlRouter;
@@ -181,6 +183,9 @@ export class GrasslandScene extends Scene {
     // 场景的两半:渲染核心与玩法查询。第 3 步搬 canvas 时只有前者跟着走。
     this.world = new SceneWorld();
     this.renderer = new SceneRenderer(options.canvas, this.world);
+    // 一局的装配。它认识的是 `SceneComposition` 这份数据和两个接收方，
+    // 既不认识 `THREE.Scene` 也不认识画布——canvas 搬进 worker 时它留在原地。
+    this.composition = new SceneCompositionHost(this.world, this.renderer);
     this.remotePlayers = new RemotePlayerGroup(this.world);
     this.flyController = new FlyController(options.canvas, {
       position: [0, 4.2, 13.5],
@@ -411,7 +416,9 @@ export class GrasslandScene extends Scene {
     this.snapshots.clear();
     this.vesselControls.reset();
     this.actorInteractions.reset();
-    this.renderer.loadScene(joined.scene, joined.room.worldSeed);
+    // 装配归 SceneCompositionHost；渲染器只接住渲染那一半。
+    this.renderer.resetEnvironment(joined.scene);
+    this.composition.load(joined.scene, joined.room.worldSeed);
     this.flyController.configure(joined.scene.camera);
     const playerArchetype = joined.scene.actorArchetypes.find(
       (definition) => definition.id === joined.scene.gameplay.playerActor.archetypeId,
@@ -636,10 +643,15 @@ export class GrasslandScene extends Scene {
     );
     // 蒙皮拖拽属于渲染侧：指针、相机和外壳都在这一边，玩家实体只经由
     // setMouseFacingSuppressed 收到「一次手势归谁」那一个布尔。
+    //
+    // 它收的不是 `renderWorld.scene`（那是边界接口，没有拖拽方法），而是
+    // `SceneRenderer` 上那扇有名字的门——那两个有返回值的方法只从这里出去。
+    const dragSurface = this.renderer.slimeSurfaceDragSurface;
+    if (!dragSurface) throw new Error('当前场景没有渲染世界，无法建立蒙皮拖拽');
     this.slimeSurfaceDrag = new SlimeSurfaceDragController(
       this.canvas,
       this.input,
-      renderWorld.scene,
+      dragSurface,
       this.player.renderProxyId,
       () => this.controls.frame,
       (active) => this.player?.controller.setMouseFacingSuppressed(active),
@@ -665,7 +677,8 @@ export class GrasslandScene extends Scene {
       this.player.dispose();
       this.player = undefined;
     }
-    this.renderer.showEmptyScene();
+    this.renderer.resetEnvironment();
+    this.composition.clear();
   }
 
   /**

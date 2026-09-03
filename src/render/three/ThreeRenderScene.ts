@@ -404,15 +404,22 @@ export class ThreeRenderScene implements RenderScene {
   }
 
   /**
-   * 蒙皮拖拽。指针、相机和外壳全在渲染这一侧，所以这三个方法是渲染世界内部调用，
+   * 蒙皮拖拽。指针、相机和外壳全在渲染这一侧，所以这几个方法是渲染世界内部调用，
    * 不是边界；玩法侧只会经由控制器收到「拖拽开始/结束」一个布尔。
+   *
+   * 但 `beginSlimeSurfaceDrag` 与 `isSlimeSurfaceDragging` **有返回值**，
+   * 而且调用方（`SlimeSurfaceDragController`）住在主线程。判据在这一侧：
+   * 命中测试打的是每帧被改写的软体外壳网格，玩法侧根本没有那份几何。
+   * 渲染循环进 worker 时这两条要改成「先乐观开拖，下一帧读渲染侧回报的状态位」——
+   * 有棘轮盯着（`tests/RenderSceneBoundary.test.ts`），清单只能变短。
    */
   public beginSlimeSurfaceDrag(id: ProxyId, ray: SlimeSurfaceDragRay): boolean {
     return this.slimeDrags.get(id)?.beginDrag(ray) ?? false;
   }
 
-  public updateSlimeSurfaceDrag(id: ProxyId, ray: SlimeSurfaceDragRay): boolean {
-    return this.slimeDrags.get(id)?.updateDrag(ray) ?? false;
+  /** 返回 void：命中与否只影响这一侧，三个调用点一个都没用过它的返回值。 */
+  public updateSlimeSurfaceDrag(id: ProxyId, ray: SlimeSurfaceDragRay): void {
+    this.slimeDrags.get(id)?.updateDrag(ray);
   }
 
   public endSlimeSurfaceDrag(id: ProxyId): void {

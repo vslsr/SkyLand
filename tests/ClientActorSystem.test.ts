@@ -1167,10 +1167,13 @@ test('史莱姆表面拖拽带动整团软体，命中处最强，接近上限�
     direction: [0, -1, 0],
   }), true);
   visual.rig.surface.raycast = surfaceRaycast;
-  assert.equal(visual.scene.updateSlimeSurfaceDrag(visual.proxyId, {
+  // updateSlimeSurfaceDrag 返回 void：拖没拖动看的是形变本身（下面那几条断言），
+  // 以及这条链路还活着没有。
+  visual.scene.updateSlimeSurfaceDrag(visual.proxyId, {
     origin: [3, 3, 0],
     direction: [0, -1, 0],
-  }), true);
+  });
+  assert.equal(visual.scene.isSlimeSurfaceDragging(visual.proxyId), true);
   for (let frame = 0; frame < 150; frame += 1) {
     visual.update(1 / 60, frame / 60, 0, 0, { velocityX: 0, velocityZ: 0 });
   }

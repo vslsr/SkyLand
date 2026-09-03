@@ -191,6 +191,43 @@ test('还在 import 渲染侧模块的 Actor Component 只有已知的那几个'
 });
 
 /**
+ * 那条「每个方法返回 void」的棘轮只盯 `RenderScene`。玩法侧还有**一扇**门够得到
+ * 具体后端：`SlimeSurfaceDragSurface`（经由 `SceneRenderer.slimeSurfaceDragSurface`
+ * 递给 `SlimeSurfaceDragController`）。这份清单盯的是那扇门上还剩几个有返回值的方法。
+ *
+ * 只剩两个：`beginSlimeSurfaceDrag`（这一次按下有没有抓住外壳）与
+ * `isSlimeSurfaceDragging`（这条链路还活着没有）。判据确实在渲染侧——命中测试打的是
+ * 每帧被改写的软体外壳网格，玩法侧没有那份几何——所以不能像准星拾取那样改成
+ * 「玩法侧自己解析求交」。
+ *
+ * 出路是先乐观开拖、下一帧读渲染侧回报的状态位，和玩家本地预测同一个套路：
+ * 一帧的误判在 16ms 内自己纠正过来。
+ */
+const DRAG_SURFACE_METHODS_STILL_RETURNING_A_VALUE = [
+  'beginSlimeSurfaceDrag',
+  'isSlimeSurfaceDragging',
+];
+
+test('玩法侧够得到后端的那扇门上，还在等回话的方法只有已知的那几个', () => {
+  const source = readFileSync(
+    new URL('../src/controllers/SlimeSurfaceDragController.ts', import.meta.url),
+    'utf8',
+  );
+  const body = /export interface SlimeSurfaceDragSurface \{([^}]*)\}/.exec(source)?.[1];
+  assert.ok(body, '找不到 SlimeSurfaceDragSurface 的声明——这条断言失效了');
+  const offenders = [...body.matchAll(/^\s*(\w+)\([^)]*\): (\w+);$/gm)]
+    .filter(([, , returns]) => returns !== 'void')
+    .map(([, name]) => name)
+    .sort();
+
+  assert.deepEqual(
+    offenders,
+    [...DRAG_SURFACE_METHODS_STILL_RETURNING_A_VALUE].sort(),
+    '这份清单只能变短：有返回值就意味着调用方要等对面回话，线程边界上没有「等一下」',
+  );
+});
+
+/**
  * 玩法侧那几个「大类」也不许 import three。
  *
  * Component 与 System 已经各有一条棘轮，但真正决定第 2 步（Sim Worker）能不能成的
@@ -312,12 +349,17 @@ test('渲染栈里还摸 DOM 的只有已知的那几个', () => {
  * 这是最后一类还在主线程上握着 `THREE.Object3D` 的东西，形状和第 1.5 步那八个
  * 表现 Component 一模一样——那一轮把清单从 8 磨到 0，这一轮同理。
  *
- * 它们靠 `renderer.addWorldObject(object)` 把自己建的对象塞进场景图。
+ * 它们曾经靠 `renderer.addWorldObject(object)` 把自己建的对象塞进场景图。
  * 渲染循环进线程之后那条路就断了：对象过不了线程边界。出路也和上一轮一样——
  * 要么把建模搬进渲染世界、玩法侧只发描述，要么整个组件搬过去。
  *
- * `SceneComponent.ts` 引的是类型（`THREE.Object3D` 出现在 `addWorldObject` 的签名
- * 上），不是实现，所以不在清单里。
+ * `addWorldObject` / `removeWorldObject` 现在已经从 `SceneRenderer` 上删掉了，
+ * 所以这条正则的第二个分支是双保险：真写了也编译不过。
+ *
+ * `onBeforeRender`（渲染侧往主线程递一个活的 `THREE.Camera`）也删掉了——它一个
+ * 注册方都没有了，唯一的用处是让 `SceneComponent.ts` 不得不 import three。
+ * 那条曾经的棘轮现在由类型系统兜着：方法不存在，写不出来。所以这个目录**整个**
+ * 都在扫描范围内，一个文件都不排除。
  *
  * 清单现在是空的。落叶由 `createRenderWorld` 建，挂在渲染世界自己的根下，
  * 收到的只是几个数和一块地形；能力实验室的整套动画在 `ThreeAbilityLabVisual` 里，
@@ -331,7 +373,7 @@ const SCENE_COMPONENTS_STILL_HOLDING_THREE: string[] = [];
 test('还在主线程建 THREE 对象的场景组件只有已知的那几个', () => {
   const directory = new URL('../src/scene/components/', import.meta.url);
   const offenders = readdirSync(directory)
-    .filter((name) => name.endsWith('.ts') && name !== 'SceneComponent.ts')
+    .filter((name) => name.endsWith('.ts'))
     .filter((name) => {
       const source = readFileSync(new URL(name, directory), 'utf8');
       const code = source
@@ -352,50 +394,6 @@ test('还在主线程建 THREE 对象的场景组件只有已知的那几个', (
   );
 });
 
-/**
- * `onBeforeRender` 是渲染侧往主线程递一个活的 `THREE.Camera`。
- *
- * 鼠标拖草曾经靠它反投影；现在它自己按机位、视场角、宽高比构造射线
- * （见 `tests/MouseGrassUnproject.test.ts`，落点和 `THREE.Raycaster` 一致）。
- * 于是这条回调**在 `SceneRenderer` 之外一个调用方都没有了**。
- */
-test('没有人再靠 onBeforeRender 借渲染侧的相机', () => {
-  const roots = ['../src/scene/', '../src/grass/', '../src/abilities/', '../src/ui/'];
-  const offenders: string[] = [];
-  for (const root of roots) {
-    const walk = (folder: URL): void => {
-      for (const entry of readdirSync(folder, { withFileTypes: true })) {
-        if (entry.isDirectory()) {
-          walk(new URL(`${entry.name}/`, folder));
-          continue;
-        }
-        if (!entry.name.endsWith('.ts')) continue;
-        const source = readFileSync(new URL(entry.name, folder), 'utf8');
-        const code = source
-          .split('\n')
-          .filter((line) => {
-            const trimmed = line.trimStart();
-            return !trimmed.startsWith('*') && !trimmed.startsWith('//');
-          })
-          .join('\n');
-        if (/\.onBeforeRender\(/.test(code)) offenders.push(entry.name);
-      }
-    };
-    walk(new URL(root, import.meta.url));
-  }
-  assert.deepEqual(offenders, [], '要相机就用主线程自己那份机位，别回调进渲染侧借');
-});
-
-/**
- * 第 1.75 步的棘轮（`doc/engine-migration-implementation-plan.md` §1.75）。
- *
- * Component 干净了还不够：Actor 世界里跑的 **System** 也得干净，否则第 2 步
- * 一样搬不进 worker。这四个是 `ClientActorSystem` 注册进 `ActorWorld` 的全部
- * System——两个写 SoA、一个发命令、一个翻面，谁都不认识 `THREE`。
- *
- * 名单写死在这里是有意的：新增一个 ActorWorld System 就要在这里登记，
- * 而登记的代价是它必须先通过这条断言。
- */
 const ACTOR_WORLD_SYSTEMS = [
   'ActorTransformSystem.ts',
   'ActorVisualParamSystem.ts',

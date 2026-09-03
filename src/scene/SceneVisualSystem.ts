@@ -110,7 +110,11 @@ export interface VesselHudState {
 }
 
 export interface SceneComposition {
-  scene: THREE.Scene;
+  /**
+   * 这张地图的场景图。**空组合没有**——大厅背后那个什么都没有的画面归渲染侧自己
+   * 铺，装配那一层不需要认识 `THREE.Scene` 才说得出「现在什么都不放」。
+   */
+  scene?: THREE.Scene;
   visualSystems: SceneFrameSystem[];
   weatherTarget?: WeatherVisualTarget;
   dayNightTarget?: DayNightVisualTarget;

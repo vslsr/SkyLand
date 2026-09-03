@@ -1,5 +1,4 @@
 import type { SceneUpdateContext } from '../SceneVisualSystem';
-import type * as THREE from 'three';
 import type { InputSubsystem } from '../../input';
 import type { PlayerEntity } from '../../player/PlayerEntity';
 import type { SceneRenderer } from '../../rendering/SceneRenderer';
@@ -39,7 +38,7 @@ export interface SceneRuntimeComponent {
   dispose?(): void;
 }
 
-export type SceneBeforeRenderListener = (camera: THREE.Camera) => void;
+
 
 /**
  * 返回 `undefined` 表示「这一类不归主线程建」——纯表现的组件由
