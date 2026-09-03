@@ -106,7 +106,6 @@
           "properties": {
             "range": { "type": "number", "exclusiveMinimum": 0, "maximum": 8 },
             "facingDot": { "type": "number", "minimum": -1, "maximum": 1 },
-            "pinch": { "type": "number", "minimum": 0, "maximum": 1 },
             "gripDepth": { "type": "number", "minimum": 0, "maximum": 2 },
             "leashSlack": { "type": "number", "minimum": 0, "maximum": 8 },
             "leashStiffness": { "type": "number", "minimum": 0, "maximum": 120 },

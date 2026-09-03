@@ -273,7 +273,8 @@ export interface ActorArchetypeDefinition {
     bite?: {
       range: number;
       facingDot?: number;
-      pinch?: number;
+      /** 牙齿捏起来的那块皮有多深（米）：贴身咬时尖的保底长度，客户端算突起向量要用。 */
+      gripDepth?: number;
       leashSlack?: number;
       leashStiffness?: number;
       leashDamping?: number;

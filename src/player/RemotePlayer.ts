@@ -20,6 +20,11 @@ import {
   type SlimeDragParams,
 } from '../render/RenderSlimeDrag';
 import {
+  SLIME_BITE_AT_REST,
+  writeSlimeBiteParams,
+  type SlimeBiteParams,
+} from '../render/RenderSlimeBite';
+import {
   SLIME_GROUND_PROBE_AT_REST,
   resolveSlimeLegGroundProbeLayout,
   writeSlimeGroundProbeParams,
@@ -42,6 +47,7 @@ export class RemotePlayer extends Actor {
   private readonly motion: SlimeMotionParams = { ...SLIME_MOTION_AT_REST };
   /** 快照里那一次拖拽；玩法侧只是把它从网络搬到参数段，重放在渲染侧。 */
   private readonly drag: SlimeDragParams = { ...SLIME_DRAG_AT_REST };
+  private readonly biteTip: SlimeBiteParams = { ...SLIME_BITE_AT_REST };
   private readonly visual: PlayerVisualShape;
   private readonly buoyancy?: BuoyancyComponent;
   private speed = 0;
@@ -136,7 +142,13 @@ export class RemotePlayer extends Actor {
     this.drag.pullX = state.slimeDrag?.pullX ?? 0;
     this.drag.pullY = state.slimeDrag?.pullY ?? 0;
     this.drag.pullZ = state.slimeDrag?.pullZ ?? 0;
-    this.drag.pinch = state.slimeDrag?.pinch ?? 0;
+  }
+
+  /** 正被谁咬着捏出来的那个尖，由 `RemotePlayerGroup` 按两边位置当场算。 */
+  public setBiteTip(tip: SlimeBiteParams): void {
+    this.biteTip.x = tip.x;
+    this.biteTip.y = tip.y;
+    this.biteTip.z = tip.z;
   }
 
   public update(deltaSeconds: number): void {
@@ -161,6 +173,7 @@ export class RemotePlayer extends Actor {
     );
     writeSlimeMotionParams(this.transforms, this.renderProxy.id, this.motion);
     writeSlimeDragParams(this.transforms, this.renderProxy.id, this.drag);
+    writeSlimeBiteParams(this.transforms, this.renderProxy.id, this.biteTip);
     const legs = this.legGroundProbe;
     if (legs) {
       legs.refresh(this.transform.x, this.transform.y, this.transform.z);

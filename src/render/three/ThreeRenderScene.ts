@@ -36,6 +36,11 @@ import {
   type SlimeDragParams,
 } from '../RenderSlimeDrag';
 import {
+  readSlimeBiteParams,
+  SLIME_BITE_AT_REST,
+  type SlimeBiteParams,
+} from '../RenderSlimeBite';
+import {
   SLIME_GROUND_PROBE_AT_REST,
   readSlimeGroundProbeParams,
   type SlimeGroundProbeParams,
@@ -140,6 +145,7 @@ export class ThreeRenderScene implements RenderScene {
   /** 逐帧复用的参数读出缓冲，避免每个史莱姆每帧分配一个对象。 */
   private readonly slimeMotion: SlimeMotionParams = { ...SLIME_MOTION_AT_REST };
   private readonly slimeDrag: SlimeDragParams = { ...SLIME_DRAG_AT_REST };
+  private readonly slimeBite: SlimeBiteParams = { ...SLIME_BITE_AT_REST };
   private readonly slimeGroundProbe: SlimeGroundProbeParams = { ...SLIME_GROUND_PROBE_AT_REST };
   /** 腿部步态每帧要读的世界 transform；和 world/parentWorld 一样是复用的读出缓冲。 */
   private readonly legWorld: RenderTransform = { x: 0, y: 0, z: 0, yaw: 0 };
@@ -387,6 +393,9 @@ export class ThreeRenderScene implements RenderScene {
       this.slimeDrags.get(id)?.applyReplicated(
         readSlimeDragParams(transforms, id, this.slimeDrag),
       );
+      // 咬住的尖是静止外形的一项，不走拖拽那条抓取/权重的路。
+      const bite = readSlimeBiteParams(transforms, id, this.slimeBite);
+      slime.simulation.setBiteTip(bite.x, bite.y, bite.z);
       slime.update(
         deltaSeconds,
         elapsedSeconds,
