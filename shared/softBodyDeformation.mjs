@@ -90,6 +90,19 @@ export function mouthWorld(actor, pickupDrop, out = { x: 0, y: 0, z: 0 }) {
   );
 }
 
+/**
+ * 把一个**世界方向**转到 Actor 本地空间。只转不平移：位移是向量不是点，
+ * 用点的换算会把两者的位置差也算进去，方向立刻就偏了。
+ */
+export function actorWorldVectorToLocal(yaw, x, y, z, out) {
+  const sin = Math.sin(yaw);
+  const cos = Math.cos(yaw);
+  out.x = x * cos - z * sin;
+  out.y = y;
+  out.z = x * sin + z * cos;
+  return out;
+}
+
 /** 世界坐标转回 Actor 本地坐标，是 `actorLocalToWorld` 的逆。 */
 export function actorWorldToLocal(origin, yaw, world, out) {
   const sin = Math.sin(yaw);

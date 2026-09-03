@@ -358,6 +358,22 @@ function validateBite(raw, filename) {
     ...(definition.facingDot !== undefined ? {
       facingDot: requireNumber(definition.facingDot, `${path}.facingDot`, -1, 1),
     } : {}),
+    ...(definition.pinch !== undefined ? {
+      pinch: requireNumber(definition.pinch, `${path}.pinch`, 0, 1),
+    } : {}),
+    ...(definition.leashSlack !== undefined ? {
+      leashSlack: requireNumber(definition.leashSlack, `${path}.leashSlack`, 0, 8),
+    } : {}),
+    // 刚度乘固定步长超过 2 这个弹簧就会自激振荡；固定步是 1/60，所以卡在 120。
+    ...(definition.leashStiffness !== undefined ? {
+      leashStiffness: requireNumber(definition.leashStiffness, `${path}.leashStiffness`, 0, 120),
+    } : {}),
+    ...(definition.leashDamping !== undefined ? {
+      leashDamping: requireNumber(definition.leashDamping, `${path}.leashDamping`, 0, 60),
+    } : {}),
+    ...(definition.leashCarry !== undefined ? {
+      leashCarry: requireNumber(definition.leashCarry, `${path}.leashCarry`, 0, 60),
+    } : {}),
   };
 }
 
