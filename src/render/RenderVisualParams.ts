@@ -1,3 +1,5 @@
+import { MAX_SOFT_BODY_HOLDERS } from '../../shared/softBodyDeformation.mjs';
+
 /**
  * 跨边界的定长表现参数（引擎迁移路线图 第 1.5 步）。
  *
@@ -96,11 +98,20 @@ export const PARAM_SLIME_DRAG_CONTACT_Z = 27;
 export const PARAM_SLIME_DRAG_PULL_X = 28;
 export const PARAM_SLIME_DRAG_PULL_Y = 29;
 export const PARAM_SLIME_DRAG_PULL_Z = 30;
+
 /**
- * 这一次抓取有多「尖」。0 是鼠标拖拽（整团跟着走），1 是被牙齿咬住（命中处拔出
- * 一个尖）。它跟着 revision 一起在抓取那一刻生效，之后整次抓取都不变。
+ * 被咬住时的那些突起向量：**每张嘴一个**，方向是「被咬者身体中心 → 那张嘴」，
+ * 长度是这个尖有多长。求解器把它们各自长成一个锥，位移相加。
+ * 外壳坐标（Actor 原点 + 世界轴向），和求解器的顶点同一套。
+ *
+ * **它不过网络。** 快照里只有「谁咬着谁」这一个离散状态（`bitingPlayerId`），
+ * 两边的位置本来就是权威复制过来的，所以每个客户端自己按位置算这三个数：算的是
+ * **当前渲染帧**的插值位置，尖因此始终贴着嘴，而不是慢一个快照。
  */
-export const PARAM_SLIME_DRAG_PINCH = 31;
+export const PARAM_SLIME_BITE_TIPS = 31;
+/** 每张嘴一个尖 × 三个分量。零向量的槽位表示那一格没人咬。 */
+export const PARAM_SLIME_BITE_TIP_COUNT = MAX_SOFT_BODY_HOLDERS;
+export const PARAM_SLIME_BITE_TIP_STRIDE = 3;
 
 /**
  * 腿部落脚用的地面采样窗口（见 `RenderSlimeLegs.ts`）。
@@ -113,12 +124,12 @@ export const PARAM_SLIME_DRAG_PINCH = 31;
  * 表现的槽位每帧写 0，所以静止值必须是「没有」——否则那五个 0 会被当成
  * 「地面在世界 Y=0」，让远处的腿一齐插进虚空。
  */
-export const PARAM_SLIME_GROUND_CENTER_Y = 32;
-export const PARAM_SLIME_GROUND_EAST_Y = 33;
-export const PARAM_SLIME_GROUND_WEST_Y = 34;
-export const PARAM_SLIME_GROUND_SOUTH_Y = 35;
-export const PARAM_SLIME_GROUND_NORTH_Y = 36;
-export const PARAM_SLIME_GROUND_PROBE_RADIUS = 37;
+export const PARAM_SLIME_GROUND_CENTER_Y = 40;
+export const PARAM_SLIME_GROUND_EAST_Y = 41;
+export const PARAM_SLIME_GROUND_WEST_Y = 42;
+export const PARAM_SLIME_GROUND_SOUTH_Y = 43;
+export const PARAM_SLIME_GROUND_NORTH_Y = 44;
+export const PARAM_SLIME_GROUND_PROBE_RADIUS = 45;
 
 /** 每个 proxy 槽位的参数个数。新增参数就在上面加常量并把这里加一。 */
-export const RENDER_VISUAL_PARAM_COUNT = 38;
+export const RENDER_VISUAL_PARAM_COUNT = 46;

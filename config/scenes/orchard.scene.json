@@ -26,10 +26,10 @@
   "renderer": {
     "type": "line-art",
     "background": "#fdfaf2",
-    "fog": { "color": "#fdfaf2", "near": 22, "far": 52 },
+    "fog": { "color": "#fdfaf2", "near": 26, "far": 60 },
     "content": { "ground": true, "trees": true, "grass": true, "ocean": true },
     "palette": {
-      "ground": "#f3ecd9",
+      "ground": "#e4dabf",
       "grass": "#c7d79f",
       "treeTrunk": "#cbb094",
       "treeNeedles": "#b9d2a4"

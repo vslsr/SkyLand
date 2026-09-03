@@ -159,6 +159,8 @@ The browser layout adds `env(safe-area-inset-*)` to configured offsets. Floating
 
 Every joystick/button control must have a touch Mapping in the same input scheme. Keep only the empty `#virtual-controls` host in `index.html`; `VirtualControls` owns all generated child elements and pointer listeners.
 
+The floating activation zone is a transparent rectangle covering nearly half the screen, so its stacking position decides whether on-screen UI is still clickable. `src/style.css` declares the whole screen order as `--layer-*` variables: canvas, `--layer-hud`, `--layer-game-input`, `--layer-game-ui`, `--layer-common-ui`, `--layer-fatal-error`. Hit testing is that order reversed, which is the whole consumption rule: a pointer landing on interactive UI is consumed there and produces no joystick event, while a pointer no UI claims falls through to the joystick. Keep `#virtual-controls` at `--layer-game-input`, keep every interactive game-layer UI at `--layer-game-ui` or higher, and write new full-screen layers as variables instead of raw `z-index` numbers. `VirtualControls` additionally ignores a pointerdown that another layer already consumed (`defaultPrevented`) or that targets an element nested inside the zone.
+
 ## Failure signatures
 
 | Symptom | Check |
@@ -175,4 +177,5 @@ Every joystick/button control must have a touch Mapping in the same input scheme
 | Virtual joystick is absent on desktop | It is gated by `topdown`; add the configured debug query parameter, currently `?virtual-controls=1` |
 | Virtual-control JSON fails during startup | A `Virtual.*` control lacks a touch Mapping, dimensions are out of bounds, or ids/controls are duplicated |
 | Floating base is clipped near an edge | Clamp the center against the activation-zone rectangle using the scaled base radius |
+| On-screen UI under the joystick area cannot be tapped | The activation zone is stacked above that UI; game input must stay at `--layer-game-input`, below `--layer-game-ui` |
 | Keyboard and joystick cancel each other or produce oversized values | Axis sources were combined across device kinds instead of using last-active arbitration |

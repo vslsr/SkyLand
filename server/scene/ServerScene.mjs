@@ -81,8 +81,8 @@ import { TerrainEditor } from '../../shared/world/terrainEditing.mjs';
 import { TerrainPatchStore } from '../../shared/world/terrainPatches.mjs';
 import {
   isSlimeDragRegrab,
+  MAX_SOFT_BODY_HOLDERS,
   mouthWorld,
-  resolveSurfaceContact,
   sanitizeSlimeDragState,
 } from '../../shared/softBodyDeformation.mjs';
 import { terrainMovementHeight } from '../../shared/world/terrainMovement.mjs';
@@ -95,7 +95,6 @@ function roundCoordinate(value) {
 function roundSlimeDrag(drag) {
   return {
     revision: drag.revision,
-    pinch: drag.pinch,
     contactX: roundCoordinate(drag.contactX),
     contactY: roundCoordinate(drag.contactY),
     contactZ: roundCoordinate(drag.contactZ),
@@ -970,16 +969,18 @@ export class ServerScene {
    */
   activeLeash(player) {
     const deformation = player.getComponent(SOFT_BODY_DEFORMATION_COMPONENT);
-    if (!deformation?.heldExternally || deformation.leashStiffness <= 0) return undefined;
+    // 几张嘴咬着就有几根绳，共享固定步只吃一根：取绷得最紧的那根，松的绳不出力。
+    const holder = deformation?.tautestHold();
+    if (!holder) return undefined;
     return {
-      anchorX: roundCoordinate(deformation.anchorX),
-      anchorZ: roundCoordinate(deformation.anchorZ),
-      slack: deformation.grabDistance + deformation.leashSlack,
-      stiffness: deformation.leashStiffness,
-      damping: deformation.leashDamping,
-      carry: deformation.leashCarry,
-      anchorVelocityX: roundCoordinate(deformation.anchorVelocityX),
-      anchorVelocityZ: roundCoordinate(deformation.anchorVelocityZ),
+      anchorX: roundCoordinate(holder.anchorX),
+      anchorZ: roundCoordinate(holder.anchorZ),
+      slack: holder.grabDistance + holder.leashSlack,
+      stiffness: holder.leashStiffness,
+      damping: holder.leashDamping,
+      carry: holder.leashCarry,
+      anchorVelocityX: roundCoordinate(holder.anchorVelocityX),
+      anchorVelocityZ: roundCoordinate(holder.anchorVelocityZ),
     };
   }
 
@@ -1016,8 +1017,12 @@ export class ServerScene {
     for (const candidate of this.players.values()) {
       if (candidate.id === playerId) continue;
       const deformation = candidate.getComponent(SOFT_BODY_DEFORMATION_COMPONENT);
-      // 已经被别的外力捏着的不再接受第二张嘴。
-      if (!deformation || deformation.heldExternally) continue;
+      // 可以几张嘴一起咬同一个人——每多一张就多一个尖。满了或者自己已经咬着的跳过。
+      if (
+        !deformation
+        || deformation.isHeldBy(playerId)
+        || deformation.holderCount >= MAX_SOFT_BODY_HOLDERS
+      ) continue;
       const distance = Math.hypot(
         candidate.x - mouth.x,
         candidate.y + radius * 0.5 - mouth.y,
@@ -1041,18 +1046,8 @@ export class ServerScene {
     }
     if (!target) return false;
 
-    // 命中点按嘴的位置挑：被咬的是朝着那张嘴的那块皮。它同时给出这块皮的朝外
-    // 法线，之后每 tick 判断「往外扯还是往身体里压」靠的就是它。
-    const contact = resolveSurfaceContact(radius, target, mouth, {
-      x: 0, y: 0, z: 0, normalX: 0, normalY: 0, normalZ: 0,
-    });
-    if (!targetDeformation.grab(player.id, contact, {
-      pinch: bite.pinch,
-      gripDepth: bite.gripDepth,
-      // 咬人者绕到另一面时，被咬的那块皮要跟着牙挪过去，重锚得知道外壳多大。
-      shellRadius: radius,
-      // 缰绳从咬住那一刻的距离起算：咬上的瞬间不会被拽一下。形变不看这个距离，
-      // 它看的是嘴在哪儿——牙咬住的当下那块皮就已经被捏起来了。
+    if (!targetDeformation.grab(player.id, {
+      // 缰绳从咬住那一刻的距离起算：咬上的瞬间不会被拽一下。
       grabDistance: Math.hypot(target.x - player.x, target.y - player.y, target.z - player.z),
       leashSlack: bite.leashSlack,
       leashStiffness: bite.leashStiffness,
@@ -1063,9 +1058,9 @@ export class ServerScene {
       targetDeformation.release(player.id);
       return false;
     }
-    // 立刻兑现一次：锚点与位移由 pullToward 写，不先跑一次的话，抓住到下一个
-    // tick 之间发出的快照会带着一条指向世界原点的缰绳，形变也要等一个 tick 才出来。
-    targetDeformation.pullToward(player.id, target, player, player.characterState, mouth);
+    // 立刻兑现一次：锚点由 updateHold 写，不先跑一次的话，抓住到下一个 tick
+    // 之间发出的快照会带着一条指向世界原点的缰绳。
+    targetDeformation.updateHold(player.id, target, player, player.characterState);
     return true;
   }
 

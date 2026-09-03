@@ -124,6 +124,11 @@ const SKY_TINT_STRENGTH = 0.5;
 const BOUNCE_TINT_STRENGTH = 0.5;
 const INK_TINT_STRENGTH = 0.6;
 
+/** 感知亮度；正午的中性白光为 1，用来判断纸面被压暗到什么程度。 */
+function luminance(color: THREE.Color): number {
+  return color.r * 0.2126 + color.g * 0.7152 + color.b * 0.0722;
+}
+
 /**
  * 把一个颜色归一化到平均值 1，再按 strength 混回白色。
  *
@@ -175,8 +180,8 @@ function clamp01(value: number): number {
 }
 
 function grayscale(color: THREE.Color, out: THREE.Color): THREE.Color {
-  const luminance = color.r * 0.3 + color.g * 0.59 + color.b * 0.11;
-  return out.setScalar(luminance * 0.9 + 0.08);
+  const gray = color.r * 0.3 + color.g * 0.59 + color.b * 0.11;
+  return out.setScalar(gray * 0.9 + 0.08);
 }
 
 function wrapAround(value: number, center: number, halfSize: number): number {
@@ -596,9 +601,9 @@ export class WeatherSystem implements SceneVisualSystem, WeatherVisualTarget, We
     scatterStrength: number,
     cloudShadowStrength: number,
   ): void {
-    // 墨线只跟着环境光换色相，浓度不变：夜里偏冷、黄昏偏暖。
+    // 墨线跟着环境光换色相；浓度则跟着照度走：纸面沉下去时墨要浮上来。
     normalizeTint(this.ambientColor, INK_TINT_STRENGTH, this.tintColor);
-    applyEnvironmentInk(this.tintColor);
+    applyEnvironmentInk(this.tintColor, luminance(this.ambientColor));
 
     // 接触阴影跟着主光走：太阳低就拉长，云厚或入夜就化开。
     if (sky) CONTACT_SHADOW_UNIFORMS.uSunDirection.value.copy(sky.sunDirection);

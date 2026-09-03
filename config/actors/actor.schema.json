@@ -4,41 +4,18 @@
   "title": "SkyLand Actor Archetype",
   "type": "object",
   "additionalProperties": false,
-  "required": [
-    "schemaVersion",
-    "id",
-    "components"
-  ],
+  "required": ["schemaVersion", "id", "components"],
   "properties": {
-    "$schema": {
-      "type": "string"
-    },
-    "schemaVersion": {
-      "const": 1
-    },
-    "id": {
-      "type": "string",
-      "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
-    },
+    "$schema": { "type": "string" },
+    "schemaVersion": { "const": 1 },
+    "id": { "type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$" },
     "components": {
       "type": "object",
       "additionalProperties": false,
       "anyOf": [
-        {
-          "required": [
-            "render"
-          ]
-        },
-        {
-          "required": [
-            "generatedProp"
-          ]
-        },
-        {
-          "required": [
-            "guidePath"
-          ]
-        }
+        { "required": ["render"] },
+        { "required": ["generatedProp"] },
+        { "required": ["guidePath"] }
       ],
       "properties": {
         "guidePath": {
@@ -68,295 +45,98 @@
                 "type": "array",
                 "minItems": 3,
                 "maxItems": 3,
-                "items": {
-                  "type": "number",
-                  "minimum": -64,
-                  "maximum": 64
-                }
+                "items": { "type": "number", "minimum": -64, "maximum": 64 }
               }
             },
-            "curve": {
-              "enum": [
-                "linear",
-                "catmull-rom"
-              ]
-            },
-            "lineColor": {
-              "$ref": "#/$defs/color"
-            },
-            "markerColor": {
-              "$ref": "#/$defs/color"
-            },
-            "lineWidth": {
-              "type": "number",
-              "minimum": 1,
-              "maximum": 20
-            },
-            "dashLength": {
-              "type": "number",
-              "minimum": 0.05,
-              "maximum": 8
-            },
-            "gapLength": {
-              "type": "number",
-              "minimum": 0,
-              "maximum": 8
-            },
-            "dashSpeed": {
-              "type": "number",
-              "minimum": -8,
-              "maximum": 8
-            },
-            "markerSize": {
-              "type": "number",
-              "minimum": 0.1,
-              "maximum": 4
-            },
-            "hitRadius": {
-              "type": "number",
-              "minimum": 0.1,
-              "maximum": 8
-            },
-            "autoAdvance": {
-              "type": "boolean"
-            },
-            "loop": {
-              "type": "boolean"
-            },
-            "enabled": {
-              "type": "boolean"
-            },
-            "currentPointIndex": {
-              "type": "integer",
-              "minimum": 0,
-              "maximum": 32
-            }
+            "curve": { "enum": ["linear", "catmull-rom"] },
+            "lineColor": { "$ref": "#/$defs/color" },
+            "markerColor": { "$ref": "#/$defs/color" },
+            "lineWidth": { "type": "number", "minimum": 1, "maximum": 20 },
+            "dashLength": { "type": "number", "minimum": 0.05, "maximum": 8 },
+            "gapLength": { "type": "number", "minimum": 0, "maximum": 8 },
+            "dashSpeed": { "type": "number", "minimum": -8, "maximum": 8 },
+            "markerSize": { "type": "number", "minimum": 0.1, "maximum": 4 },
+            "hitRadius": { "type": "number", "minimum": 0.1, "maximum": 8 },
+            "autoAdvance": { "type": "boolean" },
+            "loop": { "type": "boolean" },
+            "enabled": { "type": "boolean" },
+            "currentPointIndex": { "type": "integer", "minimum": 0, "maximum": 32 }
           }
         },
         "playerMovement": {
           "type": "object",
           "additionalProperties": false,
-          "required": [
-            "walkSpeed",
-            "sprintMultiplier",
-            "maximumStepHeight"
-          ],
+          "required": ["walkSpeed", "sprintMultiplier", "maximumStepHeight"],
           "properties": {
-            "walkSpeed": {
-              "type": "number",
-              "exclusiveMinimum": 0,
-              "maximum": 30
-            },
-            "sprintMultiplier": {
-              "type": "number",
-              "minimum": 1,
-              "maximum": 4
-            },
-            "maximumStepHeight": {
-              "type": "number",
-              "minimum": 0,
-              "maximum": 2
-            },
-            "acceleration": {
-              "type": "number",
-              "exclusiveMinimum": 0,
-              "maximum": 100
-            },
-            "deceleration": {
-              "type": "number",
-              "exclusiveMinimum": 0,
-              "maximum": 100
-            },
-            "airAcceleration": {
-              "type": "number",
-              "minimum": 0,
-              "maximum": 100
-            },
-            "airDrag": {
-              "type": "number",
-              "minimum": 0,
-              "maximum": 20
-            }
+            "walkSpeed": { "type": "number", "exclusiveMinimum": 0, "maximum": 30 },
+            "sprintMultiplier": { "type": "number", "minimum": 1, "maximum": 4 },
+            "maximumStepHeight": { "type": "number", "minimum": 0, "maximum": 2 },
+            "acceleration": { "type": "number", "exclusiveMinimum": 0, "maximum": 100 },
+            "deceleration": { "type": "number", "exclusiveMinimum": 0, "maximum": 100 },
+            "airAcceleration": { "type": "number", "minimum": 0, "maximum": 100 },
+            "airDrag": { "type": "number", "minimum": 0, "maximum": 20 }
           }
         },
         "playerJump": {
           "type": "object",
           "additionalProperties": false,
-          "required": [
-            "impulse",
-            "gravity",
-            "maximumFallSpeed",
-            "airControl"
-          ],
+          "required": ["impulse", "gravity", "maximumFallSpeed", "airControl"],
           "properties": {
-            "impulse": {
-              "type": "number",
-              "exclusiveMinimum": 0,
-              "maximum": 30
-            },
-            "gravity": {
-              "type": "number",
-              "exclusiveMinimum": 0,
-              "maximum": 60
-            },
-            "maximumFallSpeed": {
-              "type": "number",
-              "exclusiveMinimum": 0,
-              "maximum": 60
-            },
-            "airControl": {
-              "type": "number",
-              "minimum": 0,
-              "maximum": 1
-            }
+            "impulse": { "type": "number", "exclusiveMinimum": 0, "maximum": 30 },
+            "gravity": { "type": "number", "exclusiveMinimum": 0, "maximum": 60 },
+            "maximumFallSpeed": { "type": "number", "exclusiveMinimum": 0, "maximum": 60 },
+            "airControl": { "type": "number", "minimum": 0, "maximum": 1 }
           }
         },
         "softBodyDeformation": {
           "type": "object",
           "description": "可被外力捏变形的软体外壳；形变本身不改玩法状态",
           "additionalProperties": false,
-          "required": [
-            "breakDistance"
-          ],
+          "required": ["breakDistance"],
           "properties": {
-            "breakDistance": {
-              "type": "number",
-              "exclusiveMinimum": 0,
-              "maximum": 12
-            },
-            "selfReportTimeoutMs": {
-              "type": "number",
-              "exclusiveMinimum": 0,
-              "maximum": 5000
-            }
+            "breakDistance": { "type": "number", "exclusiveMinimum": 0, "maximum": 12 },
+            "selfReportTimeoutMs": { "type": "number", "exclusiveMinimum": 0, "maximum": 5000 }
           }
         },
         "bite": {
           "type": "object",
           "description": "能咬住别的软体的一张嘴；挂点复用 pickupDrop 的口部",
           "additionalProperties": false,
-          "required": [
-            "range"
-          ],
+          "required": ["range"],
           "properties": {
-            "range": {
-              "type": "number",
-              "exclusiveMinimum": 0,
-              "maximum": 8
-            },
-            "facingDot": {
-              "type": "number",
-              "minimum": -1,
-              "maximum": 1
-            },
-            "pinch": {
-              "type": "number",
-              "minimum": 0,
-              "maximum": 1
-            },
-            "gripDepth": {
-              "type": "number",
-              "minimum": 0,
-              "maximum": 2
-            },
-            "leashSlack": {
-              "type": "number",
-              "minimum": 0,
-              "maximum": 8
-            },
-            "leashStiffness": {
-              "type": "number",
-              "minimum": 0,
-              "maximum": 120
-            },
-            "leashDamping": {
-              "type": "number",
-              "minimum": 0,
-              "maximum": 60
-            },
-            "leashCarry": {
-              "type": "number",
-              "minimum": 0,
-              "maximum": 60
-            }
+            "range": { "type": "number", "exclusiveMinimum": 0, "maximum": 8 },
+            "facingDot": { "type": "number", "minimum": -1, "maximum": 1 },
+            "gripDepth": { "type": "number", "minimum": 0, "maximum": 2 },
+            "leashSlack": { "type": "number", "minimum": 0, "maximum": 8 },
+            "leashStiffness": { "type": "number", "minimum": 0, "maximum": 120 },
+            "leashDamping": { "type": "number", "minimum": 0, "maximum": 60 },
+            "leashCarry": { "type": "number", "minimum": 0, "maximum": 60 }
           }
         },
         "slimeSurfaceDrag": {
           "type": "object",
           "description": "仅客户端使用的混合史莱姆鼠标表面拖拽参数",
           "additionalProperties": false,
-          "required": [
-            "maximumDistance",
-            "pullForce",
-            "falloffExponent",
-            "influenceRadius"
-          ],
+          "required": ["maximumDistance", "pullForce", "falloffExponent", "influenceRadius"],
           "properties": {
-            "maximumDistance": {
-              "type": "number",
-              "exclusiveMinimum": 0,
-              "maximum": 2
-            },
-            "pullForce": {
-              "type": "number",
-              "exclusiveMinimum": 0,
-              "maximum": 300
-            },
-            "falloffExponent": {
-              "type": "number",
-              "minimum": 1,
-              "maximum": 8
-            },
-            "influenceRadius": {
-              "type": "number",
-              "exclusiveMinimum": 0,
-              "maximum": 2
-            }
+            "maximumDistance": { "type": "number", "exclusiveMinimum": 0, "maximum": 2 },
+            "pullForce": { "type": "number", "exclusiveMinimum": 0, "maximum": 300 },
+            "falloffExponent": { "type": "number", "minimum": 1, "maximum": 8 },
+            "influenceRadius": { "type": "number", "exclusiveMinimum": 0, "maximum": 2 }
           }
         },
         "buoyancy": {
           "type": "object",
           "additionalProperties": false,
-          "required": [
-            "minimumBeam",
-            "minimumLength",
-            "maximumTrimRadians",
-            "minimumDraft",
-            "maximumDraft",
-            "parts"
-          ],
+          "required": ["minimumBeam", "minimumLength", "maximumTrimRadians", "minimumDraft", "maximumDraft", "parts"],
           "properties": {
-            "minimumBeam": {
-              "type": "number",
-              "exclusiveMinimum": 0
-            },
-            "minimumLength": {
-              "type": "number",
-              "exclusiveMinimum": 0
-            },
-            "maximumTrimRadians": {
-              "type": "number",
-              "minimum": 0,
-              "maximum": 0.25
-            },
-            "minimumDraft": {
-              "type": "number",
-              "minimum": 0
-            },
-            "maximumDraft": {
-              "type": "number",
-              "minimum": 0
-            },
-            "bobAmplitude": {
-              "type": "number",
-              "minimum": 0,
-              "maximum": 0.75
-            },
-            "bobFrequency": {
-              "type": "number",
-              "minimum": 0,
-              "maximum": 2
-            },
+            "minimumBeam": { "type": "number", "exclusiveMinimum": 0 },
+            "minimumLength": { "type": "number", "exclusiveMinimum": 0 },
+            "maximumTrimRadians": { "type": "number", "minimum": 0, "maximum": 0.25 },
+            "minimumDraft": { "type": "number", "minimum": 0 },
+            "maximumDraft": { "type": "number", "minimum": 0 },
+            "bobAmplitude": { "type": "number", "minimum": 0, "maximum": 0.75 },
+            "bobFrequency": { "type": "number", "minimum": 0, "maximum": 2 },
             "parts": {
               "type": "array",
               "minItems": 1,
@@ -364,38 +144,14 @@
               "items": {
                 "type": "object",
                 "additionalProperties": false,
-                "required": [
-                  "id",
-                  "mass",
-                  "buoyancy",
-                  "integrity",
-                  "localX",
-                  "localZ"
-                ],
+                "required": ["id", "mass", "buoyancy", "integrity", "localX", "localZ"],
                 "properties": {
-                  "id": {
-                    "type": "string",
-                    "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
-                  },
-                  "mass": {
-                    "type": "number",
-                    "minimum": 0
-                  },
-                  "buoyancy": {
-                    "type": "number",
-                    "minimum": 0
-                  },
-                  "integrity": {
-                    "type": "number",
-                    "minimum": 0,
-                    "maximum": 1
-                  },
-                  "localX": {
-                    "type": "number"
-                  },
-                  "localZ": {
-                    "type": "number"
-                  }
+                  "id": { "type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$" },
+                  "mass": { "type": "number", "minimum": 0 },
+                  "buoyancy": { "type": "number", "minimum": 0 },
+                  "integrity": { "type": "number", "minimum": 0, "maximum": 1 },
+                  "localX": { "type": "number" },
+                  "localZ": { "type": "number" }
                 }
               }
             }
@@ -404,138 +160,46 @@
         "vesselMotor": {
           "type": "object",
           "additionalProperties": false,
-          "required": [
-            "maximumForwardSpeed",
-            "maximumReverseSpeed",
-            "acceleration",
-            "deceleration",
-            "drag",
-            "turnSpeed",
-            "inputTimeoutMs"
-          ],
+          "required": ["maximumForwardSpeed", "maximumReverseSpeed", "acceleration", "deceleration", "drag", "turnSpeed", "inputTimeoutMs"],
           "properties": {
-            "maximumForwardSpeed": {
-              "type": "number",
-              "exclusiveMinimum": 0,
-              "maximum": 30
-            },
-            "maximumReverseSpeed": {
-              "type": "number",
-              "exclusiveMinimum": 0,
-              "maximum": 15
-            },
-            "acceleration": {
-              "type": "number",
-              "exclusiveMinimum": 0,
-              "maximum": 30
-            },
-            "deceleration": {
-              "type": "number",
-              "exclusiveMinimum": 0,
-              "maximum": 30
-            },
-            "drag": {
-              "type": "number",
-              "exclusiveMinimum": 0,
-              "maximum": 30
-            },
-            "turnSpeed": {
-              "type": "number",
-              "exclusiveMinimum": 0,
-              "maximum": 6.2832
-            },
-            "inputTimeoutMs": {
-              "type": "integer",
-              "minimum": 100,
-              "maximum": 2000
-            }
+            "maximumForwardSpeed": { "type": "number", "exclusiveMinimum": 0, "maximum": 30 },
+            "maximumReverseSpeed": { "type": "number", "exclusiveMinimum": 0, "maximum": 15 },
+            "acceleration": { "type": "number", "exclusiveMinimum": 0, "maximum": 30 },
+            "deceleration": { "type": "number", "exclusiveMinimum": 0, "maximum": 30 },
+            "drag": { "type": "number", "exclusiveMinimum": 0, "maximum": 30 },
+            "turnSpeed": { "type": "number", "exclusiveMinimum": 0, "maximum": 6.2832 },
+            "inputTimeoutMs": { "type": "integer", "minimum": 100, "maximum": 2000 }
           }
         },
         "interactable": {
           "type": "object",
           "additionalProperties": false,
-          "required": [
-            "action",
-            "label",
-            "maximumDistance"
-          ],
+          "required": ["action", "label", "maximumDistance"],
           "properties": {
-            "action": {
-              "enum": [
-                "cargo-toggle",
-                "mushroom-bite",
-                "pickup-stack",
-                "harvest-prop",
-                "container-open"
-              ]
-            },
-            "label": {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 32
-            },
-            "maximumDistance": {
-              "type": "number",
-              "minimum": 0.5,
-              "maximum": 12
-            }
+            "action": { "enum": ["cargo-toggle", "mushroom-bite", "pickup-stack", "harvest-prop", "container-open"] },
+            "label": { "type": "string", "minLength": 1, "maxLength": 32 },
+            "maximumDistance": { "type": "number", "minimum": 0.5, "maximum": 12 }
           }
         },
         "cargo": {
           "type": "object",
           "additionalProperties": false,
-          "required": [
-            "mass",
-            "mountLocalX",
-            "mountLocalY",
-            "mountLocalZ"
-          ],
+          "required": ["mass", "mountLocalX", "mountLocalY", "mountLocalZ"],
           "properties": {
-            "mass": {
-              "type": "number",
-              "exclusiveMinimum": 0,
-              "maximum": 1000
-            },
-            "mountLocalX": {
-              "type": "number",
-              "minimum": -10,
-              "maximum": 10
-            },
-            "mountLocalY": {
-              "type": "number",
-              "minimum": -2,
-              "maximum": 10
-            },
-            "mountLocalZ": {
-              "type": "number",
-              "minimum": -10,
-              "maximum": 10
-            }
+            "mass": { "type": "number", "exclusiveMinimum": 0, "maximum": 1000 },
+            "mountLocalX": { "type": "number", "minimum": -10, "maximum": 10 },
+            "mountLocalY": { "type": "number", "minimum": -2, "maximum": 10 },
+            "mountLocalZ": { "type": "number", "minimum": -10, "maximum": 10 }
           }
         },
         "elasticTether": {
           "type": "object",
           "additionalProperties": false,
-          "required": [
-            "restLength",
-            "breakLength"
-          ],
+          "required": ["restLength", "breakLength"],
           "properties": {
-            "restLength": {
-              "type": "number",
-              "exclusiveMinimum": 0,
-              "maximum": 5
-            },
-            "breakLength": {
-              "type": "number",
-              "exclusiveMinimum": 0,
-              "maximum": 12
-            },
-            "pullDistance": {
-              "type": "number",
-              "minimum": 0,
-              "maximum": 12
-            }
+            "restLength": { "type": "number", "exclusiveMinimum": 0, "maximum": 5 },
+            "breakLength": { "type": "number", "exclusiveMinimum": 0, "maximum": 12 },
+            "pullDistance": { "type": "number", "minimum": 0, "maximum": 12 }
           }
         },
         "elasticDetach": {
@@ -546,96 +210,34 @@
         "pickupDrop": {
           "type": "object",
           "additionalProperties": false,
-          "required": [
-            "mouthLocalX",
-            "mouthLocalY",
-            "mouthLocalZ",
-            "mouthLocalYaw"
-          ],
+          "required": ["mouthLocalX", "mouthLocalY", "mouthLocalZ", "mouthLocalYaw"],
           "properties": {
-            "mouthLocalX": {
-              "type": "number",
-              "minimum": -10,
-              "maximum": 10
-            },
-            "mouthLocalY": {
-              "type": "number",
-              "minimum": -10,
-              "maximum": 10
-            },
-            "mouthLocalZ": {
-              "type": "number",
-              "minimum": -10,
-              "maximum": 10
-            },
-            "mouthLocalYaw": {
-              "type": "number",
-              "minimum": -6.2832,
-              "maximum": 6.2832
-            }
+            "mouthLocalX": { "type": "number", "minimum": -10, "maximum": 10 },
+            "mouthLocalY": { "type": "number", "minimum": -10, "maximum": 10 },
+            "mouthLocalZ": { "type": "number", "minimum": -10, "maximum": 10 },
+            "mouthLocalYaw": { "type": "number", "minimum": -6.2832, "maximum": 6.2832 }
           }
         },
         "hazard": {
           "type": "object",
           "additionalProperties": false,
-          "required": [
-            "radius",
-            "damage",
-            "cooldownMs",
-            "partId"
-          ],
+          "required": ["radius", "damage", "cooldownMs", "partId"],
           "properties": {
-            "radius": {
-              "type": "number",
-              "exclusiveMinimum": 0,
-              "maximum": 10
-            },
-            "damage": {
-              "type": "number",
-              "exclusiveMinimum": 0,
-              "maximum": 1
-            },
-            "cooldownMs": {
-              "type": "integer",
-              "minimum": 100,
-              "maximum": 60000
-            },
-            "partId": {
-              "type": "string",
-              "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
-            }
+            "radius": { "type": "number", "exclusiveMinimum": 0, "maximum": 10 },
+            "damage": { "type": "number", "exclusiveMinimum": 0, "maximum": 1 },
+            "cooldownMs": { "type": "integer", "minimum": 100, "maximum": 60000 },
+            "partId": { "type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$" }
           }
         },
         "temperature": {
           "type": "object",
           "additionalProperties": false,
-          "required": [
-            "initialTemperature",
-            "ambientTemperature",
-            "heatCapacity",
-            "coolingRate"
-          ],
+          "required": ["initialTemperature", "ambientTemperature", "heatCapacity", "coolingRate"],
           "properties": {
-            "initialTemperature": {
-              "type": "number",
-              "minimum": -100,
-              "maximum": 2000
-            },
-            "ambientTemperature": {
-              "type": "number",
-              "minimum": -100,
-              "maximum": 2000
-            },
-            "heatCapacity": {
-              "type": "number",
-              "exclusiveMinimum": 0,
-              "maximum": 10000
-            },
-            "coolingRate": {
-              "type": "number",
-              "minimum": 0,
-              "maximum": 10
-            }
+            "initialTemperature": { "type": "number", "minimum": -100, "maximum": 2000 },
+            "ambientTemperature": { "type": "number", "minimum": -100, "maximum": 2000 },
+            "heatCapacity": { "type": "number", "exclusiveMinimum": 0, "maximum": 10000 },
+            "coolingRate": { "type": "number", "minimum": 0, "maximum": 10 }
           }
         },
         "combustible": {
@@ -650,68 +252,28 @@
             "heatRadius"
           ],
           "properties": {
-            "ignitionTemperature": {
-              "type": "number",
-              "minimum": -100,
-              "maximum": 2000
-            },
-            "extinguishTemperature": {
-              "type": "number",
-              "minimum": -100,
-              "maximum": 2000
-            },
-            "fuel": {
-              "type": "number",
-              "exclusiveMinimum": 0,
-              "maximum": 100000
-            },
-            "burnRate": {
-              "type": "number",
-              "exclusiveMinimum": 0,
-              "maximum": 10000
-            },
-            "heatOutput": {
-              "type": "number",
-              "exclusiveMinimum": 0,
-              "maximum": 100000
-            },
-            "heatRadius": {
-              "type": "number",
-              "exclusiveMinimum": 0,
-              "maximum": 32
-            }
+            "ignitionTemperature": { "type": "number", "minimum": -100, "maximum": 2000 },
+            "extinguishTemperature": { "type": "number", "minimum": -100, "maximum": 2000 },
+            "fuel": { "type": "number", "exclusiveMinimum": 0, "maximum": 100000 },
+            "burnRate": { "type": "number", "exclusiveMinimum": 0, "maximum": 10000 },
+            "heatOutput": { "type": "number", "exclusiveMinimum": 0, "maximum": 100000 },
+            "heatRadius": { "type": "number", "exclusiveMinimum": 0, "maximum": 32 }
           }
         },
         "heatEmitter": {
           "type": "object",
           "additionalProperties": false,
-          "required": [
-            "power",
-            "radius",
-            "enabled"
-          ],
+          "required": ["power", "radius", "enabled"],
           "properties": {
-            "power": {
-              "type": "number",
-              "exclusiveMinimum": 0,
-              "maximum": 100000
-            },
-            "radius": {
-              "type": "number",
-              "exclusiveMinimum": 0,
-              "maximum": 32
-            },
-            "enabled": {
-              "type": "boolean"
-            }
+            "power": { "type": "number", "exclusiveMinimum": 0, "maximum": 100000 },
+            "radius": { "type": "number", "exclusiveMinimum": 0, "maximum": 32 },
+            "enabled": { "type": "boolean" }
           }
         },
         "inventory": {
           "type": "object",
           "additionalProperties": false,
-          "required": [
-            "slotCapacity"
-          ],
+          "required": ["slotCapacity"],
           "properties": {
             "slotCapacity": {
               "description": "角色能带走的货位数。设计稿 §6.5：容量小，够带回一次岛上收获。",
@@ -737,22 +299,10 @@
           "description": "可存取的容器：箱子、船舱。和背包共用同一套堆叠与货位规则，区别是容量更大、归世界所有。",
           "type": "object",
           "additionalProperties": false,
-          "required": [
-            "slotCapacity",
-            "label",
-            "reach"
-          ],
+          "required": ["slotCapacity", "label", "reach"],
           "properties": {
-            "slotCapacity": {
-              "type": "integer",
-              "minimum": 1,
-              "maximum": 256
-            },
-            "label": {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 32
-            },
+            "slotCapacity": { "type": "integer", "minimum": 1, "maximum": 256 },
+            "label": { "type": "string", "minLength": 1, "maxLength": 32 },
             "reach": {
               "description": "离开这个距离服务端替玩家关掉界面。",
               "type": "number",
@@ -764,233 +314,91 @@
         "itemStack": {
           "type": "object",
           "additionalProperties": false,
-          "required": [
-            "itemType",
-            "displayName",
-            "defaultQuantity",
-            "maximumQuantity",
-            "compatibilityKey"
-          ],
+          "required": ["itemType", "displayName", "defaultQuantity", "maximumQuantity", "compatibilityKey"],
           "properties": {
-            "itemType": {
-              "type": "string",
-              "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
-            },
-            "displayName": {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 32
-            },
-            "defaultQuantity": {
-              "type": "integer",
-              "minimum": 1,
-              "maximum": 100000
-            },
-            "maximumQuantity": {
-              "type": "integer",
-              "minimum": 1,
-              "maximum": 100000
-            },
-            "compatibilityKey": {
-              "type": "string",
-              "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
-            }
+            "itemType": { "type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$" },
+            "displayName": { "type": "string", "minLength": 1, "maxLength": 32 },
+            "defaultQuantity": { "type": "integer", "minimum": 1, "maximum": 100000 },
+            "maximumQuantity": { "type": "integer", "minimum": 1, "maximum": 100000 },
+            "compatibilityKey": { "type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$" }
           }
         },
         "actorResidency": {
           "type": "object",
           "additionalProperties": false,
-          "required": [
-            "sleepDelaySeconds",
-            "dormantDelaySeconds",
-            "dormantEligible"
-          ],
+          "required": ["sleepDelaySeconds", "dormantDelaySeconds", "dormantEligible"],
           "properties": {
-            "sleepDelaySeconds": {
-              "type": "number",
-              "minimum": 0,
-              "maximum": 60
-            },
-            "dormantDelaySeconds": {
-              "type": "number",
-              "minimum": 0,
-              "maximum": 600
-            },
-            "dormantEligible": {
-              "type": "boolean"
-            }
+            "sleepDelaySeconds": { "type": "number", "minimum": 0, "maximum": 60 },
+            "dormantDelaySeconds": { "type": "number", "minimum": 0, "maximum": 600 },
+            "dormantEligible": { "type": "boolean" }
           }
         },
         "dropMotion": {
           "type": "object",
           "additionalProperties": false,
-          "required": [
-            "gravity",
-            "drag",
-            "settleSpeed"
-          ],
+          "required": ["gravity", "drag", "settleSpeed"],
           "properties": {
-            "gravity": {
-              "type": "number",
-              "minimum": 0,
-              "maximum": 50
-            },
-            "drag": {
-              "type": "number",
-              "minimum": 0,
-              "maximum": 50
-            },
-            "groundDrag": {
-              "type": "number",
-              "minimum": 0,
-              "maximum": 50
-            },
-            "restitution": {
-              "type": "number",
-              "minimum": 0,
-              "maximum": 1
-            },
-            "radius": {
-              "type": "number",
-              "minimum": 0,
-              "maximum": 3
-            },
-            "angularDamping": {
-              "type": "number",
-              "minimum": 0,
-              "maximum": 50
-            },
-            "settleSpeed": {
-              "type": "number",
-              "exclusiveMinimum": 0,
-              "maximum": 10
-            }
+            "gravity": { "type": "number", "minimum": 0, "maximum": 50 },
+            "drag": { "type": "number", "minimum": 0, "maximum": 50 },
+            "groundDrag": { "type": "number", "minimum": 0, "maximum": 50 },
+            "restitution": { "type": "number", "minimum": 0, "maximum": 1 },
+            "radius": { "type": "number", "minimum": 0, "maximum": 3 },
+            "angularDamping": { "type": "number", "minimum": 0, "maximum": 50 },
+            "settleSpeed": { "type": "number", "exclusiveMinimum": 0, "maximum": 10 }
           }
         },
         "lifetime": {
           "type": "object",
           "additionalProperties": false,
-          "required": [
-            "lifetimeSeconds"
-          ],
+          "required": ["lifetimeSeconds"],
           "properties": {
-            "lifetimeSeconds": {
-              "type": "number",
-              "minimum": 0,
-              "maximum": 86400
-            }
+            "lifetimeSeconds": { "type": "number", "minimum": 0, "maximum": 86400 }
           }
         },
         "replicationPolicy": {
           "type": "object",
           "additionalProperties": false,
-          "required": [
-            "mode",
-            "radiusChunks"
-          ],
+          "required": ["mode", "radiusChunks"],
           "properties": {
-            "mode": {
-              "enum": [
-                "always",
-                "aoi"
-              ]
-            },
-            "radiusChunks": {
-              "type": "integer",
-              "minimum": 0,
-              "maximum": 8
-            }
+            "mode": { "enum": ["always", "aoi"] },
+            "radiusChunks": { "type": "integer", "minimum": 0, "maximum": 8 }
           }
         },
         "generatedProp": {
           "type": "object",
           "description": "可采集的世界生成物件；承载哪一种物件由场景的 gameplay.worldProps 决定",
           "additionalProperties": false,
-          "required": [
-            "drop"
-          ],
+          "required": ["drop"],
           "oneOf": [
             {
-              "required": [
-                "maximumHealth",
-                "harvestDamage"
-              ],
-              "not": {
-                "required": [
-                  "regrow"
-                ]
-              }
+              "required": ["maximumHealth", "harvestDamage"],
+              "not": { "required": ["regrow"] }
             },
             {
-              "required": [
-                "regrow"
-              ],
-              "not": {
-                "anyOf": [
-                  {
-                    "required": [
-                      "maximumHealth"
-                    ]
-                  },
-                  {
-                    "required": [
-                      "harvestDamage"
-                    ]
-                  }
-                ]
-              }
+              "required": ["regrow"],
+              "not": { "anyOf": [{ "required": ["maximumHealth"] }, { "required": ["harvestDamage"] }] }
             }
           ],
           "properties": {
-            "maximumHealth": {
-              "type": "integer",
-              "minimum": 1,
-              "maximum": 1000
-            },
-            "harvestDamage": {
-              "type": "integer",
-              "minimum": 1,
-              "maximum": 1000
-            },
+            "maximumHealth": { "type": "integer", "minimum": 1, "maximum": 1000 },
+            "harvestDamage": { "type": "integer", "minimum": 1, "maximum": 1000 },
             "regrow": {
               "type": "object",
               "description": "出现这一块表示采集即冷却：没有血量，采一次之后过这么多秒自己长回来",
               "additionalProperties": false,
-              "required": [
-                "seconds"
-              ],
+              "required": ["seconds"],
               "properties": {
-                "seconds": {
-                  "type": "number",
-                  "minimum": 1,
-                  "maximum": 86400
-                }
+                "seconds": { "type": "number", "minimum": 1, "maximum": 86400 }
               }
             },
             "drop": {
               "type": "object",
               "additionalProperties": false,
-              "required": [
-                "archetypeId",
-                "quantity"
-              ],
+              "required": ["archetypeId", "quantity"],
               "properties": {
-                "archetypeId": {
-                  "type": "string",
-                  "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
-                },
-                "quantity": {
-                  "type": "integer",
-                  "minimum": 1,
-                  "maximum": 1000
-                },
-                "spawnPattern": {
-                  "enum": [
-                    "center",
-                    "center-scatter",
-                    "fruit-anchors"
-                  ]
-                }
+                "archetypeId": { "type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$" },
+                "quantity": { "type": "integer", "minimum": 1, "maximum": 1000 },
+                "spawnPattern": { "enum": ["center", "center-scatter", "fruit-anchors"] }
               }
             }
           }
@@ -998,10 +406,7 @@
         "patrolPath": {
           "type": "object",
           "additionalProperties": false,
-          "required": [
-            "waypoints",
-            "speed"
-          ],
+          "required": ["waypoints", "speed"],
           "properties": {
             "waypoints": {
               "type": "array",
@@ -1011,29 +416,12 @@
                 "type": "array",
                 "minItems": 3,
                 "maxItems": 3,
-                "items": {
-                  "type": "number",
-                  "minimum": -64,
-                  "maximum": 64
-                }
+                "items": { "type": "number", "minimum": -64, "maximum": 64 }
               }
             },
-            "speed": {
-              "type": "number",
-              "exclusiveMinimum": 0,
-              "maximum": 20
-            },
-            "waitSeconds": {
-              "type": "number",
-              "minimum": 0,
-              "maximum": 60
-            },
-            "mode": {
-              "enum": [
-                "ping-pong",
-                "loop"
-              ]
-            }
+            "speed": { "type": "number", "exclusiveMinimum": 0, "maximum": 20 },
+            "waitSeconds": { "type": "number", "minimum": 0, "maximum": 60 },
+            "mode": { "enum": ["ping-pong", "loop"] }
           }
         },
         "render": {
@@ -1052,32 +440,14 @@
                 "shadowColor"
               ],
               "properties": {
-                "model": {
-                  "const": "line-art-player-slime"
-                },
-                "radius": {
-                  "type": "number",
-                  "exclusiveMinimum": 0,
-                  "maximum": 2
-                },
-                "membraneColor": {
-                  "$ref": "#/$defs/color"
-                },
-                "middleColor": {
-                  "$ref": "#/$defs/color"
-                },
-                "coreColor": {
-                  "$ref": "#/$defs/color"
-                },
-                "bubbleColor": {
-                  "$ref": "#/$defs/color"
-                },
-                "inkColor": {
-                  "$ref": "#/$defs/color"
-                },
-                "shadowColor": {
-                  "$ref": "#/$defs/color"
-                }
+                "model": { "const": "line-art-player-slime" },
+                "radius": { "type": "number", "exclusiveMinimum": 0, "maximum": 2 },
+                "membraneColor": { "$ref": "#/$defs/color" },
+                "middleColor": { "$ref": "#/$defs/color" },
+                "coreColor": { "$ref": "#/$defs/color" },
+                "bubbleColor": { "$ref": "#/$defs/color" },
+                "inkColor": { "$ref": "#/$defs/color" },
+                "shadowColor": { "$ref": "#/$defs/color" }
               }
             },
             {
@@ -1103,77 +473,23 @@
                 "shadowColor"
               ],
               "properties": {
-                "model": {
-                  "const": "line-art-pbf-slime"
-                },
-                "radius": {
-                  "type": "number",
-                  "exclusiveMinimum": 0,
-                  "maximum": 2
-                },
-                "collisionRadius": {
-                  "type": "number",
-                  "exclusiveMinimum": 0,
-                  "maximum": 2
-                },
-                "collisionHeight": {
-                  "type": "number",
-                  "exclusiveMinimum": 0,
-                  "maximum": 4
-                },
-                "particleCount": {
-                  "type": "integer",
-                  "minimum": 16,
-                  "maximum": 192
-                },
-                "constraintIterations": {
-                  "type": "integer",
-                  "minimum": 1,
-                  "maximum": 5
-                },
-                "gravity": {
-                  "type": "number",
-                  "minimum": 0,
-                  "maximum": 50
-                },
-                "centerForce": {
-                  "type": "number",
-                  "minimum": 0,
-                  "maximum": 100
-                },
-                "viscosity": {
-                  "type": "number",
-                  "minimum": 0,
-                  "maximum": 100
-                },
-                "bubbleCount": {
-                  "type": "integer",
-                  "minimum": 0,
-                  "maximum": 24
-                },
-                "bubbleSpeed": {
-                  "type": "number",
-                  "minimum": 0,
-                  "maximum": 2
-                },
-                "surfaceColor": {
-                  "$ref": "#/$defs/color"
-                },
-                "innerColor": {
-                  "$ref": "#/$defs/color"
-                },
-                "highlightColor": {
-                  "$ref": "#/$defs/color"
-                },
-                "bubbleColor": {
-                  "$ref": "#/$defs/color"
-                },
-                "inkColor": {
-                  "$ref": "#/$defs/color"
-                },
-                "shadowColor": {
-                  "$ref": "#/$defs/color"
-                }
+                "model": { "const": "line-art-pbf-slime" },
+                "radius": { "type": "number", "exclusiveMinimum": 0, "maximum": 2 },
+                "collisionRadius": { "type": "number", "exclusiveMinimum": 0, "maximum": 2 },
+                "collisionHeight": { "type": "number", "exclusiveMinimum": 0, "maximum": 4 },
+                "particleCount": { "type": "integer", "minimum": 16, "maximum": 192 },
+                "constraintIterations": { "type": "integer", "minimum": 1, "maximum": 5 },
+                "gravity": { "type": "number", "minimum": 0, "maximum": 50 },
+                "centerForce": { "type": "number", "minimum": 0, "maximum": 100 },
+                "viscosity": { "type": "number", "minimum": 0, "maximum": 100 },
+                "bubbleCount": { "type": "integer", "minimum": 0, "maximum": 24 },
+                "bubbleSpeed": { "type": "number", "minimum": 0, "maximum": 2 },
+                "surfaceColor": { "$ref": "#/$defs/color" },
+                "innerColor": { "$ref": "#/$defs/color" },
+                "highlightColor": { "$ref": "#/$defs/color" },
+                "bubbleColor": { "$ref": "#/$defs/color" },
+                "inkColor": { "$ref": "#/$defs/color" },
+                "shadowColor": { "$ref": "#/$defs/color" }
               }
             },
             {
@@ -1202,529 +518,189 @@
                 "footShadowColor"
               ],
               "properties": {
-                "model": {
-                  "const": "line-art-legged-slime"
-                },
-                "radius": {
-                  "type": "number",
-                  "exclusiveMinimum": 0,
-                  "maximum": 2
-                },
-                "hipHeight": {
-                  "type": "number",
-                  "exclusiveMinimum": 0,
-                  "maximum": 4
-                },
-                "legSpread": {
-                  "type": "number",
-                  "exclusiveMinimum": 0,
-                  "maximum": 2
-                },
-                "legCount": {
-                  "type": "integer",
-                  "minimum": 2,
-                  "maximum": 6
-                },
-                "thighLength": {
-                  "type": "number",
-                  "exclusiveMinimum": 0,
-                  "maximum": 3
-                },
-                "shinLength": {
-                  "type": "number",
-                  "exclusiveMinimum": 0,
-                  "maximum": 3
-                },
-                "legThickness": {
-                  "type": "number",
-                  "exclusiveMinimum": 0,
-                  "maximum": 0.3
-                },
-                "footLength": {
-                  "type": "number",
-                  "exclusiveMinimum": 0,
-                  "maximum": 0.6
-                },
-                "stepLength": {
-                  "type": "number",
-                  "exclusiveMinimum": 0,
-                  "maximum": 3
-                },
-                "stepHeight": {
-                  "type": "number",
-                  "minimum": 0,
-                  "maximum": 2
-                },
-                "stepDuration": {
-                  "type": "number",
-                  "exclusiveMinimum": 0,
-                  "maximum": 2
-                },
-                "membraneColor": {
-                  "$ref": "#/$defs/color"
-                },
-                "middleColor": {
-                  "$ref": "#/$defs/color"
-                },
-                "coreColor": {
-                  "$ref": "#/$defs/color"
-                },
-                "bubbleColor": {
-                  "$ref": "#/$defs/color"
-                },
-                "inkColor": {
-                  "$ref": "#/$defs/color"
-                },
-                "shadowColor": {
-                  "$ref": "#/$defs/color"
-                },
-                "legColor": {
-                  "$ref": "#/$defs/color"
-                },
-                "footShadowColor": {
-                  "$ref": "#/$defs/color"
-                }
+                "model": { "const": "line-art-legged-slime" },
+                "radius": { "type": "number", "exclusiveMinimum": 0, "maximum": 2 },
+                "hipHeight": { "type": "number", "exclusiveMinimum": 0, "maximum": 4 },
+                "legSpread": { "type": "number", "exclusiveMinimum": 0, "maximum": 2 },
+                "legCount": { "type": "integer", "minimum": 2, "maximum": 6 },
+                "thighLength": { "type": "number", "exclusiveMinimum": 0, "maximum": 3 },
+                "shinLength": { "type": "number", "exclusiveMinimum": 0, "maximum": 3 },
+                "legThickness": { "type": "number", "exclusiveMinimum": 0, "maximum": 0.3 },
+                "footLength": { "type": "number", "exclusiveMinimum": 0, "maximum": 0.6 },
+                "stepLength": { "type": "number", "exclusiveMinimum": 0, "maximum": 3 },
+                "stepHeight": { "type": "number", "minimum": 0, "maximum": 2 },
+                "stepDuration": { "type": "number", "exclusiveMinimum": 0, "maximum": 2 },
+                "membraneColor": { "$ref": "#/$defs/color" },
+                "middleColor": { "$ref": "#/$defs/color" },
+                "coreColor": { "$ref": "#/$defs/color" },
+                "bubbleColor": { "$ref": "#/$defs/color" },
+                "inkColor": { "$ref": "#/$defs/color" },
+                "shadowColor": { "$ref": "#/$defs/color" },
+                "legColor": { "$ref": "#/$defs/color" },
+                "footShadowColor": { "$ref": "#/$defs/color" }
               }
             },
             {
               "type": "object",
               "additionalProperties": false,
-              "required": [
-                "model",
-                "foamColor",
-                "length",
-                "width"
-              ],
+              "required": ["model", "foamColor", "length", "width"],
               "properties": {
-                "model": {
-                  "const": "line-art-raft"
-                },
-                "foamColor": {
-                  "$ref": "#/$defs/color"
-                },
-                "length": {
-                  "type": "number",
-                  "exclusiveMinimum": 0
-                },
-                "width": {
-                  "type": "number",
-                  "exclusiveMinimum": 0
-                }
+                "model": { "const": "line-art-raft" },
+                "foamColor": { "$ref": "#/$defs/color" },
+                "length": { "type": "number", "exclusiveMinimum": 0 },
+                "width": { "type": "number", "exclusiveMinimum": 0 }
               }
             },
             {
               "type": "object",
               "additionalProperties": false,
-              "required": [
-                "model",
-                "color",
-                "accentColor",
-                "length",
-                "width",
-                "height"
-              ],
+              "required": ["model", "color", "accentColor", "length", "width", "height"],
               "properties": {
-                "model": {
-                  "const": "line-art-cargo-crate"
-                },
-                "color": {
-                  "$ref": "#/$defs/color"
-                },
-                "accentColor": {
-                  "$ref": "#/$defs/color"
-                },
-                "length": {
-                  "type": "number",
-                  "exclusiveMinimum": 0
-                },
-                "width": {
-                  "type": "number",
-                  "exclusiveMinimum": 0
-                },
-                "height": {
-                  "type": "number",
-                  "exclusiveMinimum": 0
-                }
+                "model": { "const": "line-art-cargo-crate" },
+                "color": { "$ref": "#/$defs/color" },
+                "accentColor": { "$ref": "#/$defs/color" },
+                "length": { "type": "number", "exclusiveMinimum": 0 },
+                "width": { "type": "number", "exclusiveMinimum": 0 },
+                "height": { "type": "number", "exclusiveMinimum": 0 }
               }
             },
             {
               "type": "object",
               "additionalProperties": false,
-              "required": [
-                "model",
-                "color",
-                "accentColor",
-                "radius",
-                "height"
-              ],
+              "required": ["model", "color", "accentColor", "radius", "height"],
               "properties": {
-                "model": {
-                  "const": "line-art-reef"
-                },
-                "color": {
-                  "$ref": "#/$defs/color"
-                },
-                "accentColor": {
-                  "$ref": "#/$defs/color"
-                },
-                "radius": {
-                  "type": "number",
-                  "exclusiveMinimum": 0
-                },
-                "height": {
-                  "type": "number",
-                  "exclusiveMinimum": 0
-                }
+                "model": { "const": "line-art-reef" },
+                "color": { "$ref": "#/$defs/color" },
+                "accentColor": { "$ref": "#/$defs/color" },
+                "radius": { "type": "number", "exclusiveMinimum": 0 },
+                "height": { "type": "number", "exclusiveMinimum": 0 }
               }
             },
             {
               "type": "object",
               "additionalProperties": false,
-              "required": [
-                "model",
-                "capColor",
-                "stemColor",
-                "spotColor",
-                "radius",
-                "height"
-              ],
+              "required": ["model", "capColor", "stemColor", "spotColor", "radius", "height"],
               "properties": {
-                "model": {
-                  "const": "line-art-elastic-mushroom"
-                },
-                "capColor": {
-                  "$ref": "#/$defs/color"
-                },
-                "stemColor": {
-                  "$ref": "#/$defs/color"
-                },
-                "spotColor": {
-                  "$ref": "#/$defs/color"
-                },
-                "radius": {
-                  "type": "number",
-                  "exclusiveMinimum": 0,
-                  "maximum": 3
-                },
-                "height": {
-                  "type": "number",
-                  "exclusiveMinimum": 0,
-                  "maximum": 5
-                }
+                "model": { "const": "line-art-elastic-mushroom" },
+                "capColor": { "$ref": "#/$defs/color" },
+                "stemColor": { "$ref": "#/$defs/color" },
+                "spotColor": { "$ref": "#/$defs/color" },
+                "radius": { "type": "number", "exclusiveMinimum": 0, "maximum": 3 },
+                "height": { "type": "number", "exclusiveMinimum": 0, "maximum": 5 }
               }
             },
             {
               "type": "object",
               "additionalProperties": false,
-              "required": [
-                "model",
-                "woodColor",
-                "accentColor",
-                "radius",
-                "height"
-              ],
+              "required": ["model", "woodColor", "accentColor", "radius", "height"],
               "properties": {
-                "model": {
-                  "const": "line-art-training-dummy"
-                },
-                "woodColor": {
-                  "$ref": "#/$defs/color"
-                },
-                "accentColor": {
-                  "$ref": "#/$defs/color"
-                },
-                "radius": {
-                  "type": "number",
-                  "exclusiveMinimum": 0,
-                  "maximum": 3
-                },
-                "height": {
-                  "type": "number",
-                  "exclusiveMinimum": 0,
-                  "maximum": 6
-                }
+                "model": { "const": "line-art-training-dummy" },
+                "woodColor": { "$ref": "#/$defs/color" },
+                "accentColor": { "$ref": "#/$defs/color" },
+                "radius": { "type": "number", "exclusiveMinimum": 0, "maximum": 3 },
+                "height": { "type": "number", "exclusiveMinimum": 0, "maximum": 6 }
               }
             },
             {
               "type": "object",
               "additionalProperties": false,
-              "required": [
-                "model",
-                "stoneColor",
-                "crystalColor",
-                "radius",
-                "height"
-              ],
+              "required": ["model", "stoneColor", "crystalColor", "radius", "height"],
               "properties": {
-                "model": {
-                  "const": "line-art-focus-obelisk"
-                },
-                "stoneColor": {
-                  "$ref": "#/$defs/color"
-                },
-                "crystalColor": {
-                  "$ref": "#/$defs/color"
-                },
-                "radius": {
-                  "type": "number",
-                  "exclusiveMinimum": 0,
-                  "maximum": 3
-                },
-                "height": {
-                  "type": "number",
-                  "exclusiveMinimum": 0,
-                  "maximum": 6
-                }
+                "model": { "const": "line-art-focus-obelisk" },
+                "stoneColor": { "$ref": "#/$defs/color" },
+                "crystalColor": { "$ref": "#/$defs/color" },
+                "radius": { "type": "number", "exclusiveMinimum": 0, "maximum": 3 },
+                "height": { "type": "number", "exclusiveMinimum": 0, "maximum": 6 }
               }
             },
             {
               "type": "object",
               "additionalProperties": false,
-              "required": [
-                "model",
-                "color",
-                "accentColor",
-                "width",
-                "length",
-                "height"
-              ],
+              "required": ["model", "color", "accentColor", "width", "length", "height"],
               "properties": {
-                "model": {
-                  "const": "line-art-floor-plaque"
-                },
-                "color": {
-                  "$ref": "#/$defs/color"
-                },
-                "accentColor": {
-                  "$ref": "#/$defs/color"
-                },
-                "width": {
-                  "type": "number",
-                  "exclusiveMinimum": 0,
-                  "maximum": 12
-                },
-                "length": {
-                  "type": "number",
-                  "exclusiveMinimum": 0,
-                  "maximum": 12
-                },
-                "height": {
-                  "type": "number",
-                  "exclusiveMinimum": 0,
-                  "maximum": 1
-                }
+                "model": { "const": "line-art-floor-plaque" },
+                "color": { "$ref": "#/$defs/color" },
+                "accentColor": { "$ref": "#/$defs/color" },
+                "width": { "type": "number", "exclusiveMinimum": 0, "maximum": 12 },
+                "length": { "type": "number", "exclusiveMinimum": 0, "maximum": 12 },
+                "height": { "type": "number", "exclusiveMinimum": 0, "maximum": 1 }
               }
             },
             {
               "type": "object",
               "additionalProperties": false,
-              "required": [
-                "model",
-                "stoneColor",
-                "woodColor",
-                "emberColor",
-                "radius",
-                "height"
-              ],
+              "required": ["model", "stoneColor", "woodColor", "emberColor", "radius", "height"],
               "properties": {
-                "model": {
-                  "const": "line-art-campfire"
-                },
-                "stoneColor": {
-                  "$ref": "#/$defs/color"
-                },
-                "woodColor": {
-                  "$ref": "#/$defs/color"
-                },
-                "emberColor": {
-                  "$ref": "#/$defs/color"
-                },
-                "radius": {
-                  "type": "number",
-                  "exclusiveMinimum": 0,
-                  "maximum": 3
-                },
-                "height": {
-                  "type": "number",
-                  "exclusiveMinimum": 0,
-                  "maximum": 3
-                }
+                "model": { "const": "line-art-campfire" },
+                "stoneColor": { "$ref": "#/$defs/color" },
+                "woodColor": { "$ref": "#/$defs/color" },
+                "emberColor": { "$ref": "#/$defs/color" },
+                "radius": { "type": "number", "exclusiveMinimum": 0, "maximum": 3 },
+                "height": { "type": "number", "exclusiveMinimum": 0, "maximum": 3 }
               }
             },
             {
               "type": "object",
               "additionalProperties": false,
-              "required": [
-                "model",
-                "color",
-                "accentColor",
-                "radius",
-                "height"
-              ],
+              "required": ["model", "color", "accentColor", "radius", "height"],
               "properties": {
-                "model": {
-                  "const": "line-art-dry-hay"
-                },
-                "color": {
-                  "$ref": "#/$defs/color"
-                },
-                "accentColor": {
-                  "$ref": "#/$defs/color"
-                },
-                "radius": {
-                  "type": "number",
-                  "exclusiveMinimum": 0,
-                  "maximum": 3
-                },
-                "height": {
-                  "type": "number",
-                  "exclusiveMinimum": 0,
-                  "maximum": 3
-                }
+                "model": { "const": "line-art-dry-hay" },
+                "color": { "$ref": "#/$defs/color" },
+                "accentColor": { "$ref": "#/$defs/color" },
+                "radius": { "type": "number", "exclusiveMinimum": 0, "maximum": 3 },
+                "height": { "type": "number", "exclusiveMinimum": 0, "maximum": 3 }
               }
             },
             {
               "type": "object",
               "additionalProperties": false,
-              "required": [
-                "model",
-                "woodColor",
-                "cutColor",
-                "inkColor",
-                "radius",
-                "height"
-              ],
+              "required": ["model", "woodColor", "cutColor", "inkColor", "radius", "height"],
               "properties": {
-                "model": {
-                  "const": "line-art-wood-pile"
-                },
-                "woodColor": {
-                  "$ref": "#/$defs/color"
-                },
-                "cutColor": {
-                  "$ref": "#/$defs/color"
-                },
-                "inkColor": {
-                  "$ref": "#/$defs/color"
-                },
-                "radius": {
-                  "type": "number",
-                  "exclusiveMinimum": 0,
-                  "maximum": 3
-                },
-                "height": {
-                  "type": "number",
-                  "exclusiveMinimum": 0,
-                  "maximum": 3
-                }
+                "model": { "const": "line-art-wood-pile" },
+                "woodColor": { "$ref": "#/$defs/color" },
+                "cutColor": { "$ref": "#/$defs/color" },
+                "inkColor": { "$ref": "#/$defs/color" },
+                "radius": { "type": "number", "exclusiveMinimum": 0, "maximum": 3 },
+                "height": { "type": "number", "exclusiveMinimum": 0, "maximum": 3 }
               }
             },
             {
               "type": "object",
               "additionalProperties": false,
-              "required": [
-                "model",
-                "woodColor",
-                "cutColor",
-                "inkColor",
-                "radius",
-                "length"
-              ],
+              "required": ["model", "woodColor", "cutColor", "inkColor", "radius", "length"],
               "properties": {
-                "model": {
-                  "const": "line-art-wood-log"
-                },
-                "woodColor": {
-                  "$ref": "#/$defs/color"
-                },
-                "cutColor": {
-                  "$ref": "#/$defs/color"
-                },
-                "inkColor": {
-                  "$ref": "#/$defs/color"
-                },
-                "radius": {
-                  "type": "number",
-                  "exclusiveMinimum": 0,
-                  "maximum": 1
-                },
-                "length": {
-                  "type": "number",
-                  "exclusiveMinimum": 0,
-                  "maximum": 3
-                }
+                "model": { "const": "line-art-wood-log" },
+                "woodColor": { "$ref": "#/$defs/color" },
+                "cutColor": { "$ref": "#/$defs/color" },
+                "inkColor": { "$ref": "#/$defs/color" },
+                "radius": { "type": "number", "exclusiveMinimum": 0, "maximum": 1 },
+                "length": { "type": "number", "exclusiveMinimum": 0, "maximum": 3 }
               }
             },
             {
               "type": "object",
               "additionalProperties": false,
-              "required": [
-                "model",
-                "fruitColor",
-                "accentColor",
-                "inkColor",
-                "radius",
-                "height"
-              ],
+              "required": ["model", "fruitColor", "accentColor", "inkColor", "radius", "height"],
               "properties": {
-                "model": {
-                  "const": "line-art-fruit-pile"
-                },
-                "fruitColor": {
-                  "$ref": "#/$defs/color"
-                },
-                "accentColor": {
-                  "$ref": "#/$defs/color"
-                },
-                "inkColor": {
-                  "$ref": "#/$defs/color"
-                },
-                "radius": {
-                  "type": "number",
-                  "exclusiveMinimum": 0,
-                  "maximum": 3
-                },
-                "height": {
-                  "type": "number",
-                  "exclusiveMinimum": 0,
-                  "maximum": 3
-                }
+                "model": { "const": "line-art-fruit-pile" },
+                "fruitColor": { "$ref": "#/$defs/color" },
+                "accentColor": { "$ref": "#/$defs/color" },
+                "inkColor": { "$ref": "#/$defs/color" },
+                "radius": { "type": "number", "exclusiveMinimum": 0, "maximum": 3 },
+                "height": { "type": "number", "exclusiveMinimum": 0, "maximum": 3 }
               }
             },
             {
               "type": "object",
               "additionalProperties": false,
-              "required": [
-                "model",
-                "stoneColor",
-                "accentColor",
-                "inkColor",
-                "radius",
-                "height"
-              ],
+              "required": ["model", "stoneColor", "accentColor", "inkColor", "radius", "height"],
               "properties": {
-                "model": {
-                  "const": "line-art-stone-pile"
-                },
-                "stoneColor": {
-                  "$ref": "#/$defs/color"
-                },
-                "accentColor": {
-                  "$ref": "#/$defs/color"
-                },
-                "inkColor": {
-                  "$ref": "#/$defs/color"
-                },
-                "radius": {
-                  "type": "number",
-                  "exclusiveMinimum": 0,
-                  "maximum": 3
-                },
-                "height": {
-                  "type": "number",
-                  "exclusiveMinimum": 0,
-                  "maximum": 3
-                }
+                "model": { "const": "line-art-stone-pile" },
+                "stoneColor": { "$ref": "#/$defs/color" },
+                "accentColor": { "$ref": "#/$defs/color" },
+                "inkColor": { "$ref": "#/$defs/color" },
+                "radius": { "type": "number", "exclusiveMinimum": 0, "maximum": 3 },
+                "height": { "type": "number", "exclusiveMinimum": 0, "maximum": 3 }
               }
             }
           ]
@@ -1733,9 +709,6 @@
     }
   },
   "$defs": {
-    "color": {
-      "type": "string",
-      "pattern": "^#[0-9A-Fa-f]{6}$"
-    }
+    "color": { "type": "string", "pattern": "^#[0-9A-Fa-f]{6}$" }
   }
 }

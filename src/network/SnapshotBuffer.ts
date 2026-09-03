@@ -19,11 +19,10 @@ function blendSlimeDrag(
   if (!to || !from || from.revision !== to.revision) return to;
   return {
     revision: to.revision,
-    // 命中点与 pinch 都是抓取身份的一部分，只在换抓取时变；插值它们没有意义。
+    // 命中点是抓取身份的一部分，只在换抓取时变；插值它没有意义。
     contactX: to.contactX,
     contactY: to.contactY,
     contactZ: to.contactZ,
-    pinch: to.pinch,
     pullX: from.pullX + (to.pullX - from.pullX) * amount,
     pullY: from.pullY + (to.pullY - from.pullY) * amount,
     pullZ: from.pullZ + (to.pullZ - from.pullZ) * amount,

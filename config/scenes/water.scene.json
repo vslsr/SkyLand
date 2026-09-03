@@ -48,7 +48,7 @@
     "fog": { "color": "#f5f2e9", "near": 34, "far": 82 },
     "content": { "ground": false, "trees": false, "grass": false, "ocean": true },
     "palette": {
-      "ground": "#eee5cf",
+      "ground": "#e1d4b4",
       "grass": "#c1d7a6",
       "treeTrunk": "#d6bea3",
       "treeNeedles": "#cbdcbc"

@@ -397,9 +397,6 @@ function validateBite(raw, filename) {
     ...(definition.facingDot !== undefined ? {
       facingDot: requireNumber(definition.facingDot, `${path}.facingDot`, -1, 1),
     } : {}),
-    ...(definition.pinch !== undefined ? {
-      pinch: requireNumber(definition.pinch, `${path}.pinch`, 0, 1),
-    } : {}),
     // 捏起来的那块皮再深也不该超过外壳本身：过了求解器的可见量程，每次咬都长一样。
     ...(definition.gripDepth !== undefined ? {
       gripDepth: requireNumber(definition.gripDepth, `${path}.gripDepth`, 0, 2),

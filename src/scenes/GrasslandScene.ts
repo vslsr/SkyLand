@@ -22,11 +22,13 @@ import { TerrainEditController } from '../controllers/TerrainEditController';
 import { VesselControlController } from '../controllers/VesselControlController';
 import { RoomClient, type JoinedRoom, type RoomSummary } from '../network/RoomClient';
 import { SnapshotBuffer } from '../network/SnapshotBuffer';
-import type { RoomSnapshot } from '../network/protocol';
+import type { InterpolatedPlayerState, RoomSnapshot } from '../network/protocol';
 import { frameTimeline } from '../platform/index';
 import { PlayerEntity } from '../player/PlayerEntity';
 import { SlimeSurfaceDragController } from '../controllers/SlimeSurfaceDragController';
 import { RemotePlayerGroup } from '../player/RemotePlayerGroup';
+import { collectBiters, resolveBiteTips } from '../player/slimeBiteTip';
+import { createSlimeBiteParams, type SlimeBiteParams } from '../render/RenderSlimeBite';
 import type { SlimeSurfaceDragState } from '../render/RenderScene';
 import { SceneRenderer } from '../rendering/SceneRenderer';
 import { SceneWorld } from '../scene/SceneWorld';
@@ -91,6 +93,12 @@ export class GrasslandScene extends Scene {
   private disposeInventoryShortcut?: () => void;
   private readonly snapshots = new SnapshotBuffer();
   private readonly remotePlayers: RemotePlayerGroup;
+  /** 当前场景的玩家原型：算被咬住的那个尖要用它的半径、嘴挂点与抓握深度。 */
+  private playerArchetype?: ActorArchetypeDefinition;
+  /** 每帧复用的突起向量缓冲。 */
+  private readonly biteTips: SlimeBiteParams = createSlimeBiteParams();
+  /** 「谁被哪几张嘴咬着」：一帧算一次，本地玩家与远端玩家共用。 */
+  private readonly biters = new Map<string, InterpolatedPlayerState[]>();
   private joinedRoom?: JoinedRoom;
   private availableScenes: SceneSummary[] = [];
   private player?: PlayerEntity;
@@ -185,15 +193,11 @@ export class GrasslandScene extends Scene {
       device: virtualInput,
       config: this.inputScheme.virtualControls,
     });
-    this.hud.setInputPromptResolver((mode, deviceKind, state) => (
-      this.inputScheme.getPrompt(mode, deviceKind, state)
-    ));
     this.inputScheme.onBindingsChanged(() => {
       this.input.replaceMappingContexts(this.inputScheme.contexts);
       keyboardInput.setPreventDefaultControls(this.inputScheme.getPreventDefaultControls());
       this.refreshDebugMenuShortcut();
       this.refreshInventoryShortcut();
-      this.hud.refreshInputPrompt();
     });
     // 场景的两半:渲染核心与玩法查询。第 3 步搬 canvas 时只有前者跟着走。
     this.world = new SceneWorld();
@@ -273,7 +277,6 @@ export class GrasslandScene extends Scene {
       this.roomClient.sendInventoryCommand({ kind: 'hold', itemType });
     });
     this.controls.onModeChange((mode) => this.hud.setControlMode(mode));
-    this.input.onActiveDeviceChanged((deviceKind) => this.hud.setInputDevice(deviceKind));
 
     this.commonUI.onStackChange(() => {
       const allowsGameInteraction = this.commonUI.allowsGameInteraction;
@@ -323,11 +326,22 @@ export class GrasslandScene extends Scene {
       const own = states.find((state) => state.id === localPlayerId);
       this.localPlayerBiting = own?.bitingPlayerId !== undefined;
       this.player?.setReplicatedSlimeDrag(own?.slimeDrag);
+      // 被咬住的尖不过网络：快照里只有「谁咬着谁」，两边的位置又都是权威的，
+      // 所以这里按**这一帧插值后的**位置当场算，尖因此始终贴着那张嘴。
+      collectBiters(states, this.biters);
+      if (own && this.playerArchetype) {
+        this.player?.setBiteTips(resolveBiteTips(
+          own,
+          this.biters.get(own.id),
+          this.playerArchetype,
+          this.biteTips,
+        ));
+      }
       // 缰绳要在这一帧的预测步之前落到 characterParams 上，重放才和权威一致。
       this.player?.setLeash(own?.leash);
       this.player?.update(deltaSeconds);
       if (localPlayerId && this.joinedRoom?.scene.camera.mode === 'topdown') {
-        this.remotePlayers.sync(states, localPlayerId);
+        this.remotePlayers.sync(states, localPlayerId, this.biters);
         this.remotePlayers.update(deltaSeconds);
       } else {
         this.remotePlayers.clear();
@@ -463,6 +477,7 @@ export class GrasslandScene extends Scene {
       throw new Error(`场景缺少玩家 Actor 原型：${joined.scene.gameplay.playerActor.archetypeId}`);
     }
     this.remotePlayers.configure(playerArchetype);
+    this.playerArchetype = playerArchetype;
     if (joined.scene.camera.mode === 'topdown') {
       this.createPlayer(
         joined.player.id,

@@ -6,7 +6,6 @@ import {
   PARAM_SLIME_DRAG_CONTACT_Z,
   PARAM_SLIME_DRAG_PULL_X,
   PARAM_SLIME_DRAG_PULL_Y,
-  PARAM_SLIME_DRAG_PINCH,
   PARAM_SLIME_DRAG_PULL_Z,
   PARAM_SLIME_DRAG_REVISION,
 } from './RenderVisualParams';
@@ -37,8 +36,6 @@ export interface SlimeDragParams {
   pullX: number;
   pullY: number;
   pullZ: number;
-  /** 这一次抓取有多尖：0 整团跟随（鼠标拖拽），1 只在命中处拔尖（咬住）。 */
-  pinch: number;
 }
 
 /** 复用槽位的初值，也是「没有人在拖」的槽位每帧写进去的那组值。 */
@@ -50,7 +47,6 @@ export const SLIME_DRAG_AT_REST: SlimeDragParams = {
   pullX: 0,
   pullY: 0,
   pullZ: 0,
-  pinch: 0,
 };
 
 export function writeSlimeDragParams(
@@ -65,7 +61,6 @@ export function writeSlimeDragParams(
   transforms.writeParam(id, PARAM_SLIME_DRAG_PULL_X, drag.pullX);
   transforms.writeParam(id, PARAM_SLIME_DRAG_PULL_Y, drag.pullY);
   transforms.writeParam(id, PARAM_SLIME_DRAG_PULL_Z, drag.pullZ);
-  transforms.writeParam(id, PARAM_SLIME_DRAG_PINCH, drag.pinch);
 }
 
 export function readSlimeDragParams(
@@ -80,6 +75,5 @@ export function readSlimeDragParams(
   out.pullX = transforms.readParam(id, PARAM_SLIME_DRAG_PULL_X);
   out.pullY = transforms.readParam(id, PARAM_SLIME_DRAG_PULL_Y);
   out.pullZ = transforms.readParam(id, PARAM_SLIME_DRAG_PULL_Z);
-  out.pinch = transforms.readParam(id, PARAM_SLIME_DRAG_PINCH);
   return out;
 }

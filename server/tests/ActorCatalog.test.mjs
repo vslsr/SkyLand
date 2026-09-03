@@ -257,7 +257,6 @@ test('ActorCatalog 保留软体形变与咬合参数，并拒绝越界值', asyn
   assert.deepEqual(pbfSlime.components.bite, {
     range: 1.8,
     facingDot: 0.15,
-    pinch: 1,
     gripDepth: 0.35,
     leashSlack: 0.2,
     leashStiffness: 90,

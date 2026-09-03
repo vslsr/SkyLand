@@ -22,6 +22,15 @@ export const SLIME_DRAG_TIMEOUT_MS = 600;
 /** 命中点移动超过这个距离（米）就算换了一次抓取，接收端需要重新计算权重。 */
 export const SLIME_DRAG_REGRAB_DISTANCE = 0.02;
 
+/**
+ * 一块外壳同时最多被几个外力抓着。
+ *
+ * 每多一张嘴就多一个突起向量，画面上多一个尖，位移相加——所以这是个上限，不是
+ * 「一次只能一个」。定这个数是因为参数段是定长的；三张嘴咬同一只史莱姆已经是
+ * 围殴，再多的尖也分不出来。玩法侧与渲染侧共用它，省得两边各写一个 3。
+ */
+export const MAX_SOFT_BODY_HOLDERS = 3;
+
 function toBoundedNumber(value) {
   if (typeof value !== 'number' || !Number.isFinite(value)) return undefined;
   return Math.max(
@@ -109,38 +118,35 @@ export function worldToShellOffset(origin, world, out) {
 }
 
 /**
- * 抓住那一刻的命中点，被抓者的**外壳坐标**（见 `worldToShellOffset`：只平移，
- * 不转 yaw）。
+ * 被外力捏出来的那个**突起向量**，被捏者的外壳坐标（世界轴向，不转 yaw）。
  *
- * 取身体中心指向外力锚点的方向，落到半径上。方向对了就够：命中点会被接收端
- * 吸附到最近的外壳顶点。它之后固定不动——外壳本来也不跟着 Actor 转，所以这块皮
- * 就停在世界里的那一面上。
+ * 方向是「身体中心 → 抓握点」：牙在哪一侧，尖就从哪一侧长出来。施力方绕过去、
+ * 从被咬者身上越过去，这个方向自己就跟着转，不需要换抓取，也没有「命中点还留在
+ * 原来那一面」的问题——那正是按一块固定的皮做位移时最难处理的一段。
  *
- * 顺带写出这块皮的**朝外法线**（`normalX/Y/Z`）：它就是上面那个方向本身，和命中点
- * 同一套坐标。之后每 tick 判断「外力是把这块皮往外扯还是往身体里压」靠的就是它
- * ——往里压出来的是个凹包，不是被咬住。
+ * 长度按拉扯量算：抓握点离外壳越远，尖越长；贴着皮甚至埋进外壳里的时候（嘴挂在
+ * 施力方身前，贴身咬本来就是这样）保底 `minimumDepth`，因为牙咬住本来就会捏起
+ * 一块皮，那是牙的属性，不是两人间距的属性。
+ *
+ * 只有三个数过网络，而且是连续量：两帧之间直接插值，不需要 revision。
  */
-export function resolveSurfaceContact(radius, actor, anchorWorld, out) {
-  worldToShellOffset(actor, anchorWorld, out);
+export function resolveGripTip(radius, actor, gripWorld, minimumDepth, out) {
   const centerY = radius * SOFT_BODY_CENTER_HEIGHT_RATIO;
-  const offsetY = out.y - centerY;
-  const length = Math.hypot(out.x, offsetY, out.z);
-  if (!(length > 1e-6)) {
-    // 锚点正好落在身体中心：退化情况取正前方，不让方向变成 NaN。
+  const deltaX = gripWorld.x - actor.x;
+  const deltaY = gripWorld.y - (actor.y + centerY);
+  const deltaZ = gripWorld.z - actor.z;
+  const distance = Math.hypot(deltaX, deltaY, deltaZ);
+  if (!(distance > 1e-6)) {
+    // 抓握点正落在身体中心：方向退化，取正前方，不让它变成 NaN。
     out.x = 0;
-    out.y = centerY;
-    out.z = radius;
-    out.normalX = 0;
-    out.normalY = 0;
-    out.normalZ = 1;
+    out.y = 0;
+    out.z = minimumDepth;
     return out;
   }
-  const scale = radius / length;
-  out.normalX = out.x / length;
-  out.normalY = offsetY / length;
-  out.normalZ = out.z / length;
-  out.x *= scale;
-  out.y = centerY + offsetY * scale;
-  out.z *= scale;
+  const amount = Math.max(minimumDepth, distance - radius);
+  const scale = amount / distance;
+  out.x = deltaX * scale;
+  out.y = deltaY * scale;
+  out.z = deltaZ * scale;
   return out;
 }

@@ -2,7 +2,8 @@
   position: fixed;
   top: clamp(70px, 9vw, 104px);
   left: clamp(18px, 4.6vw, 72px);
-  z-index: 4;
+  /* 面板压在摇杆热区上：能力实验室的按钮要能点，摇杆收不到落在面板上的指针。 */
+  z-index: var(--layer-game-ui);
   display: grid;
   width: min(390px, calc(100vw - 36px));
   max-height: calc(100vh - 128px);
@@ -238,10 +239,6 @@
   color: rgba(51, 46, 41, 0.68);
   font-size: 8px;
   line-height: 1.45;
-}
-
-body.is-ability-lab .hud--footer {
-  opacity: 0.72;
 }
 
 @media (max-width: 640px) {
