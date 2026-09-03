@@ -9,6 +9,7 @@ import type { SceneDefinition } from '../scenes/data/SceneDefinition';
 import { DEFAULT_WORLD_SEED, toWorldSeed } from '../../shared/world/worldConfig.mjs';
 import { ChunkViewHost } from '../world/ChunkViewHost';
 import { TerrainWorld } from '../world/TerrainWorld';
+import { InteractiveParticleEffectHost } from '../particles/InteractiveParticleEffectHost';
 import { WeatherSystem } from '../weather/index';
 import { DayNightSystem } from '../environment/index';
 import {
@@ -60,6 +61,8 @@ export interface RenderWorldComposition {
    * 高度上。这是一条**命令**（返回 void），跨线程之后原样变成一条报文。
    */
   setTerrainCells(cells: readonly { cellX: number; cellZ: number; code: number }[]): void;
+  /** 场景进出。表现组件靠它挂上／摘下自己的对象，和主线程那批组件同一个语义。 */
+  setSceneActive(active: boolean): void;
 }
 
 export function createRenderWorld(
@@ -85,6 +88,8 @@ export function createRenderWorld(
     : undefined;
 
   const visualSystems: SceneFrameSystem[] = [];
+  /** 需要跟着场景进出而启停的表现组件。 */
+  const particleSystems: InteractiveParticleEffectHost[] = [];
   // 昼夜先更新：天气要在同一帧里读它算出的天空底色，再合成最终环境。
   const dayNight = new DayNightSystem({
     backgroundColor: renderer.background,
@@ -171,6 +176,26 @@ export function createRenderWorld(
   }
   scene.add(renderWorldRoot);
 
+  // 纯表现的场景组件归这一侧。落叶要的只是几个数和一块地形，没有一样是主线程
+  // 独有的；`createSceneRuntimeComponent` 对它返回 undefined，两边不会重复建。
+  for (const component of definition.sceneComponents) {
+    if (component.type !== 'interactive-particle-effect') continue;
+    const particles = new InteractiveParticleEffectHost(component, {
+      sceneDefinition: definition,
+      worldSeed,
+      environmentRuntime: environment.runtime,
+      root: renderWorldRoot,
+      // TerrainWorld 的订阅口叫 subscribe；这里包一层对上落叶要的那三个方法。
+      terrain: terrain && {
+        isWaterAt: (x, z) => terrain.isWaterAt(x, z),
+        sampleSurfaceHeight: (x, z) => terrain.sampleSurfaceHeight(x, z),
+        onTerrainChanged: (listener) => terrain.subscribe(listener),
+      },
+    });
+    visualSystems.push(particles);
+    particleSystems.push(particles);
+  }
+
   return {
     scene,
     environment,
@@ -181,6 +206,12 @@ export function createRenderWorld(
     grassInteraction,
     weatherTarget: weather,
     dayNightTarget: dayNight,
+    setSceneActive: (active) => {
+      for (const particles of particleSystems) {
+        if (active) particles.activate();
+        else particles.deactivate();
+      }
+    },
     setTerrainCells: (cells) => {
       for (const cell of cells) terrain?.setCellCode(cell.cellX, cell.cellZ, cell.code);
     },

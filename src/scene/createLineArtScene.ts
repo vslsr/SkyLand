@@ -119,5 +119,6 @@ export function createLineArtScene(
     // 服务端确认过的地形编辑要写两份：玩法侧那份决定脚下踩到什么，
     // 渲染侧那份决定雨落在多高。
     setRenderTerrainCells: render.setTerrainCells,
+    setRenderSceneActive: render.setSceneActive,
   };
 }

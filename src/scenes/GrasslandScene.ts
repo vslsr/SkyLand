@@ -26,6 +26,7 @@ import { SlimeSurfaceDragController } from '../controllers/SlimeSurfaceDragContr
 import { RemotePlayerGroup } from '../player/RemotePlayerGroup';
 import { SceneRenderer } from '../rendering/SceneRenderer';
 import { SceneWorld } from '../scene/SceneWorld';
+import type { SceneUpdateContext } from '../scene/SceneVisualSystem';
 import { createSceneRuntimeComponent, SceneComponentHost } from '../scene/components';
 import { INPUT_SEND_INTERVAL_SECONDS } from '../../shared/networkTuning.mjs';
 import {
@@ -312,13 +313,18 @@ export class GrasslandScene extends Scene {
    * 世界应该围绕谁展开：有玩家时是玩家，还没有玩家时是相机。
    * 流式加载靠它决定加载哪些 chunk，大厅背后看到的因此也是一片正常的世界。
    */
-  private currentFocus(): { focusX: number; focusY: number; focusZ: number } {
+  private currentFocus(): SceneUpdateContext {
     const player = this.player?.controller.position;
     if (player) {
+      const render = this.player?.renderPosition;
       return {
         focusX: player.x,
-        focusY: this.player?.renderPosition.y ?? 0,
+        focusY: render?.y ?? 0,
         focusZ: player.z,
+        // 表现侧要的是眼睛看到的那个身影，不是权威位置。
+        playerRenderX: render?.x,
+        playerRenderY: render?.y,
+        playerRenderZ: render?.z,
       };
     }
     const [cameraX, cameraY, cameraZ] = this.controls.frame.position;
@@ -327,6 +333,8 @@ export class GrasslandScene extends Scene {
 
   protected onEnter(): void {
     this.sceneComponents.setActive(true);
+    // 渲染世界里那批表现组件（落叶）跟着同一个开关。
+    this.renderer.setSceneActive(true);
     if (this.joinedRoom) {
       return;
     }
@@ -337,6 +345,7 @@ export class GrasslandScene extends Scene {
 
   protected onLeave(): void {
     this.sceneComponents.setActive(false);
+    this.renderer.setSceneActive(false);
     this.virtualControls.reset();
     this.input.setEnabled(false);
     this.controls.setInputEnabled(false);

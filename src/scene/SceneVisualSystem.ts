@@ -25,6 +25,16 @@ export interface SceneUpdateContext {
   /** 角色高度等局部表现可选用；chunk、天气与草地流送只读取 XZ。 */
   focusY?: number;
   focusZ: number;
+  /**
+   * 玩家这一帧的**渲染位置**（含插值平滑），没有玩家时省略。
+   *
+   * 和 focus 不是一回事：focus 的 XZ 取权威位置，流送要的是那个；
+   * 而扫过落叶这类表现跟的是眼睛看到的身影，差的那一点正是平滑量。
+   * 分成两组而不是复用，是因为它们真的是两个东西。
+   */
+  playerRenderX?: number;
+  playerRenderY?: number;
+  playerRenderZ?: number;
 }
 
 /**
@@ -142,4 +152,6 @@ export interface SceneComposition {
   setRenderTerrainCells?: (
     cells: readonly { cellX: number; cellZ: number; code: number }[],
   ) => void;
+  /** 场景进出。渲染侧的表现组件靠它挂上／摘下自己的对象。 */
+  setRenderSceneActive?: (active: boolean) => void;
 }

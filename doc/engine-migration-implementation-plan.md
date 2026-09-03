@@ -869,6 +869,34 @@ worker 已经在传的 `[globalCellX, globalCellZ, code, ...]`。
 
 于是 **`onBeforeRender` 在 `SceneRenderer` 之外一个调用方都没有了**，有棘轮盯着。
 
+### 已经做了的：清掉三笔账里的两笔半 ✅
+
+**天气的 `sampleGroundHeight`**：`createRenderWorld` 原来收一个指向玩法侧
+`TerrainWorld` 的回调——渲染侧每帧反向读一次玩法侧。`TerrainWorld` 是纯数学，
+输入只有种子与海平面，所以这一侧自己建一份，两侧各推各的。服务端下发的地形编辑
+是唯一推不出来的部分，经 `setTerrainCells` 命令镜像过去。用例钉住两个条件：
+同种子必然同高度、编辑镜像之后仍然一致。
+
+**昼夜的 `timeOfDay`**：`DayNightClock` 原来住在 `DayNightSystem` 里，于是
+「现在几点」要从渲染世界读回来。它是纯状态，现在归 `SceneRenderer`：那边推进、
+那边校正，每帧把小时数**发**过去。一个时刻只有一份，不会因为两侧各推各的而漂开
+——这也是为什么没有采用「两边各留一口时钟」的写法。
+
+**落叶搬进渲染世界**：`InteractiveParticleEffectSceneComponent` 曾经靠
+`renderer.addWorldObject` 把自己建的 `Object3D` 塞进场景图。落叶是纯表现，
+它要的只是几个数和一块地形，所以整个搬过来，改名 `InteractiveParticleEffectHost`
+挪进 `src/particles/`（位置和名字要说实话）。玩家扫过落叶的位置改从每帧的
+`SceneUpdateContext` 取——那里因此多了一组 `playerRender*`：focus 的 XZ 是权威位置
+（流送要那个），而扫落叶跟的是眼睛看到的身影，两者差的正是插值平滑量。
+
+场景组件工厂因此分成两半：纯表现的由 `createRenderWorld` 建，工厂返回 `undefined`，
+宿主跳过。
+
+这里踩了一个**测试抓不到、浏览器一眼看见**的坑：`onEnter` 发生在加入房间**之前**，
+那时还没有场景组合，`setSceneActive(true)` 打在空处；等 `replaceScene` 装上新组合
+时没人再打一次，落叶就永远不激活。修法是让 `SceneRenderer` 记住当前的进入状态，
+换组合时补上去——主线程那批场景组件的宿主本来就是这么做的。
+
 ### 还没做的
 
 | | 说明 |
@@ -877,9 +905,7 @@ worker 已经在传的 `[globalCellX, globalCellZ, code, ...]`。
 | `getActorRenderProxy` | 玩法侧最后一处 `resolve()`，只有能力实验室那个场景组件在用（它要 `abilityTargetRig`）。它不在 `RenderScene` 接口上——边界接口本身是干净的，这是伸手够到了具体后端 |
 | `faceCameras` / `setGuidePathResolution` | 收的是 `THREE.Camera` 与画布尺寸，是渲染世界**内部**的每帧动作，眼下经由 `ClientActorSystem.beforeRender` 路过。渲染循环进线程之后跟着走，不会出现在边界上 |
 | `GrasslandScene` 的装配归属 | 它同时握着输入、相机、玩家实体和渲染器；canvas 搬走时装配要跟着走 |
-| 天气的 `sampleGroundHeight` | 渲染侧唯一还反向读玩法侧的一处，见上 |
-| 两个还握着 THREE 的场景组件 | `InteractiveParticleEffectSceneComponent` 与 `AbilityLabSceneComponent` 靠 `addWorldObject` 把自己建的对象塞进场景图。形状和第 1.5 步那八个表现 Component 一样，出路也一样：把建模搬进渲染世界、玩法侧只发描述。已有棘轮，清单只能变短 |
-| `dayNightTarget.timeOfDay` | 调试菜单读它显示时钟。渲染侧回读的一处，但它是 `(服务端时间, 昼夜长度)` 的纯函数，主线程自己算得出来 |
+| `AbilityLabSceneComponent` | 最后一个还握着 THREE 的场景组件。它比落叶难：同时要 Actor 查询、UI 与渲染 rig（`getActorRenderProxy` 也只剩它一个调用方），是开发用的能力实验室场景。已有棘轮，清单只能变短 |
 
 §3 的前置全部落地：渲染栈不碰 DOM、玩法侧不碰 Three、chunk 与 Actor 两条主干都按
 game / render 切开、相机与合批内容都按字节过边界，**而且边界是单向的**。

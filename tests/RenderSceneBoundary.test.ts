@@ -284,8 +284,12 @@ test('渲染栈里还摸 DOM 的只有已知的那几个', () => {
  *
  * `SceneComponent.ts` 引的是类型（`THREE.Object3D` 出现在 `addWorldObject` 的签名
  * 上），不是实现，所以不在清单里。
+ *
+ * 落叶已经搬走了：它由 `createRenderWorld` 建，挂在渲染世界自己的根下，
+ * 收到的只是几个数和一块地形。剩下的 `AbilityLabSceneComponent` 是开发用的能力
+ * 实验室场景——它同时要 Actor 查询、UI 与渲染 rig，是这一类里最难拆的一个。
  */
-const SCENE_COMPONENTS_STILL_HOLDING_THREE = ['InteractiveParticleEffectSceneComponent.ts'];
+const SCENE_COMPONENTS_STILL_HOLDING_THREE: string[] = [];
 
 test('还在主线程建 THREE 对象的场景组件只有已知的那几个', () => {
   const directory = new URL('../src/scene/components/', import.meta.url);

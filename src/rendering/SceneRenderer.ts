@@ -94,6 +94,15 @@ export class SceneRenderer {
    * 本来就不该在那一侧。现在这边推进、这边校正，每帧把小时数**发**过去。
    */
   private readonly dayNightClock = new DayNightClock(DEFAULT_START_HOUR, 0);
+  private setRenderSceneActive?: SceneComposition['setRenderSceneActive'];
+  /**
+   * 当前场景该不该是「进入」状态。
+   *
+   * 必须记住它：`onEnter` 发生在加入房间**之前**，那时还没有场景组合，
+   * 开关没处可打；等 `replaceScene` 装上新组合时要把这个状态补上去。
+   * 主线程那批场景组件的宿主也是这么做的（`SceneComponentHost.load`）。
+   */
+  private sceneActive = false;
   private readonly cameraFrame = createRenderCamera();
   private readonly beforeRenderListeners = new Set<SceneBeforeRenderListener>();
 
@@ -282,6 +291,15 @@ export class SceneRenderer {
     this.dayNightClock.applyServerTime(timeOfDay, dayLengthSeconds);
   }
 
+  /**
+   * 场景进出。渲染世界里的表现组件（落叶）靠它挂上／摘下自己的对象，
+   * 和主线程那批场景组件的 `setActive` 是同一个语义。
+   */
+  public setSceneActive(active: boolean): void {
+    this.sceneActive = active;
+    this.setRenderSceneActive?.(active);
+  }
+
   /** 当前场景的共享光照与雾 uniform；场景 Component 的表现接到同一份上。 */
   public get environmentRuntime(): SceneEnvironmentRuntime | undefined {
     return this.sceneEnvironmentRuntime;
@@ -336,6 +354,9 @@ export class SceneRenderer {
     this.dayNightTarget = composition.dayNightTarget;
     this.sceneEnvironmentRuntime = composition.environmentRuntime;
     this.grassInteraction = composition.grassInteraction;
+    this.setRenderSceneActive = composition.setRenderSceneActive;
+    // 换了组合就把当前的进入状态补上去，否则先 onEnter 后加载的场景永远不激活。
+    this.setRenderSceneActive?.(this.sceneActive);
     this.actorSnapshotTarget = composition.actorSnapshotTarget;
     this.world.adopt(composition, {
       fixedWaterWorld: this.fixedWaterWorld,
