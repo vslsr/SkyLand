@@ -1,10 +1,7 @@
 import type * as THREE from 'three';
 import type { Actor } from '../../shared/actor/Actor.mjs';
 import type { CollisionWorld } from '../../shared/collision/index.mjs';
-import type { DayNightVisualTarget } from '../environment/EnvironmentTypes';
-import type { SceneEnvironmentRuntime } from '../materials/createFillMaterial';
-import type { GrassInteractionTarget } from '../grass';
-import type { ThreeRenderScene } from '../render/three/ThreeRenderScene';
+import type { RenderScene } from '../render/RenderScene';
 import type { RenderTransformBuffer } from '../render/RenderTransformBuffer';
 import type { RenderProxyTable } from '../render/RenderProxyTable';
 import type { SnapshotActor, SnapshotPlayer } from '../network/protocol';
@@ -109,18 +106,16 @@ export interface VesselHudState {
   lastEvent: { type: ActorEventType; targetId: string } | null;
 }
 
+/**
+ * 一张地图的**玩法那一半**（`createGameWorld` 的产物）。
+ *
+ * 这里曾经也装着渲染那一半（`THREE.Scene`、天气与昼夜的目标、草地写入口、
+ * 表现系统）。渲染循环搬进 worker 之后那些东西根本到不了这一侧——它们由
+ * `RenderWorldRuntime` 在画布那一边自己建，玩法侧只经由命令口说话。
+ */
 export interface SceneComposition {
-  /**
-   * 这张地图的场景图。**空组合没有**——大厅背后那个什么都没有的画面归渲染侧自己
-   * 铺，装配那一层不需要认识 `THREE.Scene` 才说得出「现在什么都不放」。
-   */
-  scene?: THREE.Scene;
+  /** 玩法侧的每帧系统（流送规划、Actor 世界），按更新顺序排好。 */
   visualSystems: SceneFrameSystem[];
-  weatherTarget?: WeatherVisualTarget;
-  dayNightTarget?: DayNightVisualTarget;
-  /** 场景级共享光照/雾 uniform；场景 Component 建的表现也接到同一份上。 */
-  environmentRuntime?: SceneEnvironmentRuntime;
-  grassInteraction?: GrassInteractionTarget;
   actorSnapshotTarget?: ActorSnapshotTarget;
   /**
    * 这张地图的渲染世界与它那段边界字节。
@@ -129,7 +124,7 @@ export interface SceneComposition {
    * 但它们的 proxy 必须和 Actor 的 proxy 落在同一个渲染世界、同一段 SoA 里，
    * 否则「一个 ProxyId 指一个东西」就不成立了。
    */
-  renderScene?: ThreeRenderScene;
+  renderScene?: RenderScene;
   renderTransforms?: RenderTransformBuffer;
   /** 槽位表在玩法侧；玩家实体要和 Actor 共用同一张。 */
   renderProxyIds?: RenderProxyTable;
@@ -141,15 +136,4 @@ export interface SceneComposition {
   /** 规则地形的内容采样（草、水、编辑等）；玩家碰撞由 trimesh 负责。 */
   terrainWorld?: TerrainWorld;
   physicsWorld?: PhysicsWorld;
-  /**
-   * 把服务端确认过的地形编辑镜像进渲染世界那一份 patch store。
-   *
-   * 两侧各按同一个种子推地形，编辑是唯一推不出来的部分，所以要发过去。
-   * 是一条命令，不是一次查询。
-   */
-  setRenderTerrainCells?: (
-    cells: readonly { cellX: number; cellZ: number; code: number }[],
-  ) => void;
-  /** 场景进出。渲染侧的表现组件靠它挂上／摘下自己的对象。 */
-  setRenderSceneActive?: (active: boolean) => void;
 }

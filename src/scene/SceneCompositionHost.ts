@@ -1,12 +1,13 @@
 import type { CollisionWorld } from '../../shared/collision/index.mjs';
 import type { PhysicsWorld } from '../../shared/physics/PhysicsWorld.mjs';
 import type { SceneDefinition } from '../scenes/data/SceneDefinition';
-import { createLineArtScene } from './createLineArtScene';
+import { createGameWorld } from './createGameWorld';
+import type { RenderWorldPort } from '../render/RenderWorldRuntime';
 import type { SceneComposition } from './SceneVisualSystem';
 import type { SceneWorld } from './SceneWorld';
 
-/** 组合里属于渲染的那一半的接收方。`SceneRenderer` 实现它。 */
-export interface SceneRenderHost {
+/** 玩法那一半的接收方：`SceneRenderer` 要驱动它们。 */
+export interface SceneGameHost {
   adoptComposition(composition: SceneComposition): void;
 }
 
@@ -31,7 +32,8 @@ export class SceneCompositionHost {
 
   public constructor(
     private readonly world: SceneWorld,
-    private readonly render: SceneRenderHost,
+    private readonly render: RenderWorldPort,
+    private readonly game: SceneGameHost,
   ) {}
 
   /**
@@ -39,10 +41,18 @@ export class SceneCompositionHost {
    * 不做流式加载的场景会忽略它。
    */
   public load(definition: SceneDefinition, worldSeed?: number): void {
-    if (definition.renderer.type !== 'line-art') {
-      throw new Error(`不支持的场景渲染器：${definition.renderer.type as string}`);
-    }
-    this.#replace(createLineArtScene(definition, worldSeed), {
+    // 先让渲染世界按定义与种子把自己那一半建起来——它只吃这两个纯数据。
+    // 建完之后才拿得到那三个口子，玩法那一半就接在它们上面。
+    this.#disposePrevious();
+    this.render.loadRenderScene(definition, worldSeed);
+    const scene = this.render.scene;
+    const transforms = this.render.transforms;
+    if (!scene || !transforms) throw new Error('渲染世界没建起来，玩法那一半接不上');
+    this.#install(createGameWorld(definition, worldSeed, {
+      scene,
+      transforms,
+      chunkViews: this.render.chunkViews,
+    }), {
       // 「没有地面、只有海」是这张地图的玩法事实：脚下踩到的是水面高度。
       fixedWaterWorld: definition.renderer.content.ocean === true
         && definition.renderer.content.ground === false,
@@ -52,27 +62,35 @@ export class SceneCompositionHost {
 
   /** 退回大厅背后那个什么都没有的场景。 */
   public clear(): void {
-    // 没有 scene：空画面归渲染侧自己铺。这一层不认识 `THREE.Scene`。
-    this.#replace({ visualSystems: [] }, { fixedWaterWorld: false, fixedWaterLevel: 0 });
+    this.#disposePrevious();
+    this.render.clearRenderScene();
+    this.#install({ visualSystems: [] }, { fixedWaterWorld: false, fixedWaterLevel: 0 });
     this.world.clear();
   }
 
-  #replace(
-    next: SceneComposition,
-    water: { fixedWaterWorld: boolean; fixedWaterLevel: number },
-  ): void {
-    // 先停掉上一张地图的每帧动作，再动它们摸过的东西——顺序反了就会有 System
-    // 在自己的资源被释放之后再跑一次。
+  /**
+   * 先停掉上一张地图的每帧动作，再动它们摸过的东西——顺序反了就会有 System
+   * 在自己的资源被释放之后再跑一次。
+   */
+  #disposePrevious(): void {
     for (const system of this.#composition?.visualSystems ?? []) system.dispose?.();
     // 碰撞与物理随场景走：上一张地图的 chunk 与 Actor 碰撞体一起丢掉，
     // 不会有残留的盒子挡住新地图里的路。
     this.#collision?.clear();
     this.#physics?.dispose();
+    this.#composition = undefined;
+    this.#collision = undefined;
+    this.#physics = undefined;
+  }
 
+  #install(
+    next: SceneComposition,
+    water: { fixedWaterWorld: boolean; fixedWaterLevel: number },
+  ): void {
     this.#composition = next;
     this.#collision = next.collisionWorld;
     this.#physics = next.physicsWorld;
     this.world.adopt(next, water);
-    this.render.adoptComposition(next);
+    this.game.adoptComposition(next);
   }
 }

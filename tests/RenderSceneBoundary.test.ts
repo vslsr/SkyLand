@@ -194,9 +194,11 @@ test('还在 import 渲染侧模块的 Actor Component 只有已知的那几个'
  * 玩法侧那几个「大类」也不许 import three。
  *
  * Component 与 System 已经各有一条棘轮，但真正决定第 2 步（Sim Worker）能不能成的
- * 是这几个：它们是快照、流送、场景装配这三条主干本身。`ClientActorSystem` 是最后
- * 一个下来的——它曾经握着两层 `InstancedMesh`、一个 `root` getter、一个收
- * `WebGLRenderer` 的 `beforeRender`，还在自己的 `update` 末尾驱动渲染世界的一帧。
+ * 是这几个：它们是快照、流送、场景装配这三条主干本身，外加主线程那个渲染门面。
+ * `ClientActorSystem` 曾经握着两层 `InstancedMesh`、一个 `root` getter、一个收
+ * `WebGLRenderer` 的 `beforeRender`，还在自己的 `update` 末尾驱动渲染世界的一帧；
+ * `SceneRenderer` 曾经**就是**那个 `WebGLRenderer` 的持有者，现在它只量画布、
+ * 推时钟、发命令——真正画画的是 `RenderWorldRuntime`，那才是要进 worker 的东西。
  *
  * 这份清单是空的。任何一项回到这里，都意味着那条主干又被钉在了主线程上。
  */
@@ -208,7 +210,9 @@ test('玩法侧的主干文件一个都不 import three', () => {
     ['../src/world/', 'ChunkStreamer.ts'],
     ['../src/world/', 'TerrainWorld.ts'],
     ['../src/scene/', 'SceneWorld.ts'],
-    ['../src/scene/', 'createLineArtScene.ts'],
+    ['../src/scene/', 'createGameWorld.ts'],
+    ['../src/scene/', 'SceneCompositionHost.ts'],
+    ['../src/rendering/', 'SceneRenderer.ts'],
   ] as const;
   const offenders = files
     .filter(([folder, name]) => (

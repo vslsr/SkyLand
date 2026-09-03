@@ -7,7 +7,10 @@ export class MouseGrassInteractionSceneComponent implements SceneRuntimeComponen
   private interactor?: MouseGrassInteractor;
 
   public constructor(private readonly context: SceneComponentContext) {
-    if (!context.renderer.grassInteractionTarget) {
+    // 「这张地图有没有草」是**场景定义说的事**，不需要回头问渲染世界要一个对象。
+    // 流式地图的草由 chunk 铺，固定地图看 content.grass。
+    const { renderer } = context.definition;
+    if (!renderer.world && !renderer.content.grass) {
       throw new Error(
         `场景 ${context.definition.id} 加载了 ${this.type}，但没有可交互草地`,
       );
@@ -16,9 +19,9 @@ export class MouseGrassInteractionSceneComponent implements SceneRuntimeComponen
 
   public activate(): void {
     if (this.interactor) return;
-    const target = this.context.renderer.grassInteractionTarget;
-    if (!target) throw new Error(`场景 ${this.context.definition.id} 的草地交互目标已失效`);
-    this.interactor = new MouseGrassInteractor(this.context.canvas, target);
+    // 脉冲经 `SceneWorld` 发给渲染世界（`applyImpulse` 返回 void）。
+    // 这一侧因此不需要持有那套草地系统，也就不会在渲染进线程时断掉。
+    this.interactor = new MouseGrassInteractor(this.context.canvas, this.context.world);
   }
 
   /**

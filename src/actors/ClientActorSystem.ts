@@ -57,7 +57,6 @@ import {
 } from '../../shared/world/generatedProp.mjs';
 import { toWorldSeed } from '../../shared/world/worldConfig.mjs';
 import { selectWorldPropVariant } from '../../shared/world/worldPropVariants.mjs';
-import type { FillMaterialEnvironment } from '../materials/createFillMaterial';
 import { NULL_PROXY_ID, type RenderScene } from '../render/RenderScene';
 import { frameTimeline } from '../platform/index';
 import { RenderTransformBuffer } from '../render/RenderTransformBuffer';
@@ -120,7 +119,6 @@ const REPLICA_SPAWN_BUDGET_MILLISECONDS = 4;
 
 export interface ClientActorSystemOptions {
   definition: SceneDefinition;
-  environment: FillMaterialEnvironment;
   /** 与 ChunkStreamer 相同的房间世界种子，用于选择同 kind 的玩法原型变体。 */
   worldSeed?: number;
   now?: () => number;

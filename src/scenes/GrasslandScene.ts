@@ -25,6 +25,7 @@ import { PlayerEntity } from '../player/PlayerEntity';
 import { SlimeSurfaceDragController } from '../controllers/SlimeSurfaceDragController';
 import { RemotePlayerGroup } from '../player/RemotePlayerGroup';
 import { SceneRenderer } from '../rendering/SceneRenderer';
+import { connectRenderWorldInProcess } from '../render/RenderWorldRuntime';
 import { SceneCompositionHost } from '../scene/SceneCompositionHost';
 import { SceneWorld } from '../scene/SceneWorld';
 import type { SceneUpdateContext } from '../scene/SceneVisualSystem';
@@ -180,12 +181,14 @@ export class GrasslandScene extends Scene {
       this.refreshInventoryShortcut();
       this.hud.refreshInputPrompt();
     });
-    // 场景的两半:渲染核心与玩法查询。第 3 步搬 canvas 时只有前者跟着走。
-    this.world = new SceneWorld();
-    this.renderer = new SceneRenderer(options.canvas, this.world);
+    // 渲染那一侧只在这一行里被决定。换成 worker 版的连接，下面三个类都不用改。
+    const render = connectRenderWorldInProcess(options.canvas);
+    // 场景的两半：渲染核心与玩法查询。第 3 步搬 canvas 时只有前者跟着走。
+    this.world = new SceneWorld(render.port);
+    this.renderer = new SceneRenderer(options.canvas, this.world, render);
     // 一局的装配。它认识的是 `SceneComposition` 这份数据和两个接收方，
     // 既不认识 `THREE.Scene` 也不认识画布——canvas 搬进 worker 时它留在原地。
-    this.composition = new SceneCompositionHost(this.world, this.renderer);
+    this.composition = new SceneCompositionHost(this.world, render.port, this.renderer);
     this.remotePlayers = new RemotePlayerGroup(this.world);
     this.flyController = new FlyController(options.canvas, {
       position: [0, 4.2, 13.5],

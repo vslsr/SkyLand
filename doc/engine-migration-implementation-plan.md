@@ -1030,6 +1030,43 @@ this.physicsWorld?.dispose();
 一起删掉了：四个拖拽方法进了 `RenderScene`，由主棘轮盯着。
 `SlimeSurfaceDragSurface` 现在只是 `Pick<RenderScene, ...>`。
 
+### 已经做了的：渲染循环收进一个盒子 ✅
+
+搬进 worker 之前先要有**一个可搬的东西**。`SceneRenderer` 那时是主线程与渲染世界
+搅在一起的一层：它持有 `WebGLRenderer`，也持有玩法侧那批每帧系统；它量画布，
+也建场景图。
+
+新增 `src/render/RenderWorldRuntime.ts`：画布、`WebGLRenderer`、一张地图的渲染世界、
+每帧那两步（`update` 跑表现系统与 `updateVisuals`，`render` 读机位并画）。
+**它成立的判据只有一条：构造它只需要一个画布，此后所有输入都是命令与字节。**
+所以同一份代码在主线程（`HTMLCanvasElement`）和在 worker 里（`OffscreenCanvas`）都能跑。
+
+它收的整图级命令是 `RenderWorldCommands`，每一条都返回 `void`：
+
+| | |
+| --- | --- |
+| `loadRenderScene(definition, seed)` / `clearRenderScene()` | 换地图。渲染那一半**由这一侧自己按定义与种子建**，不从外面递进来 |
+| `setViewport(w, h, ratio)` | 画布尺寸由主线程量——`clientWidth` 与 `devicePixelRatio` 是 DOM 的事，画布元素不跟着绘制上下文走 |
+| `setWeather` / `setTimeOfDay` / `setSceneActive` / `setTerrainCells` / `setTerrainHighlight` | 原来是从组合里掏出来的目标对象，现在是命令 |
+| `setPhysicsDebug(buffers?)` | 物理线框改成**推**：物理世界归玩法那一半持有，渲染侧问不到它 |
+| `applyGrassImpulse` / `setFrameContext` | 草地脉冲、焦点与玩家身影 |
+
+于是 `createLineArtScene` 一分为二。`createGameWorld(definition, seed, channels)`
+只建玩法那一半，`channels` 就是渲染世界递出来的三个口子——**这正是第 3 步一路在铺
+的那条缝**。`SceneComposition` 里因此再没有一个 THREE 对象：`scene`、天气与昼夜的
+目标、草地写入口、表现系统全部留在画布那一边。
+
+`SceneRenderer` 剩下四件跨不过去的事：量画布、推时钟、把机位摊进字节并按同一份数据
+回答反投影用的视图、驱动**玩法侧**那批每帧系统。它**一个 `THREE` 都不 import 了**，
+和 `ClientActorSystem` 一起进了那条主干棘轮。
+
+顺手清掉的两处：`ClientActorSystem.environment`（一个玩法类收着渲染侧的材质包，
+两个用它的合批系统搬走之后就没人读了）、`MouseGrassInteractionSceneComponent` 那次
+「问渲染世界要一个草地对象」——「这张地图有没有草」是场景定义说的事，脉冲经
+`SceneWorld` 发过去就行。
+
+换 worker 那天要动的只有一行：`GrasslandScene` 里那句 `connectRenderWorldInProcess`。
+
 ### 还没做的
 
 | | 说明 |

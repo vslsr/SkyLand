@@ -4,25 +4,38 @@ import { getRapier, PhysicsWorld } from '../../shared/physics/index.mjs';
 import type { SceneDefinition } from '../scenes/data/SceneDefinition';
 import { DEFAULT_WORLD_SEED, toWorldSeed } from '../../shared/world/worldConfig.mjs';
 import { ChunkStreamer, TerrainWorld } from '../world';
-import { createRenderWorld } from './createRenderWorld';
+import type { ChunkViewSink } from '../world/ChunkViewHost';
+import type { RenderScene } from '../render/RenderScene';
+import type { RenderTransformBuffer } from '../render/RenderTransformBuffer';
 import type { SceneComposition, SceneFrameSystem } from './SceneVisualSystem';
 
 /**
- * 一张地图的两半，以及把它们接起来的那几根线。
+ * 渲染世界递过来的三个口子。**只有这三样**跨这条缝，而且都是单向的。
  *
- * 渲染那一半整个在 `createRenderWorld` 里建——它只吃场景定义和世界种子。
- * 这里建的是**玩法那一半**：碰撞世界、物理世界、地形采样、Actor 世界、流送规划。
- *
- * 两半之间只有三样东西过去：`renderScene`（proxy 命令口）、`chunkViews`
- * （挂载命令口）、`transforms`（那段边界字节）。**没有一样是反向的**——
- * 除了签名上写明的那一个 `sampleGroundHeight`（见 `createRenderWorld`）。
- *
- * 这个分法就是第 3 步要的那条缝：把 `createRenderWorld` 换成「在 worker 里建，
- * 回传三个命令口」，这个函数一个字都不用改。
+ * 单线程下它们就是 `RenderWorldRuntime` 身上的真东西；渲染循环进 worker 之后
+ * 同一组口子由 `RenderCommandQueue` 顶上，下面这个函数一个字都不用改——
+ * 这正是第 3 步一路在铺的那条缝。
  */
-export function createLineArtScene(
+export interface GameWorldRenderChannels {
+  /** proxy 命令口。 */
+  readonly scene: RenderScene;
+  /** 那段边界字节。玩法侧写，渲染侧读。 */
+  readonly transforms: RenderTransformBuffer;
+  /** 挂载命令口。流式地图才有。 */
+  readonly chunkViews?: ChunkViewSink;
+}
+
+/**
+ * 一张地图的**玩法那一半**：碰撞世界、物理世界、地形采样、Actor 世界、流送规划。
+ *
+ * 渲染那一半在 `createRenderWorld` 里建，归 `RenderWorldRuntime`；这里只收它递过来
+ * 的三个口子（`GameWorldRenderChannels`）。这个函数里**一个 `THREE` 都没有**，
+ * 有棘轮盯着。
+ */
+export function createGameWorld(
   definition: SceneDefinition,
-  worldSeed?: number,
+  worldSeed: number | undefined,
+  render: GameWorldRenderChannels,
 ): SceneComposition {
   const { renderer } = definition;
 
@@ -37,10 +50,6 @@ export function createLineArtScene(
       )
     : undefined;
 
-  // --- 渲染那一半。它只吃场景定义和世界种子；地形它自己按同一个种子建一份 ---
-  const render = createRenderWorld(definition, worldSeed);
-
-  // --- 玩法那一半的其余部分 ---
   const gameSystems: SceneFrameSystem[] = [];
   // Actor 世界总是建，哪怕这张地图一个 Actor 都没有：**渲染世界那次翻面归它管**
   // （`RenderTransformSyncSystem` 夹在写入与依赖翻面结果的表现 System 之间），
@@ -48,11 +57,10 @@ export function createLineArtScene(
   // 会让没有 Actor 的地图上玩家整个不动。空的 ActorWorld 每帧什么都不做。
   const actorSnapshotTarget = new ClientActorSystem({
     definition,
-    environment: render.environment,
     collision: collisionWorld,
     physics: physicsWorld,
     worldSeed,
-    renderScene: render.renderScene,
+    renderScene: render.scene,
     transforms: render.transforms,
   });
 
@@ -100,15 +108,9 @@ export function createLineArtScene(
   gameSystems.push(actorSnapshotTarget);
 
   return {
-    scene: render.scene,
-    // 顺序照旧：渲染侧的昼夜/天气/地表在前，玩法侧的流送与 Actor 在后。
-    visualSystems: [...render.visualSystems, ...gameSystems],
-    weatherTarget: render.weatherTarget,
-    dayNightTarget: render.dayNightTarget,
-    environmentRuntime: render.environment.runtime,
-    grassInteraction: render.grassInteraction,
+    visualSystems: gameSystems,
     actorSnapshotTarget,
-    renderScene: render.renderScene,
+    renderScene: render.scene,
     renderTransforms: render.transforms,
     // 槽位表由 ClientActorSystem 建（它是唯一知道渲染世界什么时候就位的那一个），
     // 从这里递给玩家实体——两边必须是同一张。
@@ -116,9 +118,5 @@ export function createLineArtScene(
     collisionWorld,
     terrainWorld,
     physicsWorld,
-    // 服务端确认过的地形编辑要写两份：玩法侧那份决定脚下踩到什么，
-    // 渲染侧那份决定雨落在多高。
-    setRenderTerrainCells: render.setTerrainCells,
-    setRenderSceneActive: render.setSceneActive,
   };
 }

@@ -2,6 +2,7 @@ import type { Actor } from '../../shared/actor/Actor.mjs';
 import type { PhysicsWorld } from '../../shared/physics/PhysicsWorld.mjs';
 import { TERRAIN_CELL_SIZE } from '../../shared/world/terrainConfig.mjs';
 import type { GrassBendImpulse, GrassInteractionTarget } from '../grass';
+import type { RenderWorldCommands } from '../render/RenderWorldRuntime';
 import type { SnapshotActor, SnapshotPlayer } from '../network/protocol';
 import type { TerrainWorld } from '../world/TerrainWorld';
 import type {
@@ -30,14 +31,20 @@ export class SceneWorld implements GrassInteractionTarget {
   private terrainWorld?: TerrainWorld;
   private physicsWorld?: PhysicsWorld;
   private actorSnapshotTarget?: ActorSnapshotTarget;
-  private grassInteraction?: GrassInteractionTarget;
   /**
    * 没有地形世界的固定水面场景（线稿海域）用这两个值代替地形采样。
    * 它们本来就是「这张地图的玩法事实」，不是渲染状态。
    */
   private fixedWaterWorld = false;
   private fixedWaterLevel = 0;
-  private setRenderTerrainCells?: SceneComposition['setRenderTerrainCells'];
+
+  /**
+   * 往渲染世界发命令的口子。
+   *
+   * **不随场景走**：草地脉冲、地形编辑镜像发给的是渲染循环本身，而它从大厅到
+   * 房间再回大厅一直是同一个。单线程下是真对象，上 worker 之后是命令队列。
+   */
+  public constructor(private readonly render: RenderWorldCommands) {}
 
   /** 换场景：把新组合里属于玩法的那几个句柄接过来。 */
   public adopt(composition: SceneComposition, water: {
@@ -47,20 +54,16 @@ export class SceneWorld implements GrassInteractionTarget {
     this.terrainWorld = composition.terrainWorld;
     this.physicsWorld = composition.physicsWorld;
     this.actorSnapshotTarget = composition.actorSnapshotTarget;
-    this.grassInteraction = composition.grassInteraction;
     this.fixedWaterWorld = water.fixedWaterWorld;
     this.fixedWaterLevel = water.fixedWaterLevel;
-    this.setRenderTerrainCells = composition.setRenderTerrainCells;
   }
 
   public clear(): void {
     this.terrainWorld = undefined;
     this.physicsWorld = undefined;
     this.actorSnapshotTarget = undefined;
-    this.grassInteraction = undefined;
     this.fixedWaterWorld = false;
     this.fixedWaterLevel = 0;
-    this.setRenderTerrainCells = undefined;
   }
 
   /**
@@ -131,7 +134,7 @@ export class SceneWorld implements GrassInteractionTarget {
     for (const cell of cells) terrain.setCellCode(cell.cellX, cell.cellZ, cell.code);
     // 渲染世界按同一个种子自己推地形，编辑是它推不出来的那部分——雨要落在
     // 改过的高度上，就得把同一批格子也发过去。
-    this.setRenderTerrainCells?.(cells);
+    this.render.setTerrainCells(cells);
   }
 
   /** 当前场景任意来源的地形 patch 通知。 */
@@ -162,7 +165,7 @@ export class SceneWorld implements GrassInteractionTarget {
 
   /** 玩家、场景组件或玩法效果写入当前场景草地的统一入口。 */
   public applyImpulse(impulse: GrassBendImpulse): void {
-    this.grassInteraction?.applyImpulse(impulse);
+    this.render.applyGrassImpulse(impulse);
   }
 
   // --- Actor --------------------------------------------------------------

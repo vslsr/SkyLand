@@ -64,6 +64,13 @@ export interface RenderWorldComposition {
   setTerrainCells(cells: readonly { cellX: number; cellZ: number; code: number }[]): void;
   /** 场景进出。表现组件靠它挂上／摘下自己的对象，和主线程那批组件同一个语义。 */
   setSceneActive(active: boolean): void;
+  /**
+   * 这一侧那份地形的高度采样。
+   *
+   * 地形编辑的高亮框画在这一侧，而它要贴着地面。玩法侧当然也有一份高度，
+   * 但**跨边界回读一个数**正是这条边界不做的事——两份地形本来就同源同种子。
+   */
+  sampleGroundHeight(x: number, z: number): number;
 }
 
 export function createRenderWorld(
@@ -223,5 +230,6 @@ export function createRenderWorld(
     setTerrainCells: (cells) => {
       for (const cell of cells) terrain?.setCellCode(cell.cellX, cell.cellZ, cell.code);
     },
+    sampleGroundHeight: (x, z) => terrain?.sampleGroundHeight(x, z) ?? 0,
   };
 }
