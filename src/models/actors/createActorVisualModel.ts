@@ -3,6 +3,7 @@ import type { ActorRenderDefinition } from '../../scenes/data/SceneDefinition';
 import { createBuoyancyRaftModel } from '../ocean/createBuoyancyRaftModel';
 import type { ActorVisualModel } from './ActorVisualModel';
 import { createCargoCrateModel } from './createCargoCrateModel';
+import { createStorageChestModel } from './createStorageChestModel';
 import { createReefModel } from './createReefModel';
 import { createElasticMushroomModel } from './createElasticMushroomModel';
 import { createFloorPlaqueModel } from './createFloorPlaqueModel';
@@ -33,6 +34,9 @@ export function createActorVisualModel(
   }
   if (definition.model === 'line-art-raft') {
     return createBuoyancyRaftModel(environment, definition);
+  }
+  if (definition.model === 'line-art-storage-chest') {
+    return createStorageChestModel(environment, definition);
   }
   if (definition.model === 'line-art-cargo-crate') {
     return createCargoCrateModel(environment, definition);

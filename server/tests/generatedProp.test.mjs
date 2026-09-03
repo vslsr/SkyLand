@@ -17,6 +17,7 @@ import {
 } from '../../shared/world/generatedProp.mjs';
 import {
   CHUNK_SIZE,
+  MAXIMUM_CHUNK_COORDINATE,
   MAXIMUM_PROPS_PER_CHUNK,
   PROP_KIND,
 } from '../../shared/world/worldConfig.mjs';
@@ -87,7 +88,13 @@ test('生成物件 id 带种类、可在负 chunk 往返，并拒绝越界与未
   });
   assert.equal(formatGeneratedPropId(PROP_KIND.ROCK, 0, 0, 3), 'prop:rock:0:0:3');
   assert.equal(formatGeneratedPropId(PROP_KIND.MUSHROOM, 0, 0, 4), 'prop:mushroom:0:0:4');
-  assert.equal(parseGeneratedPropId('prop:tree:99:2:17'), undefined, 'chunk 越界');
+  // 越界的只有精度护栏之外那一格；99 号 chunk（约 3 公里外）是正常世界的一部分。
+  assert.deepEqual(parseGeneratedPropId('prop:tree:99:2:17')?.chunkX, 99);
+  assert.equal(
+    parseGeneratedPropId(`prop:tree:${MAXIMUM_CHUNK_COORDINATE + 1}:2:17`),
+    undefined,
+    'chunk 越界',
+  );
   assert.equal(parseGeneratedPropId('prop:dragon:0:0:1'), undefined, '未知种类');
   assert.equal(parseGeneratedPropId('tree:0:0:1'), undefined, '旧格式不再被接受');
   assert.equal(deriveGeneratedProp(SEED, -3, 2, 63), undefined);

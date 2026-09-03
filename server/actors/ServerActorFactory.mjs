@@ -28,6 +28,8 @@ import {
   AttachmentSystem,
   INTERACTABLE_COMPONENT,
   InteractableComponent,
+  CONTAINER_COMPONENT,
+  ContainerComponent,
   ITEM_STACK_COMPONENT,
   ItemStackComponent,
   LIFETIME_COMPONENT,
@@ -95,6 +97,9 @@ export function createServerActor(spawn, archetype, runtime = {}) {
   if (archetype.components.temperature) actor.addComponent(new TemperatureComponent(archetype.components.temperature));
   if (archetype.components.combustible) actor.addComponent(new CombustibleComponent(archetype.components.combustible));
   if (archetype.components.heatEmitter) actor.addComponent(new HeatEmitterComponent(archetype.components.heatEmitter));
+  if (archetype.components.container) {
+    actor.addComponent(new ContainerComponent(archetype.components.container));
+  }
   if (archetype.components.itemStack) {
     actor.addComponent(new ItemStackComponent({ ...archetype.components.itemStack, ...runtime.itemStack }));
   }
@@ -256,6 +261,7 @@ export function createActorSnapshots(world, options = {}) {
     const hazard = actor.getComponent(HAZARD_COMPONENT);
     const temperature = actor.getComponent(TEMPERATURE_COMPONENT);
     const combustible = actor.getComponent(COMBUSTIBLE_COMPONENT);
+    const container = actor.getComponent(CONTAINER_COMPONENT);
     const itemStack = actor.getComponent(ITEM_STACK_COMPONENT);
     const residency = actor.getComponent(ACTOR_RESIDENCY_COMPONENT);
     const generatedProp = actor.getComponent(GENERATED_PROP_COMPONENT);
@@ -378,6 +384,7 @@ export function createActorSnapshots(world, options = {}) {
           revision: Math.max(temperature.revision, combustible?.revision ?? 0),
         },
       } : {}),
+      ...(container ? { container: container.snapshot(viewer?.id) } : {}),
       ...(itemStack ? {
         itemStack: {
           itemType: itemStack.itemType,

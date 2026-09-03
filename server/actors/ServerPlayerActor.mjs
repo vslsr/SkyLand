@@ -80,6 +80,11 @@ export class ServerPlayerActor extends Actor {
     this.ackTick = 0;
     this.sequence = 0;
     this.actorInteractionSequence = 0;
+    this.inventoryCommandSequence = 0;
+    /** 手持物按下使用键的权威时刻；蓄力结算只认它，不认客户端上报的时长。 */
+    this.heldItemUseStartedAt = undefined;
+    /** 交互键按住的权威时刻；短按放下、长按收回背包由它分界。 */
+    this.heldItemStowStartedAt = undefined;
     this.terrainEditSequence = 0;
     this.stepBudget = Math.floor(INPUT_TIME_BUDGET_SECONDS / SIMULATION_STEP_SECONDS);
     // 客户端静默期间由 PlayerIdleSimulation 累积、消费的补步余量与代发步号。

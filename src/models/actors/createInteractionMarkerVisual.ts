@@ -5,6 +5,8 @@ import { createSurfaceTexture } from '../../materials/surfaceTexture';
 export interface InteractionMarkerVisual {
   readonly root: THREE.Group;
   setLabel(label: string): void;
+  /** 整块牌子的淡入淡出；0 是全透明，1 是牌子本来的样子。 */
+  setOpacity(opacity: number): void;
   dispose(): void;
 }
 
@@ -15,6 +17,8 @@ function setOverlayMaterial(material: THREE.Material): void {
 
 const MARKER_HEIGHT = 0.56;
 const PAPER_INSET = 0.07;
+/** 纸面本来就压着一点透明度；淡入淡出是在这个基线上乘出来的。 */
+const PLATE_OPACITY = 0.96;
 const LABEL_TEXTURE_HEIGHT = 256;
 const LABEL_FONT_SIZE = 176;
 
@@ -49,8 +53,11 @@ export function createInteractionMarkerVisual(): InteractionMarkerVisual {
   // WebGL 的 LineBasicMaterial 通常只能渲染 1px 线宽，远距离会被抗锯齿吞掉。
   // 边框和字形都使用实心三角形，保证低分辨率下仍然清晰。
   const borderGeometry = new THREE.PlaneGeometry(1, 1);
+  // 边框和字形本来是不透明的；淡入淡出要靠 opacity，所以三块材质统一走透明通道。
+  // 深度测试与写入本来就是关的，渲染顺序仍由 renderOrder 决定，叠放次序不变。
   const borderMaterial = new THREE.MeshBasicMaterial({
     color: 0x29231f,
+    transparent: true,
     fog: false,
   });
   setOverlayMaterial(borderMaterial);
@@ -64,7 +71,7 @@ export function createInteractionMarkerVisual(): InteractionMarkerVisual {
   const plateMaterial = new THREE.MeshBasicMaterial({
     color: 0xf5ecd7,
     transparent: true,
-    opacity: 0.96,
+    opacity: PLATE_OPACITY,
     fog: false,
   });
   setOverlayMaterial(plateMaterial);
@@ -92,6 +99,7 @@ export function createInteractionMarkerVisual(): InteractionMarkerVisual {
   root.add(glyph);
 
   let currentLabel = '';
+  let currentOpacity = 1;
   let labelTexture: THREE.CanvasTexture | undefined;
 
   const setLabel = (rawLabel: string): void => {
@@ -116,9 +124,20 @@ export function createInteractionMarkerVisual(): InteractionMarkerVisual {
     glyph.visible = Boolean(labelTexture);
   };
 
+  // 淡入淡出每帧都会调一次，值没变就不碰材质。
+  const setOpacity = (opacity: number): void => {
+    const clamped = THREE.MathUtils.clamp(opacity, 0, 1);
+    if (clamped === currentOpacity) return;
+    currentOpacity = clamped;
+    borderMaterial.opacity = clamped;
+    plateMaterial.opacity = PLATE_OPACITY * clamped;
+    glyphMaterial.opacity = clamped;
+  };
+
   return {
     root,
     setLabel,
+    setOpacity,
     dispose(): void {
       root.parent?.remove(root);
       labelTexture?.dispose();

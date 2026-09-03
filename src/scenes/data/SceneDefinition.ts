@@ -134,6 +134,15 @@ export type ActorRenderDefinition =
       height: number;
     }
   | {
+      /** 储物箱：箱体加一块绕后沿翻起的盖子，开合由 container Component 决定。 */
+      model: 'line-art-storage-chest';
+      color: string;
+      accentColor: string;
+      length: number;
+      width: number;
+      height: number;
+    }
+  | {
       model: 'line-art-reef';
       color: string;
       accentColor: string;
@@ -327,6 +336,16 @@ export interface ActorArchetypeDefinition {
     /** 角色能带走的货位数；不写按 DEFAULT_SLOT_CAPACITY。 */
     inventory?: {
       slotCapacity: number;
+      hotbarCapacity?: number;
+      /** 交互键按住多久算「收回背包」；客户端的转盘用同一个数。 */
+      stowHoldSeconds?: number;
+    };
+    /** 可存取的容器：箱子、船舱。和背包共用同一套堆叠与货位规则。 */
+    container?: {
+      slotCapacity: number;
+      label: string;
+      /** 离开这个距离服务端替玩家关掉界面。 */
+      reach: number;
     };
     pickupDrop?: {
       mouthLocalX: number;

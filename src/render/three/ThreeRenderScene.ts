@@ -52,6 +52,7 @@ import { ThreeGuidePathVisual } from './ThreeGuidePathVisual';
 import { ThreeHybridSlimeVisual } from './ThreeHybridSlimeVisual';
 import { ThreeSlimeLegVisual } from './ThreeSlimeLegVisual';
 import { ThreeAttachmentVisual } from './ThreeAttachmentVisual';
+import { ThreeContainerLidVisual } from './ThreeContainerLidVisual';
 import { ThreeDropRollVisual } from './ThreeDropRollVisual';
 import { ThreeElasticTetherVisual } from './ThreeElasticTetherVisual';
 import { ThreeMeshProxy } from './ThreeMeshProxy';
@@ -155,6 +156,7 @@ export class ThreeRenderScene implements RenderScene {
   /** proxyId → 弹性拉伸 / 脱落翻滚。两者都只有弹性蘑菇那种模型才有。 */
   private readonly elasticTethers = new Map<ProxyId, ThreeElasticTetherVisual>();
   private readonly dropRolls = new Map<ProxyId, ThreeDropRollVisual>();
+  private readonly containerLids = new Map<ProxyId, ThreeContainerLidVisual>();
   private readonly attachmentVisual = new ThreeAttachmentVisual();
 
   public constructor(
@@ -200,6 +202,9 @@ export class ThreeRenderScene implements RenderScene {
     }
     if (model.dropRollRig) {
       this.dropRolls.set(proxy.id, new ThreeDropRollVisual(proxy.id, model.dropRollRig));
+    }
+    if (model.containerLidRig) {
+      this.containerLids.set(proxy.id, new ThreeContainerLidVisual(proxy.id, model.containerLidRig));
     }
     return describeProxy(proxy);
   }
@@ -301,6 +306,7 @@ export class ThreeRenderScene implements RenderScene {
     this.waterMotions.delete(id);
     this.elasticTethers.delete(id);
     this.dropRolls.delete(id);
+    this.containerLids.delete(id);
     this.attachmentVisual.forget(id);
     proxy.dispose();
   }
@@ -378,6 +384,7 @@ export class ThreeRenderScene implements RenderScene {
       tether.update(transforms, deltaSeconds, elapsedSeconds);
     }
     for (const drop of this.dropRolls.values()) drop.update(transforms);
+    for (const lid of this.containerLids.values()) lid.update(transforms, deltaSeconds);
     this.fireVisual.update(live, transforms, deltaSeconds, elapsedSeconds);
     for (const proxy of live) {
       proxy.markers.setTemperature(transforms.readParam(proxy.id, PARAM_TEMPERATURE));
@@ -493,13 +500,16 @@ export class ThreeRenderScene implements RenderScene {
   /**
    * 选中哪一个交互目标。`NULL_PROXY_ID` 表示没有选中——生成物件带
    * InteractableComponent 却没有 proxy，所以「目标没有 proxyId」必须是合法输入。
+   *
+   * `opacity` 是交互提示的淡入淡出进度，只落在选中的那一块牌子上：没选中的牌子
+   * 本来就不可见，跟着每帧变一遍不透明度是白写。
    */
-  public setInteractionMarker(id: ProxyId, label: string): void {
+  public setInteractionMarker(id: ProxyId, label: string, opacity = 1): void {
     this.selectedInteractionProxy = id;
     for (const proxy of this.proxies) {
       if (!proxy?.markers.hasInteraction) continue;
       const selected = proxy.id === id && label.length > 0;
-      proxy.markers.setInteraction(label, selected);
+      proxy.markers.setInteraction(label, selected, selected ? opacity : 1);
     }
   }
 
@@ -535,6 +545,7 @@ export class ThreeRenderScene implements RenderScene {
     this.waterMotions.clear();
     this.elasticTethers.clear();
     this.dropRolls.clear();
+    this.containerLids.clear();
     for (const proxy of this.proxies) proxy?.dispose();
     this.proxies.length = 0;
     this.freeSlots.length = 0;

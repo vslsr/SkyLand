@@ -44,7 +44,15 @@ export const PlayerInputActionIds = {
   Inventory: 'IA_Player_Inventory',
   DebugMenu: 'IA_Debug_Menu',
   Dodge: 'IA_Player_Dodge',
+  HotbarPrevious: 'IA_Hotbar_Previous',
+  HotbarNext: 'IA_Hotbar_Next',
 } as const;
+
+/** 快捷栏直选：数字键 1-9。格数由玩家原型决定，超出的那几个标签不会有人监听。 */
+export const HotbarSlotActionIds = Array.from(
+  { length: 9 },
+  (_, index) => `IA_Hotbar_Slot${index + 1}`,
+) as readonly string[];
 
 export const PlayerInputMappingIds = {
   DebugMenuKeyboard: 'DebugMenu.Keyboard.F8',
@@ -76,6 +84,24 @@ export const PlayerInputTags = {
   Inventory: defineTag(tagForAction(PlayerInputActionIds.Inventory)),
   DebugMenu: defineTag(tagForAction(PlayerInputActionIds.DebugMenu)),
   Dodge: defineTag(tagForAction(PlayerInputActionIds.Dodge)),
+  HotbarPrevious: defineTag(tagForAction(PlayerInputActionIds.HotbarPrevious)),
+  HotbarNext: defineTag(tagForAction(PlayerInputActionIds.HotbarNext)),
+} as const;
+
+/** 第 N 格（从 0 起）的输入标签。 */
+export const HotbarSlotTags = HotbarSlotActionIds.map(
+  (actionId) => defineTag(tagForAction(actionId)),
+);
+
+/**
+ * 物品目录里的逻辑输入槽到输入标签的映射。
+ *
+ * 这是「配置里写 `input: "primary"`」与「实际按哪个键」之间唯一的接缝：物品不认识
+ * 键位，输入方案不认识物品。想让某件道具改用别的键，改物品目录；想让那个槽换成
+ * 别的物理键，改输入方案。目前只有主手一个槽。
+ */
+export const ItemUseInputTags = {
+  primary: PlayerInputTags.Primary,
 } as const;
 
 // 兼容现有业务层导入；数据源均来自 player.input.json。

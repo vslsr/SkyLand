@@ -28,6 +28,7 @@ import {
   PARAM_ELASTIC_TARGET_X,
   PARAM_ELASTIC_TARGET_Y,
   PARAM_ELASTIC_TARGET_Z,
+  PARAM_CONTAINER_OPEN_TARGET,
   PARAM_FIRE_TARGET_INTENSITY,
   PARAM_TEMPERATURE,
   RENDER_VISUAL_PARAM_COUNT,
@@ -47,6 +48,8 @@ import {
 import {
   BUOYANCY_COMPONENT,
   type BuoyancyComponent,
+  CONTAINER_COMPONENT,
+  type ContainerComponent,
   DROP_MOTION_COMPONENT,
   type DropMotionComponent,
   ELASTIC_DETACH_COMPONENT,
@@ -89,6 +92,14 @@ export class ActorVisualParamSystem {
         proxy.proxyId,
         PARAM_TEMPERATURE,
         temperature ? temperature.temperature : 0,
+      );
+      // 盖子开不开看「有几个人开着」而不是「我开着没有」：别人翻这个箱子时，
+      // 我也该看见盖子掀起来。回弹在渲染侧积分，这里只给 0 / 1 的目标。
+      const container = actor.getComponent(CONTAINER_COMPONENT) as ContainerComponent | undefined;
+      this.transforms.writeParam(
+        proxy.proxyId,
+        PARAM_CONTAINER_OPEN_TARGET,
+        container && container.viewerCount > 0 ? 1 : 0,
       );
       // Replica 的史莱姆不自己走路——服务端不复制运动演示，它们静止在原地
       // 摆动。运动参数由玩家实体自己写（它们不是 Replica，不经过这个 System），

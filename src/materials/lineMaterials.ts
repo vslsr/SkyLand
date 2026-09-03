@@ -40,18 +40,54 @@ export const OUTLINE_MATERIAL = renderAssets.get(OUTLINE_HANDLE);
 export const GROUND_GRID_MATERIAL = renderAssets.get(GROUND_GRID_HANDLE);
 
 /**
+ * 夜里的墨色。
+ *
+ * 填充色会被环境光整体压暗，墨线却是一支不参与光照的 LineBasicMaterial：
+ * 天一黑，纸面就沉到墨色附近，轮廓线随之消失，剩下一地网格。所以低照度时
+ * 把墨提到纸面之上，线稿由「深墨压浅纸」翻成「淡墨浮暗纸」，物件的剪影
+ * 在任何时刻都读得出来。
+ */
+const NIGHT_INK_COLOR = new THREE.Color(0xc4cedd);
+
+/** 网格线在夜里要跟着纸面一起沉下去，否则它会是画面里最亮的东西。 */
+const NIGHT_GRID_SCALE = 0.34;
+
+/** 环境亮度到这个值以下开始换墨；以上完全保持基准的深墨。 */
+const INK_LIFT_RANGE = Object.freeze({ from: 0.55, to: 0.12 });
+
+const GRID_BASE_OPACITY = 0.34;
+
+function clamp01(value: number): number {
+  return value < 0 ? 0 : value > 1 ? 1 : value;
+}
+
+function smoothstep(edge0: number, edge1: number, value: number): number {
+  const t = clamp01((value - edge0) / (edge1 - edge0));
+  return t * t * (3 - 2 * t);
+}
+
+/**
  * 按场景环境给共享墨线染色。
  *
  * `tint` 已经归一化到平均值 1，所以正午（中性白光）下墨色与基准完全一致，
- * 关掉昼夜的场景不会有任何变化。
+ * 关掉昼夜的场景不会有任何变化。`level` 是当前环境光的相对亮度（正午为 1），
+ * 它决定墨要不要从纸面里被提出来；不传就按满照度处理。
  */
-export function applyEnvironmentInk(tint: THREE.Color): void {
-  OUTLINE_MATERIAL.color.copy(BASE_OUTLINE_COLOR).multiply(tint);
-  GROUND_GRID_MATERIAL.color.copy(BASE_GROUND_GRID_COLOR).multiply(tint);
+export function applyEnvironmentInk(tint: THREE.Color, level = 1): void {
+  const lift = smoothstep(INK_LIFT_RANGE.from, INK_LIFT_RANGE.to, level);
+  OUTLINE_MATERIAL.color.copy(BASE_OUTLINE_COLOR)
+    .lerp(NIGHT_INK_COLOR, lift)
+    .multiply(tint);
+  // 网格随纸面一起变暗，同时让出一点不透明度：物件的轮廓要比地面的刻度醒目。
+  GROUND_GRID_MATERIAL.color.copy(BASE_GROUND_GRID_COLOR)
+    .multiplyScalar(1 - (1 - NIGHT_GRID_SCALE) * lift)
+    .multiply(tint);
+  GROUND_GRID_MATERIAL.opacity = GRID_BASE_OPACITY * (1 - 0.35 * lift);
 }
 
 /** 场景卸载时把共享墨线恢复成基准色，下一张地图不会继承上一张的天色。 */
 export function resetEnvironmentInk(): void {
   OUTLINE_MATERIAL.color.copy(BASE_OUTLINE_COLOR);
   GROUND_GRID_MATERIAL.color.copy(BASE_GROUND_GRID_COLOR);
+  GROUND_GRID_MATERIAL.opacity = GRID_BASE_OPACITY;
 }

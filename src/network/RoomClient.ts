@@ -9,7 +9,7 @@ import type {
   RoomSummary,
   VesselInputFrame,
 } from './messages';
-import type { TerrainEditOperation } from './messages';
+import type { InventoryCommand, TerrainEditOperation } from './messages';
 import type { PlayerInputStep, RoomSnapshot, SlimeDragState } from './protocol';
 import type { WeatherType } from '../weather/index';
 import { HttpRoomDirectory, type RoomDirectory } from './RoomDirectory';
@@ -71,6 +71,7 @@ export class RoomClient {
   private readonly actorInputSequences = new Map<string, number>();
   private readonly actorEventSequences = new Map<string, number>();
   private actorInteractionSequence = 0;
+  private inventoryCommandSequence = 0;
   private terrainEditSequence = 0;
 
   public constructor(options: RoomClientOptions = {}) {
@@ -252,6 +253,18 @@ export class RoomClient {
     const sent = this.send({ type: 'actor:interact', actorId, sequence }, 'control');
     if (!sent) return undefined;
     this.actorInteractionSequence = sequence;
+    return sequence;
+  }
+
+  /**
+   * 发一条背包意图。序号单调递增，服务端拿它挡掉重放与乱序——蓄力的
+   * begin/release 一旦错序，就会变成「松手比按下先到」。
+   */
+  public sendInventoryCommand(command: InventoryCommand): number | undefined {
+    const sequence = this.inventoryCommandSequence + 1;
+    const sent = this.send({ type: 'inventory:command', sequence, command }, 'control');
+    if (!sent) return undefined;
+    this.inventoryCommandSequence = sequence;
     return sequence;
   }
 

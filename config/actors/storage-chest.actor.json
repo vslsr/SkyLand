@@ -1,0 +1,25 @@
+{
+  "$schema": "./actor.schema.json",
+  "schemaVersion": 1,
+  "id": "storage-chest",
+  "components": {
+    "interactable": {
+      "action": "container-open",
+      "label": "储物箱",
+      "maximumDistance": 2.4
+    },
+    "container": {
+      "slotCapacity": 24,
+      "label": "储物箱",
+      "reach": 3.2
+    },
+    "render": {
+      "model": "line-art-storage-chest",
+      "color": "#a07850",
+      "accentColor": "#6f5138",
+      "length": 0.62,
+      "width": 0.86,
+      "height": 0.52
+    }
+  }
+}

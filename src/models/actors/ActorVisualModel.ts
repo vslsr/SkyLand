@@ -26,6 +26,8 @@ export interface ActorVisualModel {
   readonly interactionAnchorY?: number;
   /** 仅弹性模型提供；Actor 视觉 System 通过它驱动局部软体表现。 */
   readonly elasticTetherRig?: ElasticTetherVisualRig;
+  /** 仅容器提供；盖子的翻起由渲染侧按开合目标积分。 */
+  readonly containerLidRig?: ContainerLidVisualRig;
   /** 脱落成自由物体后绕刚体球心翻滚的枢轴；影子等贴地元素不挂在下面。 */
   readonly dropRollRig?: DropRollVisualRig;
   /** 仅训练假人提供；能力表现只修改这些 VisualRoot 下的展示节点。 */
@@ -136,6 +138,17 @@ export interface LineArtFireVisualRig {
 export interface DropRollVisualRig {
   readonly pivotRoot: THREE.Group;
   readonly bodyRoot: THREE.Group;
+}
+
+/**
+ * 箱盖。枢轴在后沿，所以 `lidRoot.rotation.x` 直接就是翻开的角度。
+ *
+ * `openAngle` 是完全打开时的弧度（负值向后翻）。它属于模型而不是玩法：同一个
+ * 容器 Component 换一副外观，盖子该翻多少是新外观自己的事。
+ */
+export interface ContainerLidVisualRig {
+  readonly lidRoot: THREE.Group;
+  readonly openAngle: number;
 }
 
 export interface ElasticTetherVisualRig {

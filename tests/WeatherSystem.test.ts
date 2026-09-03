@@ -5,7 +5,11 @@ import {
   createFillMaterial,
   createSceneEnvironment,
 } from '../src/materials/createFillMaterial';
-import { GROUND_GRID_MATERIAL } from '../src/materials/lineMaterials';
+import {
+  GROUND_GRID_MATERIAL,
+  OUTLINE_MATERIAL,
+  resetEnvironmentInk,
+} from '../src/materials/lineMaterials';
 import {
   createChunkFillMaterial,
   createChunkGroundFillMaterial,
@@ -249,4 +253,67 @@ test('普通物体保持清晰，仅流式物件在远端边缘混入天气距�
     renderable.geometry?.dispose();
     renderable.material?.dispose();
   });
+});
+
+
+function skyLuminance(color: THREE.Color): number {
+  return color.r * 0.2126 + color.g * 0.7152 + color.b * 0.0722;
+}
+
+test('纸面被夜色压暗时墨线浮上来，网格让位给物件轮廓', () => {
+  const state = {
+    timeOfDay: 12,
+    night: 0,
+    dayFactor: 1,
+    twilight: 0,
+    moonlit: 0,
+    skyColor: new THREE.Color('#fdfbf6'),
+    ambientColor: new THREE.Color(0xffffff),
+    ambientBrightness: 1,
+    sunDirection: new THREE.Vector3(-0.55, 0.9, 0.35).normalize(),
+    scatterColor: new THREE.Color(0xffe6b8),
+    scatterStrength: 0,
+    directLight: 1,
+    sunElevation: 1,
+    moonElevation: -1,
+  };
+  const scene = new THREE.Scene();
+  scene.background = new THREE.Color('#fdfbf6');
+  scene.fog = new THREE.Fog('#fdfbf6', 22, 52);
+  const environment = createSceneEnvironment('#fdfbf6', 22, 52);
+  const system = new WeatherSystem(scene, {
+    backgroundColor: '#fdfbf6',
+    fogColor: '#fdfbf6',
+    fogNear: 22,
+    fogFar: 52,
+    runtime: environment.runtime,
+    sampleGroundHeight: () => 2,
+    sky: { getSkyState: () => state },
+  });
+
+  settle(system, 4);
+  const noonInk = skyLuminance(OUTLINE_MATERIAL.color);
+  const noonGrid = skyLuminance(GROUND_GRID_MATERIAL.color);
+  const noonGridOpacity = GROUND_GRID_MATERIAL.opacity;
+  // 正午的中性白光下，墨色与网格与基准完全一致。
+  assert.ok(noonInk < 0.12);
+
+  state.timeOfDay = 0;
+  state.night = 1;
+  state.dayFactor = 0;
+  state.ambientColor.setRGB(0.25, 0.28, 0.38);
+  state.ambientBrightness = 0.2;
+  state.directLight = 0;
+  settle(system, 4);
+
+  // 纸面沉下去时墨要浮上来，否则轮廓线会整个陷进暗地里。
+  assert.ok(skyLuminance(OUTLINE_MATERIAL.color) > noonInk * 4);
+  // 网格反过来跟着纸面变暗、变淡：画面里最醒目的应当是物件而不是刻度。
+  assert.ok(skyLuminance(GROUND_GRID_MATERIAL.color) < noonGrid * 0.6);
+  assert.ok(GROUND_GRID_MATERIAL.opacity < noonGridOpacity);
+  assert.ok(skyLuminance(OUTLINE_MATERIAL.color) > skyLuminance(GROUND_GRID_MATERIAL.color));
+
+  system.dispose();
+  resetEnvironmentInk();
+  assert.equal(GROUND_GRID_MATERIAL.opacity, noonGridOpacity);
 });
