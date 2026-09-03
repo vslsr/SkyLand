@@ -195,6 +195,10 @@ process.on('message', (message) => {
       if (!scene) break;
       scene.interactWithActor(message.playerId, message.interaction ?? {});
       break;
+    case 'inventory:command':
+      if (!scene) break;
+      scene.applyInventoryCommand(message.playerId, message.command ?? {});
+      break;
     case 'terrain:edit': {
       if (!scene) break;
       // 没通过校验就是空数组，不广播任何东西——请求方也不会收到确认。
