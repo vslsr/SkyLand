@@ -64,6 +64,7 @@ function bytesFor(capacity: number): number {
 
 export class RenderTransformBuffer {
   #capacity = 0;
+  #grown?: (bytes: ArrayBufferLike) => void;
   #bytes: ArrayBufferLike = new ArrayBuffer(0);
   #header: Int32Array<ArrayBufferLike> = new Int32Array(0);
   #transforms: Float32Array<ArrayBufferLike> = new Float32Array(0);
@@ -113,6 +114,16 @@ export class RenderTransformBuffer {
   /** 跨线程投递的就是这一段字节；SAB 时零拷贝。 */
   public get bytes(): ArrayBufferLike {
     return this.#bytes;
+  }
+
+  /**
+   * 扩容之后的回调：那一块新的字节要送给读的一侧。
+   *
+   * 扩容会**重新分配**，旧的那一块跨线程的对面还拿着；不通知它，它会一直读一段
+   * 没人再写的内存。只在真的跨线程时才需要设——单线程下两边就是同一个对象。
+   */
+  public onGrow(listener?: (bytes: ArrayBufferLike) => void): void {
+    this.#grown = listener;
   }
 
   public get isShared(): boolean {
@@ -259,6 +270,8 @@ export class RenderTransformBuffer {
         bank * capacity * RENDER_VISUAL_PARAM_COUNT,
       );
     }
+    // 搬完再通知：对面接到手里的必须已经是搬好内容的那一块。
+    this.#grown?.(this.#bytes);
   }
 
   /** 唯一重建视图的地方。任何可能重新分配的操作都必须经过它。 */

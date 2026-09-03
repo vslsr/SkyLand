@@ -25,7 +25,7 @@ import { PlayerEntity } from '../player/PlayerEntity';
 import { SlimeSurfaceDragController } from '../controllers/SlimeSurfaceDragController';
 import { RemotePlayerGroup } from '../player/RemotePlayerGroup';
 import { SceneRenderer } from '../rendering/SceneRenderer';
-import { connectRenderWorldInProcess } from '../render/RenderWorldRuntime';
+import { connectRenderWorldInWorker } from '../render/worker/connectRenderWorldInWorker';
 import { SceneCompositionHost } from '../scene/SceneCompositionHost';
 import { SceneWorld } from '../scene/SceneWorld';
 import type { SceneUpdateContext } from '../scene/SceneVisualSystem';
@@ -181,8 +181,10 @@ export class GrasslandScene extends Scene {
       this.refreshInventoryShortcut();
       this.hud.refreshInputPrompt();
     });
-    // 渲染那一侧只在这一行里被决定。换成 worker 版的连接，下面三个类都不用改。
-    const render = connectRenderWorldInProcess(options.canvas);
+    // 渲染那一侧只在这一行里被决定。整个渲染循环跑在另一条线程上：
+    // 画布经 `transferControlToOffscreen` 转移过去，相机与 transform SoA 是两块
+    // `SharedArrayBuffer`，其余全是命令。下面三个类看不出区别。
+    const render = connectRenderWorldInWorker(options.canvas);
     // 场景的两半：渲染核心与玩法查询。第 3 步搬 canvas 时只有前者跟着走。
     this.world = new SceneWorld(render.port);
     this.renderer = new SceneRenderer(options.canvas, this.world, render);

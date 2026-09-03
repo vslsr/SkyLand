@@ -779,8 +779,10 @@ worker 已经在传的 `[globalCellX, globalCellZ, code, ...]`。
 材质、`createChunkGenerator` 的 WASM 后端、标记牌的 `OffscreenCanvas` 文字贴图，
 然后真画三帧。**全过**，68 次 draw call，画面正常。
 
-所以剩下的是装配的拆分，不是「能不能」的问题。这个目录不进产物（`tsc` 的 include
-与 vite build 的入口都不含它），留着当后面逐块搬运时的验证台。
+所以剩下的是装配的拆分，不是「能不能」的问题。
+
+（这个目录已经删了：渲染循环真搬进去之后，它证明过的两件事就是产物本身，
+留着只会变成第二份会漂开的 worker 装配代码。它自己的 README 当时就是这么写的。）
 
 ### 已经做了的：chunk 生成器归渲染侧 ✅
 
@@ -1067,18 +1069,14 @@ this.physicsWorld?.dispose();
 
 换 worker 那天要动的只有一行：`GrasslandScene` 里那句 `connectRenderWorldInProcess`。
 
-### 还没做的
+### 第 3 步做完了
 
-| | 说明 |
-| --- | --- |
-| 渲染循环整个进 worker | `SceneRenderer` 的 `WebGLRenderer` 那一层与 `transferControlToOffscreen` 本身。要搬的正好是 `update` 末尾那句 `updateVisuals`、`adoptComposition` 与 `render()` |
+渲染栈不碰 DOM、玩法侧不碰 Three、chunk 与 Actor 两条主干都按 game / render 切开、
+相机与合批内容都按字节过边界、装配有了自己的归属、边界上一次「等对面回话」都没有，
+而且**渲染循环真的在另一条线程上**。
 
-§3 的前置全部落地：渲染栈不碰 DOM、玩法侧不碰 Three、chunk 与 Actor 两条主干都按
-game / render 切开、相机与合批内容都按字节过边界、装配有了自己的归属，
-**而且边界上一次「等对面回话」都没有了**。剩下的一项是搬运本身，不再是拆解。
-
-需要说清楚的是：这一项**不省帧时间**（`render-batches` p50 只有
-0.06–0.17 ms）。它们是第 2 步与第 3 步共同的结构前提。
+回头看，前面那一长串拆解每一项单独看都不省帧时间——它们的价值全部兑现在这一步：
+一行连接换掉，主线程整帧 p50 从 9.26 ms 掉到 2.24 ms，而**没有一个调用方需要修改**。
 
 ## 第 4 步 · 换掉 Three.js（可无限期推迟）
 

@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { createArchetypeTable } from '../render/propInstanceLayout';
-import { RenderTransformBuffer } from '../render/RenderTransformBuffer';
+import type { RenderTransformBuffer } from '../render/RenderTransformBuffer';
 import { ThreeRenderScene } from '../render/three/ThreeRenderScene';
 import { GrassFieldSystem, type GrassInteractionTarget } from '../grass';
 import { createGroundModel } from '../models/ground';
@@ -75,7 +75,12 @@ export interface RenderWorldComposition {
 
 export function createRenderWorld(
   definition: SceneDefinition,
-  worldSeed?: number,
+  worldSeed: number | undefined,
+  /**
+   * 那段边界字节。**由连接持有，不是每张地图一份**——它跨线程时是一块
+   * `SharedArrayBuffer`，玩法侧要在建地图之前就拿到它才写得进去。
+   */
+  transforms: RenderTransformBuffer,
 ): RenderWorldComposition {
   const { renderer } = definition;
   const environment = createSceneEnvironment(
@@ -130,7 +135,6 @@ export function createRenderWorld(
     // `definition` 建，所以顺序必然一致——不需要每帧把这张表塞进通道。
     createArchetypeTable(definition),
   );
-  const transforms = new RenderTransformBuffer();
 
   let grassInteraction: GrassInteractionTarget | undefined;
   let chunkViews: ChunkViewHost | undefined;

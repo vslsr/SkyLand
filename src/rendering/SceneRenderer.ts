@@ -62,6 +62,8 @@ export class SceneRenderer {
    */
   private readonly dayNightClock = new DayNightClock(DEFAULT_START_HOUR, 0);
   private readonly cameraFrame = createRenderCamera();
+  /** 上一次发过去的画布尺寸，用来只在变了时才发一条命令。 */
+  private viewport = { width: 0, height: 0, pixelRatio: 0 };
 
   /**
    * `world` 是这张地图**不属于渲染**的那一半（地形、物理、Actor 查询）。
@@ -109,10 +111,22 @@ export class SceneRenderer {
     };
   }
 
-  /** 画一帧。画布尺寸在这一侧量好发过去，其余全在渲染世界里。 */
+  /**
+   * 画一帧。画布尺寸在这一侧量好发过去，其余全在渲染世界里。
+   *
+   * 尺寸只在变了的时候才发：跨线程时每一条命令都是报文里的一项，而窗口大小
+   * 一局里变不了几次。
+   */
   public render(): void {
-    const { width, height, pixelRatio } = this.measureCanvas();
-    this.runtime.setViewport(width, height, pixelRatio);
+    const viewport = this.measureCanvas();
+    if (
+      viewport.width !== this.viewport.width
+      || viewport.height !== this.viewport.height
+      || viewport.pixelRatio !== this.viewport.pixelRatio
+    ) {
+      this.viewport = viewport;
+      this.runtime.setViewport(viewport.width, viewport.height, viewport.pixelRatio);
+    }
     frameTimeline.measure('draw', () => this.runtime.render());
   }
 

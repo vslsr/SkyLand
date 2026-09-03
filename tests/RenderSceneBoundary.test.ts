@@ -275,15 +275,26 @@ test('RenderScene 上每一个方法都返回 void——边界是单向的', () 
  * canvas 交给渲染线程之后，渲染栈跑在**没有 `document`、没有 `window`** 的地方。
  * 所以这份清单盯的是「渲染侧还有几处伸手摸 DOM」。
  *
- * 它只能变短。现在只剩一项，而且那一项是对的：`SceneRenderer` 今天就是持有
- * canvas 的那一个，`devicePixelRatio` 会跟着 canvas 一起搬走，不是要清理的债。
+ * 渲染循环**已经在**渲染线程上了，所以这条不再是「以后会崩」的预警，而是当场就崩。
+ * 扫的是那条线程真正打包进去的那些目录；主线程那一侧的门面（`SceneRenderer`）
+ * 故意不在里面——量画布本来就是它的活。
+ *
+ * 只剩一项，而且那一项是**读到即用**的写法：`loadChunkGenerator` 在模块加载时
+ * 读一次 `?chunkgen=js`（主线程读得到，worker 读不到，因为 worker 的 `location`
+ * 是它自己脚本的地址），随后由开工那条报文把结果补给渲染线程。清单只能变短。
  */
-const RENDER_FILES_TOUCHING_DOM = ['SceneRenderer.ts'];
+const RENDER_FILES_TOUCHING_DOM = ['loadChunkGenerator.ts'];
 
 const DOM_ACCESS = /\b(document|window)\s*[.[]/;
 
 test('渲染栈里还摸 DOM 的只有已知的那几个', () => {
-  const roots = ['../src/rendering/', '../src/render/', '../src/models/', '../src/materials/'];
+  // 渲染线程真正打包进去的那些目录。`src/rendering/SceneRenderer.ts`
+  // **故意不在里面**：它是主线程那一侧的门面，量画布本来就是它的活。
+  const roots = [
+    '../src/render/', '../src/models/', '../src/materials/', '../src/world/',
+    '../src/grass/', '../src/weather/', '../src/environment/', '../src/particles/',
+    '../src/ocean/', '../src/scene/',
+  ];
   const offenders: string[] = [];
   for (const root of roots) {
     const directory = new URL(root, import.meta.url);

@@ -8,8 +8,8 @@ import { DEFAULT_WEATHER, type WeatherType } from '../weather/index';
 import { releaseOwnResources } from './renderAssets';
 import { RenderCameraBuffer, createRenderCamera } from './RenderCameraBuffer';
 import type { ChunkViewSink } from '../world/ChunkViewHost';
-import type { RenderScene } from './RenderScene';
-import type { RenderTransformBuffer } from './RenderTransformBuffer';
+import type { RenderScene, SlimeSurfaceDragListener } from './RenderScene';
+import { RenderTransformBuffer } from './RenderTransformBuffer';
 
 /** 主线程那台相机的视场角。渲染世界只在算投影矩阵时用它。 */
 export const CAMERA_FIELD_OF_VIEW = 50;
@@ -65,8 +65,8 @@ export interface RenderWorldCommands {
 export interface RenderWorldPort extends RenderWorldCommands {
   /** proxy 命令口。没加载地图时是 undefined。 */
   readonly scene?: RenderScene;
-  /** 那段边界字节。玩法侧写，渲染侧读。 */
-  readonly transforms?: RenderTransformBuffer;
+  /** 那段边界字节。归连接持有，从头到尾都在。 */
+  readonly transforms: RenderTransformBuffer;
   /** 挂载命令口。流式地图才有。 */
   readonly chunkViews?: ChunkViewSink;
   update(deltaSeconds: number, elapsedSeconds: number): void;
@@ -90,7 +90,8 @@ export function connectRenderWorldInProcess(
   canvas: HTMLCanvasElement | OffscreenCanvas,
 ): RenderWorldConnection {
   const camera = new RenderCameraBuffer();
-  return { port: new RenderWorldRuntime(canvas, camera), camera };
+  const transforms = new RenderTransformBuffer();
+  return { port: new RenderWorldRuntime(canvas, camera, transforms), camera };
 }
 
 /**
@@ -118,11 +119,15 @@ export class RenderWorldRuntime implements RenderWorldPort {
   #sceneActive = false;
   #frameContext?: SceneUpdateContext;
   #viewport = { cssWidth: 1, cssHeight: 1, pixelRatio: 1 };
+  #slimeDragListener?: SlimeSurfaceDragListener;
+  #generatorReadyListener?: (kind: string) => void;
 
   public constructor(
     canvas: HTMLCanvasElement | OffscreenCanvas,
     /** 相机那段字节。玩法侧写，这里读——两侧看的是同一块内存。 */
     private readonly cameraChannel: RenderCameraBuffer,
+    /** transform SoA。同样归连接持有，跨线程时是同一块 `SharedArrayBuffer`。 */
+    public readonly transforms: RenderTransformBuffer,
   ) {
     this.#renderer = new THREE.WebGLRenderer({
       canvas: canvas as HTMLCanvasElement,
@@ -145,12 +150,30 @@ export class RenderWorldRuntime implements RenderWorldPort {
     return this.#composition?.renderScene;
   }
 
-  public get transforms(): RenderTransformBuffer | undefined {
-    return this.#composition?.transforms;
-  }
-
   public get chunkViews(): ChunkViewSink | undefined {
     return this.#composition?.chunkViews;
+  }
+
+  /**
+   * 蒙皮拖拽的回报口子，**装在渲染循环上而不是某一张地图上**。
+   *
+   * 换地图会换掉整个渲染世界，而收报的那一方（跨线程时是主线程那个代理）不换。
+   * 所以这里记住它，每次装上新地图时替它接到新的 `RenderScene` 上。
+   */
+  public setSlimeSurfaceDragListener(listener?: SlimeSurfaceDragListener): void {
+    this.#slimeDragListener = listener;
+    this.#composition?.renderScene.setSlimeSurfaceDragListener(listener);
+  }
+
+  /**
+   * chunk 生成后端就位的回报口子，和拖拽那条一样装在渲染循环上。
+   *
+   * `ChunkStreamer` 在它就位之前一个 chunk 都不规划——先规划会注册出一批
+   * 「踩得到但看不见」的碰撞体。跨线程时这条不接回去，流式地图就是一片空白。
+   */
+  public setGeneratorReadyListener(listener?: (kind: string) => void): void {
+    this.#generatorReadyListener = listener;
+    if (listener) this.#composition?.chunkViews?.onGeneratorReady(listener);
   }
 
   public loadRenderScene(definition: SceneDefinition, worldSeed?: number): void {
@@ -158,7 +181,7 @@ export class RenderWorldRuntime implements RenderWorldPort {
       throw new Error(`不支持的场景渲染器：${definition.renderer.type as string}`);
     }
     this.#weather = DEFAULT_WEATHER;
-    this.#install(createRenderWorld(definition, worldSeed));
+    this.#install(createRenderWorld(definition, worldSeed, this.transforms));
   }
 
   public clearRenderScene(): void {
@@ -308,6 +331,10 @@ export class RenderWorldRuntime implements RenderWorldPort {
     this.#composition = next;
     this.#visualSystems = next?.visualSystems ?? [];
     // 换了组合就把当前的进入状态补上去，否则先 onEnter 后加载的场景永远不激活。
+    next?.renderScene.setSlimeSurfaceDragListener(this.#slimeDragListener);
+    if (this.#generatorReadyListener) {
+      next?.chunkViews?.onGeneratorReady(this.#generatorReadyListener);
+    }
     next?.setSceneActive(this.#sceneActive);
     next?.weatherTarget.setWeather(this.#weather);
     // 线框由下一次 setPhysicsDebug 按「开关开着 + 这张图有物理世界」重新决定。

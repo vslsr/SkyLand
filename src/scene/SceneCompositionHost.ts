@@ -46,11 +46,10 @@ export class SceneCompositionHost {
     this.#disposePrevious();
     this.render.loadRenderScene(definition, worldSeed);
     const scene = this.render.scene;
-    const transforms = this.render.transforms;
-    if (!scene || !transforms) throw new Error('渲染世界没建起来，玩法那一半接不上');
+    if (!scene) throw new Error('渲染世界没建起来，玩法那一半接不上');
     this.#install(createGameWorld(definition, worldSeed, {
       scene,
-      transforms,
+      transforms: this.render.transforms,
       chunkViews: this.render.chunkViews,
     }), {
       // 「没有地面、只有海」是这张地图的玩法事实：脚下踩到的是水面高度。

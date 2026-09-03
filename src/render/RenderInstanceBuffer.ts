@@ -88,6 +88,29 @@ export class RenderInstanceBuffer {
     return this.#floats[instance * this.floatStride + field];
   }
 
+  /**
+   * 这一帧真正用到的那一段整数记录，复制一份。
+   *
+   * 复制而不是共享，是因为这条通道**每帧整个重铺**且没有双缓冲：内容变化太频繁，
+   * 记账比重排还贵。跨线程时读的一侧要一份不会被写坏的快照，而按 `count` 截断
+   * 之后一张图满打满算几 KB——比给它加一套双缓冲便宜得多。
+   */
+  public copyIntegers(): Int32Array {
+    return this.#integers.slice(0, this.#count * this.intStride);
+  }
+
+  public copyFloats(): Float32Array {
+    return this.#floats.slice(0, this.#count * this.floatStride);
+  }
+
+  /** 接管对面送来的那一段。容量不够就先扩，扩完照原样填进去。 */
+  public adopt(integers: Int32Array, floats: Float32Array, count: number): void {
+    this.#ensure(count);
+    this.#integers.set(integers);
+    this.#floats.set(floats);
+    this.#count = count;
+  }
+
   #ensure(count: number): void {
     if (count <= this.capacity) return;
     let capacity = Math.max(1, this.capacity);

@@ -11,7 +11,12 @@ import type {
   SlimeSurfaceDragListener,
   SlimeSurfaceDragRay,
 } from '../RenderScene';
+import type { GrassBendImpulse } from '../../grass';
 import type { RenderInstanceBuffer } from '../RenderInstanceBuffer';
+import type { RenderWorldCommands } from '../RenderWorldRuntime';
+import type { SceneUpdateContext } from '../../scene/SceneVisualSystem';
+import type { SceneDefinition } from '../../scenes/data/SceneDefinition';
+import type { WeatherType } from '../../weather/index';
 import type { RenderTransformBuffer } from '../RenderTransformBuffer';
 import type { ChunkViewMountRequest, ChunkViewSink } from '../../world/ChunkViewHost';
 
@@ -70,7 +75,41 @@ export type RenderCommand =
    * 排在 `updateVisuals` 之前，和单线程下的调用顺序一致。
    */
   | { readonly kind: 'submitTransforms' }
-  | { readonly kind: 'submitInstances' }
+  | {
+      readonly kind: 'submitInstances';
+      readonly props: RenderInstanceSlice;
+      readonly fruit: RenderInstanceSlice;
+    }
+  | {
+      readonly kind: 'loadRenderScene';
+      readonly definition: SceneDefinition;
+      readonly worldSeed?: number;
+    }
+  | { readonly kind: 'clearRenderScene' }
+  | { readonly kind: 'adoptTransforms'; readonly bytes: ArrayBufferLike }
+  | {
+      readonly kind: 'setViewport';
+      readonly cssWidth: number;
+      readonly cssHeight: number;
+      readonly pixelRatio: number;
+    }
+  | { readonly kind: 'setWeather'; readonly weather: WeatherType }
+  | { readonly kind: 'setTimeOfDay'; readonly timeOfDay: number; readonly running: boolean }
+  | { readonly kind: 'setSceneActive'; readonly active: boolean }
+  | {
+      readonly kind: 'setTerrainCells';
+      readonly cells: readonly { cellX: number; cellZ: number; code: number }[];
+    }
+  | {
+      readonly kind: 'setTerrainHighlight';
+      readonly cell?: { cellX: number; cellZ: number };
+    }
+  | {
+      readonly kind: 'setPhysicsDebug';
+      readonly buffers?: { vertices: Float32Array; colors: Float32Array };
+    }
+  | { readonly kind: 'applyGrassImpulse'; readonly impulse: GrassBendImpulse }
+  | { readonly kind: 'setFrameContext'; readonly context: SceneUpdateContext }
   | {
       readonly kind: 'beginSlimeSurfaceDrag' | 'updateSlimeSurfaceDrag';
       readonly id: ProxyId;
@@ -95,7 +134,26 @@ export interface RenderCommandBatch {
  * 它同时实现 `RenderScene` 与 `ChunkViewSink`——玩法侧本来就是拿这两个接口说话的，
  * 所以换成跨线程时调用方一个字都不用改。
  */
-export class RenderCommandQueue implements RenderScene, ChunkViewSink {
+/** 一条实例记录段的定长切片：整数段、浮点段、条数。 */
+export interface RenderInstanceSlice {
+  readonly integers: Int32Array;
+  readonly floats: Float32Array;
+  readonly count: number;
+}
+
+function sliceInstances(buffer: RenderInstanceBuffer): RenderInstanceSlice {
+  return {
+    integers: buffer.copyIntegers(),
+    floats: buffer.copyFloats(),
+    count: buffer.count,
+  };
+}
+
+function applyInstanceSlice(buffer: RenderInstanceBuffer, slice: RenderInstanceSlice): void {
+  buffer.adopt(slice.integers, slice.floats, slice.count);
+}
+
+export class RenderCommandQueue implements RenderScene, ChunkViewSink, RenderWorldCommands {
   #commands: RenderCommand[] = [];
   #transfer: ArrayBufferLike[] = [];
   readonly #generatorReady: ((kind: string) => void)[] = [];
@@ -183,9 +241,86 @@ export class RenderCommandQueue implements RenderScene, ChunkViewSink {
     this.#commands.push({ kind: 'submitTransforms' });
   }
 
-  public submitInstances(_props: RenderInstanceBuffer, _fruit: RenderInstanceBuffer): void {
-    // 和 submitTransforms 一样不带载荷：那两段字节 worker 一开始就有同一份。
-    this.#commands.push({ kind: 'submitInstances' });
+  /**
+   * 合批内容**带着这一帧那几百条记录一起过去**，和 `submitTransforms` 不一样。
+   *
+   * transform SoA 是双缓冲的 `SharedArrayBuffer`，读的一侧永远读到完整的一帧，
+   * 所以那条命令不带载荷。实例通道不是：它每帧整个重铺（内容变化太频繁，
+   * 记账比重排还贵），也就没有「读到一半被改写」的防护。定长记录复制过去
+   * 反而是最省事的正确做法——一张图满打满算几百条，按 `count` 截断之后是几 KB。
+   */
+  public submitInstances(props: RenderInstanceBuffer, fruit: RenderInstanceBuffer): void {
+    const propSlice = sliceInstances(props);
+    const fruitSlice = sliceInstances(fruit);
+    this.#commands.push({ kind: 'submitInstances', props: propSlice, fruit: fruitSlice });
+    this.#transfer.push(
+      propSlice.integers.buffer,
+      propSlice.floats.buffer,
+      fruitSlice.integers.buffer,
+      fruitSlice.floats.buffer,
+    );
+  }
+
+  public loadRenderScene(definition: SceneDefinition, worldSeed?: number): void {
+    this.#commands.push({ kind: 'loadRenderScene', definition, worldSeed });
+  }
+
+  public clearRenderScene(): void {
+    this.#commands.push({ kind: 'clearRenderScene' });
+  }
+
+  /**
+   * transform SoA 扩容之后那一块新的 `SharedArrayBuffer`。
+   *
+   * 扩容会重新分配，旧的那一块渲染侧还拿着——不补这一条，它会一直读一段没人再写的
+   * 内存。一局里至多发生一两次（容量按 2 的倍数涨，起点就是 Actor 上限 256）。
+   */
+  public adoptTransforms(bytes: ArrayBufferLike): void {
+    this.#commands.push({ kind: 'adoptTransforms', bytes });
+  }
+
+  public setViewport(cssWidth: number, cssHeight: number, pixelRatio: number): void {
+    this.#commands.push({ kind: 'setViewport', cssWidth, cssHeight, pixelRatio });
+  }
+
+  public setWeather(weather: WeatherType): void {
+    this.#commands.push({ kind: 'setWeather', weather });
+  }
+
+  public setTimeOfDay(timeOfDay: number, running: boolean): void {
+    this.#commands.push({ kind: 'setTimeOfDay', timeOfDay, running });
+  }
+
+  public setSceneActive(active: boolean): void {
+    this.#commands.push({ kind: 'setSceneActive', active });
+  }
+
+  public setTerrainCells(
+    cells: readonly { cellX: number; cellZ: number; code: number }[],
+  ): void {
+    this.#commands.push({ kind: 'setTerrainCells', cells });
+  }
+
+  public setTerrainHighlight(cell?: { cellX: number; cellZ: number }): void {
+    this.#commands.push({ kind: 'setTerrainHighlight', cell });
+  }
+
+  public setPhysicsDebug(buffers?: { vertices: Float32Array; colors: Float32Array }): void {
+    // Rapier 每帧给的是新数组，直接转移走比复制便宜；开关关着时根本不产生它们。
+    if (!buffers) {
+      this.#commands.push({ kind: 'setPhysicsDebug' });
+      return;
+    }
+    this.#commands.push({ kind: 'setPhysicsDebug', buffers });
+    this.#transfer.push(buffers.vertices.buffer, buffers.colors.buffer);
+  }
+
+  public applyGrassImpulse(impulse: GrassBendImpulse): void {
+    this.#commands.push({ kind: 'applyGrassImpulse', impulse });
+  }
+
+  public setFrameContext(context: SceneUpdateContext): void {
+    this.#commands.push({ kind: 'setFrameContext', context });
   }
 
   public updateVisuals(
@@ -271,6 +406,10 @@ export function applyRenderCommand(
     readonly propInstances: RenderInstanceBuffer;
     readonly fruitInstances: RenderInstanceBuffer;
     readonly chunkViews?: ChunkViewSink;
+    /** 整图级命令的收件人。渲染线程那一端有，测试里的假目标可以不给。 */
+    readonly runtime?: RenderWorldCommands;
+    /** transform SoA 扩容时换上新的那一块字节。 */
+    readonly adoptTransforms?: (bytes: ArrayBufferLike) => void;
   },
 ): void {
   switch (command.kind) {
@@ -302,7 +441,45 @@ export function applyRenderCommand(
       target.scene.endSlimeSurfaceDrag(command.id);
       return;
     case 'submitInstances':
+      applyInstanceSlice(target.propInstances, command.props);
+      applyInstanceSlice(target.fruitInstances, command.fruit);
       target.scene.submitInstances(target.propInstances, target.fruitInstances);
+      return;
+    case 'loadRenderScene':
+      target.runtime?.loadRenderScene(command.definition, command.worldSeed);
+      return;
+    case 'clearRenderScene':
+      target.runtime?.clearRenderScene();
+      return;
+    case 'adoptTransforms':
+      target.adoptTransforms?.(command.bytes);
+      return;
+    case 'setViewport':
+      target.runtime?.setViewport(command.cssWidth, command.cssHeight, command.pixelRatio);
+      return;
+    case 'setWeather':
+      target.runtime?.setWeather(command.weather);
+      return;
+    case 'setTimeOfDay':
+      target.runtime?.setTimeOfDay(command.timeOfDay, command.running);
+      return;
+    case 'setSceneActive':
+      target.runtime?.setSceneActive(command.active);
+      return;
+    case 'setTerrainCells':
+      target.runtime?.setTerrainCells(command.cells);
+      return;
+    case 'setTerrainHighlight':
+      target.runtime?.setTerrainHighlight(command.cell);
+      return;
+    case 'setPhysicsDebug':
+      target.runtime?.setPhysicsDebug(command.buffers);
+      return;
+    case 'applyGrassImpulse':
+      target.runtime?.applyGrassImpulse(command.impulse);
+      return;
+    case 'setFrameContext':
+      target.runtime?.setFrameContext(command.context);
       return;
     case 'setAbilityLabTarget':
       target.scene.setAbilityLabTarget(command.id);

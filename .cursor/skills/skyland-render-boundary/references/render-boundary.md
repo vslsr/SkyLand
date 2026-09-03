@@ -132,6 +132,19 @@ Player entities (local and remote) also write into this SoA, and they run **befo
 | Batched piles, fruit | Render | `ThreeHighCountBatchVisual`, `ThreeFruitBatchVisual`, driven from `updateVisuals` |
 | Canvas, camera, draw call | Render | `SceneRenderer` |
 
+## The two threads
+
+`RenderWorldRuntime` is the render thread's whole world: the canvas, the `WebGLRenderer`, one map's render half, and the per-frame `update()` + `render()`. It is constructible from an `OffscreenCanvas`, and after construction every input is a command or a shared buffer — that is the property that let it move.
+
+`connectRenderWorldInWorker(canvas)` returns the same `RenderWorldConnection` shape as the in-process version, so switching threads changed exactly one line in `GrasslandScene`. Three things go over at startup and never again: the canvas (transferred), and the camera + transform SoA (shared `SharedArrayBuffer`s). After that, one `postMessage` per frame carrying that frame's command batch — empty frames send nothing. **The frame loop lives on the render thread**: the main thread posts and writes bytes; when to draw is the worker's own `requestAnimationFrame`.
+
+Two hazards this shape creates, both silent when you get them wrong:
+
+- **A missed reverse notification looks like nothing happening.** `ChunkStreamer` plans no chunks until `generatorReady` arrives; forgetting to route that message back left streaming maps with Actors but no terrain, trees, or rocks, and no error anywhere.
+- **A grown `SharedArrayBuffer` is a different buffer.** `RenderTransformBuffer` reallocates when it outgrows its capacity; the render thread keeps reading the old block unless an `adoptTransforms` command hands it the new one.
+
+The instance channel is deliberately *copied* rather than shared: it is rebuilt whole every frame and has no double buffer, so a snapshot per frame (a few KB, transferred) is both cheaper and safer than adding one.
+
 ## Who owns a room
 
 `SceneCompositionHost` builds a room (`createLineArtScene`), hands the game half to `SceneWorld` and the render half to `SceneRenderer`, and owns the teardown order when the next room arrives: stop the frame systems, then clear collision and dispose physics, then install. It knows `SceneComposition` and two recipients — not `THREE.Scene`, not the canvas — so it stays put when the render loop moves.

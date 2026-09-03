@@ -7,7 +7,7 @@ description: Work across SkyLand's Game World / Render World boundary — Render
 
 The client is split in two. **Game World** owns simulation: Actors, Components, collision, interaction. **Render World** owns everything Three.js touches. They communicate only through bytes and commands — never by sharing objects.
 
-This is not stylistic. The boundary exists so the render world can move onto a worker with `transferControlToOffscreen()`. Anything that holds a `THREE.Object3D` from the gameplay side blocks that move, because objects do not cross a thread boundary.
+This is not stylistic, and it is not hypothetical: **the render world already runs on a worker.** `GrasslandScene` builds it with `connectRenderWorldInWorker`, which hands the canvas over with `transferControlToOffscreen()` and thereafter talks only in commands and shared bytes. Anything that holds a `THREE.Object3D` from the gameplay side breaks at runtime, because objects do not cross a thread boundary.
 
 ## Two rules that matter
 
