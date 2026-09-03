@@ -54,11 +54,11 @@
       "keepRadius": 3,
       "rockColor": "#d4d0c6",
       "grassPatches": {
-        "maxPerChunk": 2,
-        "spawnChance": 0.5,
+        "maxPerChunk": 4,
+        "spawnChance": 0.65,
         "minRadius": 2.4,
         "maxRadius": 5.2,
-        "bladeDensity": 18
+        "bladeDensity": 20
       }
     }
   },
