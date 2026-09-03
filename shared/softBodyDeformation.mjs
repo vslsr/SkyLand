@@ -91,38 +91,37 @@ export function mouthWorld(actor, pickupDrop, out = { x: 0, y: 0, z: 0 }) {
 }
 
 /**
- * 把一个**世界方向**转到 Actor 本地空间。只转不平移：位移是向量不是点，
- * 用点的换算会把两者的位置差也算进去，方向立刻就偏了。
+ * 世界坐标 → **外壳坐标**：只减原点，不转 yaw。形变的命中点、法线、位移全用它。
+ *
+ * 软体外壳不跟着 Actor 转身。渲染侧给外壳的 rig 反着转了 `-yaw`
+ * （`ThreeHybridSlimeVisual` 里「外壳的弹簧坐标保持世界朝向」那一行），免得转身
+ * 时整团软体被当成刚体甩过去；于是求解器的顶点坐标是「Actor 原点 + 世界轴向」。
+ *
+ * 拿 Actor 本地坐标（转过 yaw 的那种）算形变，整块形变就会绕 Y 轴偏掉一个 yaw：
+ * 两人面对面时偏的正好是 180°，尖从被咬者的**背面**冒出来。这是这条链路上最容易
+ * 踩、而且类型检查和单元测试都拦不住的一处——两侧都是三个 f32，只有画面会告诉你。
  */
-export function actorWorldVectorToLocal(yaw, x, y, z, out) {
-  const sin = Math.sin(yaw);
-  const cos = Math.cos(yaw);
-  out.x = x * cos - z * sin;
-  out.y = y;
-  out.z = x * sin + z * cos;
-  return out;
-}
-
-/** 世界坐标转回 Actor 本地坐标，是 `actorLocalToWorld` 的逆。 */
-export function actorWorldToLocal(origin, yaw, world, out) {
-  const sin = Math.sin(yaw);
-  const cos = Math.cos(yaw);
-  const deltaX = world.x - origin.x;
-  const deltaZ = world.z - origin.z;
-  out.x = deltaX * cos - deltaZ * sin;
+export function worldToShellOffset(origin, world, out) {
+  out.x = world.x - origin.x;
   out.y = world.y - origin.y;
-  out.z = deltaX * sin + deltaZ * cos;
+  out.z = world.z - origin.z;
   return out;
 }
 
 /**
- * 抓住那一刻的命中点，被抓者本地坐标。
+ * 抓住那一刻的命中点，被抓者的**外壳坐标**（见 `worldToShellOffset`：只平移，
+ * 不转 yaw）。
  *
  * 取身体中心指向外力锚点的方向，落到半径上。方向对了就够：命中点会被接收端
- * 吸附到最近的外壳顶点，而且抓住之后它固定不动，被抓者转身时那块皮跟着一起转。
+ * 吸附到最近的外壳顶点。它之后固定不动——外壳本来也不跟着 Actor 转，所以这块皮
+ * 就停在世界里的那一面上。
+ *
+ * 顺带写出这块皮的**朝外法线**（`normalX/Y/Z`）：它就是上面那个方向本身，和命中点
+ * 同一套坐标。之后每 tick 判断「外力是把这块皮往外扯还是往身体里压」靠的就是它
+ * ——往里压出来的是个凹包，不是被咬住。
  */
 export function resolveSurfaceContact(radius, actor, anchorWorld, out) {
-  actorWorldToLocal(actor, actor.yaw, anchorWorld, out);
+  worldToShellOffset(actor, anchorWorld, out);
   const centerY = radius * SOFT_BODY_CENTER_HEIGHT_RATIO;
   const offsetY = out.y - centerY;
   const length = Math.hypot(out.x, offsetY, out.z);
@@ -131,9 +130,15 @@ export function resolveSurfaceContact(radius, actor, anchorWorld, out) {
     out.x = 0;
     out.y = centerY;
     out.z = radius;
+    out.normalX = 0;
+    out.normalY = 0;
+    out.normalZ = 1;
     return out;
   }
   const scale = radius / length;
+  out.normalX = out.x / length;
+  out.normalY = offsetY / length;
+  out.normalZ = out.z / length;
   out.x *= scale;
   out.y = centerY + offsetY * scale;
   out.z *= scale;

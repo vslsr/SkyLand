@@ -853,11 +853,16 @@ export class ServerScene {
     }
     if (!target) return false;
 
-    // 命中点仍然按嘴的位置挑：被咬的是朝着那张嘴的那块皮。形变的方向另算。
-    const contact = resolveSurfaceContact(radius, target, mouth, { x: 0, y: 0, z: 0 });
+    // 命中点按嘴的位置挑：被咬的是朝着那张嘴的那块皮。它同时给出这块皮的朝外
+    // 法线，之后每 tick 判断「往外扯还是往身体里压」靠的就是它。
+    const contact = resolveSurfaceContact(radius, target, mouth, {
+      x: 0, y: 0, z: 0, normalX: 0, normalY: 0, normalZ: 0,
+    });
     if (!targetDeformation.grab(player.id, contact, {
       pinch: bite.pinch,
-      // 形变与缰绳都从咬住那一刻的距离起算：咬上的瞬间既不变形，也不被拽一下。
+      gripDepth: bite.gripDepth,
+      // 缰绳从咬住那一刻的距离起算：咬上的瞬间不会被拽一下。形变不看这个距离，
+      // 它看的是嘴在哪儿——牙咬住的当下那块皮就已经被捏起来了。
       grabDistance: Math.hypot(target.x - player.x, target.y - player.y, target.z - player.z),
       leashSlack: bite.leashSlack,
       leashStiffness: bite.leashStiffness,
@@ -869,8 +874,8 @@ export class ServerScene {
       return false;
     }
     // 立刻兑现一次：锚点与位移由 pullToward 写，不先跑一次的话，抓住到下一个
-    // tick 之间发出的快照会带着一条指向世界原点的缰绳。
-    targetDeformation.pullToward(player.id, target, player, player.characterState);
+    // tick 之间发出的快照会带着一条指向世界原点的缰绳，形变也要等一个 tick 才出来。
+    targetDeformation.pullToward(player.id, target, player, player.characterState, mouth);
     return true;
   }
 

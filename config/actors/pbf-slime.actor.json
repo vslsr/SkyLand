@@ -44,6 +44,7 @@
       "range": 1.8,
       "facingDot": 0.15,
       "pinch": 1,
+      "gripDepth": 0.35,
       "leashSlack": 0.2,
       "leashStiffness": 90,
       "leashDamping": 14,
