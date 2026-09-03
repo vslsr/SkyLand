@@ -3,6 +3,20 @@
   font-family: Inter, "Microsoft YaHei", system-ui, sans-serif;
   font-synthesis: none;
   background: #fdfbf6;
+
+  /*
+   * 屏幕层级（从下往上）：世界画布 < 只读 HUD < 游戏层输入 < 游戏内 UI 控件 < CommonUI 栈 < 致命错误。
+   *
+   * 浏览器的命中测试就是这份顺序的倒序，所以这里同时定义了「谁吃掉指针」：
+   * 摇杆热区是一整块透明的游戏层输入，必须排在所有可点的 UI **下面**——
+   * 点在按钮上由按钮消耗、不产生摇杆事件；点在空处才落到摇杆上。
+   * 新加的可交互 UI 一律用 --layer-game-ui 或更高，别再用裸数字。
+   */
+  --layer-hud: 2;
+  --layer-game-input: 3;
+  --layer-game-ui: 4;
+  --layer-common-ui: 5;
+  --layer-fatal-error: 10;
 }
 
 * {
@@ -61,7 +75,7 @@ button:disabled {
 
 .hud {
   position: fixed;
-  z-index: 3;
+  z-index: var(--layer-hud);
   display: flex;
   pointer-events: none;
 }
@@ -79,7 +93,7 @@ button:disabled {
   position: fixed;
   top: clamp(22px, 4vw, 54px);
   left: clamp(22px, 4.6vw, 72px);
-  z-index: 4;
+  z-index: var(--layer-game-ui);
   width: 38px;
   height: 30px;
   padding: 0 0 6px;
@@ -150,7 +164,7 @@ button:disabled {
   position: fixed;
   top: 50%;
   left: 50%;
-  z-index: 3;
+  z-index: var(--layer-hud);
   width: 6px;
   height: 6px;
   pointer-events: none;
@@ -175,7 +189,7 @@ body.has-interaction-target .crosshair {
   position: fixed;
   top: calc(50% + 24px);
   left: 50%;
-  z-index: 4;
+  z-index: var(--layer-hud);
   max-width: min(82vw, 420px);
   padding: 7px 10px;
   pointer-events: none;
@@ -198,7 +212,7 @@ body.has-interaction-target .crosshair {
   position: fixed;
   top: clamp(68px, 9vw, 102px);
   left: clamp(22px, 4.6vw, 72px);
-  z-index: 3;
+  z-index: var(--layer-hud);
   display: grid;
   min-width: 148px;
   gap: 5px;
@@ -232,16 +246,18 @@ body.has-interaction-target .crosshair {
   to { transform: translateX(0); opacity: 1; }
 }
 
+/* 触摸控制属于游戏层输入：画在 HUD 之上（手指要看得见），但排在游戏内 UI 之下。 */
 .virtual-controls {
   position: fixed;
   inset: 0;
-  z-index: 4;
+  z-index: var(--layer-game-input);
   display: none;
   pointer-events: none;
   user-select: none;
   -webkit-user-select: none;
 }
 
+/* 热区与按钮的 z-index 只在 .virtual-controls 这个层叠上下文内部比较：按钮盖住热区。 */
 .virtual-joystick-zone {
   position: fixed;
   z-index: 1;
@@ -341,7 +357,7 @@ body.has-interaction-target .crosshair {
 .common-ui-root {
   position: fixed;
   inset: 0;
-  z-index: 5;
+  z-index: var(--layer-common-ui);
   pointer-events: none;
 }
 
@@ -682,7 +698,7 @@ body.has-interaction-target .crosshair {
   position: fixed;
   top: 50%;
   left: 50%;
-  z-index: 10;
+  z-index: var(--layer-fatal-error);
   width: min(460px, calc(100vw - 40px));
   padding: 24px;
   text-align: center;
@@ -769,7 +785,8 @@ body.is-topdown .virtual-controls.is-desktop-debug {
   align-items: center;
   gap: 8px;
   pointer-events: none;
-  z-index: 4;
+  /* 整条栏压在摇杆热区上：点按钮由按钮消耗，摇杆收不到这一指。 */
+  z-index: var(--layer-game-ui);
 }
 
 .terrain-editor[hidden] {

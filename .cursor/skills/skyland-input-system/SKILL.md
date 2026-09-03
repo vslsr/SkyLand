@@ -46,6 +46,7 @@ KeyboardMouse / Gamepad / Virtual device
 - For a new device family, add a focused adapter, extend `InputDeviceKind`, control-prefix inference, JSON Schema, prompt configuration, source arbitration, and cancel/disconnect tests.
 - For a settings page, call the live `InputSchemeRuntime` exposed as `scene.inputBindings`; do not mutate Context arrays directly.
 - For virtual-control layout or gesture changes, keep DOM/pointer behavior in `VirtualControls` and keep the resulting `Virtual.*` mapping in JSON.
+- For a report that on-screen UI stopped responding to taps, check the screen layer order in `src/style.css` before touching gesture code: the joystick activation zone is a large transparent rectangle and must stay below every interactive UI layer.
 
 ## Configure safely
 
@@ -80,6 +81,7 @@ Use `rebind(mappingId, control, { conflict })` for changes. `swap` is the defaul
 - Keep touch controls multi-pointer safe by tracking pointer ids independently for the joystick and each button.
 - Build virtual controls dynamically from `virtualControls`; do not restore hard-coded button markup in `index.html`.
 - The virtual joystick is visible in `topdown` mode on coarse/no-hover devices. For desktop inspection, use the JSON-configured query parameter (currently `?virtual-controls=1`) and verify the control mode before debugging mappings.
+- Virtual controls are game-layer input, not UI. Their layer (`--layer-game-input`) stays below every interactive UI layer (`--layer-game-ui` and above), so a pointer that lands on UI is consumed by that UI and never reaches the joystick; only unclaimed pointers become joystick input. `tests/ScreenLayerOrder.test.ts` ratchets that order.
 
 ## Verify
 

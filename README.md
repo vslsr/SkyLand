@@ -243,6 +243,25 @@ bindings.resetAllBindings();
 竖屏分别应用缩放与边距。桌面调试时在地址后添加 `?virtual-controls=1`；进入
 `topdown` 场景后即可用鼠标检查摇杆和按钮，正式桌面布局仍保持隐藏。
 
+### 屏幕层级：UI 先吃掉指针
+
+摇杆热区是一整块透明矩形，覆盖屏幕左下角将近半屏，因此**它排在哪一层就决定了
+左侧的 UI 还能不能点**。`src/style.css` 的 `:root` 里写着这份顺序，从下往上是：
+
+```text
+世界画布 → --layer-hud → --layer-game-input → --layer-game-ui → --layer-common-ui → --layer-fatal-error
+```
+
+浏览器的命中测试就是这份顺序的倒序，规则因此直接落在层级上：
+
+- 点在地形编辑栏、菜单入口这类可交互 UI 上 → UI 消耗事件 → **不产生摇杆事件**；
+- 点在左侧空处 → 没有 UI 接手 → 落到游戏层输入，生成摇杆事件。
+
+只读 HUD（房间标识、准星、交互提示、木筏状态）是 `pointer-events: none`，排在
+游戏层输入之下只影响绘制顺序：手指按住的摇杆始终画在 HUD 之上。新增可交互 UI
+一律用 `--layer-game-ui` 或更高，不要再写裸 `z-index`；`tests/ScreenLayerOrder.test.ts`
+会盯住这份顺序、变量用法和 `index.html` 里的书写次序。
+
 ## 大世界与 Chunk 系统
 
 场景配置里出现 `renderer.world` 就表示这张地图是流式大世界：地面与物件不再是
