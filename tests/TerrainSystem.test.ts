@@ -21,6 +21,7 @@ import {
   STREAMED_WATER_SHORE_WIDTH,
 } from '../src/models/terrain/terrainWaterStyle';
 import type { OceanVisualDefinition } from '../src/scenes/data/SceneDefinition';
+import { TerrainChunkView } from '../src/world/TerrainChunkView';
 import { TerrainWorld } from '../src/world/TerrainWorld';
 
 const SEED = 0x5c1a2d0b;
@@ -513,4 +514,74 @@ test('同一格重建出同一撮纹理，chunk 反复加载不会闪', () => {
     highest = Math.max(highest, first.getY(index));
   }
   assert.ok(Math.abs(highest - BIOME_MARK_LIFT) < 1e-6);
+});
+
+test('没有 ocean 定义时一格水面都不建，非水域地图不为水格付构建开销', () => {
+  const seaLevel = -0.4;
+  const water = findShoreCell();
+  const chunkX = Math.floor(water.x / TERRAIN_GRID);
+  const chunkZ = Math.floor(water.z / TERRAIN_GRID);
+  const request = { worldSeed: SEED, chunkX, chunkZ, groundColor: '#f1eddf', seaLevel };
+
+  const withOcean = createTerrainChunkGeometry({
+    ...request,
+    oceanDefinition: WATER_DEFINITION,
+  });
+  assert.ok(withOcean.waterSurface, '这块 chunk 本来就该有水面，测试前提没成立');
+
+  const withoutOcean = createTerrainChunkGeometry(request);
+  assert.equal(withoutOcean.waterSurface, undefined);
+  assert.equal(withoutOcean.waterGrid, undefined);
+  assert.equal(withoutOcean.waterShore, undefined);
+  assert.equal(withoutOcean.waterSplash, undefined);
+  // 海床本身不受影响：水格照旧按河床色铺满顶面。
+  assert.equal(
+    withoutOcean.groundFill.getAttribute('position').count,
+    withOcean.groundFill.getAttribute('position').count,
+  );
+
+  for (const geometry of [withOcean, withoutOcean]) {
+    geometry.groundFill.dispose();
+    geometry.groundGrid.dispose();
+    geometry.waterSurface?.dispose();
+    geometry.waterGrid?.dispose();
+    geometry.waterShore?.dispose();
+    geometry.waterSplash?.dispose();
+  }
+});
+
+test('水面排在海床之前绘制，被淹掉的海床片元由 early-z 丢掉', () => {
+  const seaLevel = -0.4;
+  const water = findShoreCell();
+  const view = new TerrainChunkView({
+    worldSeed: SEED,
+    chunkX: Math.floor(water.x / TERRAIN_GRID),
+    chunkZ: Math.floor(water.z / TERRAIN_GRID),
+    groundColor: '#f1eddf',
+    groundFillMaterial: new THREE.MeshBasicMaterial(),
+    groundGridMaterial: new THREE.LineBasicMaterial(),
+    showGround: true,
+    waterMaterials: {
+      surface: new THREE.MeshBasicMaterial() as unknown as THREE.ShaderMaterial,
+      grid: new THREE.LineBasicMaterial() as unknown as THREE.ShaderMaterial,
+    },
+    waterShoreMaterial: new THREE.MeshBasicMaterial(),
+    waterSplashMaterial: new THREE.PointsMaterial(),
+    oceanDefinition: WATER_DEFINITION,
+    seaLevel,
+  });
+
+  const renderOrderOf = (name: string): number => {
+    const object = view.root.children.find((child) => child.name === name);
+    assert.ok(object, `缺少 ${name}`);
+    return object.renderOrder;
+  };
+
+  // 两者都是不透明材质，three 的不透明列表里 renderOrder 压过深度排序，
+  // 顺序反过来就意味着水面之下的海床每个像素都白着色一遍。
+  assert.ok(
+    renderOrderOf('terrain-water-surface') < renderOrderOf('terrain-ground'),
+    '水面必须排在海床之前',
+  );
+  view.dispose();
 });

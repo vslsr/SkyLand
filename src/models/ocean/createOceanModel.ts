@@ -64,6 +64,9 @@ export function createOceanModel(
 
   const surface = new THREE.Mesh(surfaceGeometry, materials.surface);
   surface.name = 'ocean-surface';
+  // 负数把水面排在不透明列表的最前面：固定场景的地面用默认的 0，所以水面之下的
+  // 地面片元由 early-z 丢掉，而不是先着色一遍再被覆盖（流式地形的同一条约束写在
+  // `TerrainChunkView` 的 TERRAIN_RENDER_ORDER 上）。
   surface.renderOrder = -2;
   root.add(surface);
 
