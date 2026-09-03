@@ -51,6 +51,7 @@ export const ACTOR_ACTION_IDS = Object.freeze([
  * @property {string} id 服务端据此选 handler
  * @property {string} verb 界面动词，已经带上物品名
  * @property {boolean} blocked true 表示只提示不放行（别人正占着、前置条件没满足）
+ * @property {string} [requires] 缺的前置条件名；界面据此补上按键提示
  */
 
 const quantitySuffix = (quantity) => (
@@ -58,7 +59,12 @@ const quantitySuffix = (quantity) => (
 );
 
 const allow = (id, verb) => ({ id, verb, blocked: false });
-const block = (verb) => ({ id: 'blocked', verb, blocked: true });
+/**
+ * @param verb 说明为什么按不动
+ * @param requires 缺的是哪个前置条件。界面据此补上「按哪个键去满足它」——键位属于
+ *   输入方案，这张表不认识键，所以只报条件名，不报按键。
+ */
+const block = (verb, requires) => ({ id: 'blocked', verb, blocked: true, requires });
 
 /**
  * 解析「现在按下交互键会发生什么」。
@@ -104,7 +110,7 @@ export function resolveActorAction(target, context = {}) {
     case 'cargo-toggle': {
       if (target.enabled === false) return undefined;
       // 装卸是载具的动作而不是人的动作，所以先要有一台自己接管着的载具。
-      if (!controlledActorId) return block(`先接管木筏，再装载${name}`);
+      if (!controlledActorId) return block(`先接管木筏，再装载${name}`, 'vessel-control');
       if (!target.carrierActorId) return allow('cargo-load', `装载${name}`);
       if (target.carrierActorId === controlledActorId) return allow('cargo-unload', `卸载${name}`);
       return block(`${name}已被其他木筏装载`);

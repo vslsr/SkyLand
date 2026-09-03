@@ -181,7 +181,11 @@ export class InventoryComponent extends ActorComponent {
   /**
    * 客户端镜像：按快照重建内容与快捷栏。
    *
-   * @returns 内容或 revision 是否真的变了，供界面决定要不要重画。
+   * @param {Array<{itemType: string, quantity: number}>} entries
+   * @param {number} [revision]
+   * @param {{slots: Array<string|null>, activeIndex: number}} [hotbar]
+   *   旧快照没有这一段时保持本地快捷栏不动，只更新内容。
+   * @returns {boolean} 内容或 revision 是否真的变了，供界面决定要不要重画。
    */
   applySnapshot(entries, revision = this.revision, hotbar = undefined) {
     const nextRevision = Math.max(0, Math.trunc(Number(revision) || 0));

@@ -1,3 +1,4 @@
+import { resolveActorAction } from '../../shared/actor/index.mjs';
 import type { CameraFrame } from '../camera/CameraTransform';
 import { PlayerInputTags } from '../input/config/playerInput';
 import type { InputSubsystem } from '../input/core/InputSubsystem';
@@ -72,20 +73,12 @@ export class ActorInteractionController {
       return;
     }
     if (this.interactionRequested && this.candidate) {
-      if (this.candidate.action === 'pickup-stack' || this.candidate.action === 'harvest-prop') {
-        if (playerId) this.port.sendInteraction(this.candidate.actorId);
-      } else if (this.candidate.action === 'mushroom-bite') {
-        // 手上那一株一律放行：服务端按状态分派成放下或取消。别人手上的不行。
-        const mine = this.candidate === held;
-        if (playerId && (mine || !this.candidate.holderPlayerId)) {
-          this.port.sendInteraction(this.candidate.actorId);
-        }
-      } else if (vesselId) {
-        const carrierId = this.candidate.carrierActorId;
-        if (!carrierId || carrierId === vesselId) {
-          this.port.sendInteraction(this.candidate.actorId);
-        }
-      }
+      // 发不发由动作表说了算，和上面那句提示是同一个判定——不再各写一遍。
+      const action = resolveActorAction(
+        this.toActionTarget(this.candidate),
+        { playerId, controlledActorId: vesselId },
+      );
+      if (action && !action.blocked) this.port.sendInteraction(this.candidate.actorId);
     } else if (this.interactionRequested && playerId) {
       // 没有任何候选可按时，交互键落到彩蛋上：咬面前的人。它排在最后，所以永远
       // 抢不走正经交互；也不出提示、不出标记，找得到才有反应，是个藏着的动作。
@@ -104,65 +97,49 @@ export class ActorInteractionController {
     this.disposeBinding();
   }
 
+  /**
+   * 候选 Actor 的复制态转成动作表认识的形状。
+   *
+   * `enabled` 一律给 true：就近搜索本来就滤掉了关着的，而手上那件虽然是关着的，
+   * 却由动作表的第一支（「手上那件压过所有分支」）接住，不看这个字段。
+   */
+  private toActionTarget(candidate: ActorInteractionCandidate) {
+    return {
+      actorId: candidate.actorId,
+      label: candidate.label,
+      action: candidate.action,
+      enabled: true,
+      quantity: candidate.quantity,
+      carrierActorId: candidate.carrierActorId,
+      holderPlayerId: candidate.holderPlayerId,
+      pickupHolderActorId: candidate.pickupHolderActorId,
+    };
+  }
+
   private resolvePrompt(
     candidate: ActorInteractionCandidate | undefined,
     vesselId: string | undefined,
     playerId: string | undefined,
   ): string | undefined {
     if (!candidate) return undefined;
-    if (candidate.action === 'pickup-stack') {
-      const quantity = candidate.quantity ? ` ×${candidate.quantity}` : '';
-      return this.withInputLabel(
-        this.port.getInputLabel(PlayerInputTags.WorldInteract),
-        `拾取「${candidate.label}${quantity}」`,
-      );
-    }
-    if (candidate.action === 'harvest-prop') {
-      return this.withInputLabel(
-        this.port.getInputLabel(PlayerInputTags.WorldInteract),
-        `砍伐「${candidate.label}」`,
-      );
-    }
-    if (candidate.action === 'mushroom-bite') {
-      if (playerId && candidate.pickupHolderActorId === playerId) {
-        return this.withInputLabel(
-          this.port.getInputLabel(PlayerInputTags.WorldInteract),
-          `放下「${candidate.label}」`,
-        );
+    const action = resolveActorAction(
+      this.toActionTarget(candidate),
+      { playerId, controlledActorId: vesselId },
+    );
+    if (!action) return undefined;
+    if (action.blocked) {
+      // 挡下的动作不挂交互键——挂了等于告诉玩家按下去会有反应。但如果差的只是一个
+      // 前置动作，就把「去按哪个键」补上：动作表只报缺什么，键位在这一层才知道。
+      if (action.requires === 'vessel-control') {
+        const label = this.port.getInputLabel(PlayerInputTags.Interact);
+        return label ? action.verb.replace('先接管木筏', `先按 ${label} 接管木筏`) : action.verb;
       }
-      if (playerId && candidate.holderPlayerId === playerId) {
-        return this.withInputLabel(
-          this.port.getInputLabel(PlayerInputTags.WorldInteract),
-          `松开「${candidate.label}」`,
-        );
-      }
-      if (!candidate.holderPlayerId) {
-        return this.withInputLabel(
-          this.port.getInputLabel(PlayerInputTags.WorldInteract),
-          `叼住「${candidate.label}」`,
-        );
-      }
-      return `「${candidate.label}」正被叼住`;
+      return action.verb;
     }
-    if (!vesselId) {
-      const label = this.port.getInputLabel(PlayerInputTags.Interact);
-      return label
-        ? `先按 ${label} 接管木筏，再装载「${candidate.label}」`
-        : `请先接管木筏，再装载「${candidate.label}」`;
-    }
-    if (!candidate.carrierActorId) {
-      return this.withInputLabel(
-        this.port.getInputLabel(PlayerInputTags.WorldInteract),
-        `装载「${candidate.label}」`,
-      );
-    }
-    if (candidate.carrierActorId === vesselId) {
-      return this.withInputLabel(
-        this.port.getInputLabel(PlayerInputTags.WorldInteract),
-        `卸载「${candidate.label}」`,
-      );
-    }
-    return `「${candidate.label}」已被其他木筏装载`;
+    return this.withInputLabel(
+      this.port.getInputLabel(PlayerInputTags.WorldInteract),
+      action.verb,
+    );
   }
 
   private withInputLabel(label: string | undefined, action: string): string {

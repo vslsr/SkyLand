@@ -1032,3 +1032,168 @@ body.is-topdown .virtual-controls.is-desktop-debug {
     height: 38px;
   }
 }
+
+/* ---- 手持快捷栏 ---------------------------------------------------------- */
+
+/*
+ * 挂在 HUD 层，不进 CommonUI 栈：游戏进行中一直可见可点，也不该被背包盖住。
+ * 每一格都是真按钮——点击/触摸是切换手持的第一入口，数字键与手柄肩键是另外两条。
+ */
+.hotbar-root {
+  position: fixed;
+  inset-inline: 0;
+  bottom: 18px;
+  z-index: 4;
+  display: flex;
+  justify-content: center;
+  pointer-events: none;
+}
+
+.hotbar {
+  position: relative;
+  display: flex;
+  gap: 10px;
+  padding: 8px;
+  pointer-events: auto;
+}
+
+.hotbar[hidden] {
+  display: none;
+}
+
+.hotbar__slot {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 56px;
+  height: 56px;
+  padding: 0;
+  color: rgba(28, 26, 23, 0.86);
+  background: rgba(253, 251, 246, 0.82);
+  border: 1px solid rgba(138, 98, 56, 0.44);
+  border-radius: 50%;
+  cursor: pointer;
+  transition: transform 120ms ease, border-color 120ms ease, background 120ms ease;
+}
+
+.hotbar__slot:hover {
+  background: rgba(253, 251, 246, 0.94);
+}
+
+.hotbar__slot.is-active {
+  border-color: rgba(138, 98, 56, 0.9);
+  border-width: 2px;
+  transform: translateY(-4px);
+}
+
+/* 配置还在但货用光了：格子留着，画成灰的，补货回来自动亮起。 */
+.hotbar__slot.is-depleted .hotbar__icon,
+.hotbar__slot.is-depleted .hotbar__quantity {
+  opacity: 0.35;
+}
+
+.hotbar__icon {
+  width: 28px;
+  height: 28px;
+}
+
+.hotbar__shortcut {
+  position: absolute;
+  top: 4px;
+  left: 8px;
+  font-size: 9px;
+  font-weight: 700;
+  opacity: 0.5;
+}
+
+.hotbar__quantity {
+  position: absolute;
+  right: 6px;
+  bottom: 4px;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+/*
+ * 使用蓄力与交互键长按共用同一圈进度，靠颜色区分。圈画在当前手持那一格上，
+ * 因为两种按住说的都是「手上这件东西」。--hotbar-progress 由控制器每帧写入，
+ * 两端跑同一个 chargeRatio，所以圈满那一刻就是服务端判定满的那一刻。
+ */
+.hotbar__slot[data-progress='charge'],
+.hotbar__slot[data-progress='stow'] {
+  background-image: conic-gradient(
+    var(--hotbar-progress-color) var(--hotbar-progress, 0%),
+    transparent var(--hotbar-progress, 0%)
+  );
+}
+
+.hotbar__slot[data-progress='charge'] {
+  --hotbar-progress-color: rgba(201, 120, 104, 0.5);
+}
+
+.hotbar__slot[data-progress='stow'] {
+  --hotbar-progress-color: rgba(79, 214, 149, 0.5);
+}
+
+.hotbar__progress-label {
+  position: absolute;
+  bottom: calc(100% + 4px);
+  left: 50%;
+  margin: 0;
+  padding: 4px 9px;
+  color: rgba(28, 26, 23, 0.86);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  white-space: nowrap;
+  background: rgba(253, 251, 246, 0.86);
+  border: 1px solid rgba(138, 98, 56, 0.52);
+  border-radius: 4px;
+  transform: translateX(-50%);
+  pointer-events: none;
+}
+
+/* ---- 背包分类页签 -------------------------------------------------------- */
+
+.inventory__tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+
+.inventory__tab {
+  padding: 5px 11px;
+  color: rgba(28, 26, 23, 0.7);
+  font-size: 11px;
+  font-weight: 700;
+  background: transparent;
+  border: 1px solid rgba(138, 98, 56, 0.32);
+  border-radius: 999px;
+  cursor: pointer;
+}
+
+.inventory__tab.is-active {
+  color: rgba(28, 26, 23, 0.94);
+  background: rgba(138, 98, 56, 0.14);
+  border-color: rgba(138, 98, 56, 0.7);
+}
+
+/* 不做拖拽：一次点击就是这个界面的全部交互，所以格子本身要看得出可以点。 */
+.inventory__cell--actionable {
+  cursor: pointer;
+}
+
+.inventory__cell--actionable:hover,
+.inventory__cell--actionable:focus-visible {
+  border-color: rgba(138, 98, 56, 0.72);
+}
+
+.inventory__cell.is-held {
+  border-color: rgba(138, 98, 56, 0.9);
+  box-shadow: inset 0 0 0 1px rgba(138, 98, 56, 0.5);
+}
+
+.inventory__badge--pooled {
+  opacity: 0.62;
+}
