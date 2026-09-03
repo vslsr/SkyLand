@@ -57,6 +57,12 @@
 保底 `bite.gripDepth`。两边喂同一份权威输入，算出来一样；也没人能伪造，因为根本
 没人发。
 
+**一张嘴一个向量。** 同时被几个人咬着就有几个向量，各自长成一个锥，位移在求解器
+里相加；两个锥重叠的地方权重摊薄到和为 1，所以挨得近的两张嘴拉出来的是一道宽脊，
+而不是叠成两倍长的一根刺。上限 `MAX_SOFT_BODY_HOLDERS` = 3（参数段定长），玩法侧
+的抓握名单和渲染侧的槽位数共用它。缰绳只有一根：取绷得最紧的那个抓握，松的绳本来
+就不出力。
+
 被拴住的一方还带 `leash`：
 
 ```ts
@@ -70,7 +76,8 @@
 ## 参数段布局
 
 `PARAM_SLIME_DRAG_REVISION` 起 7 个 f32 是鼠标拖拽（revision、命中点三个、位移
-三个），紧接着 `PARAM_SLIME_BITE_X/Y/Z` 三个是咬住的突起向量。`revision` 用 f32
+三个），紧接着 `PARAM_SLIME_BITE_TIPS` 起 `MAX_SOFT_BODY_HOLDERS × 3` 个是那几个
+突起向量，一张嘴一个，空槽位写零。`revision` 用 f32
 存整数：渲染侧只比较「和上一帧一样吗」，不做算术，一次会话到不了 2^24。
 
 ## 可调参数在哪
@@ -81,7 +88,8 @@
 | `breakDistance` / `selfReportTimeoutMs` | 同一份 JSON 的 `softBodyDeformation` | 外力拉多远脱手、自报形变多久过期 |
 | `range` / `facingDot` / `gripDepth` | 同一份 JSON 的 `bite` | 嘴够得着多远、要多正对着、贴身咬至少捏起多深的一块皮（客户端算向量时用） |
 | `leashSlack` / `leashStiffness` / `leashDamping` | 同一份 JSON 的 `bite` | 能挣多远、拉多紧、会不会来回荡 |
-| `BITE_TIP_EXPONENT` / `BITE_TIP_NARROWING` / `MAX_BITE_TIP_RADIUS_RATIO` / `BITE_TIP_FOLLOW_RATE` | `HybridSlimeSimulation.ts` | 锥的张角、侧面收多紧、最长多少（按半径缩放）、咬上与松口的生长速率 |
+| `BITE_TIP_EXPONENT` / `BITE_TIP_NARROWING` / `MAX_BITE_TIP_RADIUS_RATIO` / `BITE_TIP_FOLLOW_RATE` | `HybridSlimeSimulation.ts` | 锥的张角、侧面收多紧、单个尖最长多少（按半径缩放）、咬上与松口的生长速率 |
+| `MAX_SOFT_BODY_HOLDERS` | `shared/softBodyDeformation.mjs` | 同一块外壳最多几张嘴／几个尖。玩法侧的名单与渲染侧的槽位共用 |
 | 全局跟随权重、质心跟随比例与速率 | `HybridSlimeSimulation.ts` 顶部常量 | 「整团跟着走」而不是只鼓一个包，全部按半径缩放 |
 
 ## 加一种外力：地上的倒刺
@@ -112,3 +120,5 @@
   保底，否则踩上去什么都看不见。
 - 倒刺该多尖？锥的张角与收紧程度是求解器常量（`BITE_TIP_*`），今天所有来源共用
   一套。真要让吸盘钝一些，就把指数做成来源的一项参数，而不是回去按一块皮做位移。
+- 踩在倒刺上又被人咬？两个来源各占一个槽位，各长各的尖，位移相加——这正是
+  「一个来源一个向量」的好处：新的外力不需要和已有的那个协商谁说了算。

@@ -5,6 +5,7 @@ import {
   hybridSlimeRestY,
 } from './HybridSlimeRestShape';
 import { HybridSlimeVolumeFlow } from './HybridSlimeVolumeFlow';
+import { MAX_SOFT_BODY_HOLDERS } from '../../../shared/softBodyDeformation.mjs';
 
 export interface HybridSlimeSimulationOptions {
   readonly radius: number;
@@ -92,8 +93,15 @@ const SURFACE_DRAG_BOTTOM_ADHESION = 0.45;
 const BITE_TIP_EXPONENT = 8;
 /** 尖同时向内收，锥才收得住；不收的话拉出来的是个圆柱。 */
 const BITE_TIP_NARROWING = 0.45;
-/** 尖最长按半径缩放，形变预算不随世界尺度增长。 */
+/**
+ * 单个尖最长按半径缩放，形变预算不随世界尺度增长。
+ *
+ * 几个尖不会把预算叠上去：重叠处的权重会摊薄到和为 1，所以任何一点的位移都还在
+ * 单个尖的量程内。
+ */
 const MAX_BITE_TIP_RADIUS_RATIO = 1.15;
+/** 同一块外壳上同时能有几个尖：一张嘴一个，位移相加。玩法侧用的是同一个常量。 */
+const MAX_BITE_TIPS = MAX_SOFT_BODY_HOLDERS;
 /** 咬住/松口时尖的生长与回落速率（约 0.15 秒到 90%）。 */
 const BITE_TIP_FOLLOW_RATE = 15;
 
@@ -175,12 +183,10 @@ export class HybridSlimeSimulation {
   private surfaceDragPullZ = 0;
   private surfaceDragExtensionRatio = 0;
   private surfaceDragForceScale = 0;
-  private biteTipX = 0;
-  private biteTipY = 0;
-  private biteTipZ = 0;
-  private targetBiteTipX = 0;
-  private targetBiteTipY = 0;
-  private targetBiteTipZ = 0;
+  private readonly biteTips = new Float32Array(MAX_BITE_TIPS * 3);
+  private readonly targetBiteTips = new Float32Array(MAX_BITE_TIPS * 3);
+  /** 每帧整理一次的「轴 xyz + 长度」，逐顶点的循环里直接读，不重复开方。 */
+  private readonly biteAxes = new Float32Array(MAX_BITE_TIPS * 4);
   private surfaceDragBodyX = 0;
   private surfaceDragBodyY = 0;
   private surfaceDragBodyZ = 0;
@@ -311,15 +317,28 @@ export class HybridSlimeSimulation {
    * 连续地长出去，所以没有命中点、没有抓取计数、没有权重表，也就不会在影响圈
    * 边缘裂开。施力方绕到另一面，这个向量自己转过去就行。
    */
-  public setBiteTip(tipX: number, tipY: number, tipZ: number): void {
-    if (![tipX, tipY, tipZ].every(Number.isFinite)) return;
-    const length = Math.hypot(tipX, tipY, tipZ);
+  public setBiteTips(tips: ArrayLike<number>): void {
     const maximum = this.options.radius * MAX_BITE_TIP_RADIUS_RATIO;
-    const scale = length > maximum && length > 1e-8 ? maximum / length : 1;
-    this.targetBiteTipX = tipX * scale;
-    this.targetBiteTipY = tipY * scale;
-    this.targetBiteTipZ = tipZ * scale;
-    if (length > 1e-5 || Math.hypot(this.biteTipX, this.biteTipY, this.biteTipZ) > 1e-5) {
+    let driven = 0;
+    for (let tip = 0; tip < MAX_BITE_TIPS; tip += 1) {
+      const offset = tip * 3;
+      const tipX = tip * 3 < tips.length ? tips[offset] : 0;
+      const tipY = tip * 3 < tips.length ? tips[offset + 1] : 0;
+      const tipZ = tip * 3 < tips.length ? tips[offset + 2] : 0;
+      if (![tipX, tipY, tipZ].every(Number.isFinite)) continue;
+      const length = Math.hypot(tipX, tipY, tipZ);
+      const scale = length > maximum && length > 1e-8 ? maximum / length : 1;
+      this.targetBiteTips[offset] = tipX * scale;
+      this.targetBiteTips[offset + 1] = tipY * scale;
+      this.targetBiteTips[offset + 2] = tipZ * scale;
+      driven += length + Math.hypot(
+        this.biteTips[offset],
+        this.biteTips[offset + 1],
+        this.biteTips[offset + 2],
+      );
+    }
+    // 还在长或者还在收都得醒着，否则松口那一下会停在半路上。
+    if (driven > 1e-5) {
       this.isActive = true;
       this.stableSeconds = 0;
     }
@@ -667,9 +686,9 @@ export class HybridSlimeSimulation {
     const tipRatio = deltaSeconds > 0
       ? 1 - Math.exp(-BITE_TIP_FOLLOW_RATE * deltaSeconds)
       : 1;
-    this.biteTipX += (this.targetBiteTipX - this.biteTipX) * tipRatio;
-    this.biteTipY += (this.targetBiteTipY - this.biteTipY) * tipRatio;
-    this.biteTipZ += (this.targetBiteTipZ - this.biteTipZ) * tipRatio;
+    for (let offset = 0; offset < this.biteTips.length; offset += 1) {
+      this.biteTips[offset] += (this.targetBiteTips[offset] - this.biteTips[offset]) * tipRatio;
+    }
     this.surfaceDragBodyX += (targetX - this.surfaceDragBodyX) * followRatio;
     this.surfaceDragBodyY += (targetY - this.surfaceDragBodyY) * followRatio;
     this.surfaceDragBodyZ += (targetZ - this.surfaceDragBodyZ) * followRatio;
@@ -844,12 +863,25 @@ export class HybridSlimeSimulation {
     const smoothedForceBiasX = this.forceCenter[0] - this.coreX - this.surfaceDragBodyX;
     const smoothedForceBiasZ = this.forceCenter[2] - this.coreZ - this.surfaceDragBodyZ;
     const ascentRatio = clamp(this.shapeVerticalVelocity / REFERENCE_JUMP_SPEED, 0, 1);
-    // 咬住的那一项：一个向量，方向决定尖从哪一侧长出来，长度决定长多少。
-    const biteAmount = Math.hypot(this.biteTipX, this.biteTipY, this.biteTipZ);
-    const biting = biteAmount > 1e-4;
-    const biteAxisX = biting ? this.biteTipX / biteAmount : 0;
-    const biteAxisY = biting ? this.biteTipY / biteAmount : 0;
-    const biteAxisZ = biting ? this.biteTipZ / biteAmount : 0;
+    // 咬住的那些项：每张嘴一个向量，方向决定尖从哪一侧长出来，长度决定长多少。
+    // 这里先把非零的那几个整理成轴 + 长度，循环里再逐顶点把它们的位移加起来。
+    let biteCount = 0;
+    for (let tip = 0; tip < MAX_BITE_TIPS; tip += 1) {
+      const offset = tip * 3;
+      const amount = Math.hypot(
+        this.biteTips[offset],
+        this.biteTips[offset + 1],
+        this.biteTips[offset + 2],
+      );
+      if (amount <= 1e-4) continue;
+      const packed = biteCount * 4;
+      this.biteAxes[packed] = this.biteTips[offset] / amount;
+      this.biteAxes[packed + 1] = this.biteTips[offset + 1] / amount;
+      this.biteAxes[packed + 2] = this.biteTips[offset + 2] / amount;
+      this.biteAxes[packed + 3] = amount;
+      biteCount += 1;
+    }
+
 
     for (let offset = 0; offset < directions.length; offset += 3) {
       const directionX = directions[offset];
@@ -1017,28 +1049,52 @@ export class HybridSlimeSimulation {
         + tailPerpendicularZ * airbornePerpendicularScale
       );
 
-      // 咬住：沿轴把静止外形拔出一个尖。权重只看「顶点方向与轴的夹角」，
-      // 所以整条外形是方向的连续函数——没有命中点、没有影响圈边界，也就没有
-      // 折角和裂缝。写法和跳跃水滴的尾尖是同一套：沿轴拉长、垂直方向收窄。
-      if (biting) {
-        const biteAlignment = (
-          directionX * biteAxisX + directionY * biteAxisY + directionZ * biteAxisZ
-        );
-        const biteWeight = biteAlignment > 0
-          ? Math.pow(biteAlignment, BITE_TIP_EXPONENT)
-          : 0;
-        if (biteWeight > 1e-5) {
-          const biteParallel = (
-            shapedLocalX * biteAxisX + shapedLocalY * biteAxisY + shapedLocalZ * biteAxisZ
-          );
-          const bitePerpendicularX = shapedLocalX - biteAxisX * biteParallel;
-          const bitePerpendicularY = shapedLocalY - biteAxisY * biteParallel;
-          const bitePerpendicularZ = shapedLocalZ - biteAxisZ * biteParallel;
-          const narrowing = 1 - BITE_TIP_NARROWING * biteWeight;
-          const stretched = biteParallel + biteAmount * biteWeight;
-          shapedLocalX = biteAxisX * stretched + bitePerpendicularX * narrowing;
-          shapedLocalY = biteAxisY * stretched + bitePerpendicularY * narrowing;
-          shapedLocalZ = biteAxisZ * stretched + bitePerpendicularZ * narrowing;
+      // 咬住：每个尖沿自己的轴把静止外形拔出去，位移相加。
+      //
+      // 权重只看「顶点方向与轴的夹角」，所以每一项都是方向的连续函数——没有命中点、
+      // 没有影响圈边界，也就没有折角和裂缝。写法和跳跃水滴的尾尖是同一套：沿轴
+      // 拉长、垂直方向收窄，只是这里写成位移相加的形式，好让多张嘴自然叠起来：
+      // 一个尖时它和「拉长 + 收窄」逐字等价，多个尖时和顺序无关。
+      if (biteCount > 0) {
+        // 先看这一处被几个尖同时够到：权重之和过 1 就按比例摊薄。
+        //
+        // 相加而不摊薄的话，两张嘴挨得近时同一块皮会被拉两份，越界之后再硬夹一刀
+        // ——夹到的地方是一片平顶，边上带一圈折角。摊薄之后重叠处是「按权重平均
+        // 地被拉向两张嘴之间」，形状是一道连续的脊，位移也自然落在单个尖的量程内。
+        // 不重叠时权重和本来就 ≤ 1，摊薄不生效，和只有一个尖时逐字相同。
+        let totalWeight = 0;
+        for (let tip = 0; tip < biteCount; tip += 1) {
+          const packed = tip * 4;
+          const alignment = directionX * this.biteAxes[packed]
+            + directionY * this.biteAxes[packed + 1]
+            + directionZ * this.biteAxes[packed + 2];
+          if (alignment <= 0) continue;
+          totalWeight += Math.pow(alignment, BITE_TIP_EXPONENT);
+        }
+        if (totalWeight > 1e-5) {
+          const share = totalWeight > 1 ? 1 / totalWeight : 1;
+          let biteDisplacementX = 0;
+          let biteDisplacementY = 0;
+          let biteDisplacementZ = 0;
+          for (let tip = 0; tip < biteCount; tip += 1) {
+            const packed = tip * 4;
+            const axisX = this.biteAxes[packed];
+            const axisY = this.biteAxes[packed + 1];
+            const axisZ = this.biteAxes[packed + 2];
+            const alignment = directionX * axisX + directionY * axisY + directionZ * axisZ;
+            if (alignment <= 0) continue;
+            const weight = Math.pow(alignment, BITE_TIP_EXPONENT) * share;
+            if (weight <= 1e-5) continue;
+            const parallel = shapedLocalX * axisX + shapedLocalY * axisY + shapedLocalZ * axisZ;
+            const contraction = BITE_TIP_NARROWING * weight;
+            const stretch = this.biteAxes[packed + 3] * weight;
+            biteDisplacementX += axisX * stretch - (shapedLocalX - axisX * parallel) * contraction;
+            biteDisplacementY += axisY * stretch - (shapedLocalY - axisY * parallel) * contraction;
+            biteDisplacementZ += axisZ * stretch - (shapedLocalZ - axisZ * parallel) * contraction;
+          }
+          shapedLocalX += biteDisplacementX;
+          shapedLocalY += biteDisplacementY;
+          shapedLocalZ += biteDisplacementZ;
         }
       }
 
