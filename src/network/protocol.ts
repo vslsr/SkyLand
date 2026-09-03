@@ -22,7 +22,6 @@ export interface SnapshotSlimeDrag extends SlimeDragState {
    * 这一次抓取有多「尖」。0 是外壳主人自己的鼠标拖拽，整团跟着走；
    * 1 是被牙齿之类的外力咬住，只在命中处拔出一个尖。由施力方决定。
    */
-  pinch: number;
 }
 
 /**

@@ -41,6 +41,7 @@ import {
 import type { SnapshotActor } from '../src/network/protocol';
 import { RenderTransformBuffer } from '../src/render/RenderTransformBuffer';
 import { SLIME_DRAG_AT_REST, writeSlimeDragParams } from '../src/render/RenderSlimeDrag';
+import { SLIME_BITE_AT_REST, writeSlimeBiteParams } from '../src/render/RenderSlimeBite';
 import { resolvePlayerVisualShape } from '../src/player/playerVisualShape';
 import { ThreeRenderScene } from '../src/render/three/ThreeRenderScene';
 import type { ThreeHybridSlimeVisual } from '../src/render/three/ThreeHybridSlimeVisual';
@@ -1136,92 +1137,83 @@ test('无模型 GuidePath Actor 只在快照存在时创建客户端 Three.js �
   system.dispose();
 });
 
-test('咬住的形变在命中处拔出一个锥，尖端落在牙上', () => {
+test('咬住按一个向量把静止外形拔出一个尖：连续、对称、不需要命中点', () => {
   const render = pbfSlimeArchetype.components.render;
-  const dragDefinition = pbfSlimeArchetype.components.slimeSurfaceDrag;
   assert.ok(render?.model === 'line-art-pbf-slime');
-  assert.ok(dragDefinition);
   const scene = new ThreeRenderScene(new THREE.Group(), RENDER_ENVIRONMENT);
   const transforms = new RenderTransformBuffer(4);
-  const info = scene.createPlayerProxy({
-    name: 'bitten-player',
-    render,
-    walkSpeed: 3.2,
-    surfaceDrag: dragDefinition,
-  });
+  const info = scene.createPlayerProxy({ name: 'bitten-player', render, walkSpeed: 3.2 });
   const slime = scene.resolveSlimeVisual(info.id)!;
-  const drag = { ...SLIME_DRAG_AT_REST };
+  const bite = { ...SLIME_BITE_AT_REST };
   const step = (frames: number, from = 0): void => {
     for (let frame = 0; frame < frames; frame += 1) {
-      writeSlimeDragParams(transforms, info.id, drag);
+      writeSlimeBiteParams(transforms, info.id, bite);
       transforms.publish();
       scene.submitTransforms(transforms);
       scene.updateVisuals(transforms, 1 / 60, (from + frame) / 60);
     }
   };
   step(90);
-  const initialSurface = Float32Array.from(slime.simulation.positions);
+  const rest = Float32Array.from(slime.simulation.positions);
 
-  // 命中点取正对 +Z 的那一圈顶点，和被咬时服务端给的那一面一致。
-  let contactOffset = 0;
-  let best = Number.NEGATIVE_INFINITY;
-  const centerY = render.radius * 0.46;
-  for (let offset = 0; offset < initialSurface.length; offset += 3) {
-    const score = initialSurface[offset + 2]
-      - Math.abs(initialSurface[offset]) * 2
-      - Math.abs(initialSurface[offset + 1] - centerY) * 2;
-    if (score <= best) continue;
-    best = score;
-    contactOffset = offset;
-  }
-  const pull = 0.6;
-  drag.revision = 1;
-  drag.contactX = initialSurface[contactOffset];
-  drag.contactY = initialSurface[contactOffset + 1];
-  drag.contactZ = initialSurface[contactOffset + 2];
-  drag.pullZ = pull;
-  drag.pinch = 1;
+  // 向量：方向是「身体中心 → 牙」，长度是尖有多长。没有命中点，也没有抓取计数。
+  const amount = 0.6;
+  bite.z = amount;
   step(180, 90);
 
   const bitten = slime.simulation.positions;
-  const tip = bitten[contactOffset + 2] - initialSurface[contactOffset + 2];
-  // 尖端要落在牙上。力平衡兑现不了这一条：拖拽弹簧 120、蒙皮回弹约 80，命中点
-  // 停在目标的一半，无论施力方把嘴挪多远——被咬住的那块皮得是位置约束。
-  assert.ok(
-    Math.abs(tip - pull) < 0.02,
-    `咬住的那块皮就在牙上，实际只走了 ${tip} / ${pull}`,
-  );
-
-  // 侧面得有落差也得有厚度：只有命中点动是一根「单顶点针」，动得太平是个圆包。
-  let followers = 0;
-  let farSideMaximum = 0;
-  for (let offset = 0; offset < bitten.length; offset += 3) {
-    const moved = Math.hypot(
-      bitten[offset] - initialSurface[offset],
-      bitten[offset + 1] - initialSurface[offset + 1],
-      bitten[offset + 2] - initialSurface[offset + 2],
-    );
-    if (offset !== contactOffset && moved > tip * 0.25) followers += 1;
-    if (initialSurface[offset + 2] > -render.radius * 0.5) continue;
-    farSideMaximum = Math.max(farSideMaximum, moved);
+  const directions = slime.rig.surfaceDirections;
+  let tipOffset = 0;
+  let tipAlignment = -Infinity;
+  for (let offset = 0; offset < directions.length; offset += 3) {
+    if (directions[offset + 2] <= tipAlignment) continue;
+    tipAlignment = directions[offset + 2];
+    tipOffset = offset;
   }
-  assert.ok(followers >= 6, `尖要有侧面，不能只有命中点自己动，实际 ${followers} 个顶点跟随`);
+  const tip = bitten[tipOffset + 2] - rest[tipOffset + 2];
+  assert.ok(tip > amount * 0.7, `轴向那一头要真的被拔出去，实际 ${tip} / ${amount}`);
+
+  // 侧面必须是连续的：位移随「顶点方向与轴的夹角」单调下降，而不是某一圈突然归零。
+  // 之前那版按一块皮做加权位移，影响圈边缘那一圈就是画面上那道裂缝。
+  const rings = new Map<number, { total: number; count: number }>();
+  let outsideMaximum = 0;
+  for (let offset = 0; offset < directions.length; offset += 3) {
+    const alignment = directions[offset + 2];
+    const moved = Math.hypot(
+      bitten[offset] - rest[offset],
+      bitten[offset + 1] - rest[offset + 1],
+      bitten[offset + 2] - rest[offset + 2],
+    );
+    if (alignment < 0.2) outsideMaximum = Math.max(outsideMaximum, moved);
+    const bucket = Math.round(alignment * 10) / 10;
+    const ring = rings.get(bucket) ?? { total: 0, count: 0 };
+    ring.total += moved;
+    ring.count += 1;
+    rings.set(bucket, ring);
+  }
+  const profile = [...rings.entries()]
+    .filter(([alignment]) => alignment >= 0.3)
+    .sort((left, right) => right[0] - left[0])
+    .map(([alignment, ring]) => [alignment, ring.total / ring.count] as const);
+  assert.ok(profile.length >= 4, '锥里要有好几圈顶点，只有一圈动的是一根针');
+  for (let index = 1; index < profile.length; index += 1) {
+    assert.ok(
+      profile[index][1] <= profile[index - 1][1] + 1e-3,
+      `位移必须随夹角单调下降，实际 ${JSON.stringify(profile)}`,
+    );
+  }
   assert.ok(
-    farSideMaximum < tip * 0.15,
-    `咬住的是一块皮，背面不该整团跟着走，实际 ${farSideMaximum}`,
+    outsideMaximum < tip * 0.25,
+    `背对轴的那一半不该跟着走，实际 ${outsideMaximum}`,
   );
 
-  // 松口后由原有胡克弹簧收回去，不能把咬住时按下的速度攒着弹飞。
-  drag.revision = 0;
-  drag.pinch = 0;
-  drag.pullZ = 0;
-  step(360, 270);
-  assert.equal(slime.simulation.stats().surfaceDragActive, false);
-  assert.ok(
-    Math.abs(slime.simulation.positions[contactOffset + 2] - initialSurface[contactOffset + 2])
-      < tip * 0.2,
-    '松口后应回到静止外壳',
+  // 松口：外形自己收回去，不需要额外的回弹路径。
+  bite.z = 0;
+  step(240, 270);
+  const released = Math.abs(
+    slime.simulation.positions[tipOffset + 2] - rest[tipOffset + 2],
   );
+  assert.ok(released < tip * 0.2, `松口后应回到静止外形，实际 ${released}`);
   scene.dispose();
 });
 

@@ -39,7 +39,7 @@ test('自己上报的形变只被净化转发：换抓取时递增 revision，�
 
   scene.applySlimeDrag('player-1', { ...CONTACT, pullX: 0.4, pullY: 0.2, pullZ: 0 });
   assert.deepEqual(readDrag(scene, 'player-1'), {
-    revision: 1, pinch: 0, ...CONTACT, pullX: 0.4, pullY: 0.2, pullZ: 0,
+    revision: 1, ...CONTACT, pullX: 0.4, pullY: 0.2, pullZ: 0,
   });
   assert.equal(
     scene.createSnapshot().players[0].x,
@@ -114,7 +114,7 @@ function advance(scene, clock, ticks, moves) {
   }
 }
 
-test('咬住把形变力挂到被咬者身上，再按一次松口', async () => {
+test('咬住只在服务端留下关系与缰绳：形状一个数都不下发', async () => {
   const clock = createClock();
   const scene = await createSoftBodyScene(clock);
   scene.addPlayer({ id: 'biter', name: '咬人的', slot: 0 });
@@ -125,111 +125,28 @@ test('咬住把形变力挂到被咬者身上，再按一次松口', async () =>
   assert.equal(scene.toggleBite('biter'), true);
   assert.equal(biter.requireComponent(BITE_COMPONENT).targetActorId, 'victim');
   assert.equal(deformation.sourceId, 'biter');
-  const bitten = readDrag(scene, 'victim');
-  assert.ok(bitten, '被咬的一方要带上形变');
-  // 命中点落在朝着咬人者的那一侧。坐标是**外壳坐标**：Actor 原点 + 世界轴向，
-  // 不转 yaw——软体外壳本来就不跟着 Actor 转身（渲染侧把 rig 反着转了 -yaw）。
-  // 咬人者摆在被咬者的 -Z 一侧，所以命中点也在 -Z。按 Actor 本地坐标算的话，
-  // 这里会得到 +Z，尖就从被咬者的背面冒出来——这条断言是那个偏差的哨兵。
-  assert.ok(bitten.contactZ < -0.5, `命中点应落在正对咬人者的那一面，实际 ${bitten.contactZ}`);
-  assert.ok(
-    Math.abs(Math.hypot(bitten.contactX, bitten.contactZ) - 0.95) < 0.35,
-    `命中点应落在外壳上而不是身体里，实际 ${bitten.contactX}, ${bitten.contactZ}`,
-  );
-  assert.equal(readDrag(scene, 'biter'), undefined, '咬人的一方自己不变形');
+  assert.equal(deformation.heldExternally, true);
+
+  // 关于「咬」过网络的只有这一个离散状态。尖长什么样由各客户端按两边位置自己算，
+  // 服务端算一遍再下发既多占带宽，画面上还比位置慢一个快照。
   assert.equal(scene.createSnapshot().players.find((p) => p.id === 'biter').bitingPlayerId, 'victim');
+  assert.equal(readDrag(scene, 'victim'), undefined, '被咬住不下发形状，只有自己的鼠标拖拽才下发');
+  assert.equal(readDrag(scene, 'biter'), undefined);
 
-  assert.equal(bitten.pinch, 1, '牙齿要在命中处捏出一个尖，而不是把整团推成圆包');
-  // 咬住的当下就该看得见：那块皮已经在牙上了。1.2 m 是贴身咬，嘴（身前 0.42 m）
-  // 落在被咬者的外壳里面，纯几何差向量指进身体——`gripDepth` 就是为这一段存在的。
-  const grabPull = Math.hypot(bitten.pullX, bitten.pullY, bitten.pullZ);
-  assert.ok(grabPull > 0.3, `咬住的当下就要捏起一块皮，实际 ${grabPull}`);
-  const outwardAtGrab = bitten.pullX * bitten.contactX + bitten.pullZ * bitten.contactZ;
-  assert.ok(outwardAtGrab > 0, `贴身咬也只能往外扯，不能压出一个凹包，实际 ${outwardAtGrab}`);
+  // 缰绳照旧：它是玩法，共享固定步两侧都要跑同一份。
+  const leash = scene.createSnapshot().players.find((p) => p.id === 'victim').leash;
+  assert.ok(leash, '被拴住的一方要下发缰绳');
+  assert.ok(Math.abs(leash.anchorZ - biter.z) < 0.5, '锚点是咬人者的位置');
 
-  // 位移跟着两边位姿走：咬人的一方往后退，被咬者的外壳就被拉长。
-  place(scene, biter, FIELD_X, FIELD_Z - 1.7);
-  scene.update();
-  const stretched = readDrag(scene, 'victim');
-  const length = Math.hypot(stretched.pullX, stretched.pullY, stretched.pullZ);
-  assert.ok(length > grabPull + 0.5, `退后应该把外壳拉得更长，实际 ${length}`);
-  assert.equal(stretched.revision, bitten.revision, '同一次咬住不能换抓取计数');
-
-  // 方向必须把命中处那块皮**往外**扯。早先拿「锚点减命中点」当位移，而锚点取的
-  // 是咬人者本人：他站在被咬者外壳外面没问题，一旦贴近，那个差向量就指进身体，
-  // 画面上成了一个圆钝的凹包。现在锚的是嘴，并且沿法线兜了底。
-  const outward = (
-    stretched.pullX * stretched.contactX + stretched.pullZ * stretched.contactZ
-  );
-  assert.ok(outward > 0, `形变必须朝咬人者那一侧扯出去，实际点积 ${outward}`);
-
-  // 尖端要落在牙上：命中点加位移就是那张嘴。差得远的话画面上就是一根扯向空气的
-  // 刺，和「咬住」对不上。咬人者 yaw = 0，嘴在他身前 0.42 m。
-  const mouthOffset = (biter.z + 0.42) - victim.z;
-  assert.ok(
-    Math.abs((stretched.contactZ + stretched.pullZ) - mouthOffset) < 0.12,
-    `尖端应落在嘴上：命中 ${stretched.contactZ} + 位移 ${stretched.pullZ}，嘴在 ${mouthOffset}`,
-  );
-
-  // 咬着的时候，被咬者自己上报的鼠标拖拽让位：一块外壳只有一个形变来源。
+  // 咬着的时候，被咬者自己上报的鼠标拖拽让位：一块外壳只有一个来源。
   scene.applySlimeDrag('victim', { ...CONTACT, pullX: 0.9, pullY: 0, pullZ: 0 });
   assert.equal(deformation.sourceId, 'biter');
-  assert.equal(readDrag(scene, 'victim').contactZ, stretched.contactZ);
+  assert.equal(readDrag(scene, 'victim'), undefined);
 
   assert.equal(scene.toggleBite('biter'), true, '再按一次松口');
   assert.equal(biter.requireComponent(BITE_COMPONENT).targetActorId, null);
-  assert.equal(readDrag(scene, 'victim'), undefined);
+  assert.equal(deformation.active, false);
   assert.equal(scene.createSnapshot().players.find((p) => p.id === 'biter').bitingPlayerId, undefined);
-});
-
-test('咬人者从目标身上越过之后，那块皮跟着牙绕过去，尖不会指向反方向', async () => {
-  const clock = createClock();
-  const scene = await createSoftBodyScene(clock);
-  scene.addPlayer({ id: 'biter', name: '咬人的', slot: 0 });
-  scene.addPlayer({ id: 'victim', name: '被咬的', slot: 1 });
-  const { biter, victim } = faceOff(scene, 1.2);
-  assert.equal(scene.toggleBite('biter'), true);
-  const deformation = victim.requireComponent(SOFT_BODY_DEFORMATION_COMPONENT);
-  const grabbed = { contactZ: deformation.contactZ, revision: deformation.revision };
-  assert.ok(grabbed.contactZ < -0.5, '咬住时命中点在咬人者那一面（-Z）');
-
-  // 一路从被咬者身上越过去。每一步都检查形变**朝着嘴那一侧**：这条路径上
-  // 「嘴 − 命中点」会从朝外翻成朝里，法线兜底砍掉朝里那一半之后，如果命中点
-  // 还留在原来那一面，剩下的就只有沿旧法线的一点点——尖指向背对咬人者的方向。
-  for (let step = -12; step <= 12; step += 1) {
-    const offset = step * 0.2;
-    place(scene, biter, FIELD_X, FIELD_Z + 1.2 + offset);
-    scene.update();
-    // 嘴在世界里的位置（咬人者 yaw = 0，嘴在身前 0.42 m），换算到外壳坐标。
-    const mouthZ = (biter.z + 0.42) - victim.z;
-    // 嘴几乎落在身体中轴上时方向本身就不稳，这几帧不做判定。
-    if (Math.abs(mouthZ) < 0.25) continue;
-    const alongMouth = deformation.pullZ * Math.sign(mouthZ);
-    assert.ok(
-      alongMouth > 0,
-      `嘴在 z=${mouthZ.toFixed(2)}，位移却是 ${deformation.pullZ.toFixed(2)}（指向反方向）`,
-    );
-    assert.ok(
-      deformation.contactZ * Math.sign(mouthZ) > 0,
-      `命中点应该跟着牙挪到嘴那一面，实际 ${deformation.contactZ.toFixed(2)}`,
-    );
-    const outward = (
-      deformation.pullX * deformation.normalX
-      + deformation.pullY * deformation.normalY
-      + deformation.pullZ * deformation.normalZ
-    );
-    assert.ok(
-      outward >= deformation.gripDepth - 1e-6,
-      `法线方向至少要保留抓握深度，实际 ${outward}`,
-    );
-  }
-
-  // 换了一面就是换了一次抓取：接收端得据此重建影响权重，否则尖会留在旧顶点上。
-  assert.ok(
-    deformation.revision > grabbed.revision,
-    '挪过去必须算一次新的抓取（revision 递增）',
-  );
-  assert.ok(deformation.gripDepth > 0, '牙齿要有抓握深度，否则贴身咬看不见');
 });
 
 test('够不着、背对着、已经被咬着都咬不上；拉太远自动脱口', async () => {
@@ -330,12 +247,6 @@ test('咬着的时候可以把人拖走：拖拽的力压过被咬者自己的�
     biter.getComponent(BITE_COMPONENT).targetActorId === 'victim',
     '拖行途中不该脱口',
   );
-
-  // 拖行时的形变要留在求解器的可见量程内，否则每次拖都是同一个夹死的最大拉伸。
-  const drag = readDrag(scene, 'victim');
-  const stretch = Math.hypot(drag.pullX, drag.pullY, drag.pullZ);
-  assert.ok(stretch > 0.2, `拖行时应该看得出被扯着，实际 ${stretch}`);
-  assert.ok(stretch < 1.05, `拖行形变不该顶满可见量程，实际 ${stretch}`);
 
   // 缰绳带上了咬人者的速度，客户端预测才知道自己正被拖着走。
   const leash = scene.createSnapshot().players.find((p) => p.id === 'victim').leash;

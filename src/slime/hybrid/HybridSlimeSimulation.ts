@@ -36,17 +36,6 @@ export interface HybridSlimeSurfaceDragOptions {
   readonly pullForce: number;
   readonly falloffExponent: number;
   readonly influenceRadius: number;
-  /**
-   * 这一次抓取有多「尖」。
-   *
-   * 0 是鼠标拖拽那一套：影响圈很大、整团都跟着走，手感像捏着一坨软泥挪。
-   * 1 是被牙齿咬住：影响圈收窄、权重profile 变陡、质心完全不动，于是命中处
-   * 拔出一个尖，而不是整只史莱姆鼓成一个圆包。
-   *
-   * 它是**每次抓取**的属性而不是原型参数：同一只史莱姆被鼠标拖和被咬，形状
-   * 本来就该不一样。
-   */
-  readonly pinch?: number;
 }
 
 const FIXED_STEP_SECONDS = 1 / 120;
@@ -94,28 +83,19 @@ const SURFACE_DRAG_BODY_FOLLOW_RATE = 14;
 /** 底面被地面黏住，只保留一部分整体跟随，避免拖拽时整只史莱姆像刚体滑走。 */
 const SURFACE_DRAG_BOTTOM_ADHESION = 0.45;
 /**
- * pinch = 1 时影响圈收掉这么多。
+ * 咬住的尖有多陡：权重是 `max(0, 顶点方向·轴)^k`，k 就是这个指数。
  *
- * 收得太狠会得到一根「单顶点针」：外壳顶点间距约 0.2 m，影响圈比它还小的时候，
- * 除了命中点没有第二个顶点跟着动，画面上就是一根凭空戳出来的刺，底下还带一道
- * 折角。留下三四圈邻居，尖才有侧面。
+ * 它决定锥的张角——k=8 时半张角约 24°，外壳一圈 24 段、一列 16 段，锥里因此还有
+ * 三四圈顶点，侧面是连续的。整条外形是顶点方向的连续函数，没有「命中点」这种
+ * 离散的东西，所以不会出现折角或裂缝。
  */
-const PINCH_INFLUENCE_NARROWING = 0.45;
-/**
- * pinch = 1 时的权重外形：`(1 - d/R)^k`，k 就是这个指数。
- *
- * 不能沿用 smoothstep：它在命中点附近导数为零，也就是个平顶，拉出来是蘑菇头
- * 不是尖。幂函数在 d=0 处有斜率，锥尖才收得住；指数控制侧面收敛得多快。
- */
-const PINCH_CONE_EXPONENT = 2.2;
-/**
- * 咬住的位置约束淡入速率（约 0.12 秒到 90%）。
- *
- * 位置约束本身是一帧到位的：不淡入的话，咬上的那一帧尖就凭空出现，抓握点绕到
- * 另一面重新抓取时更明显——旧的尖在回弹，新的尖已经戳出来了。淡入只影响这零点
- * 几秒，稳态还是「那块皮就在牙上」。
- */
-const PINCH_GRIP_BLEND_RATE = 18;
+const BITE_TIP_EXPONENT = 8;
+/** 尖同时向内收，锥才收得住；不收的话拉出来的是个圆柱。 */
+const BITE_TIP_NARROWING = 0.45;
+/** 尖最长按半径缩放，形变预算不随世界尺度增长。 */
+const MAX_BITE_TIP_RADIUS_RATIO = 1.15;
+/** 咬住/松口时尖的生长与回落速率（约 0.15 秒到 90%）。 */
+const BITE_TIP_FOLLOW_RATE = 15;
 
 function clamp(value: number, minimum: number, maximum: number): number {
   return Math.max(minimum, Math.min(maximum, value));
@@ -195,8 +175,12 @@ export class HybridSlimeSimulation {
   private surfaceDragPullZ = 0;
   private surfaceDragExtensionRatio = 0;
   private surfaceDragForceScale = 0;
-  private surfaceDragPinch = 0;
-  private surfaceDragGripBlend = 0;
+  private biteTipX = 0;
+  private biteTipY = 0;
+  private biteTipZ = 0;
+  private targetBiteTipX = 0;
+  private targetBiteTipY = 0;
+  private targetBiteTipZ = 0;
   private surfaceDragBodyX = 0;
   private surfaceDragBodyY = 0;
   private surfaceDragBodyZ = 0;
@@ -263,11 +247,7 @@ export class HybridSlimeSimulation {
       nearestOffset = offset;
     }
 
-    const pinch = clamp(options.pinch ?? 0, 0, 1);
-    const influenceRadius = options.influenceRadius * (1 - PINCH_INFLUENCE_NARROWING * pinch);
-    this.surfaceDragPinch = pinch;
-    // 每次抓取都从头淡入，换抓取时尤其要紧：新的一面不能一帧就长出一个尖。
-    this.surfaceDragGripBlend = 0;
+    const influenceRadius = options.influenceRadius;
     this.surfaceDragStartPositions.set(this.positions);
     this.surfaceDragVertexOffset = nearestOffset;
     this.surfaceDragMaximumDistance = options.maximumDistance;
@@ -290,10 +270,7 @@ export class HybridSlimeSimulation {
       );
       const linearWeight = clamp(1 - distance / influenceRadius, 0, 1);
       // smoothstep 避免影响圈边缘出现折线，同时保持命中顶点权重为 1。
-      const smoothWeight = linearWeight * linearWeight * (3 - 2 * linearWeight);
-      // 咬住时换成带尖的幂外形：smoothstep 的平顶拉出来是蘑菇头，幂函数才是锥。
-      const coneWeight = Math.pow(linearWeight, PINCH_CONE_EXPONENT);
-      const localWeight = smoothWeight + (coneWeight - smoothWeight) * pinch;
+      const localWeight = linearWeight * linearWeight * (3 - 2 * linearWeight);
       // 底部离地越近跟随越弱，模拟黏地；其余顶点都保留全局下限，
       // 因此影响圈之外的背面同样会被带动，只是幅度小于命中邻域。
       const groundAdhesion = clamp(
@@ -301,8 +278,7 @@ export class HybridSlimeSimulation {
         0,
         1,
       );
-      // 咬住时整团不跟随：跟随权重就是那个把尖抹成圆包的东西。
-      const bodyWeight = SURFACE_DRAG_BODY_FOLLOW_WEIGHT * (1 - pinch) * (
+      const bodyWeight = SURFACE_DRAG_BODY_FOLLOW_WEIGHT * (
         SURFACE_DRAG_BOTTOM_ADHESION + (1 - SURFACE_DRAG_BOTTOM_ADHESION) * groundAdhesion
       );
       this.surfaceDragWeights[vertex] = bodyWeight + (1 - bodyWeight) * localWeight;
@@ -327,6 +303,28 @@ export class HybridSlimeSimulation {
     this.stableSeconds = 0;
   }
 
+  /**
+   * 被咬住时那个**突起向量**：方向是「身体中心 → 牙」，长度是要拔出多长的尖。
+   * 外壳坐标（世界轴向），和求解器的顶点同一套。
+   *
+   * 它不是一块被抓住的皮，而是**静止外形的一项**：每个顶点按自己方向与轴的夹角
+   * 连续地长出去，所以没有命中点、没有抓取计数、没有权重表，也就不会在影响圈
+   * 边缘裂开。施力方绕到另一面，这个向量自己转过去就行。
+   */
+  public setBiteTip(tipX: number, tipY: number, tipZ: number): void {
+    if (![tipX, tipY, tipZ].every(Number.isFinite)) return;
+    const length = Math.hypot(tipX, tipY, tipZ);
+    const maximum = this.options.radius * MAX_BITE_TIP_RADIUS_RATIO;
+    const scale = length > maximum && length > 1e-8 ? maximum / length : 1;
+    this.targetBiteTipX = tipX * scale;
+    this.targetBiteTipY = tipY * scale;
+    this.targetBiteTipZ = tipZ * scale;
+    if (length > 1e-5 || Math.hypot(this.biteTipX, this.biteTipY, this.biteTipZ) > 1e-5) {
+      this.isActive = true;
+      this.stableSeconds = 0;
+    }
+  }
+
   public endSurfaceDrag(): void {
     if (!this.surfaceDragActive) return;
     this.surfaceDragActive = false;
@@ -335,8 +333,6 @@ export class HybridSlimeSimulation {
     this.surfaceDragPullZ = 0;
     this.surfaceDragExtensionRatio = 0;
     this.surfaceDragForceScale = 0;
-    this.surfaceDragPinch = 0;
-    this.surfaceDragGripBlend = 0;
     this.surfaceDragWeights.fill(0);
     // 继续唤醒一段时间，让现有胡克蒙皮把拉出的表面平滑带回锚点。
     this.isActive = true;
@@ -650,14 +646,8 @@ export class HybridSlimeSimulation {
     let targetX = 0;
     let targetY = 0;
     let targetZ = 0;
-    if (this.surfaceDragActive && deltaSeconds > 0) {
-      this.surfaceDragGripBlend += (1 - this.surfaceDragGripBlend) * (
-        1 - Math.exp(-PINCH_GRIP_BLEND_RATE * deltaSeconds)
-      );
-    }
     if (this.surfaceDragActive) {
-      // 质心跟随同样按 pinch 让位：被咬住的是一块皮，不是整只史莱姆。
-      const offsetRatio = SURFACE_DRAG_BODY_OFFSET_RATIO * (1 - this.surfaceDragPinch);
+      const offsetRatio = SURFACE_DRAG_BODY_OFFSET_RATIO;
       targetX = this.surfaceDragPullX * offsetRatio;
       targetY = this.surfaceDragPullY * offsetRatio;
       targetZ = this.surfaceDragPullZ * offsetRatio;
@@ -673,6 +663,13 @@ export class HybridSlimeSimulation {
     const followRatio = deltaSeconds > 0
       ? 1 - Math.exp(-SURFACE_DRAG_BODY_FOLLOW_RATE * deltaSeconds)
       : 1;
+    // 尖同样有黏性延迟：咬上的那一帧不该凭空戳出来，松口也该收回去而不是消失。
+    const tipRatio = deltaSeconds > 0
+      ? 1 - Math.exp(-BITE_TIP_FOLLOW_RATE * deltaSeconds)
+      : 1;
+    this.biteTipX += (this.targetBiteTipX - this.biteTipX) * tipRatio;
+    this.biteTipY += (this.targetBiteTipY - this.biteTipY) * tipRatio;
+    this.biteTipZ += (this.targetBiteTipZ - this.biteTipZ) * tipRatio;
     this.surfaceDragBodyX += (targetX - this.surfaceDragBodyX) * followRatio;
     this.surfaceDragBodyY += (targetY - this.surfaceDragBodyY) * followRatio;
     this.surfaceDragBodyZ += (targetZ - this.surfaceDragBodyZ) * followRatio;
@@ -727,11 +724,6 @@ export class HybridSlimeSimulation {
 
   /**
    * 衰减控制手感，硬约束负责安全：即使低帧率或参数调得过强，选中的表面也不能无限延伸。
-   *
-   * pinch 那一份是位置约束而不是力：力平衡下命中点最多走到目标的一半——拖拽弹簧
-   * `pullForce` 是 120，蒙皮回弹的 `skinStiffness + neighborStiffness` 约 80，两边
-   * 相等尖就不长了，无论施力方把嘴挪多远。牙齿不是弹簧，被咬住的那块皮就在牙上，
-   * 所以按权重把它按到目标位置：尖的外形因此直接是权重 profile，而不是刚度比例。
    */
   private constrainSurfaceDrag(): void {
     if (!this.surfaceDragActive) return;
@@ -739,19 +731,6 @@ export class HybridSlimeSimulation {
       const weight = this.surfaceDragWeights[vertex];
       if (weight <= 1e-5) continue;
       const offset = vertex * 3;
-      const grip = this.surfaceDragPinch * this.surfaceDragGripBlend * weight;
-      if (grip > 1e-5) {
-        const gripX = this.surfaceDragStartPositions[offset] + this.surfaceDragPullX * weight;
-        const gripY = this.surfaceDragStartPositions[offset + 1] + this.surfaceDragPullY * weight;
-        const gripZ = this.surfaceDragStartPositions[offset + 2] + this.surfaceDragPullZ * weight;
-        this.positions[offset] += (gripX - this.positions[offset]) * grip;
-        this.positions[offset + 1] += (gripY - this.positions[offset + 1]) * grip;
-        this.positions[offset + 2] += (gripZ - this.positions[offset + 2]) * grip;
-        // 被咬住的材料不再自己弹：留着的速度会在松口那一帧把尖弹飞。
-        this.velocities[offset] *= 1 - grip;
-        this.velocities[offset + 1] *= 1 - grip;
-        this.velocities[offset + 2] *= 1 - grip;
-      }
       const displacementX = this.positions[offset] - this.surfaceDragStartPositions[offset];
       const displacementY = this.positions[offset + 1] - this.surfaceDragStartPositions[offset + 1];
       const displacementZ = this.positions[offset + 2] - this.surfaceDragStartPositions[offset + 2];
@@ -865,6 +844,12 @@ export class HybridSlimeSimulation {
     const smoothedForceBiasX = this.forceCenter[0] - this.coreX - this.surfaceDragBodyX;
     const smoothedForceBiasZ = this.forceCenter[2] - this.coreZ - this.surfaceDragBodyZ;
     const ascentRatio = clamp(this.shapeVerticalVelocity / REFERENCE_JUMP_SPEED, 0, 1);
+    // 咬住的那一项：一个向量，方向决定尖从哪一侧长出来，长度决定长多少。
+    const biteAmount = Math.hypot(this.biteTipX, this.biteTipY, this.biteTipZ);
+    const biting = biteAmount > 1e-4;
+    const biteAxisX = biting ? this.biteTipX / biteAmount : 0;
+    const biteAxisY = biting ? this.biteTipY / biteAmount : 0;
+    const biteAxisZ = biting ? this.biteTipZ / biteAmount : 0;
 
     for (let offset = 0; offset < directions.length; offset += 3) {
       const directionX = directions[offset];
@@ -1018,16 +1003,48 @@ export class HybridSlimeSimulation {
         * ascentRatio
         * (0.35 + Math.pow(1 - height, 1.4) * 0.65)
       );
-      this.anchors[offset] = this.coreX
-        + tailAxisX * tailParallel * airborneParallelScale
-        + tailPerpendicularX * airbornePerpendicularScale;
-      this.anchors[offset + 1] = this.centerY + this.coreY
-        + tailAxisY * tailParallel * airborneParallelScale
+      let shapedLocalX = (
+        tailAxisX * tailParallel * airborneParallelScale
+        + tailPerpendicularX * airbornePerpendicularScale
+      );
+      let shapedLocalY = (
+        tailAxisY * tailParallel * airborneParallelScale
         + tailPerpendicularY * airbornePerpendicularScale
-        - takeoffSag;
-      this.anchors[offset + 2] = this.coreZ
-        + tailAxisZ * tailParallel * airborneParallelScale
-        + tailPerpendicularZ * airbornePerpendicularScale;
+        - takeoffSag
+      );
+      let shapedLocalZ = (
+        tailAxisZ * tailParallel * airborneParallelScale
+        + tailPerpendicularZ * airbornePerpendicularScale
+      );
+
+      // 咬住：沿轴把静止外形拔出一个尖。权重只看「顶点方向与轴的夹角」，
+      // 所以整条外形是方向的连续函数——没有命中点、没有影响圈边界，也就没有
+      // 折角和裂缝。写法和跳跃水滴的尾尖是同一套：沿轴拉长、垂直方向收窄。
+      if (biting) {
+        const biteAlignment = (
+          directionX * biteAxisX + directionY * biteAxisY + directionZ * biteAxisZ
+        );
+        const biteWeight = biteAlignment > 0
+          ? Math.pow(biteAlignment, BITE_TIP_EXPONENT)
+          : 0;
+        if (biteWeight > 1e-5) {
+          const biteParallel = (
+            shapedLocalX * biteAxisX + shapedLocalY * biteAxisY + shapedLocalZ * biteAxisZ
+          );
+          const bitePerpendicularX = shapedLocalX - biteAxisX * biteParallel;
+          const bitePerpendicularY = shapedLocalY - biteAxisY * biteParallel;
+          const bitePerpendicularZ = shapedLocalZ - biteAxisZ * biteParallel;
+          const narrowing = 1 - BITE_TIP_NARROWING * biteWeight;
+          const stretched = biteParallel + biteAmount * biteWeight;
+          shapedLocalX = biteAxisX * stretched + bitePerpendicularX * narrowing;
+          shapedLocalY = biteAxisY * stretched + bitePerpendicularY * narrowing;
+          shapedLocalZ = biteAxisZ * stretched + bitePerpendicularZ * narrowing;
+        }
+      }
+
+      this.anchors[offset] = this.coreX + shapedLocalX;
+      this.anchors[offset + 1] = this.centerY + this.coreY + shapedLocalY;
+      this.anchors[offset + 2] = this.coreZ + shapedLocalZ;
     }
   }
 
