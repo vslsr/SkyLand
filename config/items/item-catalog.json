@@ -11,7 +11,14 @@
       "slotCost": 1,
       "iconId": "item-wood",
       "tint": "#B98558",
-      "summary": "建造与修理的基础材料。"
+      "summary": "建造与修理的基础材料。",
+      "use": {
+        "action": "throw",
+        "input": "primary",
+        "mode": "charge",
+        "chargeSeconds": 0.7,
+        "value": 60
+      }
     },
     {
       "id": "wood-log",
@@ -21,7 +28,14 @@
       "slotCost": 1,
       "iconId": "item-wood-log",
       "tint": "#D6BEA3",
-      "summary": "未加工的原木，可在工位拆成木材。"
+      "summary": "未加工的原木，可在工位拆成木材。",
+      "use": {
+        "action": "throw",
+        "input": "primary",
+        "mode": "charge",
+        "chargeSeconds": 0.7,
+        "value": 45
+      }
     },
     {
       "id": "stone",
@@ -31,7 +45,14 @@
       "slotCost": 1,
       "iconId": "item-stone",
       "tint": "#B9B4A8",
-      "summary": "加固船体与地面工事的基础材料。"
+      "summary": "加固船体与地面工事的基础材料。",
+      "use": {
+        "action": "throw",
+        "input": "primary",
+        "mode": "charge",
+        "chargeSeconds": 0.7,
+        "value": 70
+      }
     },
     {
       "id": "rope",
@@ -41,7 +62,14 @@
       "slotCost": 1,
       "iconId": "item-rope",
       "tint": "#C8A96E",
-      "summary": "索具、登船绳与打捞装置的通用材料。"
+      "summary": "索具、登船绳与打捞装置的通用材料。",
+      "use": {
+        "action": "throw",
+        "input": "primary",
+        "mode": "charge",
+        "chargeSeconds": 0.7,
+        "value": 55
+      }
     },
     {
       "id": "gunpowder",
@@ -51,7 +79,14 @@
       "slotCost": 1,
       "iconId": "item-gunpowder",
       "tint": "#6E6A63",
-      "summary": "补弹与爆破制作共用，产量决定火力上限。"
+      "summary": "补弹与爆破制作共用，产量决定火力上限。",
+      "use": {
+        "action": "throw",
+        "input": "primary",
+        "mode": "charge",
+        "chargeSeconds": 0.7,
+        "value": 55
+      }
     },
     {
       "id": "fruit",
@@ -61,7 +96,14 @@
       "slotCost": 1,
       "iconId": "item-fruit",
       "tint": "#D4694F",
-      "summary": "交战间隙的快速恢复，用时可低速移动。"
+      "summary": "交战间隙的快速恢复，用时可低速移动。",
+      "use": {
+        "action": "throw",
+        "input": "primary",
+        "mode": "charge",
+        "chargeSeconds": 0.6,
+        "value": 65
+      }
     },
     {
       "id": "bandage",
@@ -101,7 +143,14 @@
       "slotCost": 1,
       "iconId": "item-firebomb",
       "tint": "#D2762F",
-      "summary": "逼迫离开掩体；不能越过墙体落到墙后。"
+      "summary": "逼迫离开掩体；不能越过墙体落到墙后。",
+      "use": {
+        "action": "throw",
+        "input": "primary",
+        "mode": "charge",
+        "chargeSeconds": 1.1,
+        "value": 90
+      }
     },
     {
       "id": "net-shell",
@@ -111,7 +160,14 @@
       "slotCost": 1,
       "iconId": "item-net-shell",
       "tint": "#6F8E7A",
-      "summary": "减速与打断重武器操作，创造登船窗口。"
+      "summary": "减速与打断重武器操作，创造登船窗口。",
+      "use": {
+        "action": "throw",
+        "input": "primary",
+        "mode": "charge",
+        "chargeSeconds": 0.9,
+        "value": 85
+      }
     },
     {
       "id": "smoke-canister",
@@ -121,7 +177,14 @@
       "slotCost": 1,
       "iconId": "item-smoke-canister",
       "tint": "#9AA0A6",
-      "summary": "切断视线掩护抢修，不消除实体弹道碰撞。"
+      "summary": "切断视线掩护抢修，不消除实体弹道碰撞。",
+      "use": {
+        "action": "throw",
+        "input": "primary",
+        "mode": "charge",
+        "chargeSeconds": 0.9,
+        "value": 85
+      }
     },
     {
       "id": "light-ammo",
@@ -131,7 +194,8 @@
       "slotCost": 0,
       "iconId": "item-light-ammo",
       "tint": "#A98F5E",
-      "summary": "多数轻型武器共用；自动拾取到上限，不占货位。"
+      "summary": "多数轻型武器共用；自动拾取到上限，不占货位。",
+      "holdable": false
     },
     {
       "id": "special-ammo",
@@ -141,7 +205,8 @@
       "slotCost": 0,
       "iconId": "item-special-ammo",
       "tint": "#7C74C0",
-      "summary": "高控制或元素轻型武器专用，携带上限更低。"
+      "summary": "高控制或元素轻型武器专用，携带上限更低。",
+      "holdable": false
     },
     {
       "id": "harvest-hammer",
@@ -151,7 +216,13 @@
       "slotCost": 0,
       "iconId": "item-harvest-hammer",
       "tint": "#8C7B62",
-      "summary": "面对资源与受损结构自动调用，不占战斗栏。"
+      "summary": "面对资源与受损结构自动调用，不占战斗栏。",
+      "use": {
+        "action": "tool",
+        "input": "primary",
+        "mode": "tap",
+        "value": 2
+      }
     },
     {
       "id": "spice-bundle",

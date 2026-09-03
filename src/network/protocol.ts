@@ -65,8 +65,11 @@ export interface SnapshotPlayer {
   velocityX?: number;
   velocityZ?: number;
   grounded?: boolean;
+  /** 背包只发给本人：别人包里有什么不是这名玩家该知道的。 */
   inventory?: Array<{ itemType: string; quantity: number }>;
   inventoryRevision?: number;
+  /** 快捷栏配置与选中格；同样只发给本人。 */
+  hotbar?: { slots: Array<string | null>; activeIndex: number };
   /** PickupDrop Component 的运行态；口部挂点来自玩家 Actor 原型。 */
   heldActorId?: string | null;
   pickupDropRevision?: number;
@@ -121,7 +124,7 @@ export interface SnapshotActor {
     revision: number;
   };
   interactable?: {
-    action: 'cargo-toggle' | 'mushroom-bite' | 'pickup-stack' | 'harvest-prop';
+    action: 'cargo-toggle' | 'mushroom-bite' | 'pickup-stack' | 'harvest-prop' | 'container-open';
     label: string;
     enabled: boolean;
     revision: number;
@@ -155,6 +158,20 @@ export interface SnapshotActor {
     displayName: string;
     quantity: number;
     maximumQuantity: number;
+    revision: number;
+  };
+  /**
+   * 容器的公开状态。`entries` 只发给正开着它的人——没开箱子的玩家不需要知道里面
+   * 有什么，一屋子箱子也不会每帧把全部库存推给所有人。开着的人每帧都收到，所以
+   * 别人存进去的东西会立刻出现在自己的界面上。
+   */
+  container?: {
+    label: string;
+    slotCapacity: number;
+    usedSlots: number;
+    viewerCount: number;
+    open: boolean;
+    entries?: Array<{ itemType: string; quantity: number }>;
     revision: number;
   };
   residency?: {

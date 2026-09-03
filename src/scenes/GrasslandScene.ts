@@ -15,6 +15,9 @@ import {
 import { SceneControlRouter } from '../controllers/SceneControlRouter';
 import { ActorInteractionController } from '../controllers/ActorInteractionController';
 import { InventoryController } from '../controllers/InventoryController';
+import { HotbarController } from '../controllers/HotbarController';
+import { HotbarBar } from '../ui/HotbarBar';
+import { buildInventoryView } from '../inventory/index';
 import { TerrainEditController } from '../controllers/TerrainEditController';
 import { VesselControlController } from '../controllers/VesselControlController';
 import { RoomClient, type JoinedRoom, type RoomSummary } from '../network/RoomClient';
@@ -82,6 +85,8 @@ export class GrasslandScene extends Scene {
   private readonly gameMenuPage = new GameMenuPage();
   private readonly inventoryPage = new InventoryPage();
   private readonly inventory: InventoryController;
+  private readonly hotbarBar = new HotbarBar();
+  private readonly hotbar: HotbarController;
   private readonly debugMenuPage?: DebugMenuPage;
   private readonly playerTransformLog?: PlayerTransformLogRecorder;
   private disposeDebugMenuShortcut?: () => void;
@@ -252,6 +257,25 @@ export class GrasslandScene extends Scene {
       // 只在没有别的页面盖着时开，背包因此永远是栈顶那一页。
       canOpen: () => Boolean(this.joinedRoom && this.player) && this.commonUI.size === 0,
     });
+    this.hotbar = new HotbarController(this.input, {
+      getInventory: () => this.player?.getComponent(INVENTORY_COMPONENT) as
+        InventoryComponent | undefined,
+      // 界面盖着时不响应：背包开着按 1 应该翻页而不是换手。
+      isActive: () => Boolean(this.joinedRoom && this.player) && this.commonUI.allowsGameInteraction,
+      send: (command) => { this.roomClient.sendInventoryCommand(command); },
+      setProgress: (progress) => this.hotbarBar.setProgress(progress),
+    });
+    // 点一下快捷栏那一格 = 切到它；点一下背包里那件东西 = 放上快捷栏并握住。
+    // 两条都只发意图，握没握上以下一帧快照为准。
+    // 快捷栏挂在 HUD 层而不是 CommonUI 栈里：它在游戏进行中一直可见可点，
+    // 不参与页面压栈，也不该被背包盖住。
+    document.getElementById('hotbar-root')?.append(this.hotbarBar.element);
+    this.hotbarBar.onSelect((slotIndex) => {
+      this.roomClient.sendInventoryCommand({ kind: 'select', slotIndex });
+    });
+    this.inventoryPage.onHold((itemType) => {
+      this.roomClient.sendInventoryCommand({ kind: 'hold', itemType });
+    });
     this.controls.onModeChange((mode) => this.hud.setControlMode(mode));
 
     this.commonUI.onStackChange(() => {
@@ -332,9 +356,11 @@ export class GrasslandScene extends Scene {
       // 编辑模式独占 WorldInteract：同一次点击不能既改地形又去交互 Actor。
       this.terrainEdits.update(this.controls.frame);
       this.actorInteractions.reset();
+    this.hotbar.reset();
     } else {
       this.terrainEdits.update(this.controls.frame);
       this.actorInteractions.update(this.controls.frame);
+      this.hotbar.update();
     }
     const playerId = this.joinedRoom?.player.id;
     this.hud.setVesselStatus(playerId ? this.world.getVesselHudState(playerId) : undefined);
@@ -441,6 +467,7 @@ export class GrasslandScene extends Scene {
     this.snapshots.clear();
     this.vesselControls.reset();
     this.actorInteractions.reset();
+    this.hotbar.reset();
     this.renderer.loadScene(joined.scene, joined.room.worldSeed);
     this.flyController.configure(joined.scene.camera);
     const playerArchetype = joined.scene.actorArchetypes.find(
@@ -569,8 +596,13 @@ export class GrasslandScene extends Scene {
     }
     // 背包是纯权威状态：本地这份只跟随快照，拾取成功与否由服务端说了算。
     const inventory = player.getComponent(INVENTORY_COMPONENT) as InventoryComponent | undefined;
-    if (inventory?.applySnapshot(own.inventory ?? [], own.inventoryRevision ?? inventory.revision)) {
+    if (inventory?.applySnapshot(
+      own.inventory ?? [],
+      own.inventoryRevision ?? inventory.revision,
+      own.hotbar,
+    )) {
       this.inventory.sync();
+      this.hotbarBar.setSlots(buildInventoryView(inventory).hotbar);
     }
     const pickupDrop = player.getComponent(PICKUP_DROP_COMPONENT) as PickupDropComponent | undefined;
     if (pickupDrop) {
@@ -688,8 +720,11 @@ export class GrasslandScene extends Scene {
     this.snapshots.clear();
     this.vesselControls.reset();
     this.actorInteractions.reset();
+    this.hotbar.reset();
     this.remotePlayers.setRenderWorld(undefined);
     this.slimeSurfaceDrag?.dispose();
+    this.hotbar.dispose();
+    this.hotbarBar.dispose();
     this.slimeSurfaceDrag = undefined;
     if (this.player) {
       this.controls.setPlayerController(undefined);

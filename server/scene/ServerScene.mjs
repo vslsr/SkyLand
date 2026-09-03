@@ -21,6 +21,7 @@ import {
   BUOYANCY_COMPONENT,
   BuoyancyComponent,
   CARGO_COMPONENT,
+  CONTAINER_COMPONENT,
   DROP_MOTION_COMPONENT,
   ELASTIC_DETACH_COMPONENT,
   ELASTIC_TETHER_COMPONENT,
@@ -36,6 +37,7 @@ import {
   TRANSFORM_COMPONENT,
   VESSEL_MOTOR_COMPONENT,
 } from '../../shared/actor/index.mjs';
+import { itemCatalog } from '../../shared/items/index.mjs';
 import { CollisionWorld } from '../../shared/collision/index.mjs';
 import {
   createActorSnapshots,
@@ -54,6 +56,13 @@ import {
   releaseElasticTether,
 } from '../actors/ElasticTetherMutations.mjs';
 import { dropPickedActor, pickupActor } from '../actors/PickupDropMutations.mjs';
+import {
+  dropHeldItem,
+  stowHeldItem,
+  syncHeldItemActor,
+  transferItems,
+  useHeldItem,
+} from '../actors/InventoryMutations.mjs';
 import { PlayerIdleSimulation } from './PlayerIdleSimulation.mjs';
 import { ServerChunkColliders } from './ServerChunkColliders.mjs';
 import { ServerTerrainColliders } from './ServerTerrainColliders.mjs';
@@ -130,6 +139,12 @@ function sanitizeActorId(value) {
   const id = String(value ?? '');
   if (id.length > 96) return undefined;
   return ACTOR_ID_PATTERN.test(id) ? id : undefined;
+}
+
+/** 上行的物品 id 必须是目录里登记过的一条，否则整条命令按无效处理。 */
+function sanitizeItemType(value) {
+  const id = String(value ?? '');
+  return itemCatalog.has(id) ? id : undefined;
 }
 
 function resolvePlayerActorArchetype(definition) {
@@ -505,6 +520,192 @@ export class ServerScene {
     return this.dropCarriedActor(this.players.get(playerId), actor);
   }
 
+  /**
+   * 采一次。E 采集与手持工具使用走的是同一处，否则「砍一下」会有两套语义：
+   * 一套改血量、一套改冷却，改了其中一套另一套不知道。
+   *
+   * @param {number} [damage] 工具给的额外力度；不传就是徒手的默认伤害。
+   */
+  harvestProp(target, prop, interactable, targetTransform, damage) {
+    // 可再生的在冷却里会被 harvest 拒掉，不需要在这里单独判一次。
+    const harvested = damage === undefined || prop.regrowable
+      ? prop.harvest(this.now() / 1000)
+      : prop.applyDamage(damage);
+    if (!harvested) return false;
+    // 立刻登记偏离态：这一片 chunk 卸载再装回来时，它要保持被采过的样子。
+    this.generatedProps.recordDeviation(target);
+    interactable.revision += 1;
+    if (prop.removed) {
+      // 采完就永久消失：几何体与静态碰撞一起撤走。可再生的什么都不动——
+      // 树还在原地，只是暂时没果子。
+      interactable.enabled = false;
+      this.chunkColliders.setPropSkipped(prop.chunkX, prop.chunkZ, prop.propIndex, true);
+    }
+    // 可再生的每采一次都掉东西；掉血的只在采完那一下掉。
+    if ((prop.removed || prop.regrowable) && prop.dropArchetypeId) {
+      this.spawnGeneratedPropDrop(prop, targetTransform);
+    }
+    return true;
+  }
+
+  /** 手持工具够得着的那个可采集物件；没有就是这一下敲空了。 */
+  findHarvestablePropNear(player) {
+    let best;
+    let bestDistance = Infinity;
+    for (const actor of this.actorWorld.query(
+      GENERATED_PROP_COMPONENT,
+      INTERACTABLE_COMPONENT,
+      TRANSFORM_COMPONENT,
+    )) {
+      const interactable = actor.requireComponent(INTERACTABLE_COMPONENT);
+      if (!interactable.enabled || interactable.action !== 'harvest-prop') continue;
+      const transform = actor.requireComponent(TRANSFORM_COMPONENT);
+      const distance = Math.hypot(transform.x - player.x, transform.z - player.z);
+      if (distance > interactable.maximumDistance || distance >= bestDistance) continue;
+      best = actor;
+      bestDistance = distance;
+    }
+    return best;
+  }
+
+  applyToolHarvest(player, target, damage) {
+    return this.harvestProp(
+      target,
+      target.requireComponent(GENERATED_PROP_COMPONENT),
+      target.requireComponent(INTERACTABLE_COMPONENT),
+      target.requireComponent(TRANSFORM_COMPONENT),
+      damage,
+    );
+  }
+
+  removeItemStackActor(actorId) {
+    this.actorWorld.context.highCountActors?.removeResident(this.actorWorld, actorId);
+  }
+
+  /**
+   * 背包、快捷栏与容器的唯一上行入口。
+   *
+   * 合成一条消息而不是四条，是因为它们共享同一套前置校验（玩家在不在、序号有没有
+   * 回退），并且都以「改完权威 Component、让下一帧快照去确认」收尾。传输层因此只
+   * 需要认识一个 case。
+   */
+  applyInventoryCommand(playerId, message) {
+    const player = this.players.get(playerId);
+    if (!player) return false;
+    const sequence = Math.floor(toFiniteNumber(message?.sequence, 0));
+    if (sequence <= player.inventoryCommandSequence) return false;
+    const command = message?.command;
+    const inventory = player.getComponent(INVENTORY_COMPONENT);
+    if (!command || !inventory) return false;
+
+    let changed = false;
+    switch (command.kind) {
+      case 'hold':
+        // 界面里点一下某件物品：放上快捷栏并立刻握在手上。
+        changed = inventory.holdItemType(sanitizeItemType(command.itemType));
+        break;
+      case 'select':
+        changed = inventory.setActiveHotbarSlot(Math.trunc(toFiniteNumber(command.slotIndex, -1)));
+        break;
+      case 'cycle':
+        changed = inventory.cycleActiveHotbarSlot(toFiniteNumber(command.direction, 1));
+        break;
+      case 'assign':
+        changed = inventory.assignHotbarSlot(
+          Math.trunc(toFiniteNumber(command.slotIndex, -1)),
+          sanitizeItemType(command.itemType),
+        );
+        break;
+      case 'use:begin':
+        // 蓄力的起点记在服务端：结算时用的是这个时刻，客户端报多久不作数。
+        player.heldItemUseStartedAt = this.now();
+        changed = true;
+        break;
+      case 'use:cancel':
+        player.heldItemUseStartedAt = undefined;
+        changed = true;
+        break;
+      case 'use:release': {
+        const startedAt = player.heldItemUseStartedAt;
+        player.heldItemUseStartedAt = undefined;
+        if (startedAt === undefined) return false;
+        changed = useHeldItem(this, player, (this.now() - startedAt) / 1000);
+        break;
+      }
+      case 'drop':
+        changed = dropHeldItem(this, player);
+        break;
+      case 'stow:begin':
+        // 交互键按住的起点。和蓄力一样记在服务端：客户端那圈转盘转满那一刻，
+        // 就是这里判定长按那一刻，但判定用的是自己的计时。
+        player.heldItemStowStartedAt = this.now();
+        changed = true;
+        break;
+      case 'stow:cancel':
+        player.heldItemStowStartedAt = undefined;
+        changed = true;
+        break;
+      case 'stow:release': {
+        const startedAt = player.heldItemStowStartedAt;
+        player.heldItemStowStartedAt = undefined;
+        if (startedAt === undefined) return false;
+        // 短按放下、长按收回背包，分界来自玩家原型，两端读同一份。
+        changed = (this.now() - startedAt) / 1000 >= inventory.stowHoldSeconds
+          ? stowHeldItem(this, player)
+          : dropHeldItem(this, player);
+        break;
+      }
+      case 'container:open':
+      case 'container:close':
+      case 'container:transfer':
+        changed = this.applyContainerCommand(player, command);
+        break;
+      default:
+        return false;
+    }
+    if (!['use:release', 'drop', 'stow:release'].includes(command.kind)) {
+      // 换手要跟着快捷栏走；使用与丢下已经在各自的变更里对齐过了。
+      syncHeldItemActor(this, player);
+    }
+    player.inventoryCommandSequence = sequence;
+    return changed;
+  }
+
+  applyContainerCommand(player, command) {
+    const actor = this.actorWorld.getActor(sanitizeActorId(command.actorId));
+    const container = actor?.getComponent(CONTAINER_COMPONENT);
+    const transform = actor?.getComponent(TRANSFORM_COMPONENT);
+    if (!container || !transform) return false;
+    // 够不着就当作没开：距离用权威位姿算，客户端算的只是预期。
+    const distance = Math.hypot(transform.x - player.x, transform.z - player.z);
+    if (command.kind === 'container:close') return container.closeFor(player.id);
+    if (distance > container.reach) return false;
+    if (command.kind === 'container:open') return container.openFor(player.id);
+    return transferItems(player, actor, {
+      itemType: sanitizeItemType(command.itemType),
+      quantity: toFiniteNumber(command.quantity, 0),
+      direction: command.direction === 'withdraw' ? 'withdraw' : 'store',
+    }) > 0;
+  }
+
+  /** 走远的人自动退出容器；不依赖客户端自觉发关闭。 */
+  updateContainerViewers() {
+    for (const actor of this.actorWorld.query(CONTAINER_COMPONENT, TRANSFORM_COMPONENT)) {
+      const container = actor.requireComponent(CONTAINER_COMPONENT);
+      if (container.viewerPlayerIds.size === 0) continue;
+      const transform = actor.requireComponent(TRANSFORM_COMPONENT);
+      for (const viewerId of [...container.viewerPlayerIds]) {
+        const viewer = this.players.get(viewerId);
+        if (!viewer) {
+          container.closeFor(viewerId);
+          continue;
+        }
+        const distance = Math.hypot(transform.x - viewer.x, transform.z - viewer.z);
+        if (distance > container.reach) container.closeFor(viewerId);
+      }
+    }
+  }
+
   interactWithActor(playerId, message) {
     const player = this.players.get(playerId);
     if (!player) return false;
@@ -559,6 +760,9 @@ export class ServerScene {
       if (distance > interactable.maximumDistance) return false;
       const pickedUp = this.actorWorld.context.highCountActors?.pickup(this.actorWorld, target.id, player) ?? 0;
       if (pickedUp <= 0) return false;
+      // 捡到的正好是快捷栏配置着的那一种时，手上要立刻出现它——空着手的那一格
+      // 补上货就该自动握住，不需要玩家再点一次。
+      syncHeldItemActor(this, player);
       player.actorInteractionSequence = sequence;
       return true;
     }
@@ -578,21 +782,7 @@ export class ServerScene {
       ) return false;
       const distance = Math.hypot(targetTransform.x - player.x, targetTransform.z - player.z);
       if (distance > interactable.maximumDistance) return false;
-      // 可再生的在冷却里会被 harvest 拒掉，不需要在这里单独判一次。
-      if (!prop.harvest(this.now() / 1000)) return false;
-      // 立刻登记偏离态：这一片 chunk 卸载再装回来时，它要保持被采过的样子。
-      this.generatedProps.recordDeviation(target);
-      interactable.revision += 1;
-      if (prop.removed) {
-        // 采完就永久消失：几何体与静态碰撞一起撤走。可再生的什么都不动——
-        // 树还在原地，只是暂时没果子。
-        interactable.enabled = false;
-        this.chunkColliders.setPropSkipped(prop.chunkX, prop.chunkZ, prop.propIndex, true);
-      }
-      // 可再生的每采一次都掉东西；掉血的只在采完那一下掉。
-      if ((prop.removed || prop.regrowable) && prop.dropArchetypeId) {
-        this.spawnGeneratedPropDrop(prop, targetTransform);
-      }
+      if (!this.harvestProp(target, prop, interactable, targetTransform)) return false;
       player.actorInteractionSequence = sequence;
       return true;
     }
@@ -1110,6 +1300,8 @@ export class ServerScene {
     this.chunkColliders.sync(this.players.values());
     this.terrainColliders.sync(this.players.values());
     this.generatedProps.sync(this.players.values());
+    // 走远的人自动退出容器界面；不依赖客户端自觉发关闭。
+    this.updateContainerViewers();
     // 输入包是权威模拟的主驱动，但它可能整段消失。补步只覆盖「静默超时且仍在
     // 运动」的玩家，站着不动的一步都不跑，成本上界是房间人数而非世界面积。
     this.idleSimulation.advance(this.players.values(), elapsedSeconds, now);
@@ -1222,8 +1414,13 @@ export class ServerScene {
           velocityX: roundCoordinate(player.characterState.vx),
           velocityZ: roundCoordinate(player.characterState.vz),
           grounded: player.characterState.grounded,
-          inventory: player.requireComponent(INVENTORY_COMPONENT).snapshot(),
-          inventoryRevision: player.requireComponent(INVENTORY_COMPONENT).revision,
+          // 背包只发给本人：别人包里有什么不是这名玩家该知道的，一屋子人也不该
+          // 每帧互相推送全部库存。嘴上叼着什么是看得见的，照发。
+          ...(player.id === viewerPlayerId ? {
+            inventory: player.requireComponent(INVENTORY_COMPONENT).snapshot(),
+            inventoryRevision: player.requireComponent(INVENTORY_COMPONENT).revision,
+            hotbar: player.requireComponent(INVENTORY_COMPONENT).hotbarSnapshot(),
+          } : {}),
           heldActorId: player.getComponent(PICKUP_DROP_COMPONENT)?.heldActorId ?? null,
           pickupDropRevision: player.getComponent(PICKUP_DROP_COMPONENT)?.revision ?? 0,
           ...(slimeDrag ? { slimeDrag } : {}),

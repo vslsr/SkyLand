@@ -46,10 +46,26 @@ export {
   HeatEmitterComponent,
 } from './components/HeatEmitterComponent.mjs';
 export {
+  DEFAULT_HOTBAR_CAPACITY,
   DEFAULT_SLOT_CAPACITY,
+  DEFAULT_STOW_HOLD_SECONDS,
   INVENTORY_COMPONENT,
   InventoryComponent,
+  NO_HOTBAR_SLOT,
 } from './components/InventoryComponent.mjs';
+export {
+  CONTAINER_COMPONENT,
+  ContainerComponent,
+  DEFAULT_CONTAINER_CAPACITY,
+  DEFAULT_CONTAINER_REACH,
+} from './components/ContainerComponent.mjs';
+export { ItemLedger } from './ItemLedger.mjs';
+export {
+  ACTOR_ACTION_IDS,
+  chargeRatio,
+  resolveActorAction,
+  resolveHeldItemAction,
+} from './ActorActionTable.mjs';
 export {
   INTERACTABLE_COMPONENT,
   InteractableComponent,

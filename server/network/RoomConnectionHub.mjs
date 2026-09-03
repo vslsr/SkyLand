@@ -174,6 +174,12 @@ export class RoomConnectionHub {
             this.roomManager.interactWithActor(session.roomId, session.playerId, message);
           }
           break;
+        case 'inventory:command':
+          // 和其它输入共用同一个令牌桶：连点存取不会绕过限流。
+          if (session.roomId && session.playerId && this.consumeInputToken(session)) {
+            this.roomManager.sendInventoryCommand(session.roomId, session.playerId, message);
+          }
+          break;
         case 'terrain:edit':
           // 和其它输入共用同一个令牌桶：连点编辑不会绕过限流。
           if (session.roomId && session.playerId && this.consumeInputToken(session)) {

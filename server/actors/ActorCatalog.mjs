@@ -155,7 +155,7 @@ function validatePlayerMovement(raw, filename) {
 function validateInteractable(raw, filename) {
   const path = `${filename}.components.interactable`;
   const definition = requireObject(raw, path);
-  if (!['cargo-toggle', 'mushroom-bite', 'pickup-stack', 'harvest-prop'].includes(definition.action)) {
+  if (!['cargo-toggle', 'mushroom-bite', 'pickup-stack', 'harvest-prop', 'container-open'].includes(definition.action)) {
     throw new TypeError(`${path}.action 暂不支持：${definition.action}`);
   }
   return {
@@ -261,7 +261,30 @@ function validateInventory(raw, filename) {
   const definition = requireObject(raw, path);
   const slotCapacity = requireNumber(definition.slotCapacity, `${path}.slotCapacity`, 1, 64);
   if (!Number.isInteger(slotCapacity)) throw new TypeError(`${path}.slotCapacity 必须是整数`);
-  return { slotCapacity };
+  const validated = { slotCapacity };
+  if (definition.hotbarCapacity !== undefined) {
+    const hotbarCapacity = requireNumber(definition.hotbarCapacity, `${path}.hotbarCapacity`, 1, 9);
+    if (!Number.isInteger(hotbarCapacity)) throw new TypeError(`${path}.hotbarCapacity 必须是整数`);
+    validated.hotbarCapacity = hotbarCapacity;
+  }
+  if (definition.stowHoldSeconds !== undefined) {
+    validated.stowHoldSeconds = requireNumber(
+      definition.stowHoldSeconds, `${path}.stowHoldSeconds`, 0.1, 5,
+    );
+  }
+  return validated;
+}
+
+function validateContainer(raw, filename) {
+  const path = `${filename}.components.container`;
+  const definition = requireObject(raw, path);
+  const slotCapacity = requireNumber(definition.slotCapacity, `${path}.slotCapacity`, 1, 256);
+  if (!Number.isInteger(slotCapacity)) throw new TypeError(`${path}.slotCapacity 必须是整数`);
+  return {
+    slotCapacity,
+    label: requireString(definition.label, `${path}.label`, 32),
+    reach: requireNumber(definition.reach, `${path}.reach`, 0.5, 8),
+  };
 }
 
 function validateItemStack(raw, filename) {
@@ -860,6 +883,7 @@ function validateActorArchetype(raw, filename) {
     'combustible',
     'heatEmitter',
     'inventory',
+    'container',
     'itemStack',
     'actorResidency',
     'dropMotion',
@@ -955,6 +979,7 @@ function validateActorArchetype(raw, filename) {
     ? validateHeatEmitter(components.heatEmitter, filename)
     : undefined;
   const inventory = components.inventory ? validateInventory(components.inventory, filename) : undefined;
+  const container = components.container ? validateContainer(components.container, filename) : undefined;
   const itemStack = components.itemStack ? validateItemStack(components.itemStack, filename) : undefined;
   const actorResidency = components.actorResidency
     ? validateActorResidency(components.actorResidency, filename)
@@ -975,6 +1000,10 @@ function validateActorArchetype(raw, filename) {
   }
   if (interactable?.action === 'pickup-stack' && !itemStack) {
     throw new TypeError(`${filename}.components.interactable pickup-stack 需要 itemStack`);
+  }
+  // 一个开不了的箱子和一个没有内容的「打开」提示都是死配置，两边互为前提。
+  if ((interactable?.action === 'container-open') !== Boolean(container)) {
+    throw new TypeError(`${filename}.components.container 与 container-open interactable 必须成对出现`);
   }
   if (itemStack && (!actorResidency || !dropMotion || !lifetime || !replicationPolicy)) {
     throw new TypeError(`${filename}.components.itemStack 需要 actorResidency、dropMotion、lifetime 和 replicationPolicy`);
@@ -1022,6 +1051,7 @@ function validateActorArchetype(raw, filename) {
       ...(combustible ? { combustible } : {}),
       ...(heatEmitter ? { heatEmitter } : {}),
       ...(inventory ? { inventory } : {}),
+      ...(container ? { container } : {}),
       ...(itemStack ? { itemStack } : {}),
       ...(actorResidency ? { actorResidency } : {}),
       ...(dropMotion ? { dropMotion } : {}),
