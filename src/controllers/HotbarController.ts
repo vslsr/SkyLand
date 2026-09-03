@@ -6,6 +6,7 @@ import {
 import type { InputSubsystem } from '../input/core/InputSubsystem';
 import type { InventoryModelLike } from '../inventory/index';
 import type { InventoryCommand } from '../network/messages';
+import type { TagLike } from '../tags';
 import { chargeRatio, resolveHeldItemAction } from '../../shared/actor/index.mjs';
 
 /** 界面要画的那两圈进度；没有正在进行的按住时是 undefined。 */
@@ -15,6 +16,14 @@ export interface HeldItemProgress {
   /** [0, 1]。到 1 表示服务端也认为满了。 */
   readonly ratio: number;
   readonly label: string;
+  /**
+   * 要一直按住的那个键，按当前设备的绑定取（键盘是 `E`，手柄是 `Y`）。
+   *
+   * 按住期间交互提示是灭的——`InteractionPromptFade` 把「正在操作」当成让开画面的
+   * 信号——所以圈旁边不自己写一遍键位，玩家就看不到手该按着什么。没绑定时是
+   * undefined，界面只画圈。
+   */
+  readonly inputLabel?: string;
 }
 
 export interface HotbarPort {
@@ -29,6 +38,8 @@ export interface HotbarPort {
   getHeldActorId(): string | undefined;
   /** 现在能不能操作：界面盖着或没进房间时不能。 */
   isActive(): boolean;
+  /** 当前绑定下这个 Action 的键位显示名；重绑定后立刻跟着变。 */
+  getInputLabel(tag: TagLike): string | undefined;
   send(command: InventoryCommand): void;
   /** 每帧把进度交给界面；undefined 表示收掉那两圈。 */
   setProgress(progress: HeldItemProgress | undefined): void;
@@ -47,6 +58,8 @@ interface PendingHold {
   readonly startedAt: number;
   readonly durationSeconds: number;
   readonly label: string;
+  /** 按下那一刻的键位。记在这次按住上：中途重绑定不该改写正在进行的这一次。 */
+  readonly inputLabel?: string;
 }
 
 /**
@@ -108,6 +121,7 @@ export class HotbarController {
       kind: this.pending.kind,
       ratio: chargeRatio(elapsed, this.pending.durationSeconds),
       label: this.pending.label,
+      inputLabel: this.pending.inputLabel,
     });
   }
 
@@ -153,6 +167,7 @@ export class HotbarController {
         startedAt: this.now(),
         durationSeconds: inventory.stowHoldSeconds ?? 0.6,
         label: '收进背包',
+        inputLabel: this.port.getInputLabel(PlayerInputTags.WorldInteract),
       }, { kind: 'stow:begin' });
       return;
     }
@@ -182,6 +197,7 @@ export class HotbarController {
         startedAt: this.now(),
         durationSeconds: use.chargeSeconds,
         label: use.verb,
+        inputLabel: this.port.getInputLabel(ItemUseInputTags[slot]),
       }, { kind: 'use:begin' });
       return;
     }
