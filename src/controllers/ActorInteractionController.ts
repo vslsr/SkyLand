@@ -16,6 +16,10 @@ export interface ActorInteractionPort {
   setInteractionMarkerActorId?(actorId?: string, inputLabel?: string): void;
   sendInteraction(actorId: string): void;
   setPrompt(text?: string): void;
+  /** 正咬着别人；这时交互键说的是「松口」。 */
+  isBiting?(): boolean;
+  /** 咬住 / 松口。目标由服务端按权威位姿判定，这里不指定。 */
+  sendBite?(): void;
 }
 
 /** 准星选择只负责意图和提示，装卸距离与所有权仍由 DS 判定。 */
@@ -60,6 +64,13 @@ export class ActorInteractionController {
     const vesselId = playerId ? this.port.findOwnedActorId(playerId) : undefined;
     const prompt = this.resolvePrompt(this.candidate, vesselId, playerId);
     this.port.setPrompt(prompt);
+    // 咬着人的时候交互键先归松口，和「手上已经有一株」同一条规矩：
+    // 一个已经建立的持续状态必须有一个确定的退出入口。
+    if (this.interactionRequested && this.port.isBiting?.()) {
+      this.port.sendBite?.();
+      this.interactionRequested = false;
+      return;
+    }
     if (this.interactionRequested && this.candidate) {
       if (this.candidate.action === 'pickup-stack' || this.candidate.action === 'harvest-prop') {
         if (playerId) this.port.sendInteraction(this.candidate.actorId);
@@ -75,6 +86,10 @@ export class ActorInteractionController {
           this.port.sendInteraction(this.candidate.actorId);
         }
       }
+    } else if (this.interactionRequested && playerId) {
+      // 没有任何候选可按时，交互键落到彩蛋上：咬面前的人。它排在最后，所以永远
+      // 抢不走正经交互；也不出提示、不出标记，找得到才有反应，是个藏着的动作。
+      this.port.sendBite?.();
     }
     this.interactionRequested = false;
   }

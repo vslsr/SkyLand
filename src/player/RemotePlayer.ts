@@ -15,6 +15,11 @@ import {
   type SlimeMotionParams,
 } from '../render/RenderSlimeMotion';
 import {
+  SLIME_DRAG_AT_REST,
+  writeSlimeDragParams,
+  type SlimeDragParams,
+} from '../render/RenderSlimeDrag';
+import {
   isPlayerRenderDefinition,
   resolvePlayerVisualShape,
   type PlayerVisualShape,
@@ -29,6 +34,8 @@ export class RemotePlayer extends Actor {
   /** 玩法侧的 f64 权威副本；渲染侧那份是镜像。和本地玩家同一套结构。 */
   private readonly transform = { x: 0, y: 0, z: 0, yaw: 0 };
   private readonly motion: SlimeMotionParams = { ...SLIME_MOTION_AT_REST };
+  /** 快照里那一次拖拽；玩法侧只是把它从网络搬到参数段，重放在渲染侧。 */
+  private readonly drag: SlimeDragParams = { ...SLIME_DRAG_AT_REST };
   private readonly visual: PlayerVisualShape;
   private readonly buoyancy?: BuoyancyComponent;
   private speed = 0;
@@ -107,6 +114,14 @@ export class RemotePlayer extends Actor {
     this.speed = state.speed;
     this.verticalVelocity = state.verticalVelocity ?? 0;
     this.grounded = state.grounded ?? (state.y === undefined);
+    // 松手后快照不再带这个字段，revision 回到 0 就是「没有人在拖」。
+    this.drag.revision = state.slimeDrag?.revision ?? 0;
+    this.drag.contactX = state.slimeDrag?.contactX ?? 0;
+    this.drag.contactY = state.slimeDrag?.contactY ?? 0;
+    this.drag.contactZ = state.slimeDrag?.contactZ ?? 0;
+    this.drag.pullX = state.slimeDrag?.pullX ?? 0;
+    this.drag.pullY = state.slimeDrag?.pullY ?? 0;
+    this.drag.pullZ = state.slimeDrag?.pullZ ?? 0;
   }
 
   public update(deltaSeconds: number): void {
@@ -130,6 +145,7 @@ export class RemotePlayer extends Actor {
       this.transform.yaw,
     );
     writeSlimeMotionParams(this.transforms, this.renderProxy.id, this.motion);
+    writeSlimeDragParams(this.transforms, this.renderProxy.id, this.drag);
   }
 
   private sampleHeight(x: number, z: number): number {

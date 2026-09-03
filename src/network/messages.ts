@@ -1,4 +1,4 @@
-import type { PlayerInputStep, RoomSnapshot } from './protocol';
+import type { PlayerInputStep, RoomSnapshot, SlimeDragState } from './protocol';
 import type { SceneDefinition } from '../scenes/data/SceneDefinition';
 import type { WeatherType } from '../weather/index';
 
@@ -61,6 +61,8 @@ export type ClientMessage =
       type: 'player:input';
       inputs: PlayerInputStep[];
     }
+  | { type: 'player:slime-drag'; drag: SlimeDragState | null }
+  | { type: 'player:bite' }
   | { type: 'debug:transform-log:start' }
   | {
       type: 'debug:transform-log:events';

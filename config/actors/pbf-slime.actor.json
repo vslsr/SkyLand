@@ -36,6 +36,14 @@
       "mouthLocalZ": 0.42,
       "mouthLocalYaw": 0
     },
+    "softBodyDeformation": {
+      "breakDistance": 3.0,
+      "selfReportTimeoutMs": 600
+    },
+    "bite": {
+      "range": 1.8,
+      "facingDot": 0.15
+    },
     "slimeSurfaceDrag": {
       "maximumDistance": 1.05,
       "pullForce": 120,

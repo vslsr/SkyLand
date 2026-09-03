@@ -80,3 +80,31 @@ test('清空之后不再返回任何状态', () => {
   buffer.clear();
   assert.deepEqual(buffer.sample(5000), []);
 });
+
+test('拖拽形变只在同一次抓取内插值，换抓取时直接跳到新的命中点', () => {
+  const drag = (revision: number, contactX: number, pullX: number) => ({
+    revision, contactX, contactY: 0.9, contactZ: 0, pullX, pullY: 0, pullZ: 0,
+  });
+  const buffer = new SnapshotBuffer();
+  buffer.push(snapshot(1000, [{ ...player('a', 0, 0), slimeDrag: drag(1, 0, 0.2) }]), 1000);
+  buffer.push(snapshot(1100, [{ ...player('a', 0, 0), slimeDrag: drag(1, 0, 0.6) }]), 1100);
+
+  const [sameGrab] = buffer.sample(1050 + INTERPOLATION_DELAY_MS);
+  assert.equal(sameGrab.slimeDrag!.revision, 1);
+  assert.ok(
+    Math.abs(sameGrab.slimeDrag!.pullX - 0.4) < 1e-9,
+    '同一次抓取里位移应平滑到中点，10Hz 快照才不会一跳一跳',
+  );
+
+  // 松手后抓到另一处：在两个命中点之间求平均会得到谁也没抓过的假位置。
+  buffer.push(snapshot(1200, [{ ...player('a', 0, 0), slimeDrag: drag(2, 0.8, 0.1) }]), 1200);
+  const [regrab] = buffer.sample(1150 + INTERPOLATION_DELAY_MS);
+  assert.equal(regrab.slimeDrag!.revision, 2);
+  assert.equal(regrab.slimeDrag!.contactX, 0.8);
+  assert.equal(regrab.slimeDrag!.pullX, 0.1);
+
+  // 松手后快照不再带该字段，远端必须据此结束拖拽而不是保持形变。
+  buffer.push(snapshot(1300, [player('a', 0, 0)]), 1300);
+  const [released] = buffer.sample(1300 + INTERPOLATION_DELAY_MS);
+  assert.equal(released.slimeDrag, undefined);
+});

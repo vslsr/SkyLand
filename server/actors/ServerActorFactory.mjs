@@ -57,6 +57,7 @@ import { GameAbilitySystem } from '../../shared/abilities/index.mjs';
 import { VesselHazardSystem } from './VesselHazardSystem.mjs';
 import { VesselMotorSystem } from './VesselMotorSystem.mjs';
 import { ElasticTetherSystem } from './ElasticTetherSystem.mjs';
+import { SoftBodyBiteSystem } from './SoftBodyBiteSystem.mjs';
 import { ElasticDetachSystem } from './ElasticDetachSystem.mjs';
 import { TemperatureSystem } from './TemperatureSystem.mjs';
 import { HighCountActorSystem } from './HighCountActorSystem.mjs';
@@ -173,6 +174,7 @@ export function createServerActorWorld(sceneDefinition, options = {}) {
   world.addSystem(colliderIndex);
   world.addSystem(new ActorSimpleCollisionSystem());
   world.addSystem(new ElasticTetherSystem());
+  world.addSystem(new SoftBodyBiteSystem());
   const elasticDetachSystem = new ElasticDetachSystem();
   world.context.syncDetachedPhysics = () => elasticDetachSystem.syncTransforms(world);
   world.addSystem(elasticDetachSystem);

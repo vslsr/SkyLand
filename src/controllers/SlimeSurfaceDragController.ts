@@ -1,5 +1,9 @@
 import type { CameraFrame } from '../camera/CameraTransform';
-import type { ProxyId, SlimeSurfaceDragRay } from '../render/RenderScene';
+import type {
+  ProxyId,
+  SlimeSurfaceDragRay,
+  SlimeSurfaceDragState,
+} from '../render/RenderScene';
 import {
   PlayerInputTags,
   type InputActionEvent,
@@ -17,6 +21,7 @@ export interface SlimeSurfaceDragSurface {
   beginSlimeSurfaceDrag(id: ProxyId, ray: SlimeSurfaceDragRay): boolean;
   updateSlimeSurfaceDrag(id: ProxyId, ray: SlimeSurfaceDragRay): boolean;
   endSlimeSurfaceDrag(id: ProxyId): void;
+  readSlimeSurfaceDrag(id: ProxyId, out: SlimeSurfaceDragState): boolean;
 }
 
 /**
@@ -61,6 +66,14 @@ export class SlimeSurfaceDragController {
 
   private get isDragging(): boolean {
     return this.surface.isSlimeSurfaceDragging(this.proxyId);
+  }
+
+  /**
+   * 取出当前手势交给场景上报房间。射线和外壳都不出渲染世界，出去的只有六个
+   * proxy 本地坐标；写进调用方自带的结构，每帧调用也不分配。
+   */
+  public captureReplicationState(out: SlimeSurfaceDragState): boolean {
+    return this.surface.readSlimeSurfaceDrag(this.proxyId, out);
   }
 
   public update(): void {

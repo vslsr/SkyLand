@@ -334,6 +334,33 @@ function validatePlayerJump(raw, filename) {
   };
 }
 
+function validateSoftBodyDeformation(raw, filename) {
+  const path = `${filename}.components.softBodyDeformation`;
+  const definition = requireObject(raw, path);
+  return {
+    breakDistance: requireNumber(definition.breakDistance, `${path}.breakDistance`, Number.EPSILON, 12),
+    ...(definition.selfReportTimeoutMs !== undefined ? {
+      selfReportTimeoutMs: requireNumber(
+        definition.selfReportTimeoutMs,
+        `${path}.selfReportTimeoutMs`,
+        Number.EPSILON,
+        5000,
+      ),
+    } : {}),
+  };
+}
+
+function validateBite(raw, filename) {
+  const path = `${filename}.components.bite`;
+  const definition = requireObject(raw, path);
+  return {
+    range: requireNumber(definition.range, `${path}.range`, Number.EPSILON, 8),
+    ...(definition.facingDot !== undefined ? {
+      facingDot: requireNumber(definition.facingDot, `${path}.facingDot`, -1, 1),
+    } : {}),
+  };
+}
+
 function validateSlimeSurfaceDrag(raw, filename) {
   const path = `${filename}.components.slimeSurfaceDrag`;
   const definition = requireObject(raw, path);
@@ -697,6 +724,8 @@ function validateActorArchetype(raw, filename) {
     'playerMovement',
     'playerJump',
     'slimeSurfaceDrag',
+    'softBodyDeformation',
+    'bite',
     'buoyancy',
     'vesselMotor',
     'interactable',
@@ -742,6 +771,10 @@ function validateActorArchetype(raw, filename) {
   const slimeSurfaceDrag = components.slimeSurfaceDrag
     ? validateSlimeSurfaceDrag(components.slimeSurfaceDrag, filename)
     : undefined;
+  const softBodyDeformation = components.softBodyDeformation
+    ? validateSoftBodyDeformation(components.softBodyDeformation, filename)
+    : undefined;
+  const bite = components.bite ? validateBite(components.bite, filename) : undefined;
   const interactable = components.interactable
     ? validateInteractable(components.interactable, filename)
     : undefined;
@@ -844,6 +877,8 @@ function validateActorArchetype(raw, filename) {
       ...(playerMovement ? { playerMovement } : {}),
       ...(playerJump ? { playerJump } : {}),
       ...(slimeSurfaceDrag ? { slimeSurfaceDrag } : {}),
+      ...(softBodyDeformation ? { softBodyDeformation } : {}),
+      ...(bite ? { bite } : {}),
       ...(components.buoyancy ? { buoyancy: validateBuoyancy(components.buoyancy, filename) } : {}),
       ...(components.vesselMotor ? { vesselMotor: validateVesselMotor(components.vesselMotor, filename) } : {}),
       ...(interactable ? { interactable } : {}),

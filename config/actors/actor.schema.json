@@ -88,6 +88,26 @@
             "airControl": { "type": "number", "minimum": 0, "maximum": 1 }
           }
         },
+        "softBodyDeformation": {
+          "type": "object",
+          "description": "可被外力捏变形的软体外壳；形变本身不改玩法状态",
+          "additionalProperties": false,
+          "required": ["breakDistance"],
+          "properties": {
+            "breakDistance": { "type": "number", "exclusiveMinimum": 0, "maximum": 12 },
+            "selfReportTimeoutMs": { "type": "number", "exclusiveMinimum": 0, "maximum": 5000 }
+          }
+        },
+        "bite": {
+          "type": "object",
+          "description": "能咬住别的软体的一张嘴；挂点复用 pickupDrop 的口部",
+          "additionalProperties": false,
+          "required": ["range"],
+          "properties": {
+            "range": { "type": "number", "exclusiveMinimum": 0, "maximum": 8 },
+            "facingDot": { "type": "number", "minimum": -1, "maximum": 1 }
+          }
+        },
         "slimeSurfaceDrag": {
           "type": "object",
           "description": "仅客户端使用的混合史莱姆鼠标表面拖拽参数",

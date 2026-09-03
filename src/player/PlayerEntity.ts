@@ -29,6 +29,11 @@ import {
   type SlimeMotionParams,
 } from '../render/RenderSlimeMotion';
 import {
+  SLIME_DRAG_AT_REST,
+  writeSlimeDragParams,
+  type SlimeDragParams,
+} from '../render/RenderSlimeDrag';
+import {
   isPlayerRenderDefinition,
   resolvePlayerVisualShape,
   type PlayerVisualShape,
@@ -40,7 +45,7 @@ import {
   createPlayerMovementAttributes,
 } from '../../shared/abilities/playerMovementEffects.mjs';
 import type { PhysicsWorld } from '../../shared/physics/PhysicsWorld.mjs';
-import type { PlayerInputStep } from '../network/protocol';
+import type { PlayerInputStep, SnapshotSlimeDrag } from '../network/protocol';
 import {
   MAXIMUM_PENDING_INPUT_STEPS,
   SIMULATION_STEP_SECONDS,
@@ -99,6 +104,8 @@ export class PlayerEntity extends Actor {
     rotation: { y: 0 },
   };
   private readonly motion: SlimeMotionParams = { ...SLIME_MOTION_AT_REST };
+  /** 服务端推给自己的形变；今天只有「被别人咬住」一种。 */
+  private readonly replicatedDrag: SlimeDragParams = { ...SLIME_DRAG_AT_REST };
   private readonly visual: PlayerVisualShape;
   private readonly reconciler = new PlayerReconciler();
   private readonly grassDisplacement: GrassDisplacementComponent;
@@ -236,6 +243,20 @@ export class PlayerEntity extends Actor {
     return this.pendingInputSteps;
   }
 
+  /**
+   * 服务端推给自己的形变——今天只有「被别人咬住」一种。自己的鼠标拖拽不走这里，
+   * 而且渲染侧规定一块外壳只有一个所有者：自己正拖着时，复制过来的会被忽略。
+   */
+  public setReplicatedSlimeDrag(drag: SnapshotSlimeDrag | undefined): void {
+    this.replicatedDrag.revision = drag?.revision ?? 0;
+    this.replicatedDrag.contactX = drag?.contactX ?? 0;
+    this.replicatedDrag.contactY = drag?.contactY ?? 0;
+    this.replicatedDrag.contactZ = drag?.contactZ ?? 0;
+    this.replicatedDrag.pullX = drag?.pullX ?? 0;
+    this.replicatedDrag.pullY = drag?.pullY ?? 0;
+    this.replicatedDrag.pullZ = drag?.pullZ ?? 0;
+  }
+
   public captureTransformDebugState(): PlayerTransformDebugState {
     const horizontalVelocity = this.controller.horizontalVelocity;
     return {
@@ -357,6 +378,12 @@ export class PlayerEntity extends Actor {
       this.transform.rotation.y,
     );
     writeSlimeMotionParams(this.transforms, this.renderProxy.id, this.motion);
+    // 本地玩家的拖拽整个在渲染侧完成，不经过这条复制通道；但槽位仍要每帧写，
+    // 否则回收来的槽位会带着上一位玩家的残留把自己的外壳拉出去。
+    // 自己的鼠标拖拽整个在渲染侧完成，不经过这条复制通道；走这里的只有被别人
+    // 咬住那一份。没有的时候也要每帧写，否则回收来的槽位会带着上一位玩家的
+    // 残留把自己的外壳拉出去。
+    writeSlimeDragParams(this.transforms, this.renderProxy.id, this.replicatedDrag);
   }
 
   public override dispose(): void {

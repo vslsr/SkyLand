@@ -29,6 +29,8 @@ import {
   INVENTORY_COMPONENT,
   ITEM_STACK_COMPONENT,
   PICKUP_DROP_COMPONENT,
+  BITE_COMPONENT,
+  SOFT_BODY_DEFORMATION_COMPONENT,
   sampleBuoyancyBobOffset,
   SIMPLE_COLLISION_COMPONENT,
   TRANSFORM_COMPONENT,
@@ -67,10 +69,29 @@ import { TERRAIN_CELL_SIZE, TERRAIN_SURFACE } from '../../shared/world/terrainCo
 import { sampleTerrain } from '../../shared/world/terrainContent.mjs';
 import { TerrainEditor } from '../../shared/world/terrainEditing.mjs';
 import { TerrainPatchStore } from '../../shared/world/terrainPatches.mjs';
+import {
+  isSlimeDragRegrab,
+  mouthWorld,
+  resolveSurfaceContact,
+  sanitizeSlimeDragState,
+} from '../../shared/softBodyDeformation.mjs';
 import { terrainMovementHeight } from '../../shared/world/terrainMovement.mjs';
 
 function roundCoordinate(value) {
   return Math.round(value * 1000) / 1000;
+}
+
+/** 形变状态进快照前统一取整；两个来源（鼠标拖拽与咬住）用同一份精度。 */
+function roundSlimeDrag(drag) {
+  return {
+    revision: drag.revision,
+    contactX: roundCoordinate(drag.contactX),
+    contactY: roundCoordinate(drag.contactY),
+    contactZ: roundCoordinate(drag.contactZ),
+    pullX: roundCoordinate(drag.pullX),
+    pullY: roundCoordinate(drag.pullY),
+    pullZ: roundCoordinate(drag.pullZ),
+  };
 }
 
 function capturePlayerTransformDebugState(player) {
@@ -305,6 +326,7 @@ export class ServerScene {
   }
 
   removePlayer(playerId) {
+    this.#clearBitesOf(playerId);
     this.dropCarriedActorsOf(playerId);
     for (const actor of this.actorWorld.query(
       ELASTIC_TETHER_COMPONENT,
@@ -731,6 +753,111 @@ export class ServerScene {
   }
 
   /** 按 tick 重放客户端实际执行过的 60Hz 输入步；协议不接受客户端 dt。 */
+  /**
+   * 记录一名玩家自己上报的鼠标拖拽形变。服务端不模拟它，只净化数值、判断是不是
+   * 新的一次抓取，然后随快照转发；权威坐标、碰撞与玩法都不受影响。被外力捏着的
+   * 时候这份让位——一块外壳只有一个形变来源。
+   */
+  applySlimeDrag(playerId, drag) {
+    const deformation = this.players.get(playerId)?.getComponent(
+      SOFT_BODY_DEFORMATION_COMPONENT,
+    );
+    if (!deformation) return;
+    const sanitized = sanitizeSlimeDragState(drag);
+    if (!sanitized) {
+      deformation.release(null);
+      return;
+    }
+    const regrab = isSlimeDragRegrab(
+      deformation.heldExternally || !deformation.active ? undefined : deformation,
+      sanitized,
+    );
+    deformation.applySelfReported(sanitized, this.now(), regrab);
+  }
+
+  /** 这一帧要下发的形变；自己上报的那一份还要过超时。 */
+  activeSlimeDrag(player) {
+    const deformation = player.getComponent(SOFT_BODY_DEFORMATION_COMPONENT);
+    if (!deformation) return undefined;
+    deformation.expire(this.now());
+    const state = deformation.snapshot();
+    return state ? roundSlimeDrag(state) : undefined;
+  }
+
+  /**
+   * 咬住 / 松口。一个不弹提示的彩蛋交互：交互键在没有别的候选可按时才走到这里，
+   * 由服务端自己按权威位姿挑面前最近的人，客户端不指定目标，也就无从伪造。
+   *
+   * 它不改任何玩法状态——不掉血、不减速、也不移动被咬者——只让被咬那一处产生
+   * 形变，所以整条下行复用已有的形变通道。咬住之后的推进归 SoftBodyBiteSystem。
+   */
+  toggleBite(playerId) {
+    const player = this.players.get(playerId);
+    const bite = player?.getComponent(BITE_COMPONENT);
+    const pickupDrop = player?.getComponent(PICKUP_DROP_COMPONENT);
+    if (!player || !bite || !pickupDrop) return false;
+    if (bite.targetActorId) {
+      this.#releaseBite(player, bite);
+      return true;
+    }
+    const mouth = mouthWorld(player, pickupDrop);
+    const radius = this.playerActorArchetype.components.render.radius;
+    let target;
+    let targetDeformation;
+    let nearestDistance = bite.range;
+    for (const candidate of this.players.values()) {
+      if (candidate.id === playerId) continue;
+      const deformation = candidate.getComponent(SOFT_BODY_DEFORMATION_COMPONENT);
+      // 已经被别的外力捏着的不再接受第二张嘴。
+      if (!deformation || deformation.heldExternally) continue;
+      const distance = Math.hypot(
+        candidate.x - mouth.x,
+        candidate.y + radius * 0.5 - mouth.y,
+        candidate.z - mouth.z,
+      );
+      if (distance >= nearestDistance) continue;
+      // 得大致朝着对方：从背后隔着一点距离咬不到。
+      const toTargetX = candidate.x - player.x;
+      const toTargetZ = candidate.z - player.z;
+      const planar = Math.hypot(toTargetX, toTargetZ);
+      if (planar > 1e-6) {
+        const facing = (
+          (toTargetX / planar) * Math.sin(player.yaw)
+          + (toTargetZ / planar) * Math.cos(player.yaw)
+        );
+        if (facing < bite.facingDot) continue;
+      }
+      nearestDistance = distance;
+      target = candidate;
+      targetDeformation = deformation;
+    }
+    if (!target) return false;
+
+    const contact = resolveSurfaceContact(radius, target, mouth, { x: 0, y: 0, z: 0 });
+    if (!targetDeformation.grab(player.id, contact)) return false;
+    if (!bite.bite(target.id)) {
+      targetDeformation.release(player.id);
+      return false;
+    }
+    return true;
+  }
+
+  #releaseBite(player, bite = player.getComponent(BITE_COMPONENT)) {
+    const target = bite?.targetActorId ? this.players.get(bite.targetActorId) : undefined;
+    target?.getComponent(SOFT_BODY_DEFORMATION_COMPONENT)?.release(player.id);
+    bite?.release();
+  }
+
+  /** 玩家离开房间：他咬着的松开，咬着他的那张嘴也松开。 */
+  #clearBitesOf(playerId) {
+    const player = this.players.get(playerId);
+    if (player) this.#releaseBite(player);
+    for (const candidate of this.players.values()) {
+      const bite = candidate.getComponent(BITE_COMPONENT);
+      if (bite?.targetActorId === playerId) this.#releaseBite(candidate, bite);
+    }
+  }
+
   applyInput(playerId, message) {
     const player = this.players.get(playerId);
     const debugEnabled = this.playerTransformDebug?.isEnabled(playerId) === true;
@@ -1043,25 +1170,31 @@ export class ServerScene {
       serverTime: this.now(),
       ...this.environment.snapshot(),
       actors: createActorSnapshots(this.actorWorld, { viewer }),
-      players: Array.from(this.players.values(), (player) => ({
-        id: player.id,
-        name: player.name,
-        x: roundCoordinate(player.x),
-        y: roundCoordinate(player.y),
-        z: roundCoordinate(player.z),
-        yaw: roundCoordinate(player.yaw),
-        speed: roundCoordinate(player.speed),
-        ackTick: player.ackTick,
-        sequence: player.ackTick,
-        verticalVelocity: roundCoordinate(player.characterState.vy),
-        velocityX: roundCoordinate(player.characterState.vx),
-        velocityZ: roundCoordinate(player.characterState.vz),
-        grounded: player.characterState.grounded,
-        inventory: player.requireComponent(INVENTORY_COMPONENT).snapshot(),
-        inventoryRevision: player.requireComponent(INVENTORY_COMPONENT).revision,
-        heldActorId: player.getComponent(PICKUP_DROP_COMPONENT)?.heldActorId ?? null,
-        pickupDropRevision: player.getComponent(PICKUP_DROP_COMPONENT)?.revision ?? 0,
-      })),
+      players: Array.from(this.players.values(), (player) => {
+        const slimeDrag = this.activeSlimeDrag(player);
+        const bitingPlayerId = player.getComponent(BITE_COMPONENT)?.targetActorId;
+        return {
+          id: player.id,
+          name: player.name,
+          x: roundCoordinate(player.x),
+          y: roundCoordinate(player.y),
+          z: roundCoordinate(player.z),
+          yaw: roundCoordinate(player.yaw),
+          speed: roundCoordinate(player.speed),
+          ackTick: player.ackTick,
+          sequence: player.ackTick,
+          verticalVelocity: roundCoordinate(player.characterState.vy),
+          velocityX: roundCoordinate(player.characterState.vx),
+          velocityZ: roundCoordinate(player.characterState.vz),
+          grounded: player.characterState.grounded,
+          inventory: player.requireComponent(INVENTORY_COMPONENT).snapshot(),
+          inventoryRevision: player.requireComponent(INVENTORY_COMPONENT).revision,
+          heldActorId: player.getComponent(PICKUP_DROP_COMPONENT)?.heldActorId ?? null,
+          pickupDropRevision: player.getComponent(PICKUP_DROP_COMPONENT)?.revision ?? 0,
+          ...(slimeDrag ? { slimeDrag } : {}),
+          ...(bitingPlayerId ? { bitingPlayerId } : {}),
+        };
+      }),
     };
   }
 }

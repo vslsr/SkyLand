@@ -1,7 +1,12 @@
 import * as THREE from 'three';
 import type { PbfSlimeVisualRig } from '../../models/actors/ActorVisualModel';
 import type { HybridSlimeSimulation } from '../../slime/hybrid/HybridSlimeSimulation';
-import type { SlimeSurfaceDragDefinition, SlimeSurfaceDragRay } from '../RenderScene';
+import type { SlimeDragParams } from '../RenderSlimeDrag';
+import type {
+  SlimeSurfaceDragDefinition,
+  SlimeSurfaceDragRay,
+  SlimeSurfaceDragState,
+} from '../RenderScene';
 
 /**
  * 缺省拖拽参数：房间可能在配置更新前已经启动并缓存了旧的玩家原型。
@@ -41,7 +46,10 @@ export class ThreeSlimeSurfaceDrag {
   private readonly fallbackVertexWorld = new THREE.Vector3();
   private readonly fallbackBestWorld = new THREE.Vector3();
   private readonly surfaceWorldScale = new THREE.Vector3();
+  private readonly pullLocal = new THREE.Vector3();
   private dragging = false;
+  /** 已经在求解器上开始过的那一次复制拖拽；只有换抓取才重建影响权重。 */
+  private replicatedRevision?: number;
 
   public constructor(
     public readonly rig: PbfSlimeVisualRig,
@@ -51,6 +59,51 @@ export class ThreeSlimeSurfaceDrag {
 
   public get isDragging(): boolean {
     return this.dragging;
+  }
+
+  /**
+   * 取出这一次手势本身，供玩法侧发给房间。命中点与位移都在 proxy 本地空间，
+   * 所以接收端不需要知道拖拽者的世界坐标或相机。写进调用方自带的结构，不分配。
+   */
+  public captureState(out: SlimeSurfaceDragState): boolean {
+    if (!this.dragging) return false;
+    out.contactX = this.contactLocal.x;
+    out.contactY = this.contactLocal.y;
+    out.contactZ = this.contactLocal.z;
+    out.pullX = this.pullLocal.x;
+    out.pullY = this.pullLocal.y;
+    out.pullZ = this.pullLocal.z;
+    return true;
+  }
+
+  /**
+   * 重放别人的一次拖拽。命中点已经是本地坐标，所以不需要拾取射线，只要在
+   * 换抓取时重建一次影响权重——每帧重新 begin 会把起始位置刷成当前的已形变
+   * 外壳，拉伸量因此永远累积不起来。
+   */
+  public applyReplicated(drag: SlimeDragParams): void {
+    // 一次手势只有一个所有者：本地正在拖的外壳不接受复制过来的状态。
+    if (this.dragging) return;
+    if (!(drag.revision > 0)) {
+      this.clearReplicated();
+      return;
+    }
+    if (this.replicatedRevision !== drag.revision) {
+      if (!this.simulation.beginSurfaceDrag(
+        drag.contactX,
+        drag.contactY,
+        drag.contactZ,
+        this.definition,
+      )) return;
+      this.replicatedRevision = drag.revision;
+    }
+    this.simulation.setSurfaceDragPull(drag.pullX, drag.pullY, drag.pullZ);
+  }
+
+  private clearReplicated(): void {
+    if (this.replicatedRevision === undefined) return;
+    this.replicatedRevision = undefined;
+    this.simulation.endSurfaceDrag();
   }
 
   /** 鼠标按下时只拾取连续外壳，核心、气泡、脸和阴影都不会抢走命中。 */
@@ -85,22 +138,21 @@ export class ThreeSlimeSurfaceDrag {
     this.rig.root.updateWorldMatrix(true, false);
     this.dragTargetLocal.copy(this.dragTargetWorld);
     this.rig.root.worldToLocal(this.dragTargetLocal);
-    this.simulation.setSurfaceDragPull(
-      this.dragTargetLocal.x - this.contactLocal.x,
-      this.dragTargetLocal.y - this.contactLocal.y,
-      this.dragTargetLocal.z - this.contactLocal.z,
-    );
+    this.pullLocal.subVectors(this.dragTargetLocal, this.contactLocal);
+    this.simulation.setSurfaceDragPull(this.pullLocal.x, this.pullLocal.y, this.pullLocal.z);
     return true;
   }
 
   public endDrag(): void {
     if (!this.dragging) return;
     this.dragging = false;
+    this.pullLocal.set(0, 0, 0);
     this.simulation.endSurfaceDrag();
   }
 
   public dispose(): void {
     this.endDrag();
+    this.clearReplicated();
   }
 
   private setRay(ray: SlimeSurfaceDragRay): boolean {

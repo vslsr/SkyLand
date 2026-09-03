@@ -15,6 +15,7 @@ import {
   type ProxyId,
   type RenderScene,
   type SlimeSurfaceDragRay,
+  type SlimeSurfaceDragState,
   toProxyId,
 } from '../RenderScene';
 import {
@@ -22,6 +23,11 @@ import {
   SLIME_MOTION_AT_REST,
   type SlimeMotionParams,
 } from '../RenderSlimeMotion';
+import {
+  SLIME_DRAG_AT_REST,
+  readSlimeDragParams,
+  type SlimeDragParams,
+} from '../RenderSlimeDrag';
 import type { RenderTransform, RenderTransformBuffer } from '../RenderTransformBuffer';
 import { PARAM_SLIME_SPEED, PARAM_TEMPERATURE } from '../RenderVisualParams';
 import { ThreeFireVisual } from './ThreeFireVisual';
@@ -118,6 +124,7 @@ export class ThreeRenderScene implements RenderScene {
   private readonly slimeDrags = new Map<ProxyId, ThreeSlimeSurfaceDrag>();
   /** 逐帧复用的参数读出缓冲，避免每个史莱姆每帧分配一个对象。 */
   private readonly slimeMotion: SlimeMotionParams = { ...SLIME_MOTION_AT_REST };
+  private readonly slimeDrag: SlimeDragParams = { ...SLIME_DRAG_AT_REST };
   /** proxyId → 客户端波面浮动的模式。没有海的地图上这张表永远是空的。 */
   private readonly waterMotions = new Map<ProxyId, WaterMotionMode>();
   private readonly waterMotionVisual?: ThreeWaterMotionVisual;
@@ -318,6 +325,11 @@ export class ThreeRenderScene implements RenderScene {
     for (const [id, slime] of this.slimeVisuals) {
       const proxy = this.resolve(id);
       if (!proxy) continue;
+      // 外力必须赶在这一帧求解之前写进去，否则复制过来的形变会晚一帧，
+      // 看上去就是别人的史莱姆比他的鼠标慢半拍。
+      this.slimeDrags.get(id)?.applyReplicated(
+        readSlimeDragParams(transforms, id, this.slimeDrag),
+      );
       slime.update(
         deltaSeconds,
         elapsedSeconds,
@@ -348,6 +360,14 @@ export class ThreeRenderScene implements RenderScene {
 
   public isSlimeSurfaceDragging(id: ProxyId): boolean {
     return this.slimeDrags.get(id)?.isDragging ?? false;
+  }
+
+  /**
+   * 取出本地玩家这一次手势，供玩法侧发给房间。射线不跨边界，这六个本地坐标要：
+   * 其他客户端拿到它们才能在自己的求解器上重放同一次形变。
+   */
+  public readSlimeSurfaceDrag(id: ProxyId, out: SlimeSurfaceDragState): boolean {
+    return this.slimeDrags.get(id)?.captureState(out) ?? false;
   }
 
   /** 渲染侧查找软体表现（能力实验室与测试用）。 */

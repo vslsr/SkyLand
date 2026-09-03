@@ -118,6 +118,18 @@ export class RoomConnectionHub {
             this.roomManager.sendInput(session.roomId, session.playerId, message);
           }
           break;
+        case 'player:slime-drag':
+          // 拖拽是纯表现，但同样是玩家驱动的高频上行，所以共用输入令牌桶限流。
+          if (session.roomId && session.playerId && this.consumeInputToken(session)) {
+            this.roomManager.sendSlimeDrag(session.roomId, session.playerId, message.drag);
+          }
+          break;
+        case 'player:bite':
+          // 一次按键一条消息，和其它交互一样过令牌桶。
+          if (session.roomId && session.playerId && this.consumeInputToken(session)) {
+            this.roomManager.toggleBite(session.roomId, session.playerId);
+          }
+          break;
         case 'debug:transform-log:start':
           this.startPlayerTransformLog(session);
           break;

@@ -1,5 +1,6 @@
 import {
   Actor,
+  BiteComponent,
   BuoyancyComponent,
   InventoryComponent,
   PickupDropComponent,
@@ -7,6 +8,7 @@ import {
   PlayerJumpComponent,
   PLAYER_MOVEMENT_COMPONENT,
   PlayerMovementComponent,
+  SoftBodyDeformationComponent,
   TRANSFORM_COMPONENT,
   TransformComponent,
 } from '../../shared/actor/index.mjs';
@@ -54,6 +56,15 @@ export class ServerPlayerActor extends Actor {
     this.addComponent(new InventoryComponent(archetype.components.inventory));
     if (archetype.components.pickupDrop) {
       this.addComponent(new PickupDropComponent(archetype.components.pickupDrop));
+    }
+    // 软体形变与咬人都是可选能力：原型给了参数才装配，普通球形玩家不受影响。
+    if (archetype.components.softBodyDeformation) {
+      this.addComponent(new SoftBodyDeformationComponent(
+        archetype.components.softBodyDeformation,
+      ));
+    }
+    if (archetype.components.bite) {
+      this.addComponent(new BiteComponent(archetype.components.bite));
     }
     const render = archetype.components.render;
     this.collisionRadius = render.collisionRadius ?? render.radius;

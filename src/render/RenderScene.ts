@@ -128,6 +128,22 @@ export interface SlimeSurfaceDragRay {
 }
 
 /**
+ * 一次拖拽手势本身，全部是 proxy 本地坐标的标量。
+ *
+ * 射线不跨边界，这个结构却要：玩法侧得把本地玩家的手势发给房间，其他客户端
+ * 才能复现同一次形变。过去的是**六个数字**，不是外壳的四百多个顶点——接收端
+ * 用自己那套参数在自己的求解器上重放。读取写进调用方自带的结构，不分配。
+ */
+export interface SlimeSurfaceDragState {
+  contactX: number;
+  contactY: number;
+  contactZ: number;
+  pullX: number;
+  pullY: number;
+  pullZ: number;
+}
+
+/**
  * `createMeshProxy` 回给 Game World 的东西：**全是数值，没有一个 Object3D**。
  * 这些量本身是玩法数据（碰撞盒、船体长宽），只是恰好和模型 authoring 同时产出。
  */

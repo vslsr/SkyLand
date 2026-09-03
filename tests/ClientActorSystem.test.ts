@@ -40,6 +40,7 @@ import {
 } from '../src/actors/components/FireVisualComponent';
 import type { SnapshotActor } from '../src/network/protocol';
 import { RenderTransformBuffer } from '../src/render/RenderTransformBuffer';
+import { SLIME_DRAG_AT_REST, writeSlimeDragParams } from '../src/render/RenderSlimeDrag';
 import { resolvePlayerVisualShape } from '../src/player/playerVisualShape';
 import { ThreeRenderScene } from '../src/render/three/ThreeRenderScene';
 import type { ThreeHybridSlimeVisual } from '../src/render/three/ThreeHybridSlimeVisual';
@@ -1133,6 +1134,124 @@ test('无模型 GuidePath Actor 只在快照存在时创建客户端 Three.js �
   assert.equal(system.getActor(guideSnapshot.id), undefined);
   assert.equal(system.root.getObjectByName('actor-guide-path-01-root'), undefined);
   system.dispose();
+});
+
+test('远端玩家的拖拽形变从参数段复现，松手后回弹', () => {
+  const render = pbfSlimeArchetype.components.render;
+  const dragDefinition = pbfSlimeArchetype.components.slimeSurfaceDrag;
+  assert.ok(render?.model === 'line-art-pbf-slime');
+  assert.ok(dragDefinition);
+  const scene = new ThreeRenderScene(new THREE.Group(), RENDER_ENVIRONMENT);
+  const transforms = new RenderTransformBuffer(4);
+  const info = scene.createPlayerProxy({
+    name: 'remote-drag-player',
+    render,
+    walkSpeed: 3.2,
+    surfaceDrag: dragDefinition,
+  });
+  const slime = scene.resolveSlimeVisual(info.id)!;
+  const drag = { ...SLIME_DRAG_AT_REST };
+  const step = (frames: number): void => {
+    for (let frame = 0; frame < frames; frame += 1) {
+      writeSlimeDragParams(transforms, info.id, drag);
+      transforms.publish();
+      scene.submitTransforms(transforms);
+      scene.updateVisuals(transforms, 1 / 60, frame / 60);
+    }
+  };
+  step(60);
+  const initialSurface = Float32Array.from(slime.simulation.positions);
+  let topOffset = 0;
+  for (let offset = 3; offset < initialSurface.length; offset += 3) {
+    if (initialSurface[offset + 1] > initialSurface[topOffset + 1]) topOffset = offset;
+  }
+
+  // 快照每 100ms 才到一份，同一次抓取会被连续应用很多帧；重复应用不能把起始
+  // 位置刷成当前的已形变外壳，否则拉伸永远累积不起来。
+  drag.revision = 1;
+  drag.contactX = initialSurface[topOffset];
+  drag.contactY = initialSurface[topOffset + 1];
+  drag.contactZ = initialSurface[topOffset + 2];
+  drag.pullX = 0.9;
+  step(150);
+
+  const pulledSurface = slime.simulation.positions;
+  const selectedExtension = pulledSurface[topOffset] - initialSurface[topOffset];
+  assert.equal(slime.simulation.stats().surfaceDragActive, true);
+  assert.ok(
+    selectedExtension > render.radius * 0.2,
+    `远端应复现出明显形变，实际 ${selectedExtension}`,
+  );
+  assert.ok(
+    selectedExtension <= dragDefinition.maximumDistance + 1e-5,
+    '复制过来的位移同样受 maximumDistance 约束',
+  );
+
+  let equatorMaximumDelta = 0;
+  for (let offset = 0; offset < pulledSurface.length; offset += 3) {
+    if (Math.abs(slime.rig.surfaceDirections[offset + 1]) >= 0.25) continue;
+    equatorMaximumDelta = Math.max(
+      equatorMaximumDelta,
+      Math.abs(pulledSurface[offset] - initialSurface[offset]),
+    );
+  }
+  assert.ok(
+    equatorMaximumDelta > selectedExtension * 0.3,
+    '整团跟随同样要复制到远端，不只是命中处鼓一个包',
+  );
+
+  // 松手后快照不再带该字段，玩法侧写回静止值；revision 归零就是「没有人在拖」。
+  drag.revision = 0;
+  step(360);
+  assert.equal(slime.simulation.stats().surfaceDragActive, false);
+  assert.ok(
+    Math.abs(slime.simulation.positions[topOffset] - initialSurface[topOffset])
+      < selectedExtension * 0.2,
+    '松开后应回到静止外壳',
+  );
+  scene.dispose();
+});
+
+test('一次手势只有一个所有者：本地正在拖的外壳不接受复制过来的拖拽', () => {
+  const render = pbfSlimeArchetype.components.render;
+  const dragDefinition = pbfSlimeArchetype.components.slimeSurfaceDrag;
+  assert.ok(render?.model === 'line-art-pbf-slime');
+  const visual = createPlayerVisualHarness('owned-drag-player', render, 3.2, dragDefinition);
+  assert.equal(visual.scene.beginSlimeSurfaceDrag(visual.proxyId, {
+    origin: [0, 3, 0],
+    direction: [0, -1, 0],
+  }), true);
+  assert.equal(visual.scene.updateSlimeSurfaceDrag(visual.proxyId, {
+    origin: [3, 3, 0],
+    direction: [0, -1, 0],
+  }), true);
+  for (let frame = 0; frame < 60; frame += 1) {
+    visual.update(1 / 60, frame / 60, 0, 0, { velocityX: 0, velocityZ: 0 });
+  }
+  const owned = Float32Array.from(visual.slime.simulation.positions);
+
+  // 本地玩家每帧都会把静止值写进自己的槽位；那不能把自己手上的拖拽掐掉。
+  const transforms = new RenderTransformBuffer(4);
+  writeSlimeDragParams(transforms, visual.proxyId, SLIME_DRAG_AT_REST);
+  transforms.publish();
+  visual.scene.updateVisuals(transforms, 1 / 60, 1);
+  assert.equal(visual.slime.simulation.stats().surfaceDragActive, true);
+
+  // 本地手势期间收到别人的一次抓取也不能改写拾取点。
+  writeSlimeDragParams(transforms, visual.proxyId, {
+    revision: 7, contactX: 0, contactY: -0.4, contactZ: 0.5,
+    pullX: -1, pullY: 0, pullZ: 0,
+  });
+  transforms.publish();
+  visual.scene.updateVisuals(transforms, 1 / 60, 1);
+  const state = { contactX: 0, contactY: 0, contactZ: 0, pullX: 0, pullY: 0, pullZ: 0 };
+  assert.equal(visual.scene.readSlimeSurfaceDrag(visual.proxyId, state), true);
+  assert.ok(state.pullX > 0, `本地手势仍朝原方向，实际 ${state.pullX}`);
+  assert.ok(
+    visual.slime.simulation.positions[0] * owned[0] >= 0,
+    '复制过来的反向拉力没有被应用',
+  );
+  visual.dispose();
 });
 
 test('史莱姆表面拖拽带动整团软体，命中处最强，接近上限时衰减并在释放后回弹', () => {

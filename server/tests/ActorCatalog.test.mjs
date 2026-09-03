@@ -247,6 +247,26 @@ test('ActorCatalog 拒绝缺少温度的可燃物和倒置的点燃阈值', asyn
   await assert.rejects(loadSingleActor(reversedThreshold), /必须小于 ignitionTemperature/);
 });
 
+test('ActorCatalog 保留软体形变与咬合参数，并拒绝越界值', async () => {
+  const catalog = await ActorCatalog.load();
+  const pbfSlime = catalog.require('pbf-slime');
+  assert.deepEqual(pbfSlime.components.softBodyDeformation, {
+    breakDistance: 3.0,
+    selfReportTimeoutMs: 600,
+  });
+  assert.deepEqual(pbfSlime.components.bite, { range: 1.8, facingDot: 0.15 });
+
+  const noBreak = structuredClone(pbfSlime);
+  noBreak.id = 'probe-soft-body';
+  noBreak.components.softBodyDeformation.breakDistance = 0;
+  await assert.rejects(loadSingleActor(noBreak), /breakDistance 数值范围无效/);
+
+  const wideFacing = structuredClone(pbfSlime);
+  wideFacing.id = 'probe-bite';
+  wideFacing.components.bite.facingDot = 1.5;
+  await assert.rejects(loadSingleActor(wideFacing), /facingDot 数值范围无效/);
+});
+
 test('ActorCatalog 拒绝未知原型', async () => {
   const catalog = await ActorCatalog.load();
   assert.throws(() => catalog.require('missing'), /未知 Actor 原型/);
