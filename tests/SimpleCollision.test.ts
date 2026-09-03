@@ -8,6 +8,7 @@ import {
   resolveCircleAgainstSimpleCollision,
   resolveCircleAgainstSimpleCollisions,
 } from '../shared/actor/simpleCollision.mjs';
+import { actorModelIds } from '../shared/actor/models/index.mjs';
 import type { ActorRenderDefinition } from '../src/scenes/data/SceneDefinition';
 import type { ActorSimpleCollision } from '../src/models/actors/ActorVisualModel';
 
@@ -178,11 +179,12 @@ function declaredRenderModels(): string[] {
   return [...union.matchAll(/model: '([a-z0-9-]+)'/g)].map((match) => match[1]);
 }
 
-test('每一种 render 模型都有一份碰撞快照，一个都不少', () => {
+test('模型注册表、快照表与 TS 联合三者的模型集合一致', () => {
   const declared = declaredRenderModels().sort();
   assert.ok(declared.length > 0, '联合里一个模型都没读到，正则该跟着改');
-  // 联合里加了成员而这里没跟上，就是「新模型漏了碰撞分支」——那种漏法在
-  // .mjs 侧没有任何编译期检查，只会在 spawn 时两端一起抛。
+  // 联合里加了成员而注册表没跟上，就是「新模型漏了碰撞派生」。那种漏法在 .mjs
+  // 侧没有任何编译期检查，不在这里挡下就只会在 spawn 时两端一起抛。
+  assert.deepEqual([...actorModelIds()].sort(), declared, '注册表与 ActorRenderDefinition 联合不一致');
   assert.deepEqual(Object.keys(RENDER_DEFINITIONS).sort(), declared);
   assert.deepEqual(Object.keys(EXPECTED_COLLISIONS).sort(), declared);
 });

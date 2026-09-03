@@ -221,22 +221,49 @@ test('两张模型注册表的键完全一致', () => {
 
 ## 6. 分步落地（每步独立可发布、可回滚）
 
-**Step 0 · 先钉住现状（半天，必须先做）**
+**Step 0 · 先钉住现状 ✅ 已完成**
 
-`tests/SimpleCollision.test.ts` 现在只断言了 **2 个模型**（cargo-crate、pbf-slime）的碰撞数值，
-另外 14 个没有任何测试。先补齐 16 个模型的数值快照。
-这是后面每一步「行为不变」的唯一证据；不做这步，后面全是靠肉眼比对。
+`tests/SimpleCollision.test.ts` 原来只断言了 **2 个模型**（cargo-crate、pbf-slime）的碰撞数值，
+另外 14 个没有任何测试。现在补齐了：
 
-**Step 1 · 只搬碰撞这一面（1 天，风险最低）**
+- 覆盖检查：从 `SceneDefinition.ts` 的联合源码里读出声明了哪些模型，断言快照表一个不多一个不少。
+  用源码文本而不是映射类型，是因为 `tsconfig.json` 的 `include` 里**没有 `tests`**，
+  测试文件不过 `tsc`，写成类型也没人替我们检查；`RenderSceneBoundary.test.ts` 盯 import 用的是同一个办法。
+- 16 个模型逐字段 `deepEqual`。合成 authoring 值用圆整数字而不是照抄 `config/actors/`，
+  这样派生公式能从期望值里直接读出来（蘑菇 `radius: 1` 对上 `halfWidth: 0.4`，那个 0.4 就是分支里的 `radius * 0.4`），
+  策划调数值也不会让用例变红。
+- `dropMotion` 分支：有滚动半径时优先于模型分支；`wood-pile` / `stone-pile` 的 `dropMotion` 没有 `radius`，
+  必须仍然走模型那一份。
 
-建 `shared/actor/models/`，把 A1 的 16 段分支体**原样**搬进各自文件，
-`createSimpleCollisionFromRender` 改成查表。**签名不变，调用方一个不改**
-（`ServerActorFactory`、15 个 `createXModel.ts`、`ClientActorSystem:973` 全部照旧）。
-Step 0 的测试必须一行不改地继续绿。
+变异验证：联合加一个成员而快照没跟上、箱盖外探量 `0.08→0.06`、蘑菇 `supportShape` `cylinder→box`，
+三种改动分别被对应的用例挡下。
 
-这一步就已经解决了用户问到的那个文件。
+**Step 1 · 只搬碰撞这一面 ✅ 已完成**
 
-**Step 2 · 收掉重复常量（1 天）**
+建了 `shared/actor/models/`，16 个 `*.model.mjs` 各持一份描述符（`id` + `collision`），
+`index.mjs` 收成注册表并在 id 重复时加载即抛。`createSimpleCollisionFromRender`
+从 141 行的 16 分支 `if` 链变成一次查表，**签名一字未改**——`ServerActorFactory`、
+15 个 `createXModel.ts`、`ClientActorSystem:973` 一个调用点都没动。
+
+两处偏离原计划，都是为了不把「写过一次的东西」重新抄一遍：
+
+- `authoringNumber.mjs`：`finiteNumber` / `positiveNumber` 原来是 `simpleCollision.mjs` 的私有助手，
+  描述符也要用。抽成独立模块而不是从 `simpleCollision.mjs` 导出，是因为后者要 import 注册表——
+  反过来导出会成环。
+- `authoringShapes.mjs`：只收录**确实被不止一个模型用着**的轮廓
+  （`uprightCylinder` 给假人/方尖碑，`uprightRadialBox` 给五种堆叠物）。
+  原来这些模型是靠**共用一段 `if` 分支**来避免重复的，拆成逐模型文件后需要一个别的地方放它。
+  各模型的默认值仍留在自己文件里——一种堆叠物改高度不该动到另外四种。
+
+**验证**：Step 0 的快照一个数都没改地继续绿；另做了一次差分测试——把重构前的实现取出来，
+与新实现在 16 个模型 + 未注册 + 空 id 上各跑 4000 组随机 authoring 值
+（含 `undefined` / `0` / 负数 / `NaN` / `Infinity` / 字符串 / `null` / `1e-9`，覆盖每个分支的兜底路径），
+**72000 组，0 处不一致**，连抛错信息都一致。`npm test` 666 项全绿，`npm run build` 通过。
+
+新增的常驻护栏：注册表键集合 == 快照表键集合 == `ActorRenderDefinition` 联合成员集合。
+少登记一个模型、两个描述符抢同一个 id，都已变异验证会被挡下。
+
+**Step 2 · 收掉重复常量（1 天，下一步）**
 
 加 `traits`，删掉两份 `PILE_RENDER_MODELS` 和 `isPlayerRenderDefinition`/`PLAYER_RENDER_MODELS`，
 改为派生。

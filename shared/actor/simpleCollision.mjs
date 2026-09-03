@@ -10,28 +10,26 @@
 /** @typedef {{ collision: SimpleCollisionDefinition, transform: CollisionTransform }} SimpleCollisionInstance */
 /** @typedef {{ minimumY: number, maximumY: number, maximumStepHeight?: number }} CollisionVerticalProfile */
 
-import { leggedSlimeTopY } from './leggedSlimeShape.mjs';
+import { actorModel } from './models/index.mjs';
+import { finiteNumber, positiveNumber } from './models/authoringNumber.mjs';
 
 const COLLISION_EPSILON = 1e-7;
-
-function finiteNumber(value, fallback = 0) {
-  const number = Number(value);
-  return Number.isFinite(number) ? number : fallback;
-}
-
-function positiveNumber(value, fallback) {
-  const number = finiteNumber(value, fallback);
-  return number > 0 ? number : fallback;
-}
 
 /**
  * 可视模型的 authoring 尺寸就是权威简易碰撞来源。Component 不再要求作者维护
  * 一份容易与模型漂移的重复配置。
+ *
+ * 逐模型的派生规则住在 `models/<模型>.model.mjs`，这里只做查表——原来那条
+ * 十六分支的 `if` 链把「新增一种模型」变成了要在本文件里插一段的改动，而本文件
+ * 是 `.mjs`，漏插没有任何编译期检查，只会在 spawn 时两端一起抛。
+ * 详见 `doc/model-dispatch-refactor.md`。
+ *
  * @param {Record<string, unknown>} render
  * @param {{ radius?: number }} [dropMotion] 球形掉落物的物理半径；存在时 Transform 表示球心
  * @returns {SimpleCollisionDefinition}
  */
 export function createSimpleCollisionFromRender(render, dropMotion) {
+  // 滚动半径优先于模型：脱落之后它是一颗球，模型的支撑面已经不成立了。
   const rollingRadius = Math.max(0, finiteNumber(dropMotion?.radius));
   if (rollingRadius > 0) {
     return createSimpleCollisionDefinition({
@@ -43,134 +41,11 @@ export function createSimpleCollisionFromRender(render, dropMotion) {
     });
   }
   const model = String(render?.model ?? '');
-  if (model === 'line-art-player-slime') {
-    const radius = positiveNumber(render.radius, 0.42);
-    return createSimpleCollisionDefinition({
-      shape: 'cylinder',
-      halfWidth: radius,
-      halfLength: radius,
-      minimumY: 0,
-      maximumY: radius * 2,
-    });
+  const descriptor = actorModel(model);
+  if (!descriptor) {
+    throw new TypeError(`无法为模型 ${model || '<unknown>'} 生成简易碰撞`);
   }
-  if (model === 'line-art-pbf-slime') {
-    const radius = positiveNumber(render.radius, 0.9);
-    const collisionRadius = Math.min(
-      radius * 0.95,
-      positiveNumber(render.collisionRadius, radius * 0.55),
-    );
-    return createSimpleCollisionDefinition({
-      shape: 'cylinder',
-      // 外壳可以先包住障碍并形变；内部圆柱只阻止软核心穿透。
-      halfWidth: collisionRadius,
-      halfLength: collisionRadius,
-      minimumY: 0,
-      maximumY: positiveNumber(render.collisionHeight, radius * 0.76),
-    });
-  }
-  if (model === 'line-art-legged-slime') {
-    const radius = positiveNumber(render.radius, 0.42);
-    const hipHeight = positiveNumber(render.hipHeight, radius * 1.8);
-    return createSimpleCollisionDefinition({
-      shape: 'cylinder',
-      // 腿不参与碰撞：它们是贴着地面采样点摆出来的表现，两根细杆挡住玩家只会
-      // 让这只史莱姆卡在自己的脚上。权威圆柱仍然从地面一直包到身体顶部。
-      halfWidth: radius,
-      halfLength: radius,
-      minimumY: 0,
-      maximumY: leggedSlimeTopY(hipHeight, radius),
-    });
-  }
-  if (model === 'line-art-raft') {
-    return createSimpleCollisionDefinition({
-      halfWidth: positiveNumber(render.width, 1) * 0.5,
-      halfLength: positiveNumber(render.length, 1) * 0.5,
-      minimumY: -0.24,
-      // 甲板可见顶面在根节点上方约 0.47m；旧值 2.3m 把桅杆也包进一个
-      // 巨型盒，角色控制器只会撞上一堵隐形墙而无法站上木筏。
-      maximumY: 0.47,
-    });
-  }
-  if (model === 'line-art-cargo-crate') {
-    const height = positiveNumber(render.height, 0.5);
-    return createSimpleCollisionDefinition({
-      // 箱盖比主体各向外探出 4 cm；碰撞包住模型的最外沿。
-      halfWidth: (positiveNumber(render.width, 0.5) + 0.08) * 0.5,
-      halfLength: (positiveNumber(render.length, 0.5) + 0.08) * 0.5,
-      minimumY: 0,
-      maximumY: height * 0.88,
-    });
-  }
-  if (model === 'line-art-reef') {
-    const radius = positiveNumber(render.radius, 0.5);
-    const height = positiveNumber(render.height, radius);
-    return createSimpleCollisionDefinition({
-      halfWidth: radius,
-      halfLength: radius,
-      minimumY: -height * 0.48,
-      maximumY: height * 1.08,
-    });
-  }
-  if (model === 'line-art-elastic-mushroom') {
-    const radius = positiveNumber(render.radius, 0.5);
-    const height = positiveNumber(render.height, 0.9);
-    return createSimpleCollisionDefinition({
-      // 根部保持细小；Rapier 适配层会把下面的 supportShape 生成为独立薄菌盖，
-      // 因此菌盖顶面可站立，而不再用一根宽盒从地面制造隐形墙。
-      halfWidth: radius * 0.4,
-      halfLength: radius * 0.4,
-      minimumY: 0,
-      maximumY: height,
-      // 支撑 authoring 会成为第二枚薄圆柱 collider，而不是旧查询的特殊分支。
-      supportShape: 'cylinder',
-      supportHalfWidth: radius,
-      supportHalfLength: radius,
-    });
-  }
-  if (model === 'line-art-training-dummy' || model === 'line-art-focus-obelisk') {
-    const radius = positiveNumber(render.radius, 0.5);
-    const height = positiveNumber(render.height, 1);
-    return createSimpleCollisionDefinition({
-      shape: 'cylinder',
-      halfWidth: radius,
-      halfLength: radius,
-      minimumY: 0,
-      maximumY: height,
-    });
-  }
-  if (model === 'line-art-floor-plaque') {
-    return createSimpleCollisionDefinition({
-      halfWidth: positiveNumber(render.width, 1) * 0.5,
-      halfLength: positiveNumber(render.length, 1) * 0.5,
-      minimumY: 0,
-      maximumY: positiveNumber(render.height, 0.1),
-    });
-  }
-  if (
-    model === 'line-art-campfire'
-    || model === 'line-art-dry-hay'
-    || model === 'line-art-wood-pile'
-    || model === 'line-art-stone-pile'
-    || model === 'line-art-fruit-pile'
-  ) {
-    const radius = positiveNumber(render.radius, 0.5);
-    return createSimpleCollisionDefinition({
-      halfWidth: radius,
-      halfLength: radius,
-      minimumY: 0,
-      maximumY: positiveNumber(render.height, 0.6),
-    });
-  }
-  if (model === 'line-art-wood-log') {
-    const radius = positiveNumber(render.radius, 0.1);
-    return createSimpleCollisionDefinition({
-      halfWidth: positiveNumber(render.length, 0.8) * 0.5,
-      halfLength: radius,
-      minimumY: -radius,
-      maximumY: radius,
-    });
-  }
-  throw new TypeError(`无法为模型 ${model || '<unknown>'} 生成简易碰撞`);
+  return createSimpleCollisionDefinition(descriptor.collision(render ?? {}));
 }
 
 /**
