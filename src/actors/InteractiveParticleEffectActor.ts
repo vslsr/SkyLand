@@ -28,4 +28,9 @@ export class InteractiveParticleEffectActor extends Actor {
   public applyWorldImpulse(impulse: InteractiveParticleImpulse): number {
     return this.particleEffect.applyWorldImpulse(impulse);
   }
+
+  /** 地形改写后让这一团粒子重新贴回地表。 */
+  public refreshSurfaceHeights(): void {
+    this.particleEffect.refreshSurfaceHeights();
+  }
 }

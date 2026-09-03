@@ -125,7 +125,7 @@ export class TerrainWorld {
         const hitZ = origin[2] + direction[2] * hitDistance;
         return {
           x: hitX,
-          y: this.surfaceHeight(hitX, hitZ),
+          y: this.sampleSurfaceHeight(hitX, hitZ),
           z: hitZ,
           distance: hitDistance,
         };
@@ -136,7 +136,11 @@ export class TerrainWorld {
     return undefined;
   }
 
-  private surfaceHeight(x: number, z: number): number {
+  /**
+   * 射线、相机与地表装饰共用的可见表面高度：水域取水面，其余取地面。
+   * 落叶这类贴地表现必须用它，否则会沉进浅滩的海床里。
+   */
+  public sampleSurfaceHeight(x: number, z: number): number {
     const terrain = sampleTerrain(
       this.worldSeed,
       x,
@@ -148,6 +152,6 @@ export class TerrainWorld {
   }
 
   private heightAboveSurface(x: number, y: number, z: number): number {
-    return y - this.surfaceHeight(x, z);
+    return y - this.sampleSurfaceHeight(x, z);
   }
 }

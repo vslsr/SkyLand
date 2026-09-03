@@ -49,6 +49,7 @@ export class InteractiveParticleEffectSceneComponent implements SceneRuntimeComp
   private centerChunkZ?: number;
   private hasPreviousPlayerPosition = false;
   private active = false;
+  private unsubscribeTerrain?: () => void;
 
   public constructor(
     private readonly definition: InteractiveParticleSceneComponentDefinition,
@@ -66,12 +67,19 @@ export class InteractiveParticleEffectSceneComponent implements SceneRuntimeComp
     for (const cluster of this.clusters.values()) {
       this.context.renderer.addWorldObject(cluster.actor.object3D);
     }
+    // 停用期间的地形改写没有通知到，重新接管时先把常驻落叶团贴回地表。
+    this.refreshClusterSurfaces();
+    this.unsubscribeTerrain = this.context.world.onTerrainChanged(
+      () => this.refreshClusterSurfaces(),
+    );
     this.resetPlayerSweep();
   }
 
   public deactivate(): void {
     if (!this.active) return;
     this.active = false;
+    this.unsubscribeTerrain?.();
+    this.unsubscribeTerrain = undefined;
     for (const cluster of this.clusters.values()) {
       this.context.renderer.removeWorldObject(cluster.actor.object3D);
     }
@@ -140,7 +148,7 @@ export class InteractiveParticleEffectSceneComponent implements SceneRuntimeComp
     if (!point || this.context.world.isWaterAt(point.x, point.z)) return;
     this.mountCluster(
       chunk.key,
-      [point.x, this.context.world.sampleGroundHeight(point.x, point.z), point.z],
+      [point.x, this.context.world.sampleSurfaceHeight(point.x, point.z), point.z],
       point.particleSeed,
     );
   }
@@ -150,8 +158,7 @@ export class InteractiveParticleEffectSceneComponent implements SceneRuntimeComp
     position: readonly [number, number, number],
     particleSeed: number,
   ): void {
-    const effect = createEffect(this.definition, this.context, particleSeed);
-    effect.root.position.set(...position);
+    const effect = createEffect(this.definition, this.context, particleSeed, position);
     effect.root.name = `particle-actor-${this.definition.id}-${key}`;
     const actor = new InteractiveParticleEffectActor(`${this.definition.id}-${key}`, effect);
     this.world.addActor(actor);
@@ -169,6 +176,14 @@ export class InteractiveParticleEffectSceneComponent implements SceneRuntimeComp
     this.clusters.delete(key);
     if (this.active) this.context.renderer.removeWorldObject(cluster.actor.object3D);
     this.world.removeActor(cluster.actor.id);
+  }
+
+  /**
+   * 地形被改写后让常驻落叶团重新贴地。扫的是 keepRadius 窗口里的落叶团，
+   * 每团又只有固定数量的叶片，所以代价不随世界面积增长。
+   */
+  private refreshClusterSurfaces(): void {
+    for (const cluster of this.clusters.values()) cluster.actor.refreshSurfaceHeights();
   }
 
   private applyPlayerInteraction(deltaSeconds: number): void {
@@ -244,6 +259,7 @@ function createEffect(
   definition: InteractiveParticleSceneComponentDefinition,
   context: SceneComponentContext,
   particleSeed: number,
+  origin: readonly [number, number, number],
 ): LineArtLeafParticleEffect {
   switch (definition.preset) {
     case 'line-art-leaves':
@@ -251,6 +267,10 @@ function createEffect(
         particleCount: definition.particleCount,
         radius: definition.clusterRadius,
         seed: particleSeed,
+        origin,
+        // 逐叶片采样可见表面，台阶地形上落叶才会落到自己脚下那一格，
+        // 而不是整团挂在落点中心的高度上。
+        sampleSurfaceHeight: (x, z) => context.world.sampleSurfaceHeight(x, z),
         fillColor: definition.fillColor,
         accentColor: definition.accentColor,
         lineColor: definition.lineColor,

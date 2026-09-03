@@ -18,7 +18,8 @@ const MAX_PARTICLE_COUNT = 512;
 const MAX_FRAME_DELTA_SECONDS = 0.1;
 const MAX_SIMULATION_STEP_SECONDS = 1 / 60;
 const MAX_SWEEP_DISTANCE_RADIUS_RATIO = 5;
-const GROUND_HEIGHT = 0.035;
+/** 叶片静止时离地表的抬高量，避免和地面网格 z-fighting。 */
+const GROUND_CLEARANCE = 0.035;
 const GRAVITY = -2.35;
 const AIR_DRAG = 1.05;
 const GROUND_FRICTION = 7.5;
@@ -30,6 +31,9 @@ const BASE_FLAT_QUATERNION = new THREE.Quaternion().setFromUnitVectors(
 );
 const Y_AXIS = new THREE.Vector3(0, 1, 0);
 
+/** 落叶团在世界里的落点，同时是本地模拟坐标系的原点。 */
+export type LineArtLeafParticleOrigin = readonly [number, number, number];
+
 export interface LineArtLeafParticleEffectOptions {
   particleCount: number;
   radius: number;
@@ -38,6 +42,13 @@ export interface LineArtLeafParticleEffectOptions {
   accentColor: THREE.ColorRepresentation;
   lineColor: THREE.ColorRepresentation;
   environment: FillMaterialEnvironment;
+  /** 落叶团中心的世界坐标；省略时留在原点。 */
+  origin?: LineArtLeafParticleOrigin;
+  /**
+   * 客户端可见表面采样。逐叶片调用，让整团落叶贴合台阶地形而不是共用中心高度。
+   * 省略时整团退回 origin 所在的水平面，固定场景保持既有表现。
+   */
+  sampleSurfaceHeight?: (worldX: number, worldZ: number) => number;
 }
 
 export interface LineArtLeafParticleState {
@@ -47,6 +58,8 @@ export interface LineArtLeafParticleState {
   velocityX: number;
   velocityY: number;
   velocityZ: number;
+  /** 这片叶子脚下的本地静止高度，由所在位置的地表采样决定。 */
+  groundY: number;
   active: boolean;
 }
 
@@ -77,6 +90,8 @@ export class LineArtLeafParticleEffect implements InteractiveParticleEffect {
   private readonly phases: Float32Array;
   private readonly tones: Float32Array;
   private readonly airborne: Float32Array;
+  /** 逐叶片的本地静止高度；避免每帧为静止叶片重复采样地表。 */
+  private readonly groundHeights: Float32Array;
   private readonly active: Uint8Array;
   private readonly attributes: ParticleAttributes;
   private readonly fillGeometry: THREE.InstancedBufferGeometry;
@@ -90,6 +105,10 @@ export class LineArtLeafParticleEffect implements InteractiveParticleEffect {
   private readonly flatQuaternion = new THREE.Quaternion();
   private readonly deltaQuaternion = new THREE.Quaternion();
   private readonly angularAxis = new THREE.Vector3();
+  private readonly originX: number;
+  private readonly originY: number;
+  private readonly originZ: number;
+  private readonly sampleSurfaceHeight?: (worldX: number, worldZ: number) => number;
   private disposed = false;
 
   public constructor(options: LineArtLeafParticleEffectOptions) {
@@ -104,6 +123,12 @@ export class LineArtLeafParticleEffect implements InteractiveParticleEffect {
     this.particleCount = options.particleCount;
     this.radius = options.radius;
     this.root.name = 'line-art-leaf-particle-effect';
+    const origin = options.origin ?? [0, 0, 0];
+    this.originX = origin[0];
+    this.originY = origin[1];
+    this.originZ = origin[2];
+    this.sampleSurfaceHeight = options.sampleSurfaceHeight;
+    this.root.position.set(this.originX, this.originY, this.originZ);
 
     this.positions = new Float32Array(this.particleCount * 3);
     this.velocities = new Float32Array(this.particleCount * 3);
@@ -114,12 +139,13 @@ export class LineArtLeafParticleEffect implements InteractiveParticleEffect {
     this.phases = new Float32Array(this.particleCount);
     this.tones = new Float32Array(this.particleCount);
     this.airborne = new Float32Array(this.particleCount);
+    this.groundHeights = new Float32Array(this.particleCount);
     this.active = new Uint8Array(this.particleCount);
     this.initializeParticles(options.seed >>> 0);
 
     this.attributes = this.createParticleAttributes();
     const source = createLineArtLeafGeometry();
-    const boundingRadius = this.radius * 1.35 + 2.5;
+    const boundingRadius = this.boundingRadius();
     this.fillGeometry = createInstancedGeometry(
       source.fill,
       this.attributes,
@@ -177,6 +203,7 @@ export class LineArtLeafParticleEffect implements InteractiveParticleEffect {
     this.timeUniform.value = Number.isFinite(elapsedSeconds) ? elapsedSeconds : 0;
     if (!Number.isFinite(deltaSeconds) || deltaSeconds <= 0) return;
 
+    this.refreshActiveGroundHeights();
     const frameDelta = Math.min(deltaSeconds, MAX_FRAME_DELTA_SECONDS);
     const stepCount = Math.max(1, Math.ceil(frameDelta / MAX_SIMULATION_STEP_SECONDS));
     const stepDelta = frameDelta / stepCount;
@@ -185,6 +212,37 @@ export class LineArtLeafParticleEffect implements InteractiveParticleEffect {
       changed = this.simulate(stepDelta, this.timeUniform.value) || changed;
     }
     if (changed) this.markDynamicAttributesForUpload();
+  }
+
+  /**
+   * 地形被改写后重新贴地。抬高的地面直接托起静止叶片，挖低的地面让它重新下落；
+   * 一次刷新只扫这一团的固定叶片数，常驻团数又受 keepRadius 约束。
+   */
+  public refreshSurfaceHeights(): void {
+    if (this.disposed || !this.sampleSurfaceHeight) return;
+    let changed = false;
+    for (let index = 0; index < this.particleCount; index += 1) {
+      const positionOffset = index * 3;
+      const groundY = this.localGroundHeight(
+        this.positions[positionOffset],
+        this.positions[positionOffset + 2],
+      );
+      if (groundY === this.groundHeights[index]) continue;
+      this.groundHeights[index] = groundY;
+      changed = true;
+      if (this.active[index] === 1) continue;
+      if (this.positions[positionOffset + 1] < groundY) {
+        this.positions[positionOffset + 1] = groundY;
+      } else if (this.positions[positionOffset + 1] > groundY) {
+        // 脚下被挖空：交还给模拟，叶片自己落到新的地表。
+        this.active[index] = 1;
+      }
+    }
+    if (!changed) return;
+    const radius = this.boundingRadius();
+    if (this.fillGeometry.boundingSphere) this.fillGeometry.boundingSphere.radius = radius;
+    if (this.outlineGeometry.boundingSphere) this.outlineGeometry.boundingSphere.radius = radius;
+    this.markDynamicAttributesForUpload();
   }
 
   public applyWorldImpulse(impulse: InteractiveParticleImpulse): number {
@@ -261,7 +319,7 @@ export class LineArtLeafParticleEffect implements InteractiveParticleEffect {
       ) * scaledStrength;
       this.positions[positionOffset + 1] = Math.max(
         this.positions[positionOffset + 1],
-        GROUND_HEIGHT + 0.006,
+        this.groundHeights[index] + 0.006,
       );
       this.angularVelocities[positionOffset] += Math.cos(phase * 1.3) * scaledStrength * 1.4;
       this.angularVelocities[positionOffset + 1] += Math.sin(phase * 0.7) * scaledStrength;
@@ -287,6 +345,7 @@ export class LineArtLeafParticleEffect implements InteractiveParticleEffect {
       velocityX: this.velocities[offset],
       velocityY: this.velocities[offset + 1],
       velocityZ: this.velocities[offset + 2],
+      groundY: this.groundHeights[index],
       active: this.active[index] === 1,
     };
   }
@@ -312,11 +371,16 @@ export class LineArtLeafParticleEffect implements InteractiveParticleEffect {
       const angle = random() * Math.PI * 2;
       const distance = this.radius * Math.sqrt(random()) * 0.96;
       const initiallyAirborne = random() < 0.22;
-      this.positions[positionOffset] = Math.cos(angle) * distance;
+      const localX = Math.cos(angle) * distance;
+      const localZ = Math.sin(angle) * distance;
+      // 每片叶子按自己脚下的地表落位；台阶地形上整团不再共用中心高度。
+      const groundY = this.localGroundHeight(localX, localZ);
+      this.groundHeights[index] = groundY;
+      this.positions[positionOffset] = localX;
       this.positions[positionOffset + 1] = initiallyAirborne
-        ? GROUND_HEIGHT + 0.18 + random() * 1.75
-        : GROUND_HEIGHT;
-      this.positions[positionOffset + 2] = Math.sin(angle) * distance;
+        ? groundY + 0.18 + random() * 1.75
+        : groundY;
+      this.positions[positionOffset + 2] = localZ;
       if (initiallyAirborne) {
         this.velocities[positionOffset] = (random() - 0.42) * 0.5;
         this.velocities[positionOffset + 1] = (random() - 0.58) * 0.28;
@@ -341,6 +405,48 @@ export class LineArtLeafParticleEffect implements InteractiveParticleEffect {
         this.angularVelocities[positionOffset + 1] = (random() - 0.5) * 3;
         this.angularVelocities[positionOffset + 2] = (random() - 0.5) * 4;
       }
+    }
+  }
+
+  /**
+   * 包围球以落叶团本地原点为心，除了水平范围还要罩住地表起伏，
+   * 否则斜坡上的叶片会在视锥剔除时提前消失。
+   */
+  private boundingRadius(): number {
+    let groundSpread = 0;
+    for (let index = 0; index < this.particleCount; index += 1) {
+      groundSpread = Math.max(groundSpread, Math.abs(this.groundHeights[index]));
+    }
+    return this.radius * 1.35 + 2.5 + groundSpread;
+  }
+
+  /**
+   * 本地坐标下这一点的静止高度。采样在世界坐标里做，再换算回落叶团本地坐标，
+   * 因此 root 放在哪个 chunk 都不影响结果。
+   *
+   * 结果先收敛到 float32：`groundHeights` 是 Float32Array，只有两边同精度，
+   * 地形刷新才能用相等判断认出「这片叶子脚下没变」，而不是每次都把整团叫醒。
+   */
+  private localGroundHeight(localX: number, localZ: number): number {
+    if (!this.sampleSurfaceHeight) return Math.fround(GROUND_CLEARANCE);
+    const surfaceY = this.sampleSurfaceHeight(this.originX + localX, this.originZ + localZ);
+    if (!Number.isFinite(surfaceY)) return Math.fround(GROUND_CLEARANCE);
+    return Math.fround(surfaceY - this.originY + GROUND_CLEARANCE);
+  }
+
+  /**
+   * 只为仍在活动的叶片重新采样地表，每帧一次而不是每个子步一次。
+   * 成本与被踢起的叶片数量成正比，与世界面积无关；静止叶片沿用落地时的高度。
+   */
+  private refreshActiveGroundHeights(): void {
+    if (!this.sampleSurfaceHeight) return;
+    for (let index = 0; index < this.particleCount; index += 1) {
+      if (this.active[index] === 0) continue;
+      const positionOffset = index * 3;
+      this.groundHeights[index] = this.localGroundHeight(
+        this.positions[positionOffset],
+        this.positions[positionOffset + 2],
+      );
     }
   }
 
@@ -374,10 +480,11 @@ export class LineArtLeafParticleEffect implements InteractiveParticleEffect {
       const positionOffset = index * 3;
       const quaternionOffset = index * 4;
       const phase = this.phases[index];
+      const groundY = this.groundHeights[index];
       let velocityX = this.velocities[positionOffset];
       let velocityY = this.velocities[positionOffset + 1];
       let velocityZ = this.velocities[positionOffset + 2];
-      const height = this.positions[positionOffset + 1] - GROUND_HEIGHT;
+      const height = this.positions[positionOffset + 1] - groundY;
       if (height > 0.002 || velocityY > 0) {
         velocityX += (0.11 + Math.sin(elapsedSeconds * 0.63 + phase) * 0.18) * deltaSeconds;
         velocityZ += Math.cos(elapsedSeconds * 0.51 + phase * 1.7) * 0.16 * deltaSeconds;
@@ -413,9 +520,9 @@ export class LineArtLeafParticleEffect implements InteractiveParticleEffect {
       }
 
       let onGround = false;
-      if (this.positions[positionOffset + 1] <= GROUND_HEIGHT) {
+      if (this.positions[positionOffset + 1] <= groundY) {
         onGround = true;
-        this.positions[positionOffset + 1] = GROUND_HEIGHT;
+        this.positions[positionOffset + 1] = groundY;
         if (velocityY < -0.2) velocityY *= -0.14;
         else velocityY = 0;
         velocityX *= groundDamping;
@@ -446,7 +553,7 @@ export class LineArtLeafParticleEffect implements InteractiveParticleEffect {
       this.velocities[positionOffset + 1] = velocityY;
       this.velocities[positionOffset + 2] = velocityZ;
       this.airborne[index] = THREE.MathUtils.clamp(
-        (this.positions[positionOffset + 1] - GROUND_HEIGHT) * 1.7 + Math.abs(velocityY) * 0.18,
+        (this.positions[positionOffset + 1] - groundY) * 1.7 + Math.abs(velocityY) * 0.18,
         0,
         1,
       );
