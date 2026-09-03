@@ -277,7 +277,7 @@
     "gameplay": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["playerActor", "bounds", "spawn"],
+      "required": ["playerActor", "spawn"],
       "properties": {
         "playerActor": {
           "type": "object",
@@ -306,6 +306,7 @@
         },
         "bounds": {
           "type": "object",
+          "description": "玩法平面的活动范围。renderer.world 的流式场景可以省略，玩家便可一直走下去（范围取世界的精度护栏）；固定尺寸场景必须写。",
           "additionalProperties": false,
           "required": ["minimumX", "maximumX", "minimumZ", "maximumZ"],
           "properties": {

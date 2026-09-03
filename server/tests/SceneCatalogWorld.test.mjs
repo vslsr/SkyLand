@@ -75,6 +75,23 @@ test('活动范围超出流式世界的安全区时拒绝加载', async () => {
   await assert.rejects(loadSingleScene(scene), /超出了流式世界的活动范围/);
 });
 
+test('流式场景省略 bounds 时活动范围取整个世界', async () => {
+  const scene = createSceneFile();
+  delete scene.gameplay.bounds;
+  const catalog = await loadSingleScene(scene);
+  const definition = catalog.require('streaming-probe');
+  assert.deepEqual(definition.gameplay.bounds, WORLD_PLAY_AREA);
+  // 玩家可以一直走下去：活动范围至少有几十公里，不再是一张 384 米的地图。
+  assert.ok(definition.gameplay.bounds.maximumX > 30_000);
+});
+
+test('固定场景省略 bounds 时仍然拒绝加载', async () => {
+  const scene = createSceneFile();
+  delete scene.renderer.world;
+  delete scene.gameplay.bounds;
+  await assert.rejects(loadSingleScene(scene), /gameplay\.bounds 必须是对象/);
+});
+
 test('固定场景不受这些约束限制', async () => {
   const scene = createSceneFile();
   delete scene.renderer.world;

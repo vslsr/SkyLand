@@ -604,14 +604,22 @@ function validateSceneDefinition(raw, filename, actorCatalog) {
         + '需要 renderer.world',
     );
   }
-  const bounds = requireObject(gameplay.bounds, `${filename}.gameplay.bounds`);
   const spawn = requireObject(gameplay.spawn, `${filename}.gameplay.spawn`);
+  // 流式场景可以不写 bounds：世界是按种子无边生成的，玩家想走多远走多远，
+  // 活动范围直接取 WORLD_PLAY_AREA——它不是玩法边界，而是数值精度的护栏。
+  // 固定尺寸的场景没有这个选项：那里的地面只有一块，边界必须由作者写死。
+  if (!world && gameplay.bounds === undefined) {
+    throw new TypeError(`${filename}.gameplay.bounds 必须是对象`);
+  }
+  const bounds = gameplay.bounds === undefined
+    ? WORLD_PLAY_AREA
+    : requireObject(gameplay.bounds, `${filename}.gameplay.bounds`);
   const minimumX = requireNumber(bounds.minimumX, `${filename}.gameplay.bounds.minimumX`);
   const maximumX = requireNumber(bounds.maximumX, `${filename}.gameplay.bounds.maximumX`);
   const minimumZ = requireNumber(bounds.minimumZ, `${filename}.gameplay.bounds.minimumZ`);
   const maximumZ = requireNumber(bounds.maximumZ, `${filename}.gameplay.bounds.maximumZ`);
   if (minimumX >= maximumX || minimumZ >= maximumZ) throw new TypeError(`${filename}.gameplay.bounds 范围无效`);
-  // 流式场景的活动范围必须落在生成范围向内收过的安全区里，
+  // 写死的活动范围仍然必须落在生成范围向内收过的安全区里，
   // 否则玩家能走到还没有内容的世界边缘旁边。
   if (
     world &&

@@ -16,10 +16,25 @@ export const CHUNK_SIZE_MM = CHUNK_SIZE * 1000;
 
 /**
  * 世界在每个轴向上的 chunk 数量的一半。
- * chunk 坐标的合法范围是 [-WORLD_CHUNK_RADIUS, WORLD_CHUNK_RADIUS - 1]，
- * 因此世界是 16 × 16 个 chunk，即 512 × 512 米，且以原点为中心。
+ *
+ * 世界不再是一张有边的地图：chunk 完全由种子确定性生成，加载集合只跟着玩家
+ * 走，所以「世界多大」不是玩法设计，而是**数值精度的预算**。这里的取值来自
+ * 三条硬约束里最紧的一条：
+ *
+ * - 放置算法在毫米整数域上跑，坐标要留在 int32 内（WASM 侧是 i32）：
+ *   |chunk| < 2³¹ / CHUNK_SIZE_MM ≈ 67000；
+ * - chunk 的填充与轮廓顶点是**世界坐标**的 float32 属性，网格线、雾与云影也
+ *   按世界坐标采样：32 km 处 float32 的分辨率约 4 毫米，130 km 处降到 1.6 厘米，
+ *   线稿会开始抖；
+ * - Rapier 是 f32 物理，角色控制器的容差同样吃这份分辨率。
+ *
+ * 1024 是三者都还宽裕的那一档：世界 65 × 65 公里，直线跑到边界要一个多小时，
+ * 玩家实际上碰不到它。要再往外走，需要的不是调大这个数，而是把几何体改成
+ * chunk 局部坐标 + 浮动原点（远处的一切都相对玩家所在 chunk 表达）。
+ *
+ * chunk 坐标的合法范围是 [-WORLD_CHUNK_RADIUS, WORLD_CHUNK_RADIUS - 1]。
  */
-export const WORLD_CHUNK_RADIUS = 8;
+export const WORLD_CHUNK_RADIUS = 1024;
 
 /** chunk 坐标的合法区间（闭区间）。 */
 export const MINIMUM_CHUNK_COORDINATE = -WORLD_CHUNK_RADIUS;
@@ -29,7 +44,8 @@ export const MAXIMUM_CHUNK_COORDINATE = WORLD_CHUNK_RADIUS - 1;
  * 玩家活动区比生成范围向内缩的 chunk 数。
  *
  * 留出这一圈的意义：玩家永远走不到未生成的世界边缘旁边，
- * 视野尽头始终是有内容的地面，而不是虚空。
+ * 视野尽头始终是有内容的地面，而不是虚空。这一圈是精度上限的护栏，
+ * 不是玩法边界——它离出生点 32 公里，正常游玩到不了。
  */
 export const PLAY_AREA_CHUNK_MARGIN = 2;
 
