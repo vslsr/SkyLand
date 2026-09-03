@@ -140,6 +140,10 @@ process.on('message', (message) => {
       if (!scene) break;
       scene.applySlimeDrag(message.playerId, message.drag);
       break;
+    case 'player:bite':
+      if (!scene) break;
+      scene.toggleBite(message.playerId);
+      break;
     case 'debug:transform-log:start':
       if (!scene || !scene.players.has(message.playerId)) break;
       transformRecordings.set(message.sessionId, { playerId: message.playerId });

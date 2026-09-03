@@ -63,6 +63,11 @@ export {
   PickupDropComponent,
 } from './components/PickupDropComponent.mjs';
 export {
+  SOFT_BODY_DEFORMATION_COMPONENT,
+  SoftBodyDeformationComponent,
+} from './components/SoftBodyDeformationComponent.mjs';
+export { BITE_COMPONENT, BiteComponent } from './components/BiteComponent.mjs';
+export {
   GENERATED_PROP_COMPONENT,
   GeneratedPropComponent,
 } from './components/GeneratedPropComponent.mjs';

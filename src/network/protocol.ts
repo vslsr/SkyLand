@@ -43,8 +43,10 @@ export interface SnapshotPlayer {
   /** PickupDrop Component 的运行态；口部挂点来自玩家 Actor 原型。 */
   heldActorId?: string | null;
   pickupDropRevision?: number;
-  /** 正在进行的鼠标拖拽形变；没有拖拽时不下发。 */
+  /** 正在进行的形变：自己的鼠标拖拽，或被别人咬住那一处。没有就不下发。 */
   slimeDrag?: SnapshotSlimeDrag;
+  /** 正被这名玩家咬着。只有咬人的一方带，用来让交互键知道该松口了。 */
+  bitingPlayerId?: string;
 }
 
 export type ActorFloatState = 'afloat' | 'overloaded' | 'flooding' | 'sinking';
@@ -195,4 +197,5 @@ export interface InterpolatedPlayerState {
   velocityZ?: number;
   grounded?: boolean;
   slimeDrag?: SnapshotSlimeDrag;
+  bitingPlayerId?: string;
 }

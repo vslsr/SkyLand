@@ -94,6 +94,8 @@ export class GrasslandScene extends Scene {
   private timeSinceSlimeDragSent = 0;
   /** 上一次成功上报的拖拽是否处于按住状态；决定松手后要不要补发一次结束。 */
   private slimeDragReplicated = false;
+  /** 本地玩家正咬着别人；交互键这时说的是「松口」。权威状态来自快照。 */
+  private localPlayerBiting = false;
   /** 复用的上报缓冲：拖拽每帧都可能被读一次，不该每次都分配一个对象。 */
   private readonly slimeDragState: SlimeSurfaceDragState = {
     contactX: 0, contactY: 0, contactZ: 0, pullX: 0, pullY: 0, pullZ: 0,
@@ -232,6 +234,8 @@ export class GrasslandScene extends Scene {
       },
       sendInteraction: (actorId) => { this.roomClient.interactWithActor(actorId); },
       setPrompt: (text) => this.hud.setInteractionPrompt(text),
+      isBiting: () => this.localPlayerBiting,
+      sendBite: () => { this.roomClient.toggleBite(); },
     });
     this.inventory = new InventoryController(this.inventoryPage, this.input, {
       getInventory: () => this.player?.getComponent(INVENTORY_COMPONENT) as
@@ -288,9 +292,16 @@ export class GrasslandScene extends Scene {
     this.slimeSurfaceDrag?.update();
     // 「sim」= 第 2 步要搬进 Sim Worker 的那一半：本地预测与远端插值。
     frameTimeline.measure('sim-player', () => {
+      const localPlayerId = this.joinedRoom?.player.id;
+      const states = localPlayerId ? this.snapshots.sample() : [];
+      // 自己也可能正被别人咬着。那份形变由服务端按两边位姿推出来，本地不预测，
+      // 所以和远端玩家走同一条路：读快照，写参数段，重放在渲染侧。
+      const own = states.find((state) => state.id === localPlayerId);
+      this.localPlayerBiting = own?.bitingPlayerId !== undefined;
+      this.player?.setReplicatedSlimeDrag(own?.slimeDrag);
       this.player?.update(deltaSeconds);
-      if (this.joinedRoom?.scene.camera.mode === 'topdown') {
-        this.remotePlayers.sync(this.snapshots.sample(), this.joinedRoom.player.id);
+      if (localPlayerId && this.joinedRoom?.scene.camera.mode === 'topdown') {
+        this.remotePlayers.sync(states, localPlayerId);
         this.remotePlayers.update(deltaSeconds);
       } else {
         this.remotePlayers.clear();

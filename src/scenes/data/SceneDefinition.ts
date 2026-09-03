@@ -223,6 +223,16 @@ export interface ActorArchetypeDefinition {
       airControl: number;
     };
     /** 仅客户端使用：鼠标拖拽混合史莱姆蒙皮时的局部软体参数。 */
+    /** 可被外力捏变形的软体外壳；形变本身不改玩法状态。 */
+    softBodyDeformation?: {
+      breakDistance: number;
+      selfReportTimeoutMs?: number;
+    };
+    /** 能咬住别的软体的一张嘴；挂点复用 pickupDrop 的口部。 */
+    bite?: {
+      range: number;
+      facingDot?: number;
+    };
     slimeSurfaceDrag?: {
       maximumDistance: number;
       pullForce: number;
