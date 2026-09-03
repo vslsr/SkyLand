@@ -11,11 +11,8 @@ import { generateChunkContent } from '../../shared/world/chunkContent.mjs';
 import { formatGeneratedPropId } from '../../shared/world/generatedProp.mjs';
 import { selectWorldPropVariant } from '../../shared/world/worldPropVariants.mjs';
 import { TERRAIN_CELL_SIZE } from '../../shared/world/terrainConfig.mjs';
-import {
-  MAXIMUM_CHUNK_COORDINATE,
-  MINIMUM_CHUNK_COORDINATE,
-  PROP_KIND,
-} from '../../shared/world/worldConfig.mjs';
+import { toChunkCoordinate } from '../../shared/world/chunkKey.mjs';
+import { PROP_KIND } from '../../shared/world/worldConfig.mjs';
 
 function waitForJson(socket, predicate, timeoutMs = 7_000) {
   return new Promise((resolve, reject) => {
@@ -309,9 +306,14 @@ test('真实 WebSocket 贯通流式树砍伐、偏离态快照和圆木掉落', 
   ));
   const player = initial.snapshot.players.find((candidate) => candidate.id === joined.player.id);
 
+  // 世界是无边的，扫全图不再是一个可以做的动作：只在玩家周围几圈里找目标，
+  // 反正砍树要走到跟前，更远的树本来也不会被选中。
+  const centerChunkX = toChunkCoordinate(player.x);
+  const centerChunkZ = toChunkCoordinate(player.z);
+  const searchRadius = 3;
   let target;
-  for (let chunkZ = MINIMUM_CHUNK_COORDINATE; chunkZ <= MAXIMUM_CHUNK_COORDINATE; chunkZ += 1) {
-    for (let chunkX = MINIMUM_CHUNK_COORDINATE; chunkX <= MAXIMUM_CHUNK_COORDINATE; chunkX += 1) {
+  for (let chunkZ = centerChunkZ - searchRadius; chunkZ <= centerChunkZ + searchRadius; chunkZ += 1) {
+    for (let chunkX = centerChunkX - searchRadius; chunkX <= centerChunkX + searchRadius; chunkX += 1) {
       const props = generateChunkContent(room.worldSeed, chunkX, chunkZ);
       props.forEach((prop, propIndex) => {
         if (prop.kind !== PROP_KIND.TREE) return;
