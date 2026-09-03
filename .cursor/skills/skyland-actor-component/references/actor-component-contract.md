@@ -26,10 +26,20 @@ createActorSnapshots -> room:snapshot
 ActorSnapshotBuffer -> ClientActorSystem
   creates heterogeneous Replicas and applies snapshots
           |
-Actor root (authoritative Transform)
+  Actor holds a ProxyId, not an Object3D
+  Systems write world Transform + visual params into a shared byte segment
+          |
+======== Game World / Render World boundary ========
+          |
+ThreeMeshProxy (resolved from ProxyId)
+  root (authoritative Transform, from the SoA)
   `- attachmentVisualRoot (inherited presentation only)
       `- visualRoot (waves, bobbing, tilt, outline, local animation)
 ```
+
+The last three lines live **inside the render world**. A gameplay System reaches
+none of them; it writes bytes and the render world applies them. See
+`skyland-render-boundary`.
 
 ## Component responsibilities
 
@@ -109,10 +119,10 @@ When one action changes multiple Components, use one handler or shared mutation 
 - Use the Actor snapshot buffer for Transform and other continuous values. Stop at the newest snapshot rather than extrapolating an authoritative vessel indefinitely.
 - Treat ownership, carrier relation, interaction enabled state and event ids as discrete snapshot data; do not blend identifiers or invent intermediate states.
 - Treat `parentActorId` and `localTransform` as discrete data too. Blend the final world Transform, then derive the Three.js local pose from parent/child world poses.
-- The replicated root receives Transform. Models expose a child `visualRoot` for shader waves, water bob, damage shake, selection effects and other presentation.
+- The replicated root receives Transform. Proxies expose a child `visualRoot` for shader waves, water bob, damage shake, selection effects and other presentation. Both roots are render-world objects; gameplay drives them through the transform and visual-param SoA.
 - A free floating object may sample the same deterministic client wave function as the water surface. A carried object should inherit its carrier's visual bob/tilt while its DS root continues to follow the authoritative carrier mount.
 - Selection outlines and helpers are client resources: dispose their geometry/material when the target changes, its Actor disappears, or the scene is destroyed.
-- Fire geometry is transient presentation under `visualRoot`. The DS replicates thermal state; clients deform the reference-style `LineLoop` flames and never feed visual particles back into temperature authority.
+- Fire geometry is transient presentation under `visualRoot`, built and animated entirely in the render world. The DS replicates thermal state; gameplay forwards it as a visual param (`PARAM_FIRE_TARGET_INTENSITY`), and visual particles never feed back into temperature authority.
 - Temperature debug labels are client-only world UI attached to the Actor authority root. Keep them hidden by default, face them toward the active camera only while enabled, and bound their resources to loaded temperature Actors rather than world area.
 
 ## Network channel rules
@@ -130,6 +140,8 @@ When one action changes multiple Components, use one handler or shared mutation 
 | Actor exists in JSON but never appears | Archetype was not sanitized into `actorArchetypes`, snapshot target was absent, or the client model factory lacks the render variant. |
 | Model moves but server state does not | Motion was applied to the client root or visual model instead of a DS System. |
 | Waves make interaction positions drift | Visual animation was written to the replicated root instead of `visualRoot`. |
+| A visual effect trails motion by one frame | Its param was written after `RenderTransformSyncSystem` published the bank. |
+| `RenderSceneBoundary` test fails | A Component or ActorWorld System picked up a render import, or a new System was not registered in the ratchet list. |
 | Child snaps or double-moves between snapshots | The client interpolated/re-resolved `localTransform` instead of interpolating the server-resolved world Transform. |
 | Child bob changes its gameplay position | Its root was attached under the parent's `visualRoot`; inherited presentation belongs in `attachmentVisualRoot`. |
 | Deleting a parent destroys an unrelated child | Callers used cascade deletion where detach-and-keep-world was intended, or parent disposal traversed into another Actor root. |
@@ -148,6 +160,6 @@ When one action changes multiple Components, use one handler or shared mutation 
 - The client creates/removes the Replica solely from snapshots.
 - Missing/self/cyclic parents are rejected, and both detach and cascade deletion policies have focused tests.
 - Parent changes are discrete while the final child world Transform remains smoothly interpolated.
-- Visual animation affects only `visualRoot`.
+- Visual animation affects only `visualRoot`, and is driven across the boundary rather than by reaching into the proxy.
 - HUD/interaction feedback reads replicated state rather than optimistic local truth.
 - Server, client, transport and real WebSocket tests pass, followed by the production build.
