@@ -243,6 +243,18 @@ bindings.resetAllBindings();
 竖屏分别应用缩放与边距。桌面调试时在地址后添加 `?virtual-controls=1`；进入
 `topdown` 场景后即可用鼠标检查摇杆和按钮，正式桌面布局仍保持隐藏。
 
+### 右键不弹浏览器菜单
+
+右键在游戏画面里是输入，不是「打开系统菜单」的手势：菜单一弹就挡住画面、吃掉后续的
+pointermove，右键拖拽根本做不完整。`src/input/contextMenu.ts` 的
+`suppressBrowserContextMenu()` 在 `src/main.ts` 启动时装一次，捕获阶段拦掉整份文档的
+`contextmenu` 默认行为。
+
+它只拦默认行为，不拦 `pointerdown`/`pointerup`，也不 `stopPropagation`：`Mouse.Button2`
+照常进 `KeyboardMouseInputDevice`，CommonUI 事件栈的分发链路不变，玩法随时可以把右键绑上去。
+文本输入控件（`input`、`textarea`、`select`、`contenteditable`）默认放行，房间名这类输入框
+仍然能用原生复制粘贴菜单；需要连输入框一起屏蔽时传 `allowTextEntry: false`。
+
 ### 屏幕层级：UI 先吃掉指针
 
 摇杆热区是一整块透明矩形，覆盖屏幕左下角将近半屏，因此**它排在哪一层就决定了
