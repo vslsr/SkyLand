@@ -686,16 +686,23 @@ export class GrasslandScene extends Scene {
         z: before.logic.z - own.z,
       },
     });
-    const reconciliation = player.applyAuthoritativeState(
-      own.ackTick ?? own.sequence,
-      own.x,
-      own.z,
-      own.y,
-      own.verticalVelocity,
-      own.velocityX,
-      own.velocityZ,
-      own.grounded,
-    );
+    // 打点在这里，而不是在 `sim-player` 里：和解跑在 WebSocket 的回调上，
+    // 落在两帧**之间**，rAF 的 `beginFrame`/`endFrame` 根本罩不住它。之前面板上
+    // 那个「`sim-player` 只有 0.06ms」因此是假象——重放那一串固定步一次都没被数过。
+    // `frameTimeline` 会把这段自耗时攒到下一次 `endFrame`，也就是被它拖慢的那一帧上。
+    // 代价是这个阶段不计入整帧耗时，「整帧 − 各阶段之和」在有和解的帧上会偏小。
+    const reconciliation = frameTimeline.measure('net-reconcile', () => (
+      player.applyAuthoritativeState(
+        own.ackTick ?? own.sequence,
+        own.x,
+        own.z,
+        own.y,
+        own.verticalVelocity,
+        own.velocityX,
+        own.velocityZ,
+        own.grounded,
+      )
+    ));
     const after = player.captureTransformDebugState();
     this.playerTransformLog?.record('client.reconciliation_completed', {
       snapshotTick: snapshot.tick,
