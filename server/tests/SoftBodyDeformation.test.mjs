@@ -124,8 +124,8 @@ test('咬住只在服务端留下关系与缰绳：形状一个数都不下发',
 
   assert.equal(scene.toggleBite('biter'), true);
   assert.equal(biter.requireComponent(BITE_COMPONENT).targetActorId, 'victim');
-  assert.equal(deformation.sourceId, 'biter');
-  assert.equal(deformation.heldExternally, true);
+  assert.equal(deformation.isHeldBy('biter'), true);
+  assert.equal(deformation.holderCount, 1);
 
   // 关于「咬」过网络的只有这一个离散状态。尖长什么样由各客户端按两边位置自己算，
   // 服务端算一遍再下发既多占带宽，画面上还比位置慢一个快照。
@@ -140,7 +140,7 @@ test('咬住只在服务端留下关系与缰绳：形状一个数都不下发',
 
   // 咬着的时候，被咬者自己上报的鼠标拖拽让位：一块外壳只有一个来源。
   scene.applySlimeDrag('victim', { ...CONTACT, pullX: 0.9, pullY: 0, pullZ: 0 });
-  assert.equal(deformation.sourceId, 'biter');
+  assert.equal(deformation.isHeldBy('biter'), true);
   assert.equal(readDrag(scene, 'victim'), undefined);
 
   assert.equal(scene.toggleBite('biter'), true, '再按一次松口');
@@ -163,11 +163,8 @@ test('够不着、背对着、已经被咬着都咬不上；拉太远自动脱�
 
   biter.yaw = 0;
   assert.equal(scene.toggleBite('biter'), true);
-  scene.addPlayer({ id: 'other', name: '第三个', slot: 2 });
-  const other = scene.players.get('other');
-  place(scene, other, FIELD_X, FIELD_Z + 1.2);
-  other.yaw = 0;
-  assert.equal(scene.toggleBite('other'), false, '已经被别人咬着的不接受第二张嘴');
+  assert.equal(scene.toggleBite('biter'), true, '同一张嘴再按一次是松口，不是咬第二次');
+  assert.equal(scene.toggleBite('biter'), true);
 
   // 瞬移着走远：超过 breakDistance 就自动脱口。正常走开时缰绳会把人拖着跟上，
   // 所以这条兜底针对的是传送、被地形卡住这类拖不动的情况。
@@ -179,6 +176,59 @@ test('够不着、背对着、已经被咬着都咬不上；拉太远自动脱�
     false,
   );
   assert.equal(readDrag(scene, 'victim'), undefined);
+});
+
+test('好几张嘴可以一起咬同一个人：一张嘴一个抓握，缰绳取绷得最紧的那根', async () => {
+  const clock = createClock();
+  const scene = await createSoftBodyScene(clock);
+  scene.addPlayer({ id: 'biter', name: '前面那张嘴', slot: 0 });
+  scene.addPlayer({ id: 'victim', name: '被咬的', slot: 1 });
+  const { victim } = faceOff(scene, 1.2);
+  const deformation = victim.requireComponent(SOFT_BODY_DEFORMATION_COMPONENT);
+  assert.equal(scene.toggleBite('biter'), true);
+
+  // 第二张嘴从另一侧咬上来：不再互斥，每多一张嘴画面上就多一个尖。
+  scene.addPlayer({ id: 'second', name: '后面那张嘴', slot: 2 });
+  const second = scene.players.get('second');
+  place(scene, second, FIELD_X, FIELD_Z + 2.4);
+  second.yaw = Math.PI;
+  assert.equal(scene.toggleBite('second'), true, '第二张嘴该咬得上');
+  assert.equal(deformation.holderCount, 2);
+  assert.equal(deformation.isHeldBy('biter'), true);
+  assert.equal(deformation.isHeldBy('second'), true);
+  // 形状仍然不下发：两个尖由各客户端按这两张嘴的位置自己算。
+  assert.equal(readDrag(scene, 'victim'), undefined);
+
+  // 满员之后才咬不上。上限是参数段的槽位数，玩法与渲染共用同一个常量。
+  scene.addPlayer({ id: 'third', name: '第三张嘴', slot: 3 });
+  const third = scene.players.get('third');
+  place(scene, third, FIELD_X + 1.2, FIELD_Z + 1.2);
+  third.yaw = -Math.PI / 2;
+  assert.equal(scene.toggleBite('third'), true, '第三张嘴还在上限内');
+  assert.equal(deformation.holderCount, 3);
+  scene.addPlayer({ id: 'fourth', name: '第四张嘴', slot: 4 });
+  const fourth = scene.players.get('fourth');
+  place(scene, fourth, FIELD_X - 1.2, FIELD_Z + 1.2);
+  fourth.yaw = Math.PI / 2;
+  scene.toggleBite('fourth');
+  // 满员的那块外壳不再接受第四张嘴（这一口可能落到别人身上，那不影响这条断言）。
+  assert.equal(deformation.isHeldBy('fourth'), false, '满了就咬不上这一个');
+  assert.equal(deformation.holderCount, 3);
+
+  // 缰绳只有一根：取绷得最紧的那根。把第二张嘴拉远，锚点就该换成它。
+  place(scene, second, FIELD_X, FIELD_Z + 4.2);
+  scene.update();
+  const leash = scene.createSnapshot().players.find((player) => player.id === 'victim').leash;
+  assert.ok(
+    Math.abs(leash.anchorZ - second.z) < 0.5,
+    `绷得最紧的是第二张嘴，锚点该是它，实际 ${leash.anchorZ}`,
+  );
+
+  // 松开一张嘴，其它的照旧咬着。
+  assert.equal(scene.toggleBite('biter'), true, '松口');
+  assert.equal(deformation.isHeldBy('biter'), false);
+  assert.equal(deformation.holderCount, 2);
+  assert.equal(victim.requireComponent(SOFT_BODY_DEFORMATION_COMPONENT).heldExternally, true);
 });
 
 test('咬住的人被缰绳越拉越紧地限制在原地附近', async () => {

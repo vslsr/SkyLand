@@ -5,8 +5,8 @@ import type { ActorArchetypeDefinition } from '../scenes/data/SceneDefinition';
 import type { RenderScene } from '../render/RenderScene';
 import type { RenderTransformBuffer } from '../render/RenderTransformBuffer';
 import { RemotePlayer } from './RemotePlayer';
-import { collectBiters, resolveBiteTip } from './slimeBiteTip';
-import { SLIME_BITE_AT_REST, type SlimeBiteParams } from '../render/RenderSlimeBite';
+import { collectBiters, resolveBiteTips } from './slimeBiteTip';
+import { createSlimeBiteParams, type SlimeBiteParams } from '../render/RenderSlimeBite';
 import {
   RemotePlayerColliders,
   type RemotePlayerColliderState,
@@ -22,9 +22,9 @@ import {
 export class RemotePlayerGroup {
   private readonly players = new Map<string, RemotePlayer>();
   /** 每帧复用的突起向量缓冲，算完就写进各自的参数段。 */
-  private readonly biteTip: SlimeBiteParams = { ...SLIME_BITE_AT_REST };
+  private readonly biteTips: SlimeBiteParams = createSlimeBiteParams();
   /** 调用方没给「谁咬着谁」时自己建一张，同样复用不重新分配。 */
-  private readonly biters = new Map<string, InterpolatedPlayerState>();
+  private readonly biters = new Map<string, InterpolatedPlayerState[]>();
   private archetype?: ActorArchetypeDefinition;
   private colliders?: RemotePlayerColliders;
   private renderWorld?: { scene: RenderScene; transforms: RenderTransformBuffer };
@@ -56,7 +56,7 @@ export class RemotePlayerGroup {
   public sync(
     states: InterpolatedPlayerState[],
     localPlayerId?: string,
-    biters?: ReadonlyMap<string, InterpolatedPlayerState>,
+    biters?: ReadonlyMap<string, InterpolatedPlayerState[]>,
   ): void {
     const archetype = this.archetype;
     const renderWorld = this.renderWorld;
@@ -77,7 +77,7 @@ export class RemotePlayerGroup {
       );
       if (this.players.has(state.id)) existing.applyState(state);
       else this.players.set(state.id, existing);
-      existing.setBiteTip(resolveBiteTip(state, biterOf.get(state.id), archetype, this.biteTip));
+      existing.setBiteTips(resolveBiteTips(state, biterOf.get(state.id), archetype, this.biteTips));
     }
 
     for (const [id, player] of this.players) {

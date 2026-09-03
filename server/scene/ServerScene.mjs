@@ -72,6 +72,7 @@ import { TerrainEditor } from '../../shared/world/terrainEditing.mjs';
 import { TerrainPatchStore } from '../../shared/world/terrainPatches.mjs';
 import {
   isSlimeDragRegrab,
+  MAX_SOFT_BODY_HOLDERS,
   mouthWorld,
   sanitizeSlimeDragState,
 } from '../../shared/softBodyDeformation.mjs';
@@ -778,16 +779,18 @@ export class ServerScene {
    */
   activeLeash(player) {
     const deformation = player.getComponent(SOFT_BODY_DEFORMATION_COMPONENT);
-    if (!deformation?.heldExternally || deformation.leashStiffness <= 0) return undefined;
+    // 几张嘴咬着就有几根绳，共享固定步只吃一根：取绷得最紧的那根，松的绳不出力。
+    const holder = deformation?.tautestHold();
+    if (!holder) return undefined;
     return {
-      anchorX: roundCoordinate(deformation.anchorX),
-      anchorZ: roundCoordinate(deformation.anchorZ),
-      slack: deformation.grabDistance + deformation.leashSlack,
-      stiffness: deformation.leashStiffness,
-      damping: deformation.leashDamping,
-      carry: deformation.leashCarry,
-      anchorVelocityX: roundCoordinate(deformation.anchorVelocityX),
-      anchorVelocityZ: roundCoordinate(deformation.anchorVelocityZ),
+      anchorX: roundCoordinate(holder.anchorX),
+      anchorZ: roundCoordinate(holder.anchorZ),
+      slack: holder.grabDistance + holder.leashSlack,
+      stiffness: holder.leashStiffness,
+      damping: holder.leashDamping,
+      carry: holder.leashCarry,
+      anchorVelocityX: roundCoordinate(holder.anchorVelocityX),
+      anchorVelocityZ: roundCoordinate(holder.anchorVelocityZ),
     };
   }
 
@@ -824,8 +827,12 @@ export class ServerScene {
     for (const candidate of this.players.values()) {
       if (candidate.id === playerId) continue;
       const deformation = candidate.getComponent(SOFT_BODY_DEFORMATION_COMPONENT);
-      // 已经被别的外力捏着的不再接受第二张嘴。
-      if (!deformation || deformation.heldExternally) continue;
+      // 可以几张嘴一起咬同一个人——每多一张就多一个尖。满了或者自己已经咬着的跳过。
+      if (
+        !deformation
+        || deformation.isHeldBy(playerId)
+        || deformation.holderCount >= MAX_SOFT_BODY_HOLDERS
+      ) continue;
       const distance = Math.hypot(
         candidate.x - mouth.x,
         candidate.y + radius * 0.5 - mouth.y,

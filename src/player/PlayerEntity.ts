@@ -34,7 +34,7 @@ import {
   type SlimeDragParams,
 } from '../render/RenderSlimeDrag';
 import {
-  SLIME_BITE_AT_REST,
+  createSlimeBiteParams,
   writeSlimeBiteParams,
   type SlimeBiteParams,
 } from '../render/RenderSlimeBite';
@@ -122,8 +122,8 @@ export class PlayerEntity extends Actor {
   /** 服务端推给自己的形变；今天只有「被别人咬住」一种。 */
   private readonly replicatedDrag: SlimeDragParams = { ...SLIME_DRAG_AT_REST };
 
-  /** 自己正被谁咬着捏出来的那个尖。由 `GrasslandScene` 按两边位置当场算。 */
-  private readonly biteTip: SlimeBiteParams = { ...SLIME_BITE_AT_REST };
+  /** 自己正被谁咬着捏出来的那些尖。由 `GrasslandScene` 按两边位置当场算。 */
+  private readonly biteTips: SlimeBiteParams = createSlimeBiteParams();
   private readonly visual: PlayerVisualShape;
   private readonly reconciler = new PlayerReconciler();
   private readonly grassDisplacement: GrassDisplacementComponent;
@@ -289,10 +289,8 @@ export class PlayerEntity extends Actor {
   }
 
   /** 没人咬着就传零向量：不驱动这项表现的槽位每帧写 0。 */
-  public setBiteTip(tip: SlimeBiteParams): void {
-    this.biteTip.x = tip.x;
-    this.biteTip.y = tip.y;
-    this.biteTip.z = tip.z;
+  public setBiteTips(tips: ArrayLike<number>): void {
+    this.biteTips.set(tips);
   }
 
   public captureTransformDebugState(): PlayerTransformDebugState {
@@ -422,7 +420,7 @@ export class PlayerEntity extends Actor {
     // 咬住那一份。没有的时候也要每帧写，否则回收来的槽位会带着上一位玩家的
     // 残留把自己的外壳拉出去。
     writeSlimeDragParams(this.transforms, this.renderProxy.id, this.replicatedDrag);
-    writeSlimeBiteParams(this.transforms, this.renderProxy.id, this.biteTip);
+    writeSlimeBiteParams(this.transforms, this.renderProxy.id, this.biteTips);
     this.publishGroundProbe();
   }
 

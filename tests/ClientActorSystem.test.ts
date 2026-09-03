@@ -41,7 +41,7 @@ import {
 import type { SnapshotActor } from '../src/network/protocol';
 import { RenderTransformBuffer } from '../src/render/RenderTransformBuffer';
 import { SLIME_DRAG_AT_REST, writeSlimeDragParams } from '../src/render/RenderSlimeDrag';
-import { SLIME_BITE_AT_REST, writeSlimeBiteParams } from '../src/render/RenderSlimeBite';
+import { createSlimeBiteParams, writeSlimeBiteParams } from '../src/render/RenderSlimeBite';
 import { resolvePlayerVisualShape } from '../src/player/playerVisualShape';
 import { ThreeRenderScene } from '../src/render/three/ThreeRenderScene';
 import type { ThreeHybridSlimeVisual } from '../src/render/three/ThreeHybridSlimeVisual';
@@ -1144,7 +1144,7 @@ test('咬住按一个向量把静止外形拔出一个尖：连续、对称、�
   const transforms = new RenderTransformBuffer(4);
   const info = scene.createPlayerProxy({ name: 'bitten-player', render, walkSpeed: 3.2 });
   const slime = scene.resolveSlimeVisual(info.id)!;
-  const bite = { ...SLIME_BITE_AT_REST };
+  const bite = createSlimeBiteParams();
   const step = (frames: number, from = 0): void => {
     for (let frame = 0; frame < frames; frame += 1) {
       writeSlimeBiteParams(transforms, info.id, bite);
@@ -1158,7 +1158,7 @@ test('咬住按一个向量把静止外形拔出一个尖：连续、对称、�
 
   // 向量：方向是「身体中心 → 牙」，长度是尖有多长。没有命中点，也没有抓取计数。
   const amount = 0.6;
-  bite.z = amount;
+  bite[2] = amount;
   step(180, 90);
 
   const bitten = slime.simulation.positions;
@@ -1208,12 +1208,78 @@ test('咬住按一个向量把静止外形拔出一个尖：连续、对称、�
   );
 
   // 松口：外形自己收回去，不需要额外的回弹路径。
-  bite.z = 0;
+  bite[2] = 0;
   step(240, 270);
   const released = Math.abs(
     slime.simulation.positions[tipOffset + 2] - rest[tipOffset + 2],
   );
   assert.ok(released < tip * 0.2, `松口后应回到静止外形，实际 ${released}`);
+  scene.dispose();
+});
+
+test('几张嘴一起咬：每张一个向量，位移相加，两个尖同时在', () => {
+  const render = pbfSlimeArchetype.components.render;
+  assert.ok(render?.model === 'line-art-pbf-slime');
+  const scene = new ThreeRenderScene(new THREE.Group(), RENDER_ENVIRONMENT);
+  const transforms = new RenderTransformBuffer(4);
+  const info = scene.createPlayerProxy({ name: 'double-bitten', render, walkSpeed: 3.2 });
+  const slime = scene.resolveSlimeVisual(info.id)!;
+  const bite = createSlimeBiteParams();
+  const step = (frames: number, from = 0): void => {
+    for (let frame = 0; frame < frames; frame += 1) {
+      writeSlimeBiteParams(transforms, info.id, bite);
+      transforms.publish();
+      scene.submitTransforms(transforms);
+      scene.updateVisuals(transforms, 1 / 60, (from + frame) / 60);
+    }
+  };
+  step(90);
+  const rest = Float32Array.from(slime.simulation.positions);
+
+  const directions = slime.rig.surfaceDirections;
+  const extremeAlong = (axis: readonly [number, number, number]): number => {
+    let best = 0;
+    let bestAlignment = -Infinity;
+    for (let offset = 0; offset < directions.length; offset += 3) {
+      const alignment = directions[offset] * axis[0]
+        + directions[offset + 1] * axis[1]
+        + directions[offset + 2] * axis[2];
+      if (alignment <= bestAlignment) continue;
+      bestAlignment = alignment;
+      best = offset;
+    }
+    return best;
+  };
+  const frontOffset = extremeAlong([0, 0, 1]);
+  const sideOffset = extremeAlong([1, 0, 0]);
+
+  // 先只有一张嘴：量一个尖的长度作为基准。
+  bite[2] = 0.6;
+  step(180, 90);
+  const single = slime.simulation.positions[frontOffset + 2] - rest[frontOffset + 2];
+  assert.ok(single > 0.4, `单张嘴要先拔出一个尖，实际 ${single}`);
+
+  // 第二张嘴从 +X 咬上来：两个尖同时在，各自朝各自那张嘴。
+  bite[3] = 0.6;
+  step(180, 270);
+  const bitten = slime.simulation.positions;
+  const front = bitten[frontOffset + 2] - rest[frontOffset + 2];
+  const side = bitten[sideOffset] - rest[sideOffset];
+  assert.ok(
+    Math.abs(front - single) < single * 0.35,
+    `第一个尖不该被第二张嘴吃掉，实际 ${front} vs ${single}`,
+  );
+  assert.ok(side > 0.4, `第二个尖也要长出来，实际 ${side}`);
+
+  // 松开第二张：它自己收回去，第一个尖还在。
+  bite[3] = 0;
+  step(240, 450);
+  const released = slime.simulation.positions[sideOffset] - rest[sideOffset];
+  assert.ok(released < side * 0.25, `松开的那张嘴的尖要收回去，实际 ${released}`);
+  assert.ok(
+    slime.simulation.positions[frontOffset + 2] - rest[frontOffset + 2] > single * 0.7,
+    '还咬着的那个尖不受影响',
+  );
   scene.dispose();
 });
 

@@ -22,6 +22,15 @@ export const SLIME_DRAG_TIMEOUT_MS = 600;
 /** 命中点移动超过这个距离（米）就算换了一次抓取，接收端需要重新计算权重。 */
 export const SLIME_DRAG_REGRAB_DISTANCE = 0.02;
 
+/**
+ * 一块外壳同时最多被几个外力抓着。
+ *
+ * 每多一张嘴就多一个突起向量，画面上多一个尖，位移相加——所以这是个上限，不是
+ * 「一次只能一个」。定这个数是因为参数段是定长的；三张嘴咬同一只史莱姆已经是
+ * 围殴，再多的尖也分不出来。玩法侧与渲染侧共用它，省得两边各写一个 3。
+ */
+export const MAX_SOFT_BODY_HOLDERS = 3;
+
 function toBoundedNumber(value) {
   if (typeof value !== 'number' || !Number.isFinite(value)) return undefined;
   return Math.max(
