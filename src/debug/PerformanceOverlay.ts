@@ -90,6 +90,7 @@ export class PerformanceOverlay {
       {
         label: '渲染线程',
         report: renderThread?.report,
+        pacing: renderThread?.pacing,
         ageMilliseconds: renderThread?.ageMilliseconds,
         absentReason: '渲染循环没在独立线程上（或还没画出第一帧）',
       },

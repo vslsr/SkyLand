@@ -38,6 +38,16 @@ let reportedAt = 0;
 /** 帧计时报表的发送间隔。一秒一条足够看清趋势，又不会把 postMessage 变成负担。 */
 const FRAME_REPORT_INTERVAL_MS = 1000;
 
+/** 上一帧读到的玩法帧号，用来数重复与跳过。 */
+let lastTransformFrameId = -1;
+let pacingFrames = 0;
+let pacingDuplicated = 0;
+let pacingSkipped = 0;
+/** 跨报表窗口保留的最差帧。卡顿几秒一次，只看当前这一秒会正好错过。 */
+let worstFrameMilliseconds = 0;
+let worstFrameAt = 0;
+const WORST_FRAME_WINDOW_MS = 10_000;
+
 self.addEventListener('message', (event: MessageEvent<RenderWorkerFromMain>) => {
   const message = event.data;
   if (message.kind === 'start') {
@@ -97,18 +107,50 @@ function frame(now: number): void {
   elapsed += deltaSeconds;
   // 帧边界打在这里，不在 runtime 里：整帧减去各阶段之和，剩下的就是还没打点的地方。
   // 帧循环搬进这条线程之后，这才是「一帧到底多久」的唯一现场。
+  const startedAt = (globalThis.performance ?? Date).now();
   frameTimeline.beginFrame();
   frameTimeline.measure('render-update', () => runtime?.update(deltaSeconds, elapsed));
   frameTimeline.measure('render-draw', () => runtime?.render());
   frameTimeline.endFrame();
+  const frameMilliseconds = (globalThis.performance ?? Date).now() - startedAt;
+  if (frameMilliseconds >= worstFrameMilliseconds || now - worstFrameAt > WORST_FRAME_WINDOW_MS) {
+    worstFrameMilliseconds = frameMilliseconds;
+    worstFrameAt = now;
+  }
+
+  // 这一帧画的是玩法的第几帧。两条循环各跑各的 rAF，相位一漂就会「同一份画两遍」
+  // 接着「有一份没画」——两边都还是满帧，画面却在这对上一顿。
+  const frameId = transforms?.frameId ?? -1;
+  if (frameId >= 0) {
+    pacingFrames += 1;
+    if (lastTransformFrameId >= 0) {
+      const advanced = frameId - lastTransformFrameId;
+      if (advanced === 0) pacingDuplicated += 1;
+      else if (advanced > 1) pacingSkipped += 1;
+    }
+    lastTransformFrameId = frameId;
+  }
 
   if (reportedAt === 0) reportedAt = now;
   if (now - reportedAt >= FRAME_REPORT_INTERVAL_MS) {
     reportedAt = now;
     // 报完就清：面板看的是「最近一秒」，而不是从进图到现在的平均——
     // 卡顿是一阵一阵的，累计平均会把它抹平。
-    post({ kind: 'frameReport', report: frameTimeline.report() });
+    post({
+      kind: 'frameReport',
+      report: frameTimeline.report(),
+      pacing: {
+        frames: pacingFrames,
+        duplicated: pacingDuplicated,
+        skipped: pacingSkipped,
+        worstMilliseconds: worstFrameMilliseconds,
+        worstSecondsAgo: Math.max(0, (now - worstFrameAt) / 1000),
+      },
+    });
     frameTimeline.reset();
+    pacingFrames = 0;
+    pacingDuplicated = 0;
+    pacingSkipped = 0;
   }
 }
 

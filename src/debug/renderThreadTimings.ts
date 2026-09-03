@@ -1,4 +1,5 @@
 import type { FrameTimingReport } from '../platform/index';
+import type { FramePacing } from '../render/worker/renderWorkerProtocol';
 
 /**
  * 渲染线程最近一份帧计时。
@@ -12,12 +13,17 @@ import type { FrameTimingReport } from '../platform/index';
  */
 
 let latest: FrameTimingReport | undefined;
+let latestPacing: FramePacing | undefined;
 let receivedAt = 0;
 
 const now = (): number => (globalThis.performance ?? Date).now();
 
-export function publishRenderThreadReport(report: FrameTimingReport): void {
+export function publishRenderThreadReport(
+  report: FrameTimingReport,
+  pacing?: FramePacing,
+): void {
   latest = report;
+  latestPacing = pacing;
   receivedAt = now();
 }
 
@@ -29,14 +35,16 @@ export function publishRenderThreadReport(report: FrameTimingReport): void {
  */
 export function readRenderThreadReport(): {
   report: FrameTimingReport;
+  pacing?: FramePacing;
   ageMilliseconds: number;
 } | undefined {
   if (!latest) return undefined;
-  return { report: latest, ageMilliseconds: now() - receivedAt };
+  return { report: latest, pacing: latestPacing, ageMilliseconds: now() - receivedAt };
 }
 
 /** 换地图或断开连接时清掉，避免上一张图的数字留在面板上。 */
 export function clearRenderThreadReport(): void {
   latest = undefined;
+  latestPacing = undefined;
   receivedAt = 0;
 }

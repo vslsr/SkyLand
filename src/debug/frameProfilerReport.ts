@@ -1,4 +1,5 @@
 import type { FrameTimingReport } from '../platform/index';
+import type { FramePacing } from '../render/worker/renderWorkerProtocol';
 
 /**
  * 帧计时的纯文本排版。
@@ -19,6 +20,8 @@ export interface ProfilerThreadSample {
   readonly ageMilliseconds?: number;
   /** 没有报表时显示的原因，例如「渲染循环在主线程上」。 */
   readonly absentReason?: string;
+  /** 与玩法循环的配对情况。只有跨线程渲染时才有。 */
+  readonly pacing?: FramePacing;
 }
 
 /** 超过这个年龄就认为渲染线程已经不发了。它每秒发一条，两秒没来必然有问题。 */
@@ -54,12 +57,32 @@ export function formatFrameProfiler(
     }
     const { report } = thread;
     const fps = thread.fps ?? report.frames;
+    // 帧数要跟着抬头一起显示：渲染线程的窗口是一秒（它每秒清一次），主线程那份
+    // 由 main.ts 每十秒清一次。两条线的 p95/max 因此不是同一个窗口算出来的，
+    // 不写出来会让人拿一秒的最大值去比十秒的最大值。
     lines.push(
       `${thread.label}  ${fps.toFixed(0).padStart(3)} fps`
       + `  帧 p50=${milliseconds(report.frameMedian)}`
       + `  p95=${milliseconds(report.frameP95)}`
-      + `  max=${milliseconds(report.frameMaximum)}`,
+      + `  max=${milliseconds(report.frameMaximum)}`
+      + `  取样 ${report.frames} 帧`,
     );
+    if (thread.pacing && thread.pacing.frames > 0) {
+      const { frames, duplicated, skipped } = thread.pacing;
+      const wasted = duplicated + skipped;
+      lines.push(
+        `   ${'帧配对'.padEnd(14)} 一对一=${String(frames - wasted).padStart(3)}`
+        + `  重复=${String(duplicated).padStart(3)}`
+        + `  跳过=${String(skipped).padStart(3)}`
+        + `${wasted > 0 ? `  ← 画面在这 ${wasted} 帧上顿` : ''}`,
+      );
+      if (thread.pacing.worstMilliseconds > 0) {
+        lines.push(
+          `   ${'近十秒最差'.padEnd(12)} ${milliseconds(thread.pacing.worstMilliseconds)}`
+          + `  （${thread.pacing.worstSecondsAgo.toFixed(1)}s 前）`,
+        );
+      }
+    }
     for (const phase of report.phases.slice(0, phaseLimit)) {
       lines.push(
         `   ${phase.phase.padEnd(16)} p50=${milliseconds(phase.median)}`

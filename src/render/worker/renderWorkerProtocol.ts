@@ -50,4 +50,33 @@ export type RenderWorkerToMain =
    * 一秒一条、约两百字节，生产构建里也照发：调试面板一打开就有数，不必等开关
    * 生效后再攒一秒。
    */
-  | { readonly kind: 'frameReport'; readonly report: FrameTimingReport };
+  | {
+      readonly kind: 'frameReport';
+      readonly report: FrameTimingReport;
+      readonly pacing: FramePacing;
+    };
+
+/**
+ * 两条循环的配对情况。
+ *
+ * 玩法每帧写满 transform 双缓冲并 `publish()`，渲染线程按自己的 rAF 读最新那一面——
+ * 两条循环都是 60Hz，但没有相位锁，也没有插值。于是相位一漂，就会出现「同一份
+ * transform 被画了两遍」紧跟着「有一份根本没被画出来」。两条线程各自都是满帧，
+ * 画面却在这对重复/跳过上一顿。光看 fps 和耗时永远看不出来，所以单独数出来。
+ */
+export interface FramePacing {
+  /** 这一秒画了多少帧。 */
+  readonly frames: number;
+  /** 其中有多少帧读到的 transform 与上一帧完全相同（玩法没赶上）。 */
+  readonly duplicated: number;
+  /** 有多少帧跨过了不止一次 publish（玩法赶超了，中间那份没被画出来）。 */
+  readonly skipped: number;
+  /**
+   * 最近十秒里最慢的那一帧，以及它是几秒前的事。
+   *
+   * 报表本身每秒清一次，卡顿却常常是几秒一次的——只看当前这一秒，十有八九
+   * 正好错过。这一项跨窗口留着，"我卡了一下但面板上什么都没有"就不会再发生。
+   */
+  readonly worstMilliseconds: number;
+  readonly worstSecondsAgo: number;
+}

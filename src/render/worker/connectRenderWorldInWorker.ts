@@ -70,7 +70,7 @@ export function connectRenderWorldInWorker(
     if (message.kind === 'frameReport') {
       // 落进那份全局，调试面板从那里读。这里不判断面板开没开：一秒一条报文，
       // 而「开面板之前的那一秒」恰恰是最想看的那一秒。
-      publishRenderThreadReport(message.report);
+      publishRenderThreadReport(message.report, message.pacing);
       return;
     }
     if (message.kind === 'failed') {
