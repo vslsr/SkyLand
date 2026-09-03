@@ -74,6 +74,26 @@ Decide first which of the two kinds you have.
 
 The self-reported drag is throttled to `SLIME_DRAG_SEND_INTERVAL_SECONDS` (the snapshot rate), not the input rate: the server only forwards it once per snapshot, and it shares the input token bucket with movement. Sending it faster silently starves the inputs that actually get replayed.
 
+## The wrong turns this feature already took
+
+All of these shipped. Every one of them type-checked, passed `npm test`, and read fine in review — the failure mode is always that both sides hold three plausible f32, so only a picture disagrees.
+
+| What was wrong | What it looked like |
+| --- | --- |
+| contact and pull computed in Actor-local space (yaw-rotated) while the solver's vertices are world-aligned | the spike came out of the victim's *back* — 180° off, because the two face each other |
+| the pull's length was "how much further apart the two have drifted since the grab" | biting and standing still deformed nothing at all, and the tip never reached the teeth |
+| `pinch` narrowed the influence radius to 0.30m, under the ~0.2m vertex spacing | a one-vertex needle with a crease under it, not a cone |
+| the pinched weight was `smoothstep^k`, which is flat at its peak | a mushroom head instead of a converging apex |
+| the pinch relied on force balance (`pullForce` 120 vs. skin ≈ 80) | the tip stalled at half its target however far the teeth moved |
+| *(earlier)* the pull was `mouth − contact` with no guard | at bite range that vector points inside the body: the shell dented into a round lump |
+| *(earlier)* `grab()` did not prime the leash anchor | one snapshot's leash pointed at the world origin and yanked the victim there |
+
+Two of them are worth a second look, because of *how* they survived.
+
+**A half-diagnosis got written down as a law.** The inward dent was real, and the fix — stop using `mouth − contact`, derive the direction from the two body positions instead — did remove it. It also quietly traded a wrong direction for a wrong length, and this file then recorded the replacement as an iron law ("the pull direction is source-position → not anchor-minus-contact"), so the next pass kept it and tuned around it. A rule that records the symptom instead of the geometry freezes the bug in place. Write down what the quantity *is* — the skin sits on the grip point, and never presses inward — rather than what it is not.
+
+**A sentence here contradicted the code and nothing checked it.** This file used to claim the grabbed patch "turns with the victim". It does not: `ThreeHybridSlimeVisual` counter-rotates the rig by `-yaw`. The frame bug lived directly under that sentence for two passes.
+
 ## Route adjacent work
 
 - `skyland-render-boundary` for which channel a new value rides and where a visual System may live. It owns everything after the Replica exists.
@@ -88,3 +108,4 @@ The self-reported drag is throttled to `SLIME_DRAG_SEND_INTERVAL_SECONDS` (the s
 3. A render test that drives the real path — write params, `submitTransforms`, `updateVisuals` — not the solver directly. Applying the *same* revision for many frames must keep accumulating stretch. For a pinched grab, assert the tip reaches the full pull *and* that several vertices follow it: one vertex alone is a needle, a flat profile is a lump, and only the two together are a cone.
 4. `tests/RenderSceneBoundary.test.ts`, always: a Component that quietly imported the solver fails there and nowhere else.
 5. `npm test` and `npx tsc --noEmit`.
+6. **Then look at it.** Nothing above catches a wrong frame or a needle — they are all plausible f32 in, plausible f32 out. Drive the whole chain once in a throwaway script: a `ServerScene` with two players, `toggleBite`, `createSnapshot`, then feed that snapshot's `slimeDrag` *and* both transforms into a `ThreeRenderScene`, step ~240 frames, project every surface triangle of both rigs through `rig.surface.matrixWorld` into one SVG, and mark the source's grip point. Give each triangle a consistent 2D winding or the nonzero fill rule cancels the far hemisphere against the near one and the page comes out blank. Headless Chromium renders the SVG to a PNG. The first rows of the table above are unmistakable in that picture and invisible in every other check.
