@@ -1,6 +1,7 @@
 import {
   Actor,
   BuoyancyComponent,
+  InventoryComponent,
   PlayerJumpComponent,
   PlayerMovementComponent,
   PickupDropComponent,
@@ -127,6 +128,9 @@ export class PlayerEntity extends Actor {
     const movement = this.addComponent(new PlayerMovementComponent(
       archetype.components.playerMovement,
     )) as PlayerMovementComponent;
+    // 背包是权威数据，本地这份只是快照的镜像：容量参数从原型来，内容等
+    // GrasslandScene 把玩家快照喂进 applySnapshot，不做本地预测。
+    this.addComponent(new InventoryComponent(archetype.components.inventory));
     if (archetype.components.pickupDrop) {
       this.addComponent(new PickupDropComponent(archetype.components.pickupDrop));
     }

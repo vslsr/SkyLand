@@ -66,6 +66,11 @@
       "trigger": { "type": "pressed" }
     },
     {
+      "id": "IA_Player_Inventory",
+      "valueType": "digital",
+      "trigger": { "type": "pressed" }
+    },
+    {
       "id": "IA_Debug_Menu",
       "valueType": "digital",
       "trigger": { "type": "pressed" }
@@ -90,6 +95,7 @@
       { "tag": "Input.AbilityLab.Rage", "actionId": "IA_AbilityLab_Rage" },
       { "tag": "Input.AbilityLab.Silence", "actionId": "IA_AbilityLab_Silence" },
       { "tag": "Input.AbilityLab.Reset", "actionId": "IA_AbilityLab_Reset" },
+      { "tag": "Input.Player.Inventory", "actionId": "IA_Player_Inventory" },
       { "tag": "Input.Debug.Menu", "actionId": "IA_Debug_Menu" },
       { "tag": "Input.Player.Dodge", "actionId": "IA_Player_Dodge" }
     ]
@@ -138,6 +144,9 @@
         { "id": "AbilityLab.Keyboard.Rage", "deviceKind": "keyboardMouse", "control": "Keyboard.Digit3", "actionId": "IA_AbilityLab_Rage" },
         { "id": "AbilityLab.Keyboard.Silence", "deviceKind": "keyboardMouse", "control": "Keyboard.Digit4", "actionId": "IA_AbilityLab_Silence" },
         { "id": "AbilityLab.Keyboard.Reset", "deviceKind": "keyboardMouse", "control": "Keyboard.Digit0", "actionId": "IA_AbilityLab_Reset" },
+        { "id": "Inventory.Keyboard.Primary", "deviceKind": "keyboardMouse", "control": "Keyboard.KeyB", "actionId": "IA_Player_Inventory" },
+        { "id": "Inventory.Touch.Button", "deviceKind": "touch", "control": "Virtual.InventoryButton", "actionId": "IA_Player_Inventory" },
+        { "id": "Inventory.Gamepad.Button", "deviceKind": "gamepad", "control": "Gamepad.Back", "actionId": "IA_Player_Inventory" },
         { "id": "Dodge.Touch.Button", "deviceKind": "touch", "control": "Virtual.DodgeButton", "actionId": "IA_Player_Dodge" },
         { "id": "Dodge.Gamepad.Button", "deviceKind": "gamepad", "control": "Gamepad.ButtonEast", "actionId": "IA_Player_Dodge" }
       ]
@@ -163,6 +172,7 @@
       "Keyboard.ArrowRight": "→",
       "Keyboard.KeyF": "F",
       "Keyboard.KeyE": "E",
+      "Keyboard.KeyB": "B",
       "Keyboard.Digit0": "0",
       "Keyboard.Digit1": "1",
       "Keyboard.Digit2": "2",
@@ -176,10 +186,12 @@
       "Virtual.SprintButton": "RUN",
       "Virtual.JumpButton": "JUMP",
       "Virtual.WorldInteractButton": "ACT",
+      "Virtual.InventoryButton": "BAG",
       "Gamepad.LeftStick": "左摇杆",
       "Gamepad.LeftStickButton": "L3",
       "Gamepad.ButtonWest": "X",
-      "Gamepad.ButtonNorth": "Y"
+      "Gamepad.ButtonNorth": "Y",
+      "Gamepad.Back": "Back"
     },
     "prompts": [
       {
@@ -202,7 +214,8 @@
           { "label": "镜头", "text": "左键拖动" },
           { "label": "朝向", "text": "点击地面" },
           { "label": "加速", "mappingIds": ["Sprint.Keyboard.Primary"] },
-          { "label": "跳跃", "mappingIds": ["Jump.Keyboard.Primary"] }
+          { "label": "跳跃", "mappingIds": ["Jump.Keyboard.Primary"] },
+          { "label": "背包", "mappingIds": ["Inventory.Keyboard.Primary"] }
         ]
       },
       {
@@ -212,7 +225,8 @@
           { "label": "移动", "mappingIds": ["Move.Touch.Stick"] },
           { "label": "镜头", "text": "拖动屏幕" },
           { "label": "加速", "mappingIds": ["Sprint.Touch.Button"] },
-          { "label": "跳跃", "mappingIds": ["Jump.Touch.Button"] }
+          { "label": "跳跃", "mappingIds": ["Jump.Touch.Button"] },
+          { "label": "背包", "mappingIds": ["Inventory.Touch.Button"] }
         ]
       },
       {
@@ -220,7 +234,8 @@
         "deviceKind": "gamepad",
         "entries": [
           { "label": "移动", "mappingIds": ["Move.Gamepad.Stick"] },
-          { "label": "加速", "mappingIds": ["Sprint.Gamepad.Button"] }
+          { "label": "加速", "mappingIds": ["Sprint.Gamepad.Button"] },
+          { "label": "背包", "mappingIds": ["Inventory.Gamepad.Button"] }
         ]
       }
     ]
@@ -275,6 +290,15 @@
         "sizePx": 64,
         "gridColumn": 2,
         "gridRow": 2
+      },
+      {
+        "id": "inventory",
+        "control": "Virtual.InventoryButton",
+        "label": "BAG",
+        "ariaLabel": "背包",
+        "sizePx": 52,
+        "gridColumn": 1,
+        "gridRow": 3
       },
       {
         "id": "world-interact",

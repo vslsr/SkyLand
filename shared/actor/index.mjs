@@ -46,6 +46,7 @@ export {
   HeatEmitterComponent,
 } from './components/HeatEmitterComponent.mjs';
 export {
+  DEFAULT_SLOT_CAPACITY,
   INVENTORY_COMPONENT,
   InventoryComponent,
 } from './components/InventoryComponent.mjs';

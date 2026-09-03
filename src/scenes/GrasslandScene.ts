@@ -14,6 +14,7 @@ import {
 } from '../input/index';
 import { SceneControlRouter } from '../controllers/SceneControlRouter';
 import { ActorInteractionController } from '../controllers/ActorInteractionController';
+import { InventoryController } from '../controllers/InventoryController';
 import { TerrainEditController } from '../controllers/TerrainEditController';
 import { VesselControlController } from '../controllers/VesselControlController';
 import { RoomClient, type JoinedRoom, type RoomSummary } from '../network/RoomClient';
@@ -27,12 +28,18 @@ import { SceneRenderer } from '../rendering/SceneRenderer';
 import { SceneWorld } from '../scene/SceneWorld';
 import { createSceneRuntimeComponent, SceneComponentHost } from '../scene/components';
 import { INPUT_SEND_INTERVAL_SECONDS } from '../../shared/networkTuning.mjs';
-import { PICKUP_DROP_COMPONENT, type PickupDropComponent } from '../../shared/actor/index.mjs';
+import {
+  INVENTORY_COMPONENT,
+  type InventoryComponent,
+  PICKUP_DROP_COMPONENT,
+  type PickupDropComponent,
+} from '../../shared/actor/index.mjs';
 import { HudController } from '../ui/HudController';
 import { TerrainEditorPanel } from '../ui/TerrainEditorPanel';
 import { CreateRoomPage, type CreateRoomFormValue } from '../ui/pages/CreateRoomPage';
 import { DebugMenuPage } from '../ui/pages/DebugMenuPage';
 import { GameMenuPage } from '../ui/pages/GameMenuPage';
+import { InventoryPage } from '../ui/pages/InventoryPage';
 import { RoomLobbyPage } from '../ui/pages/RoomLobbyPage';
 import { Scene, type SceneUIContext } from './Scene';
 import type {
@@ -67,9 +74,12 @@ export class GrasslandScene extends Scene {
   private readonly roomClient = new RoomClient();
   private readonly lobbyPage = new RoomLobbyPage();
   private readonly gameMenuPage = new GameMenuPage();
+  private readonly inventoryPage = new InventoryPage();
+  private readonly inventory: InventoryController;
   private readonly debugMenuPage?: DebugMenuPage;
   private readonly playerTransformLog?: PlayerTransformLogRecorder;
   private disposeDebugMenuShortcut?: () => void;
+  private disposeInventoryShortcut?: () => void;
   private readonly snapshots = new SnapshotBuffer();
   private readonly remotePlayers: RemotePlayerGroup;
   private joinedRoom?: JoinedRoom;
@@ -164,6 +174,7 @@ export class GrasslandScene extends Scene {
       this.input.replaceMappingContexts(this.inputScheme.contexts);
       keyboardInput.setPreventDefaultControls(this.inputScheme.getPreventDefaultControls());
       this.refreshDebugMenuShortcut();
+      this.refreshInventoryShortcut();
       this.hud.refreshInputPrompt();
     });
     // 场景的两半:渲染核心与玩法查询。第 3 步搬 canvas 时只有前者跟着走。
@@ -211,6 +222,17 @@ export class GrasslandScene extends Scene {
       sendInteraction: (actorId) => { this.roomClient.interactWithActor(actorId); },
       setPrompt: (text) => this.hud.setInteractionPrompt(text),
     });
+    this.inventory = new InventoryController(this.inventoryPage, this.input, {
+      getInventory: () => this.player?.getComponent(INVENTORY_COMPONENT) as
+        InventoryComponent | undefined,
+      isOpen: () => this.commonUI.top === this.inventoryPage,
+      setOpen: (open) => {
+        if (open) this.commonUI.push(this.inventoryPage);
+        else this.commonUI.pop(this.inventoryPage);
+      },
+      // 只在没有别的页面盖着时开，背包因此永远是栈顶那一页。
+      canOpen: () => Boolean(this.joinedRoom && this.player) && this.commonUI.size === 0,
+    });
     this.controls.onModeChange((mode) => this.hud.setControlMode(mode));
     this.input.onActiveDeviceChanged((deviceKind) => this.hud.setInputDevice(deviceKind));
 
@@ -227,6 +249,8 @@ export class GrasslandScene extends Scene {
     this.hud.onMenuRequest(() => this.openGameMenu());
     this.gameMenuPage.onRequestClose(() => this.commonUI.pop(this.gameMenuPage));
     this.gameMenuPage.onExit(() => this.exitCurrentRoom());
+    this.inventoryPage.onRequestClose(() => this.inventory.close());
+    this.refreshInventoryShortcut();
     this.roomClient.onRoomUpdate((room) => this.handleRoomUpdate(room));
     this.terrainEditorPanel.onOperationChange((operation) => {
       this.terrainEdits.setOperation(operation);
@@ -435,6 +459,23 @@ export class GrasslandScene extends Scene {
     this.commonUI.push(page);
   }
 
+  /**
+   * 背包的键盘开合走 CommonUI 全局入口。
+   *
+   * 背包一开，Gameplay Input 就被 CommonUI 关掉了，`Input.Player.Inventory`
+   * 标签再也收不到按键——关背包的那一下只能从这里来。控制路径仍然取自
+   * InputMapping，玩家改键之后这里跟着换。
+   */
+  private refreshInventoryShortcut(): void {
+    this.disposeInventoryShortcut?.();
+    const { control } = this.inputScheme.getMapping(PlayerInputMappingIds.InventoryKeyboard);
+    this.inventory.setControlLabel(this.inputScheme.getControlLabel(control));
+    this.disposeInventoryShortcut = this.commonUI.bindGlobalKeyboardControl(
+      control,
+      () => this.inventory.toggle(),
+    );
+  }
+
   private refreshDebugMenuShortcut(): void {
     if (!this.debugMenuPage) return;
     this.disposeDebugMenuShortcut?.();
@@ -485,6 +526,11 @@ export class GrasslandScene extends Scene {
         snapshotPlayerIds: snapshot.players.map((entry) => entry.id),
       });
       return;
+    }
+    // 背包是纯权威状态：本地这份只跟随快照，拾取成功与否由服务端说了算。
+    const inventory = player.getComponent(INVENTORY_COMPONENT) as InventoryComponent | undefined;
+    if (inventory?.applySnapshot(own.inventory ?? [], own.inventoryRevision ?? inventory.revision)) {
+      this.inventory.sync();
     }
     const pickupDrop = player.getComponent(PICKUP_DROP_COMPONENT) as PickupDropComponent | undefined;
     if (pickupDrop) {
@@ -594,6 +640,9 @@ export class GrasslandScene extends Scene {
   }
 
   private destroyPlayer(): void {
+    // 角色没了，背包里那份镜像也就没有权威来源了；开着的话先收起来，
+    // 免得断线后停在一屏读不到更新的旧货位上。
+    this.inventory.close();
     this.debugMenuPage?.setTransformLogAvailable(false);
     this.sceneComponents.clear();
     this.snapshots.clear();

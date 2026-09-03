@@ -866,3 +866,169 @@ body.is-topdown .virtual-controls.is-desktop-debug {
   border-color: #35281f;
   color: #f6efe4;
 }
+
+/* 背包：格子是货位，不是无限列表——空格照样画出来，玩家一眼看到还剩几格。 */
+.inventory__summary {
+  display: grid;
+  gap: 8px;
+  padding-bottom: 16px;
+  margin-bottom: 18px;
+  border-bottom: 1px solid rgba(28, 26, 23, 0.16);
+}
+
+.inventory__capacity {
+  margin: 0;
+  color: #1c1a17;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.06em;
+}
+
+.inventory__meter {
+  height: 8px;
+  background: #f2ede1;
+  border: 1px solid rgba(28, 26, 23, 0.3);
+}
+
+.inventory__meter-fill {
+  display: block;
+  width: 0;
+  height: 100%;
+  background: #8ca071;
+  transition: width 160ms ease;
+}
+
+.inventory__ledger,
+.inventory__note,
+.inventory__empty-notice,
+.inventory__hint {
+  margin: 0;
+  color: rgba(28, 26, 23, 0.62);
+  font-size: 11px;
+  line-height: 1.65;
+}
+
+.inventory__ledger:empty {
+  display: none;
+}
+
+.inventory__section + .inventory__section {
+  padding-top: 18px;
+  margin-top: 18px;
+  border-top: 1px solid rgba(28, 26, 23, 0.16);
+}
+
+.inventory__section h3 {
+  margin: 0 0 10px;
+  color: #728562;
+  font-size: 9px;
+  letter-spacing: 0.16em;
+}
+
+.inventory__section .inventory__note {
+  margin-bottom: 10px;
+}
+
+.inventory__grid {
+  display: grid;
+  padding: 0;
+  margin: 0;
+  gap: 10px;
+  grid-template-columns: repeat(auto-fill, minmax(112px, 1fr));
+  list-style: none;
+}
+
+.inventory__cell {
+  position: relative;
+  display: grid;
+  gap: 5px;
+  justify-items: center;
+  min-height: 104px;
+  padding: 12px 8px 10px;
+  background: #fdfbf6;
+  border: 1px solid rgba(28, 26, 23, 0.34);
+}
+
+/* 空货位保持同样的方格尺寸，只把边框画虚，让「还剩几格」是看得见的形状。 */
+.inventory__cell--empty {
+  background: transparent;
+  border-style: dashed;
+  border-color: rgba(28, 26, 23, 0.22);
+}
+
+.inventory__swatch {
+  display: grid;
+  width: 44px;
+  height: 44px;
+  place-items: center;
+  color: #35281f;
+  background: color-mix(in srgb, var(--item-tint, #b9b4a8) 34%, #fdfbf6);
+  border: 1px solid rgba(28, 26, 23, 0.28);
+}
+
+.inventory__icon {
+  display: block;
+  width: 26px;
+  height: 26px;
+}
+
+.inventory__name {
+  color: #1c1a17;
+  font-size: 11px;
+  text-align: center;
+}
+
+.inventory__count {
+  color: rgba(28, 26, 23, 0.62);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.04em;
+}
+
+/* 堆满了才提醒：这一格再拾取只能另开一格，是货位决策的信息。 */
+.inventory__count.is-full {
+  color: #8b4058;
+  font-weight: 700;
+}
+
+.inventory__badge {
+  padding: 1px 6px;
+  color: rgba(28, 26, 23, 0.72);
+  font-size: 9px;
+  letter-spacing: 0.06em;
+  background: #f2ede1;
+  border: 1px solid rgba(28, 26, 23, 0.24);
+}
+
+.inventory__badge--coin {
+  color: #6b5320;
+  background: #f6edd4;
+  border-color: rgba(107, 83, 32, 0.34);
+}
+
+/* 违禁品在世界里会暴露位置，格子上也不让它藏在一堆普通货里。 */
+.inventory__cell[data-contraband="true"] {
+  border-color: #8b4058;
+  box-shadow: inset 0 0 0 1px rgba(139, 64, 88, 0.28);
+}
+
+.inventory__grid--pooled .inventory__cell {
+  min-height: 92px;
+  background: #f8f4ea;
+}
+
+@media (max-width: 720px) {
+  .inventory__grid {
+    grid-template-columns: repeat(auto-fill, minmax(92px, 1fr));
+  }
+
+  .inventory__cell {
+    min-height: 92px;
+    padding: 10px 6px 8px;
+  }
+
+  .inventory__swatch {
+    width: 38px;
+    height: 38px;
+  }
+}
