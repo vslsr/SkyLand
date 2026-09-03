@@ -35,6 +35,9 @@ export class ContainerPage extends ModalWindow {
       title: '储物箱',
       description: '大宗资源存进箱子；箱子归这片地方所有，同伴也能一起取用。',
       size: 'wide',
+      // Esc 不能走 CommonUI 的默认弹栈：那条路只把页面弹掉，不通知服务端，于是
+      // 下一帧快照又把它推回来。这里自己接管，和 X 按钮走同一个 requestClose。
+      closeOnEscape: false,
     });
     this.element.className += ' container-window';
 
@@ -64,6 +67,13 @@ export class ContainerPage extends ModalWindow {
 
     this.bodyElement.append(summary, this.storeAllButton, this.emptyNotice, this.rowList);
     this.setContainer(undefined);
+  }
+
+  /** Esc 与 X 走同一条路：都只是「请求关闭」，真正的关闭由服务端确认。 */
+  public handleGlobalInputEvent(event: KeyboardEvent): boolean {
+    if (event.key !== 'Escape') return false;
+    this.requestClose();
+    return true;
   }
 
   public onTransfer(

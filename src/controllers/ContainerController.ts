@@ -28,6 +28,17 @@ export class ContainerController {
   /** 上一次画出去的 revision；null 表示上一次画的是「没有容器」。 */
   private renderedRevision: number | null = null;
   private renderedActorId?: string;
+  /**
+   * 已经请求关闭、还在等服务端确认的那个容器。
+   *
+   * 这不是第二个「开着没有」的真相来源，而是一次**在途请求**的记账。没有它的话：
+   * 点 X 立刻弹栈 → `container:close` 还在路上 → 下一帧快照里服务端仍然认为我
+   * 开着 → `sync()` 把页面推回来 → 再下一帧才真的关上。表现就是关闭时闪一下。
+   *
+   * 快照 10Hz，纯等服务端确认要 100ms 以上才消失，点 X 会明显发黏，所以这里保留
+   * 立即关闭，只是让 `sync()` 在确认到达之前别把它推回来。
+   */
+  private pendingCloseActorId?: string;
 
   public constructor(
     private readonly view: ContainerPage,
@@ -43,7 +54,14 @@ export class ContainerController {
 
   /** 收到快照后调用：跟随服务端开合，内容变了才重画。 */
   public sync(): void {
-    const actorId = this.port.findOpenContainerActorId();
+    const reported = this.port.findOpenContainerActorId();
+    // 服务端已经不认为我开着它了：这次关闭到账，在途标记可以清掉。
+    if (this.pendingCloseActorId && reported !== this.pendingCloseActorId) {
+      this.pendingCloseActorId = undefined;
+    }
+    // 还在等确认的那个当作已经关了；别的箱子照常开——中途走到另一个箱子前面按 E
+    // 不该被上一次的在途关闭压掉。
+    const actorId = reported === this.pendingCloseActorId ? undefined : reported;
     const container = actorId ? this.port.getContainer(actorId) : undefined;
     if (!actorId || !container) {
       if (this.port.isOpen()) this.port.setOpen(false);
@@ -59,12 +77,14 @@ export class ContainerController {
     this.view.setContainer(buildContainerView(actorId, container, this.port.getInventory()));
   }
 
-  /** 主动关：玩家点了关闭按钮。服务端收到后把我移出，下一帧快照才真的关上。 */
+  /** 主动关：X 按钮与 Esc 都走这里。界面立刻收起，服务端确认在后面到。 */
   public requestClose(): void {
     const actorId = this.port.findOpenContainerActorId();
-    if (actorId) this.port.send({ kind: 'container:close', actorId });
-    // 界面先收起来，不等那一帧：关闭是玩家自己的意图，等一帧会感觉按钮没反应。
-    // 万一服务端拒了，下一次 sync 会把它重新打开。
+    if (actorId) {
+      this.port.send({ kind: 'container:close', actorId });
+      // 记下这次在途请求，`sync()` 才不会在确认到达之前把页面推回来。
+      this.pendingCloseActorId = actorId;
+    }
     this.port.setOpen(false);
   }
 
