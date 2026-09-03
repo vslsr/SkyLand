@@ -1115,10 +1115,16 @@ body.is-topdown .virtual-controls.is-desktop-debug {
 }
 
 .hotbar {
+  --hotbar-slot: 52px;
+  --hotbar-ink: rgba(28, 26, 23, 0.86);
+  --hotbar-edge: rgba(138, 98, 56, 0.42);
+  --hotbar-held: rgba(138, 98, 56, 0.95);
   position: relative;
   display: flex;
-  gap: 10px;
-  padding: 8px;
+  flex-direction: column;
+  align-items: center;
+  /* 手持那一格要浮起来，上面得给它留出空间，不然会被裁掉。 */
+  padding: 22px 8px 8px;
   pointer-events: auto;
 }
 
@@ -1126,35 +1132,82 @@ body.is-topdown .virtual-controls.is-desktop-debug {
   display: none;
 }
 
+.hotbar__track {
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
+}
+
+/*
+ * 一格只画一种状态。
+ *
+ * 「哪一格拿在手上」全部由 `data-held` 说，而且只用一种说法：浮起来 + 一圈实边 +
+ * 底下一团暖光。别的格子只是稍微退后一点，不抢这一处亮。焦点圈是另一件事
+ * （键盘/手柄现在停在哪一格），画成虚线、离得更远，绝不和「拿在手上」撞脸。
+ */
 .hotbar__slot {
   position: relative;
   display: grid;
   place-items: center;
-  width: 56px;
-  height: 56px;
+  width: var(--hotbar-slot);
+  height: var(--hotbar-slot);
   padding: 0;
-  color: rgba(28, 26, 23, 0.86);
-  background: rgba(253, 251, 246, 0.82);
-  border: 1px solid rgba(138, 98, 56, 0.44);
+  color: var(--hotbar-ink);
+  background: rgba(253, 251, 246, 0.72);
+  border: 1px solid var(--hotbar-edge);
   border-radius: 50%;
   cursor: pointer;
-  transition: transform 120ms ease, border-color 120ms ease, background 120ms ease;
+  opacity: 0.88;
+  /* 放大与上浮都从底边长出来，整排的下沿因此始终对齐。 */
+  transform-origin: 50% 100%;
+  transition:
+    transform 140ms cubic-bezier(0.2, 0.8, 0.3, 1),
+    opacity 140ms ease,
+    border-color 140ms ease,
+    box-shadow 140ms ease,
+    background 140ms ease;
+}
+
+.hotbar__slot[data-state='empty'] {
+  background: rgba(253, 251, 246, 0.42);
+  border-style: dashed;
 }
 
 .hotbar__slot:hover {
-  background: rgba(253, 251, 246, 0.94);
+  opacity: 1;
+  background: rgba(253, 251, 246, 0.9);
 }
 
-.hotbar__slot.is-active {
-  border-color: rgba(138, 98, 56, 0.9);
+/* 键盘/手柄的落点。虚线、留空隙，和「拿在手上」的实心圈边分得开。 */
+.hotbar__slot:focus {
+  outline: none;
+}
+
+.hotbar__slot:focus-visible {
+  outline: 2px dashed rgba(28, 26, 23, 0.6);
+  outline-offset: 4px;
+}
+
+.hotbar__slot[data-held='true'] {
+  opacity: 1;
+  background: rgba(255, 253, 248, 0.98);
+  border-color: var(--hotbar-held);
   border-width: 2px;
-  transform: translateY(-4px);
+  transform: translateY(-10px) scale(1.14);
+  box-shadow:
+    0 0 0 4px rgba(214, 158, 74, 0.18),
+    0 8px 16px rgba(58, 42, 22, 0.24);
 }
 
 /* 配置还在但货用光了：格子留着，画成灰的，补货回来自动亮起。 */
-.hotbar__slot.is-depleted .hotbar__icon,
-.hotbar__slot.is-depleted .hotbar__quantity {
+.hotbar__slot[data-state='depleted'] .hotbar__figure,
+.hotbar__slot[data-state='depleted'] .hotbar__quantity {
   opacity: 0.35;
+}
+
+.hotbar__figure {
+  display: grid;
+  place-items: center;
 }
 
 .hotbar__icon {
@@ -1168,7 +1221,11 @@ body.is-topdown .virtual-controls.is-desktop-debug {
   left: 8px;
   font-size: 9px;
   font-weight: 700;
-  opacity: 0.5;
+  opacity: 0.4;
+}
+
+.hotbar__slot[data-held='true'] .hotbar__shortcut {
+  opacity: 0.75;
 }
 
 .hotbar__quantity {
@@ -1177,6 +1234,10 @@ body.is-topdown .virtual-controls.is-desktop-debug {
   bottom: 4px;
   font-size: 10px;
   font-weight: 700;
+}
+
+.hotbar__quantity[hidden] {
+  display: none;
 }
 
 /*
@@ -1200,22 +1261,41 @@ body.is-topdown .virtual-controls.is-desktop-debug {
   --hotbar-progress-color: rgba(79, 214, 149, 0.5);
 }
 
-.hotbar__progress-label {
-  position: absolute;
-  bottom: calc(100% + 4px);
-  left: 50%;
-  margin: 0;
-  padding: 4px 9px;
-  color: rgba(28, 26, 23, 0.86);
+/*
+ * 手持那一格头顶的牌子。平时写着手上拿的是什么，按住时改写这次按住在做什么——
+ * 同一个位置只说一句话，两句话轮着出现，不会一上一下堆两层。
+ */
+.hotbar__plate {
+  margin: 0 0 6px;
+  padding: 3px 10px;
+  color: var(--hotbar-ink);
   font-size: 10px;
   font-weight: 700;
   letter-spacing: 0.08em;
   white-space: nowrap;
   background: rgba(253, 251, 246, 0.86);
-  border: 1px solid rgba(138, 98, 56, 0.52);
-  border-radius: 4px;
-  transform: translateX(-50%);
+  border: 1px solid rgba(138, 98, 56, 0.4);
+  border-radius: 999px;
   pointer-events: none;
+}
+
+.hotbar__plate[hidden] {
+  display: none;
+}
+
+.hotbar__plate[data-progress='true'] {
+  border-color: rgba(138, 98, 56, 0.85);
+}
+
+/* 动效只是让「换手」看得出来，关掉动画的人不该被它拖着。 */
+@media (prefers-reduced-motion: reduce) {
+  .hotbar__slot {
+    transition: none;
+  }
+
+  .hotbar__slot[data-held='true'] {
+    transform: none;
+  }
 }
 
 /* ---- 背包分类页签 -------------------------------------------------------- */
