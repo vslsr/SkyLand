@@ -61,6 +61,10 @@ export {
 } from './components/ContainerComponent.mjs';
 export { ItemLedger } from './ItemLedger.mjs';
 export {
+  STOWABLE_COMPONENT,
+  StowableComponent,
+} from './components/StowableComponent.mjs';
+export {
   ACTOR_ACTION_IDS,
   chargeRatio,
   resolveActorAction,

@@ -1,0 +1,44 @@
+{
+  "$schema": "./actor.schema.json",
+  "schemaVersion": 1,
+  "id": "mushroom-pile",
+  "components": {
+    "interactable": {
+      "action": "pickup-stack",
+      "label": "弹弹菇",
+      "maximumDistance": 2.4
+    },
+    "itemStack": {
+      "itemType": "mushroom",
+      "displayName": "弹弹菇",
+      "defaultQuantity": 1,
+      "maximumQuantity": 999,
+      "compatibilityKey": "mushroom-standard"
+    },
+    "actorResidency": {
+      "sleepDelaySeconds": 1,
+      "dormantDelaySeconds": 3,
+      "dormantEligible": true
+    },
+    "dropMotion": {
+      "gravity": 9.8,
+      "drag": 5,
+      "settleSpeed": 0.08
+    },
+    "lifetime": {
+      "lifetimeSeconds": 900
+    },
+    "replicationPolicy": {
+      "mode": "aoi",
+      "radiusChunks": 2
+    },
+    "render": {
+      "model": "line-art-fruit-pile",
+      "fruitColor": "#C97868",
+      "accentColor": "#EADFC5",
+      "inkColor": "#51463E",
+      "radius": 0.42,
+      "height": 0.3
+    }
+  }
+}

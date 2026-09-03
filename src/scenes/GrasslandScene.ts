@@ -264,6 +264,10 @@ export class GrasslandScene extends Scene {
     this.hotbar = new HotbarController(this.input, {
       getInventory: () => this.player?.getComponent(INVENTORY_COMPONENT) as
         InventoryComponent | undefined,
+      // 嘴上那个 Actor：叼着的蘑菇和快捷栏拿出来的手持物都在这里，
+      // 所以两种手持物走同一条按住计时。
+      getHeldActorId: () => (this.player?.getComponent(PICKUP_DROP_COMPONENT) as
+        PickupDropComponent | undefined)?.heldActorId ?? undefined,
       // 界面盖着时不响应：背包开着按 1 应该翻页而不是换手。
       isActive: () => Boolean(this.joinedRoom && this.player) && this.commonUI.allowsGameInteraction,
       send: (command) => { this.roomClient.sendInventoryCommand(command); },

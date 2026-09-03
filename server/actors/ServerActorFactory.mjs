@@ -30,6 +30,7 @@ import {
   InteractableComponent,
   CONTAINER_COMPONENT,
   ContainerComponent,
+  StowableComponent,
   ITEM_STACK_COMPONENT,
   ItemStackComponent,
   LIFETIME_COMPONENT,
@@ -99,6 +100,9 @@ export function createServerActor(spawn, archetype, runtime = {}) {
   if (archetype.components.heatEmitter) actor.addComponent(new HeatEmitterComponent(archetype.components.heatEmitter));
   if (archetype.components.container) {
     actor.addComponent(new ContainerComponent(archetype.components.container));
+  }
+  if (archetype.components.stowable) {
+    actor.addComponent(new StowableComponent(archetype.components.stowable));
   }
   if (archetype.components.itemStack) {
     actor.addComponent(new ItemStackComponent({ ...archetype.components.itemStack, ...runtime.itemStack }));

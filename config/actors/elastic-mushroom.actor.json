@@ -14,6 +14,9 @@
       "pullDistance": 2.8
     },
     "elasticDetach": {},
+    "stowable": {
+      "itemType": "mushroom"
+    },
     "dropMotion": {
       "gravity": 9.8,
       "drag": 1.8,

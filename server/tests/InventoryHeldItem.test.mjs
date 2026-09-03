@@ -6,11 +6,12 @@ import {
   InventoryComponent,
   ItemLedger,
   NO_HOTBAR_SLOT,
+  StowableComponent,
   chargeRatio,
   resolveActorAction,
   resolveHeldItemAction,
 } from '../../shared/actor/index.mjs';
-import { stowHeldItem, transferItems } from '../actors/InventoryMutations.mjs';
+import { dropHeldObject, stowHeldItem, transferItems } from '../actors/InventoryMutations.mjs';
 
 const player = (inventory) => ({ id: 'p1', getComponent: (name) => (name === 'inventory' ? inventory : undefined) });
 const chest = (container) => ({ getComponent: (name) => (name === 'container' ? container : undefined) });
@@ -217,4 +218,66 @@ test('背包满了收不回来时，东西留在手上而不是消失', () => {
   assert.equal(stowHeldItem(scene, player), false);
   assert.deepEqual(removed, [], '收不回来就不删 Actor');
   assert.equal(pickupDrop.heldActorId, 'held-2', '还拿在手上');
+});
+
+test('叼着的世界物件也能收进背包，按它自己声明的物品回账', () => {
+  const inventory = new InventoryComponent({ slotCapacity: 8, hotbarCapacity: 4 });
+  // 蘑菇不是物品堆：它没有 itemStack，只有 stowable 说明「装进包里算什么」。
+  const stowable = new StowableComponent({ itemType: 'mushroom' });
+  const mushroom = {
+    id: 'm1',
+    parent: { id: 'p1' },
+    getComponent: (name) => (name === 'stowable' ? stowable : undefined),
+  };
+  const pickupDrop = { heldActorId: 'm1', drop() { this.heldActorId = null; return true; } };
+  const player = { id: 'p1', getComponent: (name) => ({ inventory, pickupDrop }[name]) };
+  const removed = [];
+  const scene = {
+    actorWorld: {
+      getActor: () => mushroom,
+      setActorParent: () => { mushroom.parent = undefined; },
+      removeActor: (id) => removed.push(id),
+    },
+    removeItemStackActor: () => { throw new Error('世界物件不该走物品堆的删除'); },
+  };
+
+  assert.equal(stowHeldItem(scene, player), true);
+  assert.equal(inventory.quantityOf('mushroom'), 1);
+  assert.deepEqual(removed, ['m1'], '世界物件走 ActorWorld 的删除');
+  assert.equal(pickupDrop.heldActorId, null, '收完是空手');
+});
+
+test('没声明 stowable 的世界物件揣不走，长按由调用方回退成放下', () => {
+  const inventory = new InventoryComponent({ slotCapacity: 8 });
+  const rock = { id: 'r1', parent: { id: 'p1' }, getComponent: () => undefined };
+  const pickupDrop = { heldActorId: 'r1', drop() { this.heldActorId = null; return true; } };
+  const player = { id: 'p1', getComponent: (name) => ({ inventory, pickupDrop }[name]) };
+  const scene = {
+    actorWorld: { getActor: () => rock, setActorParent: () => {}, removeActor: () => {} },
+    removeItemStackActor: () => {},
+  };
+
+  assert.equal(stowHeldItem(scene, player), false);
+  assert.equal(pickupDrop.heldActorId, 'r1', '收不了就原样留在手上');
+});
+
+test('放下分派：物品堆走物品的落法，世界物件走它自己的', () => {
+  const inventory = new InventoryComponent({ slotCapacity: 8 });
+  const mushroom = {
+    id: 'm1',
+    parent: { id: 'p1' },
+    getComponent: () => undefined,
+  };
+  const pickupDrop = { heldActorId: 'm1', drop() { this.heldActorId = null; return true; } };
+  const player = { id: 'p1', getComponent: (name) => ({ inventory, pickupDrop }[name]) };
+  const carriedDrops = [];
+  const scene = {
+    actorWorld: { getActor: () => mushroom, setActorParent: () => {} },
+    removeItemStackActor: () => {},
+    // 蘑菇的落地要建刚体、恢复可交互、按碰撞半径推开落点，那一整套留在 ServerScene。
+    dropCarriedActor: (_player, actor) => { carriedDrops.push(actor.id); return true; },
+  };
+
+  assert.equal(dropHeldObject(scene, player), true);
+  assert.deepEqual(carriedDrops, ['m1'], '没有 itemStack 就交给蘑菇自己的落法');
 });

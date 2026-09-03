@@ -28,6 +28,12 @@ const ITEM_ICON_PATHS = {
     <ellipse cx="8" cy="12" rx="2.7" ry="5.5" />
     <circle cx="8" cy="12" r="1.1" />
   `,
+  'item-mushroom': `
+    <path d="M4.2 11.2a6.8 6.8 0 0 1 13.6 0Z" />
+    <path d="M9.4 11.2v4.9a1.8 1.8 0 0 0 3.2 0v-4.9" />
+    <circle cx="8.4" cy="8.6" r="1.1" />
+    <circle cx="13.4" cy="9.2" r="0.8" />
+  `,
   'item-stone': `
     <path d="M3.6 18.4h16.8" />
     <path d="m5.6 18.4-1.3-3.7 3.2-2.7 3.7 1.5.6 3.4-1.5 1.5Z" />
