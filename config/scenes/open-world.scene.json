@@ -84,7 +84,6 @@
         { "archetype": "elastic-mushroom", "weight": 1 }
       ]
     },
-    "bounds": { "minimumX": -192, "maximumX": 192, "minimumZ": -192, "maximumZ": 192 },
     "spawn": { "centerX": 0, "centerZ": 0, "radius": 6, "slots": 16 },
     "water": { "seaLevel": -0.4 }
   },

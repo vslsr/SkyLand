@@ -50,7 +50,6 @@
         { "archetype": "large-rock", "weight": 1 }
       ]
     },
-    "bounds": { "minimumX": -192, "maximumX": 192, "minimumZ": -192, "maximumZ": 192 },
     "spawn": { "centerX": 0, "centerZ": 0, "radius": 5, "slots": 8 }
   },
   "camera": {

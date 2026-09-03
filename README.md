@@ -5,7 +5,7 @@
 当前包含：
 
 - Three.js 淡色填充与 `EdgesGeometry` 线稿场景
-- 512 × 512 米的大世界：2 米网格台地、四向直坡、两类四向角坡、凹地水域与物件按 chunk 流式加载
+- 走不到头的大世界：2 米网格台地、四向直坡、两类四向角坡、凹地水域与物件按 chunk 流式加载
 - Rust 编译的 WebAssembly 生成后端，附行为一致的纯 JS 降级实现
 - `Scene` / `SceneManager` 场景生命周期
 - 每个 Scene 独立的 `CommonUIManager` 栈
@@ -268,14 +268,22 @@ bindings.resetAllBindings();
 摆好的固定内容，而是由世界种子确定性生成、按 chunk 加载。`open-world` 与 `orchard`
 是内置的两张流式地图，`grassland` 与 `open-meadow` 保持原来的固定场景。
 
-世界是 16 × 16 个 chunk，每个 chunk 32 米见方，合计 512 × 512 米。世界尺寸是
-生成算法的固有属性，写在 `shared/world/worldConfig.mjs` 里，对所有流式场景都一样；
-场景配置只决定加载半径、保留半径和岩石配色。
+世界没有地图边框：chunk 完全由世界种子确定性生成，加载集合只跟着玩家走，
+所以玩家可以一直朝一个方向走下去，地块就一直在前面长出来。常驻集合的上界是
+`玩家数 × (2 × keepRadius + 1)²`，与走了多远无关。
 
-玩家的活动范围比生成范围向内收两个 chunk（384 × 384 米），因此永远走不到没有
-内容的世界边缘旁边。`SceneCatalog` 在启动时校验这两条约束：
+因此 `shared/world/worldConfig.mjs` 里的 `WORLD_CHUNK_RADIUS` 不是玩法尺寸，而是
+**数值精度的护栏**：放置算法跑在毫米整数域上（WASM 侧是 i32），chunk 的顶点、
+渲染 transform 镜像和 Rapier 物理都是 f32。取 1024（世界 65 × 65 公里，边缘处
+f32 分辨率约 4 毫米）是三者都还宽裕的一档；直线跑到边界要一个多小时，玩家实际
+碰不到它。要真正无限，需要把几何体改成 chunk 局部坐标加浮动原点，而不是调大
+这个常数。
 
-- `gameplay.bounds` 必须落在这个安全区内；
+流式场景的 `gameplay.bounds` 因此可以省略：省略时活动范围取整个世界（生成范围
+向内收两个 chunk，玩家永远走不到没有内容的边缘旁边）。写死 bounds 仍然允许，
+用来做有意围起来的小地图。`SceneCatalog` 在启动时校验：
+
+- 写死的 `gameplay.bounds` 必须落在这个安全区内；固定尺寸场景必须写；
 - `renderer.fog.far` 必须不大于 `loadRadius × 32`，否则视野会越过最近的未加载
   chunk，玩家会直接看到地块凭空出现。
 
