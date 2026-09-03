@@ -1,3 +1,4 @@
+import { readRenderPacingMode } from '../../debug/renderPacingSwitch';
 import { publishRenderThreadReport } from '../../debug/renderThreadTimings';
 import { isSharedBytes } from '../../platform/index';
 import { isJavaScriptChunkGeneratorForced } from '../../world/loadChunkGenerator';
@@ -26,6 +27,10 @@ import type { RenderWorkerFromMain, RenderWorkerToMain } from './renderWorkerPro
  * | transform SoA | 同上；扩容时补一条 `adoptTransforms` |
  *
  * 之后每帧只有一次 `postMessage`：这一帧攒下的命令成批过去，空帧不发。
+ *
+ * 渲染线程默认每拍**等主线程翻面**再画（`RenderFramePacer`）。`?renderpace=free`
+ * 关掉这一等、退回「每拍读最新一面」，专门用来在面板上对照「重复／跳过」两个数；
+ * 开关由主线程读（`debug/renderPacingSwitch`），随开工那条报文交过去。
  */
 export function connectRenderWorldInWorker(
   canvas: HTMLCanvasElement,
@@ -52,6 +57,7 @@ export function connectRenderWorldInWorker(
     camera: camera.bytes,
     transforms: transforms.bytes,
     forceJavaScriptChunkGenerator: isJavaScriptChunkGeneratorForced(),
+    renderPacing: readRenderPacingMode(),
   };
   worker.postMessage(start, [offscreen]);
   // 扩容会重新分配，渲染侧还拿着旧的那一块——补一条命令把新的送过去。
@@ -130,6 +136,14 @@ class WorkerRenderWorldPort extends RenderCommandQueue implements RenderWorldPor
   public update(): void {
     // 空的：这一帧的表现在渲染线程上跑。
   }
+
+  /**
+   * 不发这条命令。渲染线程每拍等到翻面之后自己兑现 transform
+   * （`RenderWorldRuntime.consumePublishedFrame`），和机位一起、同一瞬间读。
+   * 再由命令去兑现一次，就又回到「位置在消息到达那一刻换、机位在画的那一刻读」——
+   * 两个时刻之间主线程可能翻了一次面，相机就比世界新一帧。
+   */
+  public override submitTransforms(): void {}
 
   public render(): void {
     const batch = this.flush();

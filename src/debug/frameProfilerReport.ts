@@ -69,13 +69,28 @@ export function formatFrameProfiler(
     );
     if (thread.pacing && thread.pacing.frames > 0) {
       const { frames, duplicated, skipped } = thread.pacing;
+      const torn = thread.pacing.torn ?? 0;
       const wasted = duplicated + skipped;
       lines.push(
         `   ${'帧配对'.padEnd(14)} 一对一=${String(frames - wasted).padStart(3)}`
         + `  重复=${String(duplicated).padStart(3)}`
         + `  跳过=${String(skipped).padStart(3)}`
-        + `${wasted > 0 ? `  ← 画面在这 ${wasted} 帧上顿` : ''}`,
+        + `  撕裂=${String(torn).padStart(3)}`
+        + `${wasted + torn > 0 ? `  ← 画面在这 ${wasted + torn} 帧上顿` : ''}`,
       );
+      // 等主线程翻面等了多久。中位数是常态，最大值是主线程最慢的那一拍；超时的
+      // 那几帧只能画上一帧——那是主线程没赶上 vsync，不是渲染线程慢。
+      const waitMedian = thread.pacing.waitMedianMs ?? 0;
+      const waitMaximum = thread.pacing.waitMaximumMs ?? 0;
+      const waitTimeouts = thread.pacing.waitTimeouts ?? 0;
+      if (waitMaximum > 0 || waitTimeouts > 0) {
+        lines.push(
+          `   ${'等主线程'.padEnd(13)} 中位 ${waitMedian.toFixed(1)}ms`
+          + `  最长 ${waitMaximum.toFixed(1)}ms`
+          + `  超时 ${waitTimeouts}/${frames} 帧`
+          + `${waitTimeouts > 0 ? '  ← 主线程没赶上这几拍' : ''}`,
+        );
+      }
       if (thread.pacing.motionFrames > 0) {
         const { motionFrames, motionStalls, motionMedian, motionMaximum } = thread.pacing;
         const ratio = motionMedian > 0 ? motionMaximum / motionMedian : 0;

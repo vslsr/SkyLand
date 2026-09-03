@@ -8,7 +8,8 @@ import { PROP_FLOAT_STRIDE, PROP_INT_STRIDE } from '../propInstanceLayout';
 import { forceJavaScriptChunkGenerator } from '../../world/loadChunkGenerator';
 import { frameTimeline } from '../../platform/index';
 import { applyRenderCommand } from './renderCommands';
-import type { RenderWorkerFromMain, RenderWorkerToMain } from './renderWorkerProtocol';
+import { RenderFramePacer } from './RenderFramePacer';
+import type { RenderPacingMode, RenderWorkerFromMain, RenderWorkerToMain } from './renderWorkerProtocol';
 
 /**
  * 渲染线程（引擎迁移路线图 第 3 步）。
@@ -19,11 +20,19 @@ import type { RenderWorkerFromMain, RenderWorkerToMain } from './renderWorkerPro
  *
  * **帧循环在这一侧。** 主线程发命令、写字节，什么时候画由这边的 `requestAnimationFrame`
  * 决定。玩法卡一帧不会让画面跟着卡，这就是搬进来的全部意义。
+ *
+ * 但「各画各的」不等于「各读各的」：两条 rAF 都挂在同一个 vsync 上，谁先跑完却没有
+ * 保证。这一拍主线程翻面在渲染线程读之前还是之后，决定了画的是这一帧还是上一帧——
+ * 相位一交叉就是「同一帧画两遍、下一帧被跳过」。所以每拍开头先**等主线程翻面**
+ * （`RenderFramePacer`），等到了再把机位与 transform 一次读齐，然后才画；等不到
+ * （主线程真的卡了）就照旧画上一帧，表现动画照常推进。
  */
 
 const post = (message: RenderWorkerToMain): void => {
   (self as unknown as Worker).postMessage(message);
 };
+
+const clock = globalThis.performance ?? Date;
 
 let runtime: RenderWorldRuntime | undefined;
 let transforms: RenderTransformBuffer | undefined;
@@ -39,11 +48,10 @@ let reportedAt = 0;
 /** 帧计时报表的发送间隔。一秒一条足够看清趋势，又不会把 postMessage 变成负担。 */
 const FRAME_REPORT_INTERVAL_MS = 1000;
 
-/** 上一帧读到的玩法帧号，用来数重复与跳过。 */
-let lastTransformFrameId = -1;
-let pacingFrames = 0;
-let pacingDuplicated = 0;
-let pacingSkipped = 0;
+/** 每拍等主线程翻面的节拍器；`?renderpace=free` 时只记账不等。 */
+let pacer = new RenderFramePacer();
+/** 这一秒里画出来的相机与世界对不上号的帧数（见 pairedFrame.ts）。 */
+let torn = 0;
 /** 跨报表窗口保留的最差帧。卡顿几秒一次，只看当前这一秒会正好错过。 */
 let worstFrameMilliseconds = 0;
 let worstFrameAt = 0;
@@ -62,7 +70,7 @@ self.addEventListener('message', (event: MessageEvent<RenderWorkerFromMain>) => 
   const message = event.data;
   if (message.kind === 'start') {
     forceJavaScriptChunkGenerator(message.forceJavaScriptChunkGenerator);
-    start(message.canvas, message.camera, message.transforms);
+    start(message.canvas, message.camera, message.transforms, message.renderPacing);
     return;
   }
   if (!runtime || !transforms) return;
@@ -74,7 +82,8 @@ self.addEventListener('message', (event: MessageEvent<RenderWorkerFromMain>) => 
       fruitInstances,
       chunkViews: runtime.chunkViews,
       runtime,
-      adoptTransforms: (bytes) => { transforms = RenderTransformBuffer.fromBytes(bytes); },
+      // 就地换字节：渲染世界与表现系统握着的是同一个对象，换新对象它们会一直读旧内存。
+      adoptTransforms: (bytes) => { transforms?.adoptBytes(bytes); },
     });
   }
 });
@@ -83,11 +92,13 @@ function start(
   canvas: OffscreenCanvas,
   cameraBytes: ArrayBufferLike,
   transformBytes: ArrayBufferLike,
+  renderPacing: RenderPacingMode,
 ): void {
   try {
     transforms = RenderTransformBuffer.fromBytes(transformBytes);
     cameraBuffer = RenderCameraBuffer.fromBytes(cameraBytes);
     runtime = new RenderWorldRuntime(canvas, cameraBuffer, transforms);
+    pacer = new RenderFramePacer({ waitEnabled: renderPacing !== 'free' });
     // 两条反向通知：都是只有这一侧知道的事实，走 postMessage，不进命令队列。
     // 回报里的那份逐帧复用，`postMessage` 会结构化克隆，所以摊平成一条报文。
     runtime.setSlimeSurfaceDragListener((report) => post({
@@ -107,26 +118,35 @@ function start(
 
 function frame(now: number): void {
   (self as unknown as Window).requestAnimationFrame(frame);
-  if (!runtime) return;
+  if (!runtime || !transforms) return;
+  pacer.beginFrame(now);
   // 第一帧没有前一帧可减；之后钳到 100ms，切标签页回来时不要一次跳一大步。
   const deltaSeconds = previous === 0 ? 1 / 60 : Math.min((now - previous) / 1000, 0.1);
   previous = now;
   elapsed += deltaSeconds;
+
+  // 先等主线程这一拍翻面。等的是机位那一面——它是主线程一帧里最后翻的，等到它，
+  // 这一帧的 transform 一定也翻过了。等的这段不算进帧耗时——它是「在等别人」，
+  // 不是「自己慢」；面板上单独有一行给它。
+  if (cameraBuffer) pacer.acquire(cameraBuffer, clock);
   // 帧边界打在这里，不在 runtime 里：整帧减去各阶段之和，剩下的就是还没打点的地方。
   // 帧循环搬进这条线程之后，这才是「一帧到底多久」的唯一现场。
-  const startedAt = (globalThis.performance ?? Date).now();
+  const startedAt = clock.now();
   frameTimeline.beginFrame();
+  // 机位与 transform 在这一处一次读齐：两样出自同一帧，相机不会比世界新一帧。
+  const consumed = frameTimeline.measure('render-sync', () => runtime!.consumePublishedFrame());
   frameTimeline.measure('render-update', () => runtime?.update(deltaSeconds, elapsed));
   frameTimeline.measure('render-draw', () => runtime?.render());
   frameTimeline.endFrame();
-  const frameMilliseconds = (globalThis.performance ?? Date).now() - startedAt;
+  const frameMilliseconds = clock.now() - startedAt;
+  pacer.endFrame(frameMilliseconds);
   if (frameMilliseconds >= worstFrameMilliseconds || now - worstFrameAt > WORST_FRAME_WINDOW_MS) {
     worstFrameMilliseconds = frameMilliseconds;
     worstFrameAt = now;
   }
 
-  // 这一帧画的是玩法的第几帧。两条循环各跑各的 rAF，相位一漂就会「同一份画两遍」
-  // 接着「有一份没画」——两边都还是满帧，画面却在这对上一顿。
+  if (consumed.torn) torn += 1;
+
   // 相机每帧推进了多远。帧再准，位移忽大忽小照样看着顿。
   const camera = cameraBuffer?.read(cameraSample);
   if (camera) {
@@ -138,17 +158,6 @@ function frame(now: number): void {
     previousCamera = [x, y, z];
   }
 
-  const frameId = transforms?.frameId ?? -1;
-  if (frameId >= 0) {
-    pacingFrames += 1;
-    if (lastTransformFrameId >= 0) {
-      const advanced = frameId - lastTransformFrameId;
-      if (advanced === 0) pacingDuplicated += 1;
-      else if (advanced > 1) pacingSkipped += 1;
-    }
-    lastTransformFrameId = frameId;
-  }
-
   if (reportedAt === 0) reportedAt = now;
   if (now - reportedAt >= FRAME_REPORT_INTERVAL_MS) {
     reportedAt = now;
@@ -158,18 +167,15 @@ function frame(now: number): void {
       kind: 'frameReport',
       report: frameTimeline.report(),
       pacing: {
-        frames: pacingFrames,
-        duplicated: pacingDuplicated,
-        skipped: pacingSkipped,
+        ...pacer.report(),
+        torn,
         worstMilliseconds: worstFrameMilliseconds,
         worstSecondsAgo: Math.max(0, (now - worstFrameAt) / 1000),
         ...summarizeMotion(),
       },
     });
     frameTimeline.reset();
-    pacingFrames = 0;
-    pacingDuplicated = 0;
-    pacingSkipped = 0;
+    torn = 0;
     motionSamples.length = 0;
   }
 }

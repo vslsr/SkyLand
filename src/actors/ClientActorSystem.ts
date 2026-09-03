@@ -334,7 +334,8 @@ export class ClientActorSystem implements SceneFrameSystem {
     this.sampleGroundHeight = options.sampleGroundHeight;
     this.transforms = options.transforms;
     this.renderScene = options.renderScene;
-    this.proxyIds = new RenderProxyTable(this.renderScene);
+    // 槽位释放后隔一帧再复用：渲染线程画这一帧时旧 proxy 还在（见 RenderProxyTable）。
+    this.proxyIds = new RenderProxyTable(this.renderScene, this.transforms);
     // 客户端不运行 AttachmentSystem：最终世界坐标来自快照插值，不能被
     // localTransform 再次解算覆盖。
     //

@@ -11,8 +11,8 @@ import { allocateSharedBytes, isSharedBytes } from '../platform/index';
  * 一帧，不会读到写到一半的机位。
  *
  * ```text
- * [ Int32 header ×2 ][ Float32 2×9 ]
- *   readBank frameId   x y z  fx fy fz  ux uy uz
+ * [ Int32 header ×3 ][ Float32 2×9 ]
+ *   readBank frameId pairedTransformFrameId   x y z  fx fy fz  ux uy uz
  * ```
  *
  * **为什么不并进 `RenderTransformBuffer`**：那一段是**场景的**——换地图就换一个，
@@ -20,9 +20,14 @@ import { allocateSharedBytes, isSharedBytes } from '../platform/index';
  * 而且它是每帧一条固定记录，不是每槽位一条。并进去只会让那段字节多一个和容量
  * 无关的尾巴，以及一个「换场景时相机怎么办」的问题。
  *
- * 代价是两次 `publish()`，理论上存在「相机是第 N 帧、世界是第 N-1 帧」的撕裂窗口。
- * 实际不会：两次翻面都发生在同一个 tick 里（见 `GrasslandScene.update`）。真要
- * 让它成为不可能而不只是不会发生，就把两段字节合成一段——那时这个类整个消失。
+ * 代价是两次 `publish()`：存在「相机是第 N 帧、世界是第 N-1 帧」的撕裂窗口。
+ * 「两次翻面都在同一个 tick 里」堵不住它——读的一侧在另一条线程上，它什么时候读
+ * transform、什么时候读相机，主线程管不着；录像里玩家每隔几帧相对地面倒退一步
+ * 再追上来，就是这道缝。所以配对写在字节里：机位翻面时带上**它配的是第几帧
+ * transform**（`publish(pairedTransformFrameId)`），主线程先翻 transform 再翻机位
+ * （`GrasslandScene.update`）。读的一侧把两样在同一处一次读完，对不上号就等机位
+ * 那一面到了再读一次（`consumePairedFrame`）——机位最后翻，所以渲染线程等的也是
+ * 它的帧号。真要让它在结构上不可能，就把两段字节合成一段——那时这个类整个消失。
  *
  * **只送对面真正要的**：位置、前向、上向，九个 f32。`CameraFrame` 里还有
  * `right` 和 `viewMatrix`，但渲染侧拿到位置和朝向之后自己会算——视图矩阵是
@@ -32,10 +37,16 @@ import { allocateSharedBytes, isSharedBytes } from '../platform/index';
 /** 每一面的浮点数个数：位置 3 + 前向 3 + 上向 3。 */
 export const RENDER_CAMERA_STRIDE = 9;
 
-const HEADER_INT32_COUNT = 2;
+/** 表头三个整数：读面、帧号、这一面机位配对的 transform 帧号。 */
+export const RENDER_CAMERA_HEADER_INT32_COUNT = 3;
+const HEADER_INT32_COUNT = RENDER_CAMERA_HEADER_INT32_COUNT;
 const HEADER_READ_BANK = 0;
 const HEADER_FRAME_ID = 1;
+const HEADER_PAIRED_TRANSFORM_FRAME_ID = 2;
 const HEADER_BYTES = HEADER_INT32_COUNT * Int32Array.BYTES_PER_ELEMENT;
+
+/** `waitForFrame` 的结果，和 transform SoA 那边同一组。 */
+export type CameraFrameWaitResult = 'ok' | 'not-equal' | 'timed-out' | 'unsupported';
 
 export interface RenderCamera {
   position: [number, number, number];
@@ -65,6 +76,7 @@ export class RenderCameraBuffer {
     if (adopted) return;
     this.#header[HEADER_READ_BANK] = 0;
     this.#header[HEADER_FRAME_ID] = 0;
+    this.#header[HEADER_PAIRED_TRANSFORM_FRAME_ID] = 0;
     const initial = createRenderCamera();
     // 两面都填成缺省朝向：第一帧就算没人写过也画得出东西。
     for (const bank of [0, 1]) this.#writeBank(bank, initial.position, initial.forward, initial.up);
@@ -100,6 +112,30 @@ export class RenderCameraBuffer {
     return Atomics.load(this.#header, HEADER_FRAME_ID);
   }
 
+  /**
+   * 读面上的机位配的是第几帧 transform（`publish` 时由主线程写入）。
+   * 渲染侧拿它核对：和刚兑现的 transform 帧号不一致，画出来的相机与世界就不是同一帧。
+   */
+  public get pairedTransformFrameId(): number {
+    return Atomics.load(this.#header, HEADER_PAIRED_TRANSFORM_FRAME_ID);
+  }
+
+  /**
+   * 帧号仍等于 `frameId` 时阻塞，最多 `timeoutMs` 毫秒；`publish()` 翻面时叫醒。
+   *
+   * 机位是主线程一帧里**最后**翻面的那段字节，所以渲染线程每拍等的是它
+   * （`RenderFramePacer`）：等到了，这一帧的 transform 一定也已经翻过面。
+   * 主线程上 `Atomics.wait` 会抛，收成 'unsupported'；非共享内存同样不等。
+   */
+  public waitForFrame(frameId: number, timeoutMs: number): CameraFrameWaitResult {
+    if (!this.isShared || !(timeoutMs > 0)) return 'unsupported';
+    try {
+      return Atomics.wait(this.#header, HEADER_FRAME_ID, frameId, timeoutMs);
+    } catch {
+      return 'unsupported';
+    }
+  }
+
   public write(
     position: readonly [number, number, number],
     forward: readonly [number, number, number],
@@ -111,11 +147,18 @@ export class RenderCameraBuffer {
   /**
    * 翻面。和 transform 那一段一样：发布之后把新的读面复制到写面，
    * 所以下一帧没人写相机就保持上一帧的机位，而不是回到两帧前。
+   *
+   * `pairedTransformFrameId` 是这一面机位配的 transform 帧号——主线程在翻完
+   * transform 之后翻机位，把刚翻出去的那个帧号带在这里。读的一侧靠它核对两段字节
+   * 是不是同一帧，对不上就等机位再翻一次。
    */
-  public publish(): void {
+  public publish(pairedTransformFrameId = 0): void {
     const published = 1 - this.#readBank;
+    Atomics.store(this.#header, HEADER_PAIRED_TRANSFORM_FRAME_ID, pairedTransformFrameId | 0);
     Atomics.store(this.#header, HEADER_READ_BANK, published);
     Atomics.add(this.#header, HEADER_FRAME_ID, 1);
+    // 叫醒在 `waitForFrame` 里等这一帧的渲染线程。非共享内存上是空操作。
+    Atomics.notify(this.#header, HEADER_FRAME_ID);
     this.#values.copyWithin(
       (1 - published) * RENDER_CAMERA_STRIDE,
       published * RENDER_CAMERA_STRIDE,

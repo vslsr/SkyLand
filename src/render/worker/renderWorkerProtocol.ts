@@ -25,8 +25,18 @@ export type RenderWorkerFromMain =
        * 读好交过去——否则这个调试开关会静默失效。
        */
       readonly forceJavaScriptChunkGenerator: boolean;
+      /**
+       * `?renderpace=free` 那个开关：渲染线程不等主线程翻面，每拍读最新一面。
+       *
+       * 默认是等（'locked'）。留这个开关是为了在面板上对照：不等的话「重复／跳过」
+       * 会随两条线程的相位漂动，那正是「两边都满帧、画面却一顿一顿」的来源。
+       */
+      readonly renderPacing: RenderPacingMode;
     }
   | { readonly kind: 'batch'; readonly batch: RenderCommandBatch };
+
+/** 'locked'：渲染线程每拍等主线程翻面，一帧画一次；'free'：读最新一面，老行为。 */
+export type RenderPacingMode = 'locked' | 'free';
 
 export type RenderWorkerToMain =
   | { readonly kind: 'ready' }
@@ -59,18 +69,37 @@ export type RenderWorkerToMain =
 /**
  * 两条循环的配对情况。
  *
- * 玩法每帧写满 transform 双缓冲并 `publish()`，渲染线程按自己的 rAF 读最新那一面——
- * 两条循环都是 60Hz，但没有相位锁，也没有插值。于是相位一漂，就会出现「同一份
+ * 玩法每帧写满 transform 双缓冲并 `publish()`，渲染线程按自己的 rAF 画。两条循环
+ * 都挂在同一个 vsync 上，但谁先跑完没有保证：相位一交叉，就会出现「同一份
  * transform 被画了两遍」紧跟着「有一份根本没被画出来」。两条线程各自都是满帧，
  * 画面却在这对重复/跳过上一顿。光看 fps 和耗时永远看不出来，所以单独数出来。
+ *
+ * 现在渲染线程默认在每拍里**等主线程翻面**再画（`RenderFramePacer`），这几个数
+ * 因此应当接近零；不为零时，`waitTimeouts` 说的是主线程这一拍没赶上。
+ *
+ * 数的是**画出来的**那一帧：原来按读到的帧号数，而画面用的是命令到达时兑现的
+ * 位置，两者差一帧，那个数字看不见真正的重复与跳过。
  */
 export interface FramePacing {
   /** 这一秒画了多少帧。 */
   readonly frames: number;
-  /** 其中有多少帧读到的 transform 与上一帧完全相同（玩法没赶上）。 */
+  /** 其中有多少帧画的 transform 与上一帧完全相同（玩法没赶上）。 */
   readonly duplicated: number;
   /** 有多少帧跨过了不止一次 publish（玩法赶超了，中间那份没被画出来）。 */
   readonly skipped: number;
+  /**
+   * 有多少帧里相机与世界不是同一帧的。
+   *
+   * 相机与 transform 是两段字节、两次翻面。原来一个在命令到达时兑现、一个在画的
+   * 那一刻读，中间主线程再翻一次面，相机就比世界新一帧——玩家在屏幕上倒退一步
+   * 再追上来。现在两样在同一处一起读，这个数应当恒为 0。
+   */
+  readonly torn: number;
+  /** 这一秒里渲染线程等主线程翻面等了多久：中位数与最大值（毫秒）。 */
+  readonly waitMedianMs: number;
+  readonly waitMaximumMs: number;
+  /** 等到上限主线程还没翻面的帧数——主线程这一拍没赶上，这一帧只能画上一帧。 */
+  readonly waitTimeouts: number;
   /**
    * 最近十秒里最慢的那一帧，以及它是几秒前的事。
    *

@@ -40,6 +40,12 @@ import { RENDER_VISUAL_PARAM_COUNT } from './RenderVisualParams';
 /** 每个槽位的 transform 分量：x, y, z, yaw。 */
 export const RENDER_TRANSFORM_STRIDE = 4;
 
+/**
+ * `waitForFrame` 的结果：`Atomics.wait` 的三种，加上「这条线程不允许等」。
+ * 主线程上 `Atomics.wait` 会抛，单线程或测试里的普通 `ArrayBuffer` 也没什么可等的。
+ */
+export type FrameWaitResult = 'ok' | 'not-equal' | 'timed-out' | 'unsupported';
+
 const HEADER_INT32_COUNT = 4;
 const HEADER_READ_BANK = 0;
 const HEADER_FRAME_ID = 1;
@@ -53,6 +59,17 @@ export interface RenderTransform {
   y: number;
   z: number;
   yaw: number;
+}
+
+/** 从表头读容量；不像这段字节的（太短、容量不是正整数）当场报错，而不是读出一堆垃圾。 */
+function readCapacity(bytes: ArrayBufferLike): number {
+  const capacity = bytes.byteLength >= HEADER_BYTES
+    ? new Int32Array(bytes, 0, HEADER_INT32_COUNT)[HEADER_CAPACITY]
+    : undefined;
+  if (!Number.isInteger(capacity) || (capacity as number) <= 0) {
+    throw new Error(`这段字节不像 RenderTransformBuffer：表头里的容量是 ${capacity}`);
+  }
+  return capacity as number;
 }
 
 function bytesFor(capacity: number): number {
@@ -90,16 +107,24 @@ export class RenderTransformBuffer {
    * 把新的 `bytes` 再投递一次。这个坑关在这个类里，见类注释第 3 条。
    */
   public static fromBytes(bytes: ArrayBufferLike): RenderTransformBuffer {
-    const capacity = new Int32Array(bytes, 0, HEADER_INT32_COUNT)[HEADER_CAPACITY];
-    if (!Number.isInteger(capacity) || capacity <= 0) {
-      throw new Error(`这段字节不像 RenderTransformBuffer：表头里的容量是 ${capacity}`);
-    }
+    const capacity = readCapacity(bytes);
     // 先按最小容量正常构造再换视图：私有字段只有构造器装得上，
     // `Object.create` 出来的壳子调不了 `#adopt`。那一小段字节随即被丢掉。
     const buffer = new RenderTransformBuffer(1);
     // 只换视图，不碰表头——表头归写入的那一侧。
     buffer.#adopt(bytes, capacity);
     return buffer;
+  }
+
+  /**
+   * 对面扩容之后送来的新字节，**就地**换上。
+   *
+   * 和 `fromBytes` 造一个新对象不同：渲染世界、合成、表现系统手里握着的都是同一个
+   * `RenderTransformBuffer`，换新对象只会让第一个拿到的人看到新内存，其余人还在读
+   * 一段没人再写的旧字节。就地换视图之后，所有持有者下一次读到的就都是新的。
+   */
+  public adoptBytes(bytes: ArrayBufferLike): void {
+    this.#adopt(bytes, readCapacity(bytes));
   }
 
   public get capacity(): number {
@@ -109,6 +134,22 @@ export class RenderTransformBuffer {
   /** 递增的帧号。渲染侧靠它判断「这一帧的数据是不是新的」。 */
   public get frameId(): number {
     return Atomics.load(this.#header, HEADER_FRAME_ID);
+  }
+
+  /**
+   * 帧号仍等于 `frameId` 时阻塞，最多 `timeoutMs` 毫秒；`publish()` 翻面时把等的人叫醒。
+   *
+   * 这是渲染线程「等主线程这一拍翻完面再画」的那一等（见 `RenderFramePacer`）。
+   * 只有工作线程能等：主线程上 `Atomics.wait` 会抛，这里收成 'unsupported'，调用方
+   * 退回「读最新一面」。非共享内存（单线程、测试）同样没有另一条线程会来叫醒，不等。
+   */
+  public waitForFrame(frameId: number, timeoutMs: number): FrameWaitResult {
+    if (!this.isShared || !(timeoutMs > 0)) return 'unsupported';
+    try {
+      return Atomics.wait(this.#header, HEADER_FRAME_ID, frameId, timeoutMs);
+    } catch {
+      return 'unsupported';
+    }
   }
 
   /** 跨线程投递的就是这一段字节；SAB 时零拷贝。 */
@@ -176,6 +217,8 @@ export class RenderTransformBuffer {
     const published = this.#writeBank;
     Atomics.store(this.#header, HEADER_READ_BANK, published);
     Atomics.add(this.#header, HEADER_FRAME_ID, 1);
+    // 叫醒在 `waitForFrame` 里等这一帧的渲染线程。非共享内存上这一句是空操作。
+    Atomics.notify(this.#header, HEADER_FRAME_ID);
     const next = 1 - published;
     const stride = this.#capacity * RENDER_TRANSFORM_STRIDE;
     this.#transforms.copyWithin(next * stride, published * stride, (published + 1) * stride);

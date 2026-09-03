@@ -90,10 +90,13 @@ export class SceneRenderer {
    *
    * 收 `CameraFrame` 是因为算相机的那一半（跟随、悬臂、模式过渡）在玩法侧，
    * 它本来就产出这个结构；这里只负责把其中真正过边界的九个数摊进字节。
+   *
+   * 必须排在这一帧的 transform 翻面之后调：机位带着刚翻出去的 transform 帧号一起
+   * 翻面，渲染线程靠这个号核对相机与世界是不是同一帧（`RenderCameraBuffer`）。
    */
   public publishCamera(frame: CameraFrame): void {
     this.cameraChannel.write(frame.position, frame.axes.forward, frame.axes.up);
-    this.cameraChannel.publish();
+    this.cameraChannel.publish(this.runtime.transforms.frameId);
   }
 
   /**

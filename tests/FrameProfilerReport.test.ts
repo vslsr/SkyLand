@@ -86,7 +86,7 @@ test('帧配对单独占一行：两条循环都满帧也能看出画面在哪�
   const lines = formatFrameProfiler([{
     label: '渲染线程',
     report,
-    pacing: { frames: 61, duplicated: 12, skipped: 11, worstMilliseconds: 0, worstSecondsAgo: 0, motionFrames: 0, motionStalls: 0, motionMedian: 0, motionMaximum: 0 },
+    pacing: { frames: 61, duplicated: 12, skipped: 11, torn: 0, waitMedianMs: 0, waitMaximumMs: 0, waitTimeouts: 0, worstMilliseconds: 0, worstSecondsAgo: 0, motionFrames: 0, motionStalls: 0, motionMedian: 0, motionMaximum: 0 },
   }]);
   const pacing = lines.find((line) => line.includes('帧配对'));
   assert.ok(pacing, '应该有帧配对那一行');
@@ -96,12 +96,46 @@ test('帧配对单独占一行：两条循环都满帧也能看出画面在哪�
   assert.match(pacing, /画面在这 23 帧上顿/);
 });
 
+test('撕裂单独计数：相机与世界不是同一帧的那几帧也算顿', () => {
+  const report = reportWith({ 'render-draw': [1] }, [2]);
+  const lines = formatFrameProfiler([{
+    label: '渲染线程',
+    report,
+    pacing: { frames: 60, duplicated: 0, skipped: 0, torn: 4, waitMedianMs: 0, waitMaximumMs: 0, waitTimeouts: 0, worstMilliseconds: 0, worstSecondsAgo: 0, motionFrames: 0, motionStalls: 0, motionMedian: 0, motionMaximum: 0 },
+  }]);
+  const pacing = lines.find((line) => line.includes('帧配对'))!;
+  assert.match(pacing, /撕裂=\s*4/);
+  assert.match(pacing, /画面在这 4 帧上顿/);
+});
+
+test('等主线程那一行：等了多久、有几拍没等到；一次都没等过就不出现', () => {
+  const report = reportWith({ 'render-draw': [1] }, [2]);
+  const waited = formatFrameProfiler([{
+    label: '渲染线程',
+    report,
+    pacing: { frames: 60, duplicated: 2, skipped: 0, torn: 0, waitMedianMs: 3.2, waitMaximumMs: 11.8, waitTimeouts: 2, worstMilliseconds: 0, worstSecondsAgo: 0, motionFrames: 0, motionStalls: 0, motionMedian: 0, motionMaximum: 0 },
+  }]);
+  const line = waited.find((entry) => entry.includes('等主线程'))!;
+  assert.ok(line, '等过就该有这一行');
+  assert.match(line, /中位 3\.2ms/);
+  assert.match(line, /最长 11\.8ms/);
+  assert.match(line, /超时 2\/60 帧/);
+  assert.match(line, /主线程没赶上/);
+
+  const never = formatFrameProfiler([{
+    label: '渲染线程',
+    report,
+    pacing: { frames: 60, duplicated: 0, skipped: 0, torn: 0, waitMedianMs: 0, waitMaximumMs: 0, waitTimeouts: 0, worstMilliseconds: 0, worstSecondsAgo: 0, motionFrames: 0, motionStalls: 0, motionMedian: 0, motionMaximum: 0 },
+  }]);
+  assert.ok(!never.some((entry) => entry.includes('等主线程')));
+});
+
 test('配对完美时不喊「顿」，没有 pacing 时整行不出现', () => {
   const report = reportWith({ 'render-draw': [1] }, [2]);
   const [, clean] = formatFrameProfiler([{
     label: '渲染线程',
     report,
-    pacing: { frames: 60, duplicated: 0, skipped: 0, worstMilliseconds: 0, worstSecondsAgo: 0, motionFrames: 0, motionStalls: 0, motionMedian: 0, motionMaximum: 0 },
+    pacing: { frames: 60, duplicated: 0, skipped: 0, torn: 0, waitMedianMs: 0, waitMaximumMs: 0, waitTimeouts: 0, worstMilliseconds: 0, worstSecondsAgo: 0, motionFrames: 0, motionStalls: 0, motionMedian: 0, motionMaximum: 0 },
   }]);
   assert.match(clean, /一对一=\s*60/);
   assert.doesNotMatch(clean, /顿/);
@@ -119,6 +153,10 @@ test('近十秒最差帧跨窗口留着——卡顿几秒一次，只看当前�
       frames: 60,
       duplicated: 0,
       skipped: 0,
+      torn: 0,
+      waitMedianMs: 0,
+      waitMaximumMs: 0,
+      waitTimeouts: 0,
       worstMilliseconds: 84.2,
       worstSecondsAgo: 6.4,
       motionFrames: 0,
@@ -136,7 +174,7 @@ test('近十秒最差帧跨窗口留着——卡顿几秒一次，只看当前�
   const quiet = formatFrameProfiler([{
     label: '渲染线程',
     report,
-    pacing: { frames: 60, duplicated: 0, skipped: 0, worstMilliseconds: 0, worstSecondsAgo: 0, motionFrames: 0, motionStalls: 0, motionMedian: 0, motionMaximum: 0 },
+    pacing: { frames: 60, duplicated: 0, skipped: 0, torn: 0, waitMedianMs: 0, waitMaximumMs: 0, waitTimeouts: 0, worstMilliseconds: 0, worstSecondsAgo: 0, motionFrames: 0, motionStalls: 0, motionMedian: 0, motionMaximum: 0 },
   }]);
   assert.ok(!quiet.some((line) => line.includes('近十秒最差')));
 });
@@ -147,7 +185,7 @@ test('画面位移单独一行：帧是匀的但画面不匀时点出来', () =>
     label: '渲染线程',
     report,
     pacing: {
-      frames: 60, duplicated: 0, skipped: 0,
+      frames: 60, duplicated: 0, skipped: 0, torn: 0, waitMedianMs: 0, waitMaximumMs: 0, waitTimeouts: 0,
       worstMilliseconds: 0, worstSecondsAgo: 0,
       motionFrames: 58, motionStalls: 9, motionMedian: 0.052, motionMaximum: 0.147,
     },
@@ -163,7 +201,7 @@ test('画面位移单独一行：帧是匀的但画面不匀时点出来', () =>
     label: '渲染线程',
     report,
     pacing: {
-      frames: 60, duplicated: 0, skipped: 0,
+      frames: 60, duplicated: 0, skipped: 0, torn: 0, waitMedianMs: 0, waitMaximumMs: 0, waitTimeouts: 0,
       worstMilliseconds: 0, worstSecondsAgo: 0,
       motionFrames: 58, motionStalls: 0, motionMedian: 0.052, motionMaximum: 0.061,
     },
@@ -175,7 +213,7 @@ test('画面位移单独一行：帧是匀的但画面不匀时点出来', () =>
     label: '渲染线程',
     report,
     pacing: {
-      frames: 60, duplicated: 0, skipped: 0,
+      frames: 60, duplicated: 0, skipped: 0, torn: 0, waitMedianMs: 0, waitMaximumMs: 0, waitTimeouts: 0,
       worstMilliseconds: 0, worstSecondsAgo: 0,
       motionFrames: 0, motionStalls: 0, motionMedian: 0, motionMaximum: 0,
     },

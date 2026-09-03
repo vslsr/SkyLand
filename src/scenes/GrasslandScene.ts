@@ -388,11 +388,13 @@ export class GrasslandScene extends Scene {
         this.remotePlayers.clear();
       }
     });
-    // 相机在这里过边界，紧挨着 renderer.update 里的那次 transform 翻面：
-    // 两段字节因此是同一个 tick 的，世界不会比机位晚一帧。
+    this.renderer.update(deltaSeconds, elapsedSeconds, this.currentFocus());
+    // 相机在这里过边界，**紧跟在** renderer.update 里那次 transform 翻面之后：
+    // 机位带着刚翻出去的 transform 帧号一起翻面，渲染线程等的就是机位这一面——
+    // 等到时 transform 一定已经翻过，两段字节因此是同一帧的（RenderCameraBuffer）。
+    // 顺序不能倒：机位先翻，渲染线程就可能画出「相机是这一帧、世界是上一帧」。
     // 写在 render() 里也能跑，但那时渲染循环已经在另一条线程上了，读不到这个对象。
     this.renderer.publishCamera(this.controls.frame);
-    this.renderer.update(deltaSeconds, elapsedSeconds, this.currentFocus());
     if (this.terrainEdits.active) {
       // 编辑模式独占 WorldInteract：同一次点击不能既改地形又去交互 Actor。
       this.terrainEdits.update(this.controls.frame);

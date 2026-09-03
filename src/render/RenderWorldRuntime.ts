@@ -10,9 +10,15 @@ import { RenderCameraBuffer, createRenderCamera } from './RenderCameraBuffer';
 import type { ChunkViewSink } from '../world/ChunkViewHost';
 import type { RenderScene, SlimeSurfaceDragListener } from './RenderScene';
 import { RenderTransformBuffer } from './RenderTransformBuffer';
+import {
+  consumePairedFrame,
+  type PairedFrameIds,
+  type PairedFrameSources,
+} from './worker/pairedFrame';
 
 /** 主线程那台相机的视场角。渲染世界只在算投影矩阵时用它。 */
 export const CAMERA_FIELD_OF_VIEW = 50;
+
 
 const EMPTY_SCENE_COLOR = 0xfdfbf6;
 
@@ -110,6 +116,18 @@ export class RenderWorldRuntime implements RenderWorldPort {
   readonly #dynamicWorld = new THREE.Group();
   readonly #lookTarget = new THREE.Vector3();
   readonly #cameraFrame = createRenderCamera();
+  /** `consumePublishedFrame` 已经替这一帧读过机位；`render()` 不再自己去读。 */
+  #cameraConsumed = false;
+  /** 上一次 `consumePublishedFrame` 读到的帧号。逐帧复用，不每帧新建。 */
+  readonly #consumed: PairedFrameIds = {
+    transformFrameId: 0,
+    cameraFrameId: 0,
+    pairedTransformFrameId: 0,
+    torn: false,
+    retries: 0,
+  };
+  /** `consumePairedFrame` 要的那几个口子，绑在这个实例上，逐帧复用。构造器里装。 */
+  readonly #pairedSources: PairedFrameSources;
   #scene = createEmptyScene();
   #composition?: RenderWorldComposition;
   #visualSystems: SceneFrameSystem[] = [];
@@ -129,6 +147,12 @@ export class RenderWorldRuntime implements RenderWorldPort {
     /** transform SoA。同样归连接持有，跨线程时是同一块 `SharedArrayBuffer`。 */
     public readonly transforms: RenderTransformBuffer,
   ) {
+    this.#pairedSources = {
+      transforms,
+      camera: cameraChannel,
+      submitTransforms: () => this.#composition?.renderScene.submitTransforms(this.transforms),
+      readCamera: () => { this.cameraChannel.read(this.#cameraFrame); },
+    };
     this.#renderer = new THREE.WebGLRenderer({
       canvas: canvas as HTMLCanvasElement,
       antialias: true,
@@ -278,6 +302,23 @@ export class RenderWorldRuntime implements RenderWorldPort {
   }
 
   /**
+   * 一次读入这一刻已发布的机位与 transform SoA，两样出自同一帧。
+   *
+   * 渲染线程等到主线程这一拍翻面之后调它一次（见 `RenderFramePacer`）。机位与
+   * 世界**必须在同一处、同一瞬间取**：原来 transform 在命令到达时兑现、机位在
+   * `render()` 里读，两个时刻之间主线程可能又翻了一次面——相机就比世界新一帧，
+   * 玩家在屏幕上倒退一步再追上来。`render()` 随后用这里读到的机位。
+   *
+   * 返回兑现的是第几帧、有没有对上号，渲染线程拿它记重复、跳过与撕裂。
+   */
+  public consumePublishedFrame(): PairedFrameIds {
+    // 机位那一面带着它配的 transform 帧号；对不上就等机位再翻一次（见 pairedFrame.ts）。
+    consumePairedFrame(this.#pairedSources, this.#consumed);
+    this.#cameraConsumed = true;
+    return this.#consumed;
+  }
+
+  /**
    * 渲染世界这一帧。
    *
    * 顺序是有约束的：表现系统先跑（它们读上一次翻面的那段字节），
@@ -296,10 +337,18 @@ export class RenderWorldRuntime implements RenderWorldPort {
     );
   }
 
-  /** 画一帧。机位从那段字节里读，不由参数传进来。 */
+  /**
+   * 画一帧。机位从那段字节里读，不由参数传进来。
+   *
+   * 这一帧已经由 `consumePublishedFrame` 连同 transform 一起读过机位时就用那一份——
+   * 再读一次可能读到主线程刚翻的下一帧，相机与世界就不是同一帧了。
+   */
   public render(): void {
     this.#resize();
-    const frame = this.cameraChannel.read(this.#cameraFrame);
+    const frame = this.#cameraConsumed
+      ? this.#cameraFrame
+      : this.cameraChannel.read(this.#cameraFrame);
+    this.#cameraConsumed = false;
     this.#camera.position.set(...frame.position);
     this.#camera.up.set(...frame.up);
     this.#lookTarget.set(
