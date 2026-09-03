@@ -861,6 +861,8 @@ export class ServerScene {
     if (!targetDeformation.grab(player.id, contact, {
       pinch: bite.pinch,
       gripDepth: bite.gripDepth,
+      // 咬人者绕到另一面时，被咬的那块皮要跟着牙挪过去，重锚得知道外壳多大。
+      shellRadius: radius,
       // 缰绳从咬住那一刻的距离起算：咬上的瞬间不会被拽一下。形变不看这个距离，
       // 它看的是嘴在哪儿——牙咬住的当下那块皮就已经被捏起来了。
       grabDistance: Math.hypot(target.x - player.x, target.y - player.y, target.z - player.z),

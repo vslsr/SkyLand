@@ -1,5 +1,8 @@
 import { ActorComponent } from '../ActorComponent.mjs';
-import { worldToShellOffset } from '../../softBodyDeformation.mjs';
+import {
+  resolveSurfaceContact,
+  worldToShellOffset,
+} from '../../softBodyDeformation.mjs';
 
 export const SOFT_BODY_DEFORMATION_COMPONENT = 'softBodyDeformation';
 
@@ -8,6 +11,18 @@ export const SOFT_BODY_DEFORMATION_COMPONENT = 'softBodyDeformation';
  * 被咬住、被倒刺钩住的时候，自己那点拖拽说了不算。
  */
 const SELF_REPORTED_SOURCE = null;
+
+/**
+ * 抓握点偏离命中处法线超过这个夹角（cos 值，0.5 就是 60°），那块皮就跟着挪过去。
+ *
+ * 命中点固定住是对的——牙还在那块皮上方的时候，皮就该被拉向牙。但施力方绕过去、
+ * 或者干脆从目标身上越过之后，牙已经在外壳的另一面了：这时「嘴 − 那块皮」几乎
+ * 整条都是朝身体里的，法线兜底把它砍掉之后剩下的就只有沿**旧**法线的那一点，
+ * 尖于是指向反方向。皮跟着牙绕过去，方向才跟得上。
+ *
+ * 60° 是个折中：再宽尖会歪得不像被咬着，再窄则平常走动都会不停换抓取。
+ */
+const REANCHOR_ALIGNMENT = 0.5;
 
 function finiteOr(value, fallback = 0) {
   const number = Number(value);
@@ -33,6 +48,8 @@ export class SoftBodyDeformationComponent extends ActorComponent {
   #gripWorld = { x: 0, y: 0, z: 0 };
 
   #poseOrigin = { x: 0, y: 0, z: 0 };
+
+  #reanchored = { x: 0, y: 0, z: 0, normalX: 0, normalY: 0, normalZ: 0 };
 
   constructor(definition = {}) {
     super(SOFT_BODY_DEFORMATION_COMPONENT);
@@ -80,6 +97,8 @@ export class SoftBodyDeformationComponent extends ActorComponent {
      * 深度是牙的属性，不是两人间距的属性。
      */
     this.gripDepth = 0;
+    /** 外壳半径，抓握点绕到另一面时用它把命中点重新落到外壳上。 */
+    this.shellRadius = 0;
     /** 施力方最后一次的世界位置，缰绳的锚点就是它。 */
     this.anchorX = 0;
     this.anchorZ = 0;
@@ -102,20 +121,15 @@ export class SoftBodyDeformationComponent extends ActorComponent {
   }
 
   /**
-   * 外力抓住一处外壳。命中点固定在抓住那一刻的那块皮上，所以只在这里写一次。
+   * 记下一处命中点与它的朝外法线，抓住和重锚共用。
    *
-   * 坐标是**外壳坐标**（`worldToShellOffset`：Actor 原点 + 世界轴向）。外壳本来
-   * 就不跟着 Actor 转身，命中点也就不该跟着转——按 Actor 本地坐标存，形变会整体
-   * 偏掉一个 yaw。
+   * 法线由 `resolveSurfaceContact` 一起给出；万一来源没给，退回命中点自身的方向，
+   * 那也是外壳上的朝外方向，只是没有被身体中心的高度修正过。
    */
-  grab(sourceId, contact, options = {}) {
-    if (!sourceId || this.heldExternally) return false;
-    this.sourceId = sourceId;
+  #adoptContact(contact) {
     this.contactX = finiteOr(contact.x);
     this.contactY = finiteOr(contact.y);
     this.contactZ = finiteOr(contact.z);
-    // 法线由 `resolveSurfaceContact` 一起给出；万一来源没给，退回命中点自身的方向，
-    // 那也是外壳上的朝外方向，只是没有被身体中心的高度修正过。
     const normalLength = Math.hypot(
       finiteOr(contact.normalX),
       finiteOr(contact.normalY),
@@ -135,12 +149,30 @@ export class SoftBodyDeformationComponent extends ActorComponent {
       this.normalY = 0;
       this.normalZ = 1;
     }
+  }
+
+  /**
+   * 外力抓住一处外壳。
+   *
+   * 坐标是**外壳坐标**（`worldToShellOffset`：Actor 原点 + 世界轴向）。外壳本来
+   * 就不跟着 Actor 转身，命中点也就不该跟着转——按 Actor 本地坐标存，形变会整体
+   * 偏掉一个 yaw。
+   *
+   * 命中点之后只有一种情况会动：抓握点绕到了外壳的另一面（见 `REANCHOR_ALIGNMENT`）。
+   * 那不是同一次抓取的延续，所以走的是加 `revision` 的重锚，而不是原地改坐标。
+   */
+  grab(sourceId, contact, options = {}) {
+    if (!sourceId || this.heldExternally) return false;
+    this.sourceId = sourceId;
+    this.#adoptContact(contact);
     this.pullX = 0;
     this.pullY = 0;
     this.pullZ = 0;
     this.pinch = Math.max(0, Math.min(1, finiteOr(options.pinch, 1)));
     this.grabDistance = Math.max(0, finiteOr(options.grabDistance));
     this.gripDepth = Math.max(0, finiteOr(options.gripDepth));
+    /** 外壳半径，重锚时把新的命中点重新落到外壳上。 */
+    this.shellRadius = Math.max(0, finiteOr(options.shellRadius));
     this.leashSlack = Math.max(0, finiteOr(options.leashSlack));
     this.leashStiffness = Math.max(0, finiteOr(options.leashStiffness));
     this.leashDamping = Math.max(0, finiteOr(options.leashDamping));
@@ -184,6 +216,10 @@ export class SoftBodyDeformationComponent extends ActorComponent {
     this.#gripWorld.y = finiteOr(gripWorld.y);
     this.#gripWorld.z = finiteOr(gripWorld.z);
     const grip = worldToShellOffset(this.#poseOrigin, this.#gripWorld, this.#localGrip);
+    // 抓握点绕到外壳另一面就把那块皮挪过去，不然「不能往里压」的兜底会把方向留在
+    // 旧的那一面：从目标身上越过之后，位移几乎整条朝里，砍掉之后只剩沿旧法线的
+    // 一点点，尖于是指向背对施力方的方向。
+    this.#reanchorIfBehind(pose);
     let pullX = grip.x - this.contactX;
     let pullY = grip.y - this.contactY;
     let pullZ = grip.z - this.contactZ;
@@ -208,6 +244,35 @@ export class SoftBodyDeformationComponent extends ActorComponent {
     const separationZ = this.anchorZ - this.#poseOrigin.z;
     const stretch = Math.hypot(separationX, separationY, separationZ) - this.grabDistance;
     return stretch <= this.breakDistance;
+  }
+
+  /**
+   * 抓握点已经跑到外壳的另一面了吗？是就把命中点挪过去，并且算一次新的抓取。
+   *
+   * 判据是「身体中心指向抓握点」的方向与命中处法线的夹角。牙还在那块皮上方时
+   * 什么都不做——命中点固定住，被咬者转身、被拖着走，扯的都还是同一块皮；
+   * 一旦施力方绕过去或者干脆从目标身上越过，那块皮就跟着牙绕过去。
+   *
+   * 加 `revision` 是必须的：接收端按它重建影响权重，原地改坐标的话，尖会留在
+   * 旧顶点上被拖着走，而不是在新的一面重新拔出来。
+   */
+  #reanchorIfBehind(pose) {
+    if (!(this.shellRadius > 0)) return false;
+    const centerY = this.contactY - this.normalY * this.shellRadius;
+    const toGripX = this.#localGrip.x;
+    const toGripY = this.#localGrip.y - centerY;
+    const toGripZ = this.#localGrip.z;
+    const length = Math.hypot(toGripX, toGripY, toGripZ);
+    // 抓握点正落在身体中心附近：方向本身不稳，这一帧不换，免得来回跳。
+    if (!(length > this.shellRadius * 0.25)) return false;
+    const alignment = (
+      toGripX * this.normalX + toGripY * this.normalY + toGripZ * this.normalZ
+    ) / length;
+    if (alignment >= REANCHOR_ALIGNMENT) return false;
+    resolveSurfaceContact(this.shellRadius, pose, this.#gripWorld, this.#reanchored);
+    this.#adoptContact(this.#reanchored);
+    this.revision += 1;
+    return true;
   }
 
   /**
