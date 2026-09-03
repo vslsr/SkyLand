@@ -7,6 +7,9 @@ const DEFAULT_BLADES_PER_SQUARE_UNIT = 28;
 const MIN_BLADE_COUNT = 8_000;
 const MAX_BLADE_COUNT = 32_000;
 
+/** 叶根抬离地表的高度，避免与地面填充 z-fighting。 */
+export const GRASS_BLADE_GROUND_OFFSET = 0.018;
+
 export interface GrassFieldBounds {
   minimumX: number;
   maximumX: number;
@@ -35,12 +38,63 @@ export interface GrassFieldGeometry {
   instanceCount: number;
 }
 
-interface InstanceAttributeArrays {
+/** 一批草叶实例的属性数组，与 shaders/grass.ts 的 attribute 一一对应。 */
+export interface GrassInstanceArrays {
   offsets: Float32Array;
   scales: Float32Array;
   rotations: Float32Array;
   phases: Float32Array;
   tones: Float32Array;
+}
+
+export function createGrassInstanceArrays(count: number): GrassInstanceArrays {
+  return {
+    offsets: new Float32Array(count * 3),
+    scales: new Float32Array(count * 2),
+    rotations: new Float32Array(count),
+    phases: new Float32Array(count),
+    tones: new Float32Array(count),
+  };
+}
+
+/**
+ * 写入一片密草的实例属性。
+ *
+ * 尺寸分布与铺满整块场景的草场完全一致，流式世界里的草丛因此和固定场景的
+ * 草地是同一种草，只是覆盖的范围由外部决定。
+ */
+export function writeGrassBladeInstance(
+  arrays: GrassInstanceArrays,
+  index: number,
+  x: number,
+  y: number,
+  z: number,
+  random: () => number,
+): void {
+  const height = 0.34 + Math.pow(random(), 0.7) * 0.38;
+  const bladeWidth = (0.045 + random() * 0.035) * (0.82 + height * 0.28);
+  arrays.offsets[index * 3] = x;
+  arrays.offsets[index * 3 + 1] = y;
+  arrays.offsets[index * 3 + 2] = z;
+  arrays.scales[index * 2] = bladeWidth;
+  arrays.scales[index * 2 + 1] = height;
+  arrays.rotations[index] = random() * Math.PI * 2;
+  arrays.phases[index] = random() * Math.PI * 2;
+  arrays.tones[index] = random() * 2 - 1;
+}
+
+/** 由一批实例属性建出填充与描边两份实例几何。 */
+export function buildGrassFieldGeometry(
+  arrays: GrassInstanceArrays,
+  instanceCount: number,
+): GrassFieldGeometry {
+  const blade = createGrassBladeGeometry();
+  const edges = new THREE.EdgesGeometry(blade, 20);
+  const fill = createInstancedGeometry(blade, arrays, instanceCount);
+  const outline = createInstancedGeometry(edges, arrays, instanceCount);
+  blade.dispose();
+  edges.dispose();
+  return { fill, outline, instanceCount };
 }
 
 /**
@@ -71,16 +125,12 @@ export function createGrassBladeGeometry(): THREE.BufferGeometry {
 
 export function createGrassFieldGeometry(options: GrassFieldGeometryOptions): GrassFieldGeometry {
   const instanceCount = options.bladeCount ?? calculateBladeCount(options.bounds);
-  const blade = createGrassBladeGeometry();
-  const edges = new THREE.EdgesGeometry(blade, 20);
-  const attributes = createInstanceAttributeArrays(options.bounds, instanceCount, options.seed ?? 0x51a9);
-  const fill = createInstancedGeometry(blade, attributes, instanceCount);
-  const outline = createInstancedGeometry(edges, attributes, instanceCount);
-
-  blade.dispose();
-  edges.dispose();
-
-  return { fill, outline, instanceCount };
+  const attributes = createInstanceAttributeArrays(
+    options.bounds,
+    instanceCount,
+    options.seed ?? 0x51a9,
+  );
+  return buildGrassFieldGeometry(attributes, instanceCount);
 }
 
 function calculateBladeCount(bounds: GrassFieldBounds): number {
@@ -96,13 +146,9 @@ function createInstanceAttributeArrays(
   bounds: GrassFieldBounds,
   count: number,
   seed: number,
-): InstanceAttributeArrays {
+): GrassInstanceArrays {
   const random = createSeededRandom(seed);
-  const offsets = new Float32Array(count * 3);
-  const scales = new Float32Array(count * 2);
-  const rotations = new Float32Array(count);
-  const phases = new Float32Array(count);
-  const tones = new Float32Array(count);
+  const arrays = createGrassInstanceArrays(count);
   const width = bounds.maximumX - bounds.minimumX;
   const depth = bounds.maximumZ - bounds.minimumZ;
   const columns = Math.max(1, Math.ceil(Math.sqrt(count * width / depth)));
@@ -115,25 +161,15 @@ function createInstanceAttributeArrays(
     const row = Math.floor(index / columns);
     const x = bounds.minimumX + (column + 0.12 + random() * 0.76) * cellWidth;
     const z = bounds.minimumZ + (row + 0.12 + random() * 0.76) * cellDepth;
-    const height = 0.34 + Math.pow(random(), 0.7) * 0.38;
-    const bladeWidth = (0.045 + random() * 0.035) * (0.82 + height * 0.28);
-
-    offsets[index * 3] = x;
-    offsets[index * 3 + 1] = 0.018;
-    offsets[index * 3 + 2] = z;
-    scales[index * 2] = bladeWidth;
-    scales[index * 2 + 1] = height;
-    rotations[index] = random() * Math.PI * 2;
-    phases[index] = random() * Math.PI * 2;
-    tones[index] = random() * 2 - 1;
+    writeGrassBladeInstance(arrays, index, x, GRASS_BLADE_GROUND_OFFSET, z, random);
   }
 
-  return { offsets, scales, rotations, phases, tones };
+  return arrays;
 }
 
 function createInstancedGeometry(
   source: THREE.BufferGeometry,
-  attributes: InstanceAttributeArrays,
+  attributes: GrassInstanceArrays,
   instanceCount: number,
 ): THREE.InstancedBufferGeometry {
   const geometry = new THREE.InstancedBufferGeometry();
@@ -166,7 +202,7 @@ function createInstancedGeometry(
   return geometry;
 }
 
-function createSeededRandom(seed: number): () => number {
+export function createSeededRandom(seed: number): () => number {
   let state = seed >>> 0;
   return () => {
     state += 0x6d2b79f5;
@@ -196,13 +232,7 @@ export function createPlacedGrassGeometry(
   placements: readonly GrassClusterPlacement[],
 ): GrassFieldGeometry {
   const instanceCount = placements.length * CLUSTER_BLADE_COUNT;
-  const attributes: InstanceAttributeArrays = {
-    offsets: new Float32Array(instanceCount * 3),
-    scales: new Float32Array(instanceCount * 2),
-    rotations: new Float32Array(instanceCount),
-    phases: new Float32Array(instanceCount),
-    tones: new Float32Array(instanceCount),
-  };
+  const attributes = createGrassInstanceArrays(instanceCount);
 
   let instanceIndex = 0;
   for (const placement of placements) {
@@ -219,7 +249,7 @@ export function createPlacedGrassGeometry(
 
       // 与 chunkGenerator.emitTemplate 的 Y 轴旋转约定完全一致。
       attributes.offsets[offsetIndex] = placement.x + cosine * localX + sine * localZ;
-      attributes.offsets[offsetIndex + 1] = placement.y + 0.018;
+      attributes.offsets[offsetIndex + 1] = placement.y + GRASS_BLADE_GROUND_OFFSET;
       attributes.offsets[offsetIndex + 2] = placement.z + cosine * localZ - sine * localX;
       attributes.scales[scaleIndex] = CLUSTER_BLADE_WIDTH * placement.scale;
       attributes.scales[scaleIndex + 1] = height;
@@ -232,13 +262,7 @@ export function createPlacedGrassGeometry(
     }
   }
 
-  const blade = createGrassBladeGeometry();
-  const edges = new THREE.EdgesGeometry(blade, 20);
-  const fill = createInstancedGeometry(blade, attributes, instanceCount);
-  const outline = createInstancedGeometry(edges, attributes, instanceCount);
-  blade.dispose();
-  edges.dispose();
-  return { fill, outline, instanceCount };
+  return buildGrassFieldGeometry(attributes, instanceCount);
 }
 
 function hashGrassInstance(

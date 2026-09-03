@@ -29,7 +29,8 @@ export const OCEAN_SURFACE_VERTEX_SHADER = /* glsl */ `
   uniform float uGridStep;
   uniform float uInterlaceStrength;
 
-  attribute vec3 color;
+  // 顶点色的 attribute 由 three 按 vertexColors 注入（USE_COLOR），
+  // 这里再声明一次会让顶点着色器以 'color' : redefinition 编译失败。
   varying vec3 vColor;
   varying vec3 vWorldPosition;
   varying vec3 vWorldNormal;

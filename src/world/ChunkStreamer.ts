@@ -183,6 +183,7 @@ export class ChunkStreamer implements SceneVisualSystem {
       ocean: options.ocean,
       seaLevel,
       worldSeed: this.worldSeed,
+      grassPatches: options.world.grassPatches,
     });
     this.grassInteraction = this.views.grassInteraction;
     this.root.add(this.views.root);

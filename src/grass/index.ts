@@ -5,5 +5,11 @@ export {
   type GrassInteractionTarget,
   type NormalizedGrassBendImpulse,
 } from './GrassInteraction';
+export {
+  DEFAULT_GRASS_PATCH_CONFIG,
+  generateChunkGrassPatches,
+  type GrassPatch,
+  type GrassPatchConfig,
+} from './grassPatchField';
 export { MouseGrassInteractor } from './MouseGrassInteractor';
-export { StreamingGrassSystem } from './StreamingGrassSystem';
+export { StreamingGrassSystem, type GrassChunkAnchor } from './StreamingGrassSystem';
