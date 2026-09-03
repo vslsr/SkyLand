@@ -121,10 +121,9 @@
               ]
             },
             "input": {
-              "description": "走哪个逻辑输入槽。物理键位由 config/input/player.input.json 决定，这里不写死键。",
+              "description": "走哪个逻辑输入槽。物理键位由 config/input/player.input.json 决定，这里不写死键；目前只有主手，加副手是往这个枚举里加一个值。",
               "enum": [
-                "primary",
-                "secondary"
+                "primary"
               ]
             },
             "mode": {

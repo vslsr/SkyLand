@@ -59,6 +59,8 @@ export interface InventoryModelLike {
   readonly hotbar?: readonly (string | null)[];
   readonly activeHotbarIndex?: number;
   readonly heldItemType?: string;
+  /** 交互键按住多久算「收回背包」。来自玩家原型，两端读同一份。 */
+  readonly stowHoldSeconds?: number;
 }
 
 export interface InventoryStackView {
@@ -77,6 +79,8 @@ export interface InventoryStackView {
   readonly full: boolean;
   readonly coinValue?: number;
   readonly contraband: boolean;
+  /** 能不能拿到手上；界面据此决定这一格点不点得动。 */
+  readonly holdable: boolean;
 }
 
 /** 分类页。第一页固定是「全部」，其余按物品目录的分类顺序，空分类不出现。 */
@@ -142,6 +146,8 @@ function toStackView(
     full: entry.quantity >= definition.stackLimit,
     coinValue: definition.coinValue,
     contraband: definition.contraband,
+    // 目录没写就按可手持处理，和 ItemCatalog 的默认一致（弹药那类显式写了 false）。
+    holdable: definition.holdable ?? true,
   };
 }
 

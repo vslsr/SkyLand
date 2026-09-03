@@ -32,11 +32,14 @@ export const ITEM_USE_ACTIONS = Object.freeze(['tool', 'throw']);
 /**
  * 逻辑输入槽。
  *
- * 物品说自己走「主手」还是「副手」，**不说自己绑在哪个键上**：键位属于
+ * 物品说自己走哪个槽，**不说自己绑在哪个键上**：键位属于
  * `config/input/player.input.json`，那里才有重绑定、手柄和触屏三套映射。物品目录
  * 里写死 `Mouse.Button0` 会让这三样在这件物品上同时失效。
+ *
+ * 目前只有主手一个槽。留着这一层是因为它是「物品」和「键位」之间唯一的接缝：
+ * 以后要给弓箭配一个瞄准键，是往这个枚举加一个值，而不是在玩法里插一句判断。
  */
-export const ITEM_USE_INPUTS = Object.freeze(['primary', 'secondary']);
+export const ITEM_USE_INPUTS = Object.freeze(['primary']);
 
 /**
  * 怎么按。

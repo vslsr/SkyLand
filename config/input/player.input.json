@@ -6,98 +6,306 @@
     {
       "id": "IA_Player_Move",
       "valueType": "axis2D",
-      "modifiers": [{ "type": "deadZone", "minimum": 0.12 }],
-      "trigger": { "type": "pressed" }
+      "modifiers": [
+        {
+          "type": "deadZone",
+          "minimum": 0.12
+        }
+      ],
+      "trigger": {
+        "type": "pressed"
+      }
     },
     {
       "id": "IA_Vessel_Move",
       "valueType": "axis2D",
-      "modifiers": [{ "type": "deadZone", "minimum": 0.12 }],
-      "trigger": { "type": "pressed" }
+      "modifiers": [
+        {
+          "type": "deadZone",
+          "minimum": 0.12
+        }
+      ],
+      "trigger": {
+        "type": "pressed"
+      }
     },
     {
       "id": "IA_Player_Sprint",
       "valueType": "digital",
-      "trigger": { "type": "pressed" }
+      "trigger": {
+        "type": "pressed"
+      }
     },
     {
       "id": "IA_Player_Jump",
       "valueType": "digital",
-      "trigger": { "type": "pressed" }
+      "trigger": {
+        "type": "pressed"
+      }
     },
     {
       "id": "IA_Player_Primary",
       "valueType": "digital",
-      "trigger": { "type": "pressed" }
+      "trigger": {
+        "type": "pressed"
+      }
     },
     {
       "id": "IA_Player_Interact",
       "valueType": "digital",
-      "trigger": { "type": "pressed" }
+      "trigger": {
+        "type": "pressed"
+      }
     },
     {
       "id": "IA_World_Interact",
       "valueType": "digital",
-      "trigger": { "type": "pressed" }
+      "trigger": {
+        "type": "pressed"
+      }
     },
     {
       "id": "IA_AbilityLab_Arcane",
       "valueType": "digital",
-      "trigger": { "type": "pressed" }
+      "trigger": {
+        "type": "pressed"
+      }
     },
     {
       "id": "IA_AbilityLab_Burn",
       "valueType": "digital",
-      "trigger": { "type": "pressed" }
+      "trigger": {
+        "type": "pressed"
+      }
     },
     {
       "id": "IA_AbilityLab_Rage",
       "valueType": "digital",
-      "trigger": { "type": "pressed" }
+      "trigger": {
+        "type": "pressed"
+      }
     },
     {
       "id": "IA_AbilityLab_Silence",
       "valueType": "digital",
-      "trigger": { "type": "pressed" }
+      "trigger": {
+        "type": "pressed"
+      }
     },
     {
       "id": "IA_AbilityLab_Reset",
       "valueType": "digital",
-      "trigger": { "type": "pressed" }
+      "trigger": {
+        "type": "pressed"
+      }
     },
     {
       "id": "IA_Player_Inventory",
       "valueType": "digital",
-      "trigger": { "type": "pressed" }
+      "trigger": {
+        "type": "pressed"
+      }
     },
     {
       "id": "IA_Debug_Menu",
       "valueType": "digital",
-      "trigger": { "type": "pressed" }
+      "trigger": {
+        "type": "pressed"
+      }
     },
     {
       "id": "IA_Player_Dodge",
       "valueType": "digital",
-      "trigger": { "type": "doubleTap", "maximumGapMs": 260, "maximumTapMs": 220 }
+      "trigger": {
+        "type": "doubleTap",
+        "maximumGapMs": 260,
+        "maximumTapMs": 220
+      }
+    },
+    {
+      "id": "IA_Hotbar_Previous",
+      "valueType": "digital",
+      "trigger": {
+        "type": "pressed"
+      }
+    },
+    {
+      "id": "IA_Hotbar_Next",
+      "valueType": "digital",
+      "trigger": {
+        "type": "pressed"
+      }
+    },
+    {
+      "id": "IA_Hotbar_Slot1",
+      "valueType": "digital",
+      "trigger": {
+        "type": "pressed"
+      }
+    },
+    {
+      "id": "IA_Hotbar_Slot2",
+      "valueType": "digital",
+      "trigger": {
+        "type": "pressed"
+      }
+    },
+    {
+      "id": "IA_Hotbar_Slot3",
+      "valueType": "digital",
+      "trigger": {
+        "type": "pressed"
+      }
+    },
+    {
+      "id": "IA_Hotbar_Slot4",
+      "valueType": "digital",
+      "trigger": {
+        "type": "pressed"
+      }
+    },
+    {
+      "id": "IA_Hotbar_Slot5",
+      "valueType": "digital",
+      "trigger": {
+        "type": "pressed"
+      }
+    },
+    {
+      "id": "IA_Hotbar_Slot6",
+      "valueType": "digital",
+      "trigger": {
+        "type": "pressed"
+      }
+    },
+    {
+      "id": "IA_Hotbar_Slot7",
+      "valueType": "digital",
+      "trigger": {
+        "type": "pressed"
+      }
+    },
+    {
+      "id": "IA_Hotbar_Slot8",
+      "valueType": "digital",
+      "trigger": {
+        "type": "pressed"
+      }
+    },
+    {
+      "id": "IA_Hotbar_Slot9",
+      "valueType": "digital",
+      "trigger": {
+        "type": "pressed"
+      }
     }
   ],
   "inputConfig": {
     "bindings": [
-      { "tag": "Input.Player.Move", "actionId": "IA_Player_Move" },
-      { "tag": "Input.Vessel.Move", "actionId": "IA_Vessel_Move" },
-      { "tag": "Input.Player.Sprint", "actionId": "IA_Player_Sprint" },
-      { "tag": "Input.Player.Jump", "actionId": "IA_Player_Jump" },
-      { "tag": "Input.Player.Primary", "actionId": "IA_Player_Primary" },
-      { "tag": "Input.Player.Interact", "actionId": "IA_Player_Interact" },
-      { "tag": "Input.World.Interact", "actionId": "IA_World_Interact" },
-      { "tag": "Input.AbilityLab.Arcane", "actionId": "IA_AbilityLab_Arcane" },
-      { "tag": "Input.AbilityLab.Burn", "actionId": "IA_AbilityLab_Burn" },
-      { "tag": "Input.AbilityLab.Rage", "actionId": "IA_AbilityLab_Rage" },
-      { "tag": "Input.AbilityLab.Silence", "actionId": "IA_AbilityLab_Silence" },
-      { "tag": "Input.AbilityLab.Reset", "actionId": "IA_AbilityLab_Reset" },
-      { "tag": "Input.Player.Inventory", "actionId": "IA_Player_Inventory" },
-      { "tag": "Input.Debug.Menu", "actionId": "IA_Debug_Menu" },
-      { "tag": "Input.Player.Dodge", "actionId": "IA_Player_Dodge" }
+      {
+        "tag": "Input.Player.Move",
+        "actionId": "IA_Player_Move"
+      },
+      {
+        "tag": "Input.Vessel.Move",
+        "actionId": "IA_Vessel_Move"
+      },
+      {
+        "tag": "Input.Player.Sprint",
+        "actionId": "IA_Player_Sprint"
+      },
+      {
+        "tag": "Input.Player.Jump",
+        "actionId": "IA_Player_Jump"
+      },
+      {
+        "tag": "Input.Player.Primary",
+        "actionId": "IA_Player_Primary"
+      },
+      {
+        "tag": "Input.Player.Interact",
+        "actionId": "IA_Player_Interact"
+      },
+      {
+        "tag": "Input.World.Interact",
+        "actionId": "IA_World_Interact"
+      },
+      {
+        "tag": "Input.AbilityLab.Arcane",
+        "actionId": "IA_AbilityLab_Arcane"
+      },
+      {
+        "tag": "Input.AbilityLab.Burn",
+        "actionId": "IA_AbilityLab_Burn"
+      },
+      {
+        "tag": "Input.AbilityLab.Rage",
+        "actionId": "IA_AbilityLab_Rage"
+      },
+      {
+        "tag": "Input.AbilityLab.Silence",
+        "actionId": "IA_AbilityLab_Silence"
+      },
+      {
+        "tag": "Input.AbilityLab.Reset",
+        "actionId": "IA_AbilityLab_Reset"
+      },
+      {
+        "tag": "Input.Player.Inventory",
+        "actionId": "IA_Player_Inventory"
+      },
+      {
+        "tag": "Input.Debug.Menu",
+        "actionId": "IA_Debug_Menu"
+      },
+      {
+        "tag": "Input.Player.Dodge",
+        "actionId": "IA_Player_Dodge"
+      },
+      {
+        "actionId": "IA_Hotbar_Previous",
+        "tag": "Input.Hotbar.Previous"
+      },
+      {
+        "actionId": "IA_Hotbar_Next",
+        "tag": "Input.Hotbar.Next"
+      },
+      {
+        "actionId": "IA_Hotbar_Slot1",
+        "tag": "Input.Hotbar.Slot1"
+      },
+      {
+        "actionId": "IA_Hotbar_Slot2",
+        "tag": "Input.Hotbar.Slot2"
+      },
+      {
+        "actionId": "IA_Hotbar_Slot3",
+        "tag": "Input.Hotbar.Slot3"
+      },
+      {
+        "actionId": "IA_Hotbar_Slot4",
+        "tag": "Input.Hotbar.Slot4"
+      },
+      {
+        "actionId": "IA_Hotbar_Slot5",
+        "tag": "Input.Hotbar.Slot5"
+      },
+      {
+        "actionId": "IA_Hotbar_Slot6",
+        "tag": "Input.Hotbar.Slot6"
+      },
+      {
+        "actionId": "IA_Hotbar_Slot7",
+        "tag": "Input.Hotbar.Slot7"
+      },
+      {
+        "actionId": "IA_Hotbar_Slot8",
+        "tag": "Input.Hotbar.Slot8"
+      },
+      {
+        "actionId": "IA_Hotbar_Slot9",
+        "tag": "Input.Hotbar.Slot9"
+      }
     ]
   },
   "inputMappingContexts": [
@@ -106,49 +314,360 @@
       "priority": 100,
       "activeByDefault": true,
       "mappings": [
-        { "id": "Move.Keyboard.Up", "deviceKind": "keyboardMouse", "control": "Keyboard.KeyW", "actionId": "IA_Player_Move", "axis2D": { "x": 0, "y": 1 } },
-        { "id": "Move.Keyboard.Down", "deviceKind": "keyboardMouse", "control": "Keyboard.KeyS", "actionId": "IA_Player_Move", "axis2D": { "x": 0, "y": -1 } },
-        { "id": "Move.Keyboard.Left", "deviceKind": "keyboardMouse", "control": "Keyboard.KeyA", "actionId": "IA_Player_Move", "axis2D": { "x": -1, "y": 0 } },
-        { "id": "Move.Keyboard.Right", "deviceKind": "keyboardMouse", "control": "Keyboard.KeyD", "actionId": "IA_Player_Move", "axis2D": { "x": 1, "y": 0 } },
-        { "id": "Move.Touch.Stick", "deviceKind": "touch", "control": "Virtual.MoveStick", "actionId": "IA_Player_Move" },
-        { "id": "Move.Gamepad.Stick", "deviceKind": "gamepad", "control": "Gamepad.LeftStick", "actionId": "IA_Player_Move", "modifiers": [{ "type": "negate", "axes": "y" }] },
-        { "id": "Move.Gamepad.Up", "deviceKind": "gamepad", "control": "Gamepad.DPadUp", "actionId": "IA_Player_Move", "axis2D": { "x": 0, "y": 1 } },
-        { "id": "Move.Gamepad.Down", "deviceKind": "gamepad", "control": "Gamepad.DPadDown", "actionId": "IA_Player_Move", "axis2D": { "x": 0, "y": -1 } },
-        { "id": "Move.Gamepad.Left", "deviceKind": "gamepad", "control": "Gamepad.DPadLeft", "actionId": "IA_Player_Move", "axis2D": { "x": -1, "y": 0 } },
-        { "id": "Move.Gamepad.Right", "deviceKind": "gamepad", "control": "Gamepad.DPadRight", "actionId": "IA_Player_Move", "axis2D": { "x": 1, "y": 0 } },
-
-        { "id": "Vessel.Keyboard.Forward", "deviceKind": "keyboardMouse", "control": "Keyboard.ArrowUp", "actionId": "IA_Vessel_Move", "axis2D": { "x": 0, "y": 1 } },
-        { "id": "Vessel.Keyboard.Reverse", "deviceKind": "keyboardMouse", "control": "Keyboard.ArrowDown", "actionId": "IA_Vessel_Move", "axis2D": { "x": 0, "y": -1 } },
-        { "id": "Vessel.Keyboard.Left", "deviceKind": "keyboardMouse", "control": "Keyboard.ArrowLeft", "actionId": "IA_Vessel_Move", "axis2D": { "x": -1, "y": 0 } },
-        { "id": "Vessel.Keyboard.Right", "deviceKind": "keyboardMouse", "control": "Keyboard.ArrowRight", "actionId": "IA_Vessel_Move", "axis2D": { "x": 1, "y": 0 } },
-
-        { "id": "Sprint.Keyboard.Primary", "deviceKind": "keyboardMouse", "control": "Keyboard.ShiftLeft", "actionId": "IA_Player_Sprint" },
-        { "id": "Sprint.Keyboard.Alternate", "deviceKind": "keyboardMouse", "control": "Keyboard.ShiftRight", "actionId": "IA_Player_Sprint" },
-        { "id": "Sprint.Touch.Button", "deviceKind": "touch", "control": "Virtual.SprintButton", "actionId": "IA_Player_Sprint" },
-        { "id": "Sprint.Gamepad.Button", "deviceKind": "gamepad", "control": "Gamepad.LeftStickButton", "actionId": "IA_Player_Sprint" },
-
-        { "id": "Jump.Keyboard.Primary", "deviceKind": "keyboardMouse", "control": "Keyboard.Space", "actionId": "IA_Player_Jump" },
-        { "id": "Jump.Touch.Button", "deviceKind": "touch", "control": "Virtual.JumpButton", "actionId": "IA_Player_Jump" },
-
-        { "id": "Primary.Mouse.Button", "deviceKind": "keyboardMouse", "control": "Mouse.Button0", "actionId": "IA_Player_Primary" },
-        { "id": "Primary.Gamepad.Button", "deviceKind": "gamepad", "control": "Gamepad.ButtonSouth", "actionId": "IA_Player_Primary" },
-        { "id": "Primary.Gamepad.Trigger", "deviceKind": "gamepad", "control": "Gamepad.RightTrigger", "actionId": "IA_Player_Primary" },
-        { "id": "Interact.Keyboard.Primary", "deviceKind": "keyboardMouse", "control": "Keyboard.KeyF", "actionId": "IA_Player_Interact" },
-        { "id": "Interact.Touch.Button", "deviceKind": "touch", "control": "Virtual.InteractButton", "actionId": "IA_Player_Interact" },
-        { "id": "Interact.Gamepad.Button", "deviceKind": "gamepad", "control": "Gamepad.ButtonWest", "actionId": "IA_Player_Interact" },
-        { "id": "WorldInteract.Keyboard.Primary", "deviceKind": "keyboardMouse", "control": "Keyboard.KeyE", "actionId": "IA_World_Interact" },
-        { "id": "WorldInteract.Touch.Button", "deviceKind": "touch", "control": "Virtual.WorldInteractButton", "actionId": "IA_World_Interact" },
-        { "id": "WorldInteract.Gamepad.Button", "deviceKind": "gamepad", "control": "Gamepad.ButtonNorth", "actionId": "IA_World_Interact" },
-        { "id": "AbilityLab.Keyboard.Arcane", "deviceKind": "keyboardMouse", "control": "Keyboard.Digit1", "actionId": "IA_AbilityLab_Arcane" },
-        { "id": "AbilityLab.Keyboard.Burn", "deviceKind": "keyboardMouse", "control": "Keyboard.Digit2", "actionId": "IA_AbilityLab_Burn" },
-        { "id": "AbilityLab.Keyboard.Rage", "deviceKind": "keyboardMouse", "control": "Keyboard.Digit3", "actionId": "IA_AbilityLab_Rage" },
-        { "id": "AbilityLab.Keyboard.Silence", "deviceKind": "keyboardMouse", "control": "Keyboard.Digit4", "actionId": "IA_AbilityLab_Silence" },
-        { "id": "AbilityLab.Keyboard.Reset", "deviceKind": "keyboardMouse", "control": "Keyboard.Digit0", "actionId": "IA_AbilityLab_Reset" },
-        { "id": "Inventory.Keyboard.Primary", "deviceKind": "keyboardMouse", "control": "Keyboard.KeyB", "actionId": "IA_Player_Inventory" },
-        { "id": "Inventory.Touch.Button", "deviceKind": "touch", "control": "Virtual.InventoryButton", "actionId": "IA_Player_Inventory" },
-        { "id": "Inventory.Gamepad.Button", "deviceKind": "gamepad", "control": "Gamepad.Back", "actionId": "IA_Player_Inventory" },
-        { "id": "Dodge.Touch.Button", "deviceKind": "touch", "control": "Virtual.DodgeButton", "actionId": "IA_Player_Dodge" },
-        { "id": "Dodge.Gamepad.Button", "deviceKind": "gamepad", "control": "Gamepad.ButtonEast", "actionId": "IA_Player_Dodge" }
+        {
+          "id": "Move.Keyboard.Up",
+          "deviceKind": "keyboardMouse",
+          "control": "Keyboard.KeyW",
+          "actionId": "IA_Player_Move",
+          "axis2D": {
+            "x": 0,
+            "y": 1
+          }
+        },
+        {
+          "id": "Move.Keyboard.Down",
+          "deviceKind": "keyboardMouse",
+          "control": "Keyboard.KeyS",
+          "actionId": "IA_Player_Move",
+          "axis2D": {
+            "x": 0,
+            "y": -1
+          }
+        },
+        {
+          "id": "Move.Keyboard.Left",
+          "deviceKind": "keyboardMouse",
+          "control": "Keyboard.KeyA",
+          "actionId": "IA_Player_Move",
+          "axis2D": {
+            "x": -1,
+            "y": 0
+          }
+        },
+        {
+          "id": "Move.Keyboard.Right",
+          "deviceKind": "keyboardMouse",
+          "control": "Keyboard.KeyD",
+          "actionId": "IA_Player_Move",
+          "axis2D": {
+            "x": 1,
+            "y": 0
+          }
+        },
+        {
+          "id": "Move.Touch.Stick",
+          "deviceKind": "touch",
+          "control": "Virtual.MoveStick",
+          "actionId": "IA_Player_Move"
+        },
+        {
+          "id": "Move.Gamepad.Stick",
+          "deviceKind": "gamepad",
+          "control": "Gamepad.LeftStick",
+          "actionId": "IA_Player_Move",
+          "modifiers": [
+            {
+              "type": "negate",
+              "axes": "y"
+            }
+          ]
+        },
+        {
+          "id": "Move.Gamepad.Up",
+          "deviceKind": "gamepad",
+          "control": "Gamepad.DPadUp",
+          "actionId": "IA_Player_Move",
+          "axis2D": {
+            "x": 0,
+            "y": 1
+          }
+        },
+        {
+          "id": "Move.Gamepad.Down",
+          "deviceKind": "gamepad",
+          "control": "Gamepad.DPadDown",
+          "actionId": "IA_Player_Move",
+          "axis2D": {
+            "x": 0,
+            "y": -1
+          }
+        },
+        {
+          "id": "Move.Gamepad.Left",
+          "deviceKind": "gamepad",
+          "control": "Gamepad.DPadLeft",
+          "actionId": "IA_Player_Move",
+          "axis2D": {
+            "x": -1,
+            "y": 0
+          }
+        },
+        {
+          "id": "Move.Gamepad.Right",
+          "deviceKind": "gamepad",
+          "control": "Gamepad.DPadRight",
+          "actionId": "IA_Player_Move",
+          "axis2D": {
+            "x": 1,
+            "y": 0
+          }
+        },
+        {
+          "id": "Vessel.Keyboard.Forward",
+          "deviceKind": "keyboardMouse",
+          "control": "Keyboard.ArrowUp",
+          "actionId": "IA_Vessel_Move",
+          "axis2D": {
+            "x": 0,
+            "y": 1
+          }
+        },
+        {
+          "id": "Vessel.Keyboard.Reverse",
+          "deviceKind": "keyboardMouse",
+          "control": "Keyboard.ArrowDown",
+          "actionId": "IA_Vessel_Move",
+          "axis2D": {
+            "x": 0,
+            "y": -1
+          }
+        },
+        {
+          "id": "Vessel.Keyboard.Left",
+          "deviceKind": "keyboardMouse",
+          "control": "Keyboard.ArrowLeft",
+          "actionId": "IA_Vessel_Move",
+          "axis2D": {
+            "x": -1,
+            "y": 0
+          }
+        },
+        {
+          "id": "Vessel.Keyboard.Right",
+          "deviceKind": "keyboardMouse",
+          "control": "Keyboard.ArrowRight",
+          "actionId": "IA_Vessel_Move",
+          "axis2D": {
+            "x": 1,
+            "y": 0
+          }
+        },
+        {
+          "id": "Sprint.Keyboard.Primary",
+          "deviceKind": "keyboardMouse",
+          "control": "Keyboard.ShiftLeft",
+          "actionId": "IA_Player_Sprint"
+        },
+        {
+          "id": "Sprint.Keyboard.Alternate",
+          "deviceKind": "keyboardMouse",
+          "control": "Keyboard.ShiftRight",
+          "actionId": "IA_Player_Sprint"
+        },
+        {
+          "id": "Sprint.Touch.Button",
+          "deviceKind": "touch",
+          "control": "Virtual.SprintButton",
+          "actionId": "IA_Player_Sprint"
+        },
+        {
+          "id": "Sprint.Gamepad.Button",
+          "deviceKind": "gamepad",
+          "control": "Gamepad.LeftStickButton",
+          "actionId": "IA_Player_Sprint"
+        },
+        {
+          "id": "Jump.Keyboard.Primary",
+          "deviceKind": "keyboardMouse",
+          "control": "Keyboard.Space",
+          "actionId": "IA_Player_Jump"
+        },
+        {
+          "id": "Jump.Touch.Button",
+          "deviceKind": "touch",
+          "control": "Virtual.JumpButton",
+          "actionId": "IA_Player_Jump"
+        },
+        {
+          "id": "Primary.Mouse.Button",
+          "deviceKind": "keyboardMouse",
+          "control": "Mouse.Button0",
+          "actionId": "IA_Player_Primary"
+        },
+        {
+          "id": "Primary.Gamepad.Button",
+          "deviceKind": "gamepad",
+          "control": "Gamepad.ButtonSouth",
+          "actionId": "IA_Player_Primary"
+        },
+        {
+          "id": "Primary.Gamepad.Trigger",
+          "deviceKind": "gamepad",
+          "control": "Gamepad.RightTrigger",
+          "actionId": "IA_Player_Primary"
+        },
+        {
+          "id": "Interact.Keyboard.Primary",
+          "deviceKind": "keyboardMouse",
+          "control": "Keyboard.KeyF",
+          "actionId": "IA_Player_Interact"
+        },
+        {
+          "id": "Interact.Touch.Button",
+          "deviceKind": "touch",
+          "control": "Virtual.InteractButton",
+          "actionId": "IA_Player_Interact"
+        },
+        {
+          "id": "Interact.Gamepad.Button",
+          "deviceKind": "gamepad",
+          "control": "Gamepad.ButtonWest",
+          "actionId": "IA_Player_Interact"
+        },
+        {
+          "id": "WorldInteract.Keyboard.Primary",
+          "deviceKind": "keyboardMouse",
+          "control": "Keyboard.KeyE",
+          "actionId": "IA_World_Interact"
+        },
+        {
+          "id": "WorldInteract.Touch.Button",
+          "deviceKind": "touch",
+          "control": "Virtual.WorldInteractButton",
+          "actionId": "IA_World_Interact"
+        },
+        {
+          "id": "WorldInteract.Gamepad.Button",
+          "deviceKind": "gamepad",
+          "control": "Gamepad.ButtonNorth",
+          "actionId": "IA_World_Interact"
+        },
+        {
+          "id": "AbilityLab.Keyboard.Arcane",
+          "deviceKind": "keyboardMouse",
+          "control": "Keyboard.Digit1",
+          "actionId": "IA_AbilityLab_Arcane"
+        },
+        {
+          "id": "AbilityLab.Keyboard.Burn",
+          "deviceKind": "keyboardMouse",
+          "control": "Keyboard.Digit2",
+          "actionId": "IA_AbilityLab_Burn"
+        },
+        {
+          "id": "AbilityLab.Keyboard.Rage",
+          "deviceKind": "keyboardMouse",
+          "control": "Keyboard.Digit3",
+          "actionId": "IA_AbilityLab_Rage"
+        },
+        {
+          "id": "AbilityLab.Keyboard.Silence",
+          "deviceKind": "keyboardMouse",
+          "control": "Keyboard.Digit4",
+          "actionId": "IA_AbilityLab_Silence"
+        },
+        {
+          "id": "AbilityLab.Keyboard.Reset",
+          "deviceKind": "keyboardMouse",
+          "control": "Keyboard.Digit0",
+          "actionId": "IA_AbilityLab_Reset"
+        },
+        {
+          "id": "Inventory.Keyboard.Primary",
+          "deviceKind": "keyboardMouse",
+          "control": "Keyboard.KeyB",
+          "actionId": "IA_Player_Inventory"
+        },
+        {
+          "id": "Inventory.Touch.Button",
+          "deviceKind": "touch",
+          "control": "Virtual.InventoryButton",
+          "actionId": "IA_Player_Inventory"
+        },
+        {
+          "id": "Inventory.Gamepad.Button",
+          "deviceKind": "gamepad",
+          "control": "Gamepad.Back",
+          "actionId": "IA_Player_Inventory"
+        },
+        {
+          "id": "Dodge.Touch.Button",
+          "deviceKind": "touch",
+          "control": "Virtual.DodgeButton",
+          "actionId": "IA_Player_Dodge"
+        },
+        {
+          "id": "Dodge.Gamepad.Button",
+          "deviceKind": "gamepad",
+          "control": "Gamepad.ButtonEast",
+          "actionId": "IA_Player_Dodge"
+        },
+        {
+          "id": "Hotbar.Gamepad.Previous",
+          "deviceKind": "gamepad",
+          "control": "Gamepad.LeftShoulder",
+          "actionId": "IA_Hotbar_Previous"
+        },
+        {
+          "id": "Hotbar.Gamepad.Next",
+          "deviceKind": "gamepad",
+          "control": "Gamepad.RightShoulder",
+          "actionId": "IA_Hotbar_Next"
+        },
+        {
+          "id": "Hotbar.Keyboard.Slot1",
+          "deviceKind": "keyboardMouse",
+          "control": "Keyboard.Digit1",
+          "actionId": "IA_Hotbar_Slot1"
+        },
+        {
+          "id": "Hotbar.Keyboard.Slot2",
+          "deviceKind": "keyboardMouse",
+          "control": "Keyboard.Digit2",
+          "actionId": "IA_Hotbar_Slot2"
+        },
+        {
+          "id": "Hotbar.Keyboard.Slot3",
+          "deviceKind": "keyboardMouse",
+          "control": "Keyboard.Digit3",
+          "actionId": "IA_Hotbar_Slot3"
+        },
+        {
+          "id": "Hotbar.Keyboard.Slot4",
+          "deviceKind": "keyboardMouse",
+          "control": "Keyboard.Digit4",
+          "actionId": "IA_Hotbar_Slot4"
+        },
+        {
+          "id": "Hotbar.Keyboard.Slot5",
+          "deviceKind": "keyboardMouse",
+          "control": "Keyboard.Digit5",
+          "actionId": "IA_Hotbar_Slot5"
+        },
+        {
+          "id": "Hotbar.Keyboard.Slot6",
+          "deviceKind": "keyboardMouse",
+          "control": "Keyboard.Digit6",
+          "actionId": "IA_Hotbar_Slot6"
+        },
+        {
+          "id": "Hotbar.Keyboard.Slot7",
+          "deviceKind": "keyboardMouse",
+          "control": "Keyboard.Digit7",
+          "actionId": "IA_Hotbar_Slot7"
+        },
+        {
+          "id": "Hotbar.Keyboard.Slot8",
+          "deviceKind": "keyboardMouse",
+          "control": "Keyboard.Digit8",
+          "actionId": "IA_Hotbar_Slot8"
+        },
+        {
+          "id": "Hotbar.Keyboard.Slot9",
+          "deviceKind": "keyboardMouse",
+          "control": "Keyboard.Digit9",
+          "actionId": "IA_Hotbar_Slot9"
+        }
       ]
     },
     {
@@ -156,7 +675,12 @@
       "priority": 1000,
       "activeByDefault": true,
       "mappings": [
-        { "id": "DebugMenu.Keyboard.F8", "deviceKind": "keyboardMouse", "control": "Keyboard.F8", "actionId": "IA_Debug_Menu" }
+        {
+          "id": "DebugMenu.Keyboard.F8",
+          "deviceKind": "keyboardMouse",
+          "control": "Keyboard.F8",
+          "actionId": "IA_Debug_Menu"
+        }
       ]
     }
   ],
@@ -210,32 +734,100 @@
         "mode": "topdown",
         "deviceKind": "keyboardMouse",
         "entries": [
-          { "label": "移动", "mappingIds": ["Move.Keyboard.Up", "Move.Keyboard.Left", "Move.Keyboard.Down", "Move.Keyboard.Right"], "joinWith": "/" },
-          { "label": "镜头", "text": "左键拖动" },
-          { "label": "朝向", "text": "点击地面" },
-          { "label": "加速", "mappingIds": ["Sprint.Keyboard.Primary"] },
-          { "label": "跳跃", "mappingIds": ["Jump.Keyboard.Primary"] },
-          { "label": "背包", "mappingIds": ["Inventory.Keyboard.Primary"] }
+          {
+            "label": "移动",
+            "mappingIds": [
+              "Move.Keyboard.Up",
+              "Move.Keyboard.Left",
+              "Move.Keyboard.Down",
+              "Move.Keyboard.Right"
+            ],
+            "joinWith": "/"
+          },
+          {
+            "label": "镜头",
+            "text": "左键拖动"
+          },
+          {
+            "label": "朝向",
+            "text": "点击地面"
+          },
+          {
+            "label": "加速",
+            "mappingIds": [
+              "Sprint.Keyboard.Primary"
+            ]
+          },
+          {
+            "label": "跳跃",
+            "mappingIds": [
+              "Jump.Keyboard.Primary"
+            ]
+          },
+          {
+            "label": "背包",
+            "mappingIds": [
+              "Inventory.Keyboard.Primary"
+            ]
+          }
         ]
       },
       {
         "mode": "topdown",
         "deviceKind": "touch",
         "entries": [
-          { "label": "移动", "mappingIds": ["Move.Touch.Stick"] },
-          { "label": "镜头", "text": "拖动屏幕" },
-          { "label": "加速", "mappingIds": ["Sprint.Touch.Button"] },
-          { "label": "跳跃", "mappingIds": ["Jump.Touch.Button"] },
-          { "label": "背包", "mappingIds": ["Inventory.Touch.Button"] }
+          {
+            "label": "移动",
+            "mappingIds": [
+              "Move.Touch.Stick"
+            ]
+          },
+          {
+            "label": "镜头",
+            "text": "拖动屏幕"
+          },
+          {
+            "label": "加速",
+            "mappingIds": [
+              "Sprint.Touch.Button"
+            ]
+          },
+          {
+            "label": "跳跃",
+            "mappingIds": [
+              "Jump.Touch.Button"
+            ]
+          },
+          {
+            "label": "背包",
+            "mappingIds": [
+              "Inventory.Touch.Button"
+            ]
+          }
         ]
       },
       {
         "mode": "topdown",
         "deviceKind": "gamepad",
         "entries": [
-          { "label": "移动", "mappingIds": ["Move.Gamepad.Stick"] },
-          { "label": "加速", "mappingIds": ["Sprint.Gamepad.Button"] },
-          { "label": "背包", "mappingIds": ["Inventory.Gamepad.Button"] }
+          {
+            "label": "移动",
+            "mappingIds": [
+              "Move.Gamepad.Stick"
+            ]
+          },
+          {
+            "label": "加速",
+            "mappingIds": [
+              "Sprint.Gamepad.Button"
+            ]
+          },
+          {
+            "label": "背包",
+            "mappingIds": [
+              "Inventory.Gamepad.Button"
+            ]
+          }
         ]
       }
     ]
