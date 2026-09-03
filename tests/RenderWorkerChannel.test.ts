@@ -196,3 +196,46 @@ test('两条反向通知都不进命令队列', () => {
   assert.deepEqual(seen, ['generator:wasm', 'drag:2:true:1.5']);
   assert.equal(queue.flush(), undefined, '反向通知一条命令都不该产生');
 });
+
+/**
+ * 合批内容每帧整个重铺，但绝大多数帧什么都没变。没变的帧不发：不复制、不克隆、
+ * 不转移——主线程 `draw` 那一段里每帧固定的那几十微秒就是它。变了、换了地图，照发。
+ */
+test('实例记录逐字节没变的帧不再发，变了或换了地图才发', () => {
+  const props = new RenderInstanceBuffer(PROP_INT, PROP_FLOAT, 4);
+  const fruit = new RenderInstanceBuffer(2, 3, 4);
+  const fill = (x: number) => {
+    props.beginFrame();
+    props.push([1, 0, 0, 1, 42], [x, 0, -4, 0.5, 2, 0]);
+    fruit.beginFrame();
+    fruit.push([1, 2], [0.1, 0.2, 0.3]);
+  };
+  const queue = new RenderCommandQueue();
+  const sent = (): number => (queue.flush()?.commands ?? [])
+    .filter((command) => command.kind === 'submitInstances').length;
+
+  fill(3);
+  queue.submitInstances(props, fruit);
+  assert.equal(sent(), 1, '第一帧要发');
+  fill(3);
+  queue.submitInstances(props, fruit);
+  assert.equal(sent(), 0, '内容一样的帧不发');
+  fill(3.5);
+  queue.submitInstances(props, fruit);
+  assert.equal(sent(), 1, '一个数变了就发');
+  fill(3.5);
+  queue.submitInstances(props, fruit);
+  assert.equal(sent(), 0);
+  // 记录数变了也算变。
+  props.beginFrame();
+  queue.submitInstances(props, fruit);
+  assert.equal(sent(), 1, '少了一条记录要发');
+  // 换地图之后渲染世界是新的，没见过任何记录：照发。
+  fill(3.5);
+  queue.submitInstances(props, fruit);
+  queue.flush();
+  queue.clearRenderScene();
+  fill(3.5);
+  queue.submitInstances(props, fruit);
+  assert.equal(sent(), 1, '换了地图要重发');
+});

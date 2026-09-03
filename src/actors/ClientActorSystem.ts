@@ -274,12 +274,16 @@ export class ClientActorSystem implements SceneFrameSystem {
   /** 树上果子走另一条通道：它的记录里没有原型、没有驻留态，形状不一样。 */
   private readonly fruitInstances = new RenderInstanceBuffer(FRUIT_INT_STRIDE, FRUIT_FLOAT_STRIDE);
   private readonly archetypeOrder: readonly string[];
-  /** actorId → 登记进碰撞世界的实例，逐帧复用，避免每帧产生一批临时对象。 */
+  /**
+   * actorId → 登记进碰撞世界的实例，逐帧复用，避免每帧产生一批临时对象。
+   * `published` 是上一次真正登记出去的位姿与形状：没变就一步都不走。
+   */
   private readonly colliderInstances = new Map<string, {
     collision: SimpleCollisionComponent;
     transform: TransformComponent;
     layers: number;
     actorId: string;
+    published?: PublishedCollider;
   }>();
   /** Replica 的父节点若是 players 快照里的外部 Actor，就在这里保存 Attach 关系。 */
   private readonly externalParentActorIds = new Map<string, string>();
@@ -520,6 +524,13 @@ export class ClientActorSystem implements SceneFrameSystem {
     this.publishColliders();
   }
 
+  /**
+   * 只登记**变了的**：位姿变了挪一下，形状变了重建，都没变一步不走。
+   *
+   * 原来每帧把每个 Actor 的碰撞体在 Rapier 里删掉再建一遍——`sim-colliders`
+   * 那 0.5–4ms 就是它，而场景里绝大多数 Actor（蘑菇、箱子、掉落物）根本不动。
+   * 建碰撞体还会把查询管线标脏，逼下一个固定步在查询前多跑一次 `world.step()`。
+   */
   private publishColliders(): void {
     this.collidersStale = false;
     const live = new Set<string>();
@@ -541,9 +552,17 @@ export class ClientActorSystem implements SceneFrameSystem {
         };
         this.colliderInstances.set(actor.id, instance);
       }
+      const change = classifyColliderChange(instance.published, instance.collision, instance.transform);
+      if (change === 'none') continue;
       this.collision.setDynamic(actor.id, instance);
       const definitions = simpleCollisionInstanceToPhysicsDefinitions(instance);
-      if (definitions.length > 0) this.physics?.setActorCollider(actor.id, definitions);
+      if (definitions.length > 0) {
+        // 只挪位姿挪不动（没登记过、数量不符）就重建；形状变了直接重建。
+        if (change === 'shape' || !this.physics?.moveActorCollider(actor.id, definitions)) {
+          this.physics?.setActorCollider(actor.id, definitions);
+        }
+      }
+      instance.published = rememberPublishedCollider(instance.published, instance.collision, instance.transform);
     }
     for (const actorId of Array.from(this.colliderInstances.keys())) {
       if (live.has(actorId)) continue;
@@ -1275,4 +1294,81 @@ export class ClientActorSystem implements SceneFrameSystem {
       this.generatedPropArchetypeVariants.get(kind) ?? [],
     )?.archetype;
   }
+}
+
+/** 上一次登记出去的碰撞体：位姿四个数，形状那几个数。 */
+interface PublishedCollider {
+  x: number;
+  y: number;
+  z: number;
+  yaw: number;
+  shape: string | undefined;
+  supportShape: string | undefined;
+  centerX: number;
+  centerZ: number;
+  halfWidth: number;
+  halfLength: number;
+  minimumY: number;
+  maximumY: number;
+  supportHalfWidth: number | undefined;
+  supportHalfLength: number | undefined;
+}
+
+type ColliderChange = 'none' | 'pose' | 'shape';
+
+/** 和上一次登记的比：没登记过或形状变了要重建，只有位姿变了挪一下就行。 */
+function classifyColliderChange(
+  published: PublishedCollider | undefined,
+  collision: SimpleCollisionComponent,
+  transform: TransformComponent,
+): ColliderChange {
+  if (!published) return 'shape';
+  if (
+    published.shape !== collision.shape
+    || published.supportShape !== collision.supportShape
+    || published.centerX !== collision.centerX
+    || published.centerZ !== collision.centerZ
+    || published.halfWidth !== collision.halfWidth
+    || published.halfLength !== collision.halfLength
+    || published.minimumY !== collision.minimumY
+    || published.maximumY !== collision.maximumY
+    || published.supportHalfWidth !== collision.supportHalfWidth
+    || published.supportHalfLength !== collision.supportHalfLength
+  ) return 'shape';
+  if (
+    published.x !== transform.x
+    || published.y !== transform.y
+    || published.z !== transform.z
+    || published.yaw !== transform.yaw
+  ) return 'pose';
+  return 'none';
+}
+
+/** 记下这一次登记出去的位姿与形状。复用上一条记录，不逐帧分配。 */
+function rememberPublishedCollider(
+  previous: PublishedCollider | undefined,
+  collision: SimpleCollisionComponent,
+  transform: TransformComponent,
+): PublishedCollider {
+  const record = previous ?? {
+    x: 0, y: 0, z: 0, yaw: 0,
+    shape: undefined, supportShape: undefined,
+    centerX: 0, centerZ: 0, halfWidth: 0, halfLength: 0, minimumY: 0, maximumY: 0,
+    supportHalfWidth: undefined, supportHalfLength: undefined,
+  };
+  record.x = transform.x;
+  record.y = transform.y;
+  record.z = transform.z;
+  record.yaw = transform.yaw;
+  record.shape = collision.shape;
+  record.supportShape = collision.supportShape;
+  record.centerX = collision.centerX;
+  record.centerZ = collision.centerZ;
+  record.halfWidth = collision.halfWidth;
+  record.halfLength = collision.halfLength;
+  record.minimumY = collision.minimumY;
+  record.maximumY = collision.maximumY;
+  record.supportHalfWidth = collision.supportHalfWidth;
+  record.supportHalfLength = collision.supportHalfLength;
+  return record;
 }

@@ -4,6 +4,7 @@ import {
   type ProfilerThreadSample,
 } from './frameProfilerReport';
 import { readRenderThreadReport } from './renderThreadTimings';
+import { reportMainThreadPacing, type MainThreadPacingReport } from './mainThreadPacing';
 
 /**
  * 游戏内的帧耗时面板（开发运行时，F8 里开关）。
@@ -27,6 +28,8 @@ export class PerformanceOverlay {
   private frames = 0;
   private accumulatedSeconds = 0;
   private mainFps = 0;
+  /** 主线程最近一秒的节拍账。和 fps 同一个窗口，每秒读一次并清零。 */
+  private mainPacing?: MainThreadPacingReport;
   private sinceRefresh = 0;
 
   public constructor(root: HTMLElement, document: Document = globalThis.document) {
@@ -72,6 +75,7 @@ export class PerformanceOverlay {
       this.mainFps = this.frames / this.accumulatedSeconds;
       this.frames = 0;
       this.accumulatedSeconds = 0;
+      this.mainPacing = reportMainThreadPacing();
     }
     if (!this.visibleState) return;
     this.sinceRefresh += deltaSeconds;
@@ -98,6 +102,7 @@ export class PerformanceOverlay {
         label: '主线程　',
         fps: this.mainFps,
         report: frameTimeline.report(),
+        mainPacing: this.mainPacing,
       },
     ];
     this.body.textContent = formatFrameProfiler(threads).join('\n');

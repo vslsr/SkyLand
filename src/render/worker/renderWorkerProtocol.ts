@@ -101,6 +101,31 @@ export interface FramePacing {
   /** 等到上限主线程还没翻面的帧数——主线程这一拍没赶上，这一帧只能画上一帧。 */
   readonly waitTimeouts: number;
   /**
+   * 回调起跑比它那一拍的 vsync 晚了多少（毫秒）：中位数与最大值。
+   *
+   * 渲染线程的 rAF 什么时候跑不由它自己定。起跑晚，这一拍留给画的时间就短；
+   * 起跑总在主线程翻面之后，说明两条线程实际上是串着跑的——一拍要装下两边。
+   */
+  readonly startDelayMedianMs: number;
+  readonly startDelayMaximumMs: number;
+  /**
+   * 回调结束时已经过了下一个 vsync 的帧数。
+   *
+   * 配对一对一、两边都满帧，画面照样能顿：画完得太晚，合成器这一拍拿不到新画面，
+   * 下一拍又一次拿到两张、只显示后一张——一张被按住、一张被丢掉。这个数就是
+   * 那种顿的次数。
+   */
+  readonly overrunFrames: number;
+  /** 显卡真正画完一帧的耗时（`EXT_disjoint_timer_query_webgl2`）；扩展不可用时 gpuFrames 为 0。 */
+  readonly gpuFrames: number;
+  readonly gpuMedianMs: number;
+  readonly gpuMaximumMs: number;
+  /** 上一帧的绘制统计。draw call 数决定渲染线程 CPU 侧那一半。 */
+  readonly drawCalls: number;
+  readonly triangles: number;
+  readonly lines: number;
+  readonly programs: number;
+  /**
    * 最近十秒里最慢的那一帧，以及它是几秒前的事。
    *
    * 报表本身每秒清一次，卡顿却常常是几秒一次的——只看当前这一秒，十有八九

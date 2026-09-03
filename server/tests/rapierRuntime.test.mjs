@@ -68,3 +68,42 @@ test('Rapier camera sphere cast sees CAMERA-only authoring', async () => {
   assert.ok(ratio > 0 && ratio < 0.5, `unexpected camera hit ratio ${ratio}`);
   physics.dispose();
 });
+
+/**
+ * 只挪位姿、不删了重建：主线程每帧把所有 Actor 碰撞体重建一遍是 `sim-colliders`
+ * 那几毫秒的来源。挪过去的碰撞体必须在新位置上挡得住角色，旧位置上不再挡。
+ */
+test('moveActorCollider moves an existing collider without rebuilding it', async () => {
+  const rapier = await initRapier(() => import('@dimforge/rapier3d-compat'));
+  const physics = new PhysicsWorld(rapier);
+  physics.setChunkCollider('floor', {
+    vertices: new Float32Array([-8, 0, -8, -8, 0, 8, 8, 0, 8, 8, 0, -8]),
+    indices: new Uint32Array([0, 1, 2, 0, 2, 3]),
+  });
+  const definition = {
+    shape: 'box', halfWidth: 0.5, halfLength: 0.5,
+    minimumY: 0, maximumY: 1, x: 2, y: 0, z: 0, yaw: 0,
+  };
+  physics.setActorCollider('rock', definition);
+  physics.createCharacter('player', { x: 0, y: 0.5, z: 0, radius: 0.4, halfHeight: 0.4 });
+  const colliderCount = physics.colliderCount;
+  physics.prepareQueries();
+  const blocked = physics.computeCharacterMovement('player', { x: 3, y: 0, z: 0 });
+  assert.ok(blocked.movement.x < 1.5, `石头在 x=2 时应当挡住：走了 ${blocked.movement.x}`);
+
+  // 没登记过的、数量不符的都挪不动，交给 setActorCollider 重建。
+  assert.equal(physics.moveActorCollider('nobody', definition), false);
+  assert.equal(physics.moveActorCollider('rock', [definition, definition]), false);
+
+  assert.equal(physics.moveActorCollider('rock', { ...definition, x: 2, z: 5 }), true);
+  assert.equal(physics.colliderCount, colliderCount, '挪不新建');
+  physics.setCharacterTranslation('player', { x: 0, y: 0.5, z: 0 });
+  physics.prepareQueries();
+  const free = physics.computeCharacterMovement('player', { x: 3, y: 0, z: 0 });
+  assert.ok(free.movement.x > 2.5, `石头挪走之后不该再挡：走了 ${free.movement.x}`);
+  physics.setCharacterTranslation('player', { x: 0, y: 0.5, z: 5 });
+  physics.prepareQueries();
+  const blockedAgain = physics.computeCharacterMovement('player', { x: 3, y: 0, z: 0 });
+  assert.ok(blockedAgain.movement.x < 1.5, `石头在新位置上应当挡住：走了 ${blockedAgain.movement.x}`);
+  physics.dispose();
+});

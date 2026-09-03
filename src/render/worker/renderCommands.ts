@@ -162,6 +162,12 @@ function applyInstanceSlice(buffer: RenderInstanceBuffer, slice: RenderInstanceS
 export class RenderCommandQueue implements RenderScene, ChunkViewSink, RenderWorldCommands {
   #commands: RenderCommand[] = [];
   #transfer: ArrayBufferLike[] = [];
+  /**
+   * 上一次真的发出去的实例记录。内容逐字节没变的帧不再发——渲染侧留着上一份就是
+   * 这一帧的。发出去的那段字节是转移的，所以这里留的是自己的一份副本。
+   */
+  #sentProps?: RenderInstanceSlice;
+  #sentFruit?: RenderInstanceSlice;
   readonly #generatorReady: ((kind: string) => void)[] = [];
   #generatorKind?: string;
   #slimeDragListener?: SlimeSurfaceDragListener;
@@ -256,8 +262,16 @@ export class RenderCommandQueue implements RenderScene, ChunkViewSink, RenderWor
    * 反而是最省事的正确做法——一张图满打满算几百条，按 `count` 截断之后是几 KB。
    */
   public submitInstances(props: RenderInstanceBuffer, fruit: RenderInstanceBuffer): void {
+    // 什么都没变的帧（绝大多数帧）一个字节都不发：不复制、不克隆、不转移。
+    if (
+      this.#sentProps && this.#sentFruit
+      && props.matches(this.#sentProps.integers, this.#sentProps.floats, this.#sentProps.count)
+      && fruit.matches(this.#sentFruit.integers, this.#sentFruit.floats, this.#sentFruit.count)
+    ) return;
     const propSlice = sliceInstances(props);
     const fruitSlice = sliceInstances(fruit);
+    this.#sentProps = sliceInstances(props);
+    this.#sentFruit = sliceInstances(fruit);
     this.#commands.push({ kind: 'submitInstances', props: propSlice, fruit: fruitSlice });
     this.#transfer.push(
       propSlice.integers.buffer,
@@ -268,10 +282,15 @@ export class RenderCommandQueue implements RenderScene, ChunkViewSink, RenderWor
   }
 
   public loadRenderScene(definition: SceneDefinition, worldSeed?: number): void {
+    // 新的渲染世界没见过任何实例记录：下一帧不管变没变都要发一次。
+    this.#sentProps = undefined;
+    this.#sentFruit = undefined;
     this.#commands.push({ kind: 'loadRenderScene', definition, worldSeed });
   }
 
   public clearRenderScene(): void {
+    this.#sentProps = undefined;
+    this.#sentFruit = undefined;
     this.#commands.push({ kind: 'clearRenderScene' });
   }
 

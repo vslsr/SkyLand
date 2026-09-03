@@ -1,6 +1,7 @@
 import { FlyController } from '../camera/FlyController';
 import { GameInteractionLayer } from '../interaction/GameInteractionLayer';
 import { isDevelopmentRuntime } from '../debug/developmentRuntime';
+import { recordReconciliation } from '../debug/mainThreadPacing';
 import { PerformanceOverlay } from '../debug/PerformanceOverlay';
 import { PlayerTransformLogRecorder } from '../debug/PlayerTransformLogRecorder';
 import {
@@ -709,6 +710,8 @@ export class GrasslandScene extends Scene {
         own.grounded,
       )
     ));
+    // 拉回了几次、拉回多远，面板上「和解」那一行读它。
+    recordReconciliation(reconciliation);
     const after = player.captureTransformDebugState();
     this.playerTransformLog?.record('client.reconciliation_completed', {
       snapshotTick: snapshot.tick,

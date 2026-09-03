@@ -222,6 +222,33 @@ export class PhysicsWorld {
     return colliders.map((collider) => collider.handle);
   }
 
+  /**
+   * 只挪已有的 Actor 碰撞体，不删了重建。
+   *
+   * 每帧把全部 Actor 碰撞体删掉再建一遍是主线程 `sim-colliders` 那 0.5–4ms 的来源：
+   * Rapier 每建一个 collider 都要进宽相，还把查询管线标脏、逼下一次查询前多跑一次
+   * `world.step()`。形状没变、只是挪了位置的，改位姿就够。数量或形状变了才回落到
+   * `setActorCollider` 重建。
+   *
+   * @returns {boolean} 挪成功；false 表示没登记过或数量不符，调用方应改走 setActorCollider。
+   */
+  moveActorCollider(id, definition) {
+    this.#assertAlive();
+    const colliders = this.#actors.get(id);
+    const definitions = Array.isArray(definition) ? definition : [definition];
+    if (!colliders || colliders.length !== definitions.length) return false;
+    for (let index = 0; index < colliders.length; index += 1) {
+      if (!colliders[index].isValid()) return false;
+    }
+    for (let index = 0; index < colliders.length; index += 1) {
+      const pose = this.#actorColliderPose(definitions[index]);
+      colliders[index].setTranslation(pose.translation);
+      colliders[index].setRotation(pose.rotation);
+    }
+    this.#queriesDirty = true;
+    return true;
+  }
+
   removeActorCollider(id) {
     const colliders = this.#actors.get(id);
     if (!colliders) return false;
@@ -514,20 +541,32 @@ export class PhysicsWorld {
         positive(definition?.halfLength, 0.01),
       );
     }
+    const pose = this.#actorColliderPose(definition);
+    descriptor.setTranslation(pose.translation.x, pose.translation.y, pose.translation.z);
+    descriptor.setRotation(pose.rotation);
+    descriptor.setFriction(0);
+    descriptor.setCollisionGroups(colliderInteractionGroups(definition?.layers));
+    return descriptor;
+  }
+
+  /** 一份 Actor 碰撞定义对应的世界位姿：建碰撞体与挪碰撞体算的是同一个。 */
+  #actorColliderPose(definition) {
+    const minimumY = finite(definition?.minimumY);
+    const maximumY = Math.max(minimumY + 0.001, finite(definition?.maximumY, minimumY + 1));
+    const halfHeight = (maximumY - minimumY) * 0.5;
     const yaw = finite(definition?.yaw);
     const sinYaw = Math.sin(yaw);
     const cosYaw = Math.cos(yaw);
     const centerX = finite(definition?.centerX);
     const centerZ = finite(definition?.centerZ);
-    descriptor.setTranslation(
-      finite(definition?.x) + cosYaw * centerX + sinYaw * centerZ,
-      finite(definition?.y) + minimumY + halfHeight,
-      finite(definition?.z) - sinYaw * centerX + cosYaw * centerZ,
-    );
-    descriptor.setRotation(yawQuaternion(yaw));
-    descriptor.setFriction(0);
-    descriptor.setCollisionGroups(colliderInteractionGroups(definition?.layers));
-    return descriptor;
+    return {
+      translation: {
+        x: finite(definition?.x) + cosYaw * centerX + sinYaw * centerZ,
+        y: finite(definition?.y) + minimumY + halfHeight,
+        z: finite(definition?.z) - sinYaw * centerX + cosYaw * centerZ,
+      },
+      rotation: yawQuaternion(yaw),
+    };
   }
 
   #assertAlive() {

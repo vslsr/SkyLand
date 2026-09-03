@@ -103,6 +103,28 @@ export class RenderInstanceBuffer {
     return this.#floats.slice(0, this.#count * this.floatStride);
   }
 
+  /**
+   * 这一帧的内容和上一次发出去的那一段是否逐字节相同。
+   *
+   * 合批内容每帧整个重铺，但绝大多数帧什么都没变：掉落堆没人捡、果子没熟。
+   * 没变的帧不必再复制一份、再过一次结构化克隆。逐元素比较不分配任何东西。
+   */
+  public matches(integers: Int32Array, floats: Float32Array, count: number): boolean {
+    if (count !== this.#count) return false;
+    const intCount = count * this.intStride;
+    if (integers.length !== intCount) return false;
+    for (let index = 0; index < intCount; index += 1) {
+      if (this.#integers[index] !== integers[index]) return false;
+    }
+    const floatCount = count * this.floatStride;
+    if (floats.length !== floatCount) return false;
+    for (let index = 0; index < floatCount; index += 1) {
+      // NaN 不等于自己；这里的字段都是有限数，按位比较即可。
+      if (this.#floats[index] !== floats[index]) return false;
+    }
+    return true;
+  }
+
   /** 接管对面送来的那一段。容量不够就先扩，扩完照原样填进去。 */
   public adopt(integers: Int32Array, floats: Float32Array, count: number): void {
     this.#ensure(count);

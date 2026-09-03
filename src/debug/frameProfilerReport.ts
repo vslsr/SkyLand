@@ -1,5 +1,6 @@
 import type { FrameTimingReport } from '../platform/index';
 import type { FramePacing } from '../render/worker/renderWorkerProtocol';
+import type { MainThreadPacingReport } from './mainThreadPacing';
 
 /**
  * 帧计时的纯文本排版。
@@ -22,6 +23,8 @@ export interface ProfilerThreadSample {
   readonly absentReason?: string;
   /** 与玩法循环的配对情况。只有跨线程渲染时才有。 */
   readonly pacing?: FramePacing;
+  /** 主线程自己的节拍账：丢拍、超时、和解拉回。只有主线程那一条有。 */
+  readonly mainPacing?: MainThreadPacingReport;
 }
 
 /** 超过这个年龄就认为渲染线程已经不发了。它每秒发一条，两秒没来必然有问题。 */
@@ -32,6 +35,13 @@ export const DEFAULT_PHASE_LIMIT = 5;
 
 function milliseconds(value: number): string {
   return `${value.toFixed(2)}ms`.padStart(8);
+}
+
+/** 三角形与线段数动辄几十万，按千位缩写。 */
+function thousands(value: number): string {
+  if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(2)}M`;
+  if (value >= 1000) return `${(value / 1000).toFixed(1)}k`;
+  return String(Math.round(value));
 }
 
 /**
@@ -102,12 +112,56 @@ export function formatFrameProfiler(
           + `${motionStalls > 0 || ratio > 2 ? '  ← 帧是匀的，画面不匀' : ''}`,
         );
       }
+      // 起跑晚 + 画完晚：两边都满帧、配对一对一时画面还会顿的那种，只有这两项看得见。
+      const startDelayMedian = thread.pacing.startDelayMedianMs ?? 0;
+      const startDelayMaximum = thread.pacing.startDelayMaximumMs ?? 0;
+      const overrun = thread.pacing.overrunFrames ?? 0;
+      if (startDelayMaximum > 0 || overrun > 0) {
+        lines.push(
+          `   ${'起跑晚'.padEnd(14)} 中位 ${startDelayMedian.toFixed(1)}ms`
+          + `  最长 ${startDelayMaximum.toFixed(1)}ms`
+          + `  画过头 ${overrun}/${frames} 帧`
+          + `${overrun > 0 ? `  ← 这 ${overrun} 帧晚一拍上屏` : ''}`,
+        );
+      }
+      const gpuFrames = thread.pacing.gpuFrames ?? 0;
+      const drawCalls = thread.pacing.drawCalls ?? 0;
+      if (gpuFrames > 0 || drawCalls > 0) {
+        const gpu = gpuFrames > 0
+          ? `GPU 中位 ${(thread.pacing.gpuMedianMs ?? 0).toFixed(1)}ms  最长 ${(thread.pacing.gpuMaximumMs ?? 0).toFixed(1)}ms`
+          : 'GPU 计时不可用';
+        lines.push(
+          `   ${'显卡'.padEnd(15)} ${gpu}`
+          + `  绘制 ${drawCalls} 次`
+          + `  三角 ${thousands(thread.pacing.triangles ?? 0)}`
+          + `  线段 ${thousands(thread.pacing.lines ?? 0)}`
+          + `  程序 ${thread.pacing.programs ?? 0}`,
+        );
+      }
       if (thread.pacing.worstMilliseconds > 0) {
         lines.push(
           `   ${'近十秒最差'.padEnd(12)} ${milliseconds(thread.pacing.worstMilliseconds)}`
           + `  （${thread.pacing.worstSecondsAgo.toFixed(1)}s 前）`,
         );
       }
+    }
+    if (thread.mainPacing) {
+      const main = thread.mainPacing;
+      // 各阶段耗时看不见回调之间的空洞：丢一拍就是模拟一口气走两步。
+      lines.push(
+        `   ${'丢拍'.padEnd(15)} ${main.droppedFrames}/${main.frames} 帧`
+        + `${main.droppedFrames > 0 ? `  最长间隔 ${main.longestGapMs.toFixed(1)}ms` : ''}`
+        + `  画过头 ${main.overrunFrames} 帧`
+        + `${main.overrunFrames > 0 ? `  最多 ${main.worstOverrunMs.toFixed(1)}ms` : ''}`
+        + `${main.droppedFrames + main.overrunFrames > 0 ? '  ← 这几拍模拟要补步' : ''}`,
+      );
+      // 走着走着被拉回：配对与耗时上一个数字都不变，只有这一行看得见。
+      lines.push(
+        `   ${'和解'.padEnd(15)} 拉回 ${main.corrections} 次`
+        + `  最大残差 ${(main.worstResidualMeters * 100).toFixed(1)}cm`
+        + `  瞬移 ${main.snaps} 次`
+        + `${main.corrections + main.snaps > 0 ? '  ← 预测和权威没对上' : ''}`,
+      );
     }
     for (const phase of report.phases.slice(0, phaseLimit)) {
       lines.push(

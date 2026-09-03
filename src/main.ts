@@ -7,6 +7,7 @@ import {
   frameTimeline,
 } from './platform/index';
 import { createFrameStatsPanel } from './debug/FrameStatsPanel';
+import { beginMainFrame, endMainFrame } from './debug/mainThreadPacing';
 import { suppressBrowserContextMenu } from './input/contextMenu';
 import { GrasslandScene } from './scenes/GrasslandScene';
 import { SceneManager } from './scenes/SceneManager';
@@ -72,12 +73,15 @@ try {
     const elapsedSeconds = (now - startedAt) / 1000;
     previousTime = now;
     frameStats?.begin();
+    // 丢拍与画过头记在回调外面：各阶段耗时看不见回调之间的空洞。
+    beginMainFrame(now);
     // 帧边界在这里，不在场景里：整帧减去各阶段之和就是还没打点的地方
     // （引擎迁移路线图 第 2 步——先有证据，再拆线程）。
     frameTimeline.beginFrame();
     sceneManager.update(deltaSeconds, elapsedSeconds);
     sceneManager.render(elapsedSeconds);
     frameTimeline.endFrame();
+    endMainFrame(now);
     frameStats?.end();
     if (elapsedSeconds >= nextReportAt) {
       nextReportAt = elapsedSeconds + FRAME_REPORT_INTERVAL_SECONDS;

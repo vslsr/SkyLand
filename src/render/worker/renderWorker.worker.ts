@@ -1,5 +1,5 @@
 /// <reference lib="webworker" />
-import { createRenderCamera, RenderCameraBuffer } from '../RenderCameraBuffer';
+import { RenderCameraBuffer } from '../RenderCameraBuffer';
 import { RenderInstanceBuffer } from '../RenderInstanceBuffer';
 import { RenderTransformBuffer } from '../RenderTransformBuffer';
 import { RenderWorldRuntime } from '../RenderWorldRuntime';
@@ -7,6 +7,7 @@ import { FRUIT_FLOAT_STRIDE, FRUIT_INT_STRIDE } from '../fruitInstanceLayout';
 import { PROP_FLOAT_STRIDE, PROP_INT_STRIDE } from '../propInstanceLayout';
 import { forceJavaScriptChunkGenerator } from '../../world/loadChunkGenerator';
 import { frameTimeline } from '../../platform/index';
+import { GpuFrameTimer } from '../GpuFrameTimer';
 import { applyRenderCommand } from './renderCommands';
 import { RenderFramePacer } from './RenderFramePacer';
 import type { RenderPacingMode, RenderWorkerFromMain, RenderWorkerToMain } from './renderWorkerProtocol';
@@ -52,13 +53,21 @@ const FRAME_REPORT_INTERVAL_MS = 1000;
 let pacer = new RenderFramePacer();
 /** 这一秒里画出来的相机与世界对不上号的帧数（见 pairedFrame.ts）。 */
 let torn = 0;
+/** 显卡真正画完一帧要多久。CPU 侧 6ms、显卡 15ms 的那种顿只有它看得见。 */
+let gpuTimer = new GpuFrameTimer(undefined);
+/**
+ * 回调起跑比它那一拍的 vsync 晚了多少，以及回调结束时有没有过了下一个 vsync。
+ * 两条线程都满帧、配对一对一，画面照样能顿——画完得太晚，合成器这一拍拿不到
+ * 新画面，下一拍又拿到两张只显示后一张。这两项就是量那种顿的。
+ */
+const startDelays: number[] = [];
+let overrunFrames = 0;
 /** 跨报表窗口保留的最差帧。卡顿几秒一次，只看当前这一秒会正好错过。 */
 let worstFrameMilliseconds = 0;
 let worstFrameAt = 0;
 const WORST_FRAME_WINDOW_MS = 10_000;
 
-/** 上一帧的相机位置，用来逐帧量画面到底推进了多少。复用一个读出对象，不每帧新建。 */
-const cameraSample = createRenderCamera();
+/** 上一帧的相机位置，用来逐帧量画面到底推进了多少。 */
 let previousCamera: [number, number, number] | undefined;
 const motionSamples: number[] = [];
 /** 位移小于中位数这个比例的帧算「基本没动」。 */
@@ -99,6 +108,7 @@ function start(
     cameraBuffer = RenderCameraBuffer.fromBytes(cameraBytes);
     runtime = new RenderWorldRuntime(canvas, cameraBuffer, transforms);
     pacer = new RenderFramePacer({ waitEnabled: renderPacing !== 'free' });
+    gpuTimer = new GpuFrameTimer(runtime.glContext as unknown as ConstructorParameters<typeof GpuFrameTimer>[0]);
     // 两条反向通知：都是只有这一侧知道的事实，走 postMessage，不进命令队列。
     // 回报里的那份逐帧复用，`postMessage` 会结构化克隆，所以摊平成一条报文。
     runtime.setSlimeSurfaceDragListener((report) => post({
@@ -120,6 +130,9 @@ function frame(now: number): void {
   (self as unknown as Window).requestAnimationFrame(frame);
   if (!runtime || !transforms) return;
   pacer.beginFrame(now);
+  // 起跑比 vsync 晚了多少。上一帧的结果这时候多半已经好了，顺手收一下。
+  startDelays.push(Math.max(0, clock.now() - now));
+  gpuTimer.poll();
   // 第一帧没有前一帧可减；之后钳到 100ms，切标签页回来时不要一次跳一大步。
   const deltaSeconds = previous === 0 ? 1 / 60 : Math.min((now - previous) / 1000, 0.1);
   previous = now;
@@ -136,33 +149,38 @@ function frame(now: number): void {
   // 机位与 transform 在这一处一次读齐：两样出自同一帧，相机不会比世界新一帧。
   const consumed = frameTimeline.measure('render-sync', () => runtime!.consumePublishedFrame());
   frameTimeline.measure('render-update', () => runtime?.update(deltaSeconds, elapsed));
+  gpuTimer.begin();
   frameTimeline.measure('render-draw', () => runtime?.render());
+  gpuTimer.end();
   frameTimeline.endFrame();
-  const frameMilliseconds = clock.now() - startedAt;
+  const endedAt = clock.now();
+  const frameMilliseconds = endedAt - startedAt;
   pacer.endFrame(frameMilliseconds);
   if (frameMilliseconds >= worstFrameMilliseconds || now - worstFrameAt > WORST_FRAME_WINDOW_MS) {
     worstFrameMilliseconds = frameMilliseconds;
     worstFrameAt = now;
   }
+  // 画完时已经过了下一个 vsync：这一帧会晚一拍上屏，合成器那一拍只能按住上一张。
+  if (endedAt > now + pacer.rafIntervalMs) overrunFrames += 1;
 
   if (consumed.torn) torn += 1;
 
   // 相机每帧推进了多远。帧再准，位移忽大忽小照样看着顿。
-  const camera = cameraBuffer?.read(cameraSample);
-  if (camera) {
-    const [x, y, z] = camera.position;
-    if (previousCamera) {
-      const moved = Math.hypot(x - previousCamera[0], y - previousCamera[1], z - previousCamera[2]);
-      if (moved > MOTION_IDLE_METERS) motionSamples.push(moved);
-    }
-    previousCamera = [x, y, z];
+  // 量的是**这一帧兑现的**机位——画完再去读那段字节，主线程可能已经翻了下一面，
+  // 一帧读到两帧的位移会把「不匀」量出来，其实画面是匀的。
+  const [x, y, z] = runtime.consumedCameraPosition;
+  if (previousCamera) {
+    const moved = Math.hypot(x - previousCamera[0], y - previousCamera[1], z - previousCamera[2]);
+    if (moved > MOTION_IDLE_METERS) motionSamples.push(moved);
   }
+  previousCamera = [x, y, z];
 
   if (reportedAt === 0) reportedAt = now;
   if (now - reportedAt >= FRAME_REPORT_INTERVAL_MS) {
     reportedAt = now;
     // 报完就清：面板看的是「最近一秒」，而不是从进图到现在的平均——
     // 卡顿是一阵一阵的，累计平均会把它抹平。
+    const sortedDelays = [...startDelays].sort((left, right) => left - right);
     post({
       kind: 'frameReport',
       report: frameTimeline.report(),
@@ -171,11 +189,21 @@ function frame(now: number): void {
         torn,
         worstMilliseconds: worstFrameMilliseconds,
         worstSecondsAgo: Math.max(0, (now - worstFrameAt) / 1000),
+        startDelayMedianMs: sortedDelays.length > 0 ? sortedDelays[Math.floor(sortedDelays.length / 2)] : 0,
+        startDelayMaximumMs: sortedDelays.length > 0 ? sortedDelays[sortedDelays.length - 1] : 0,
+        overrunFrames,
+        ...gpuTimer.report(),
+        drawCalls: runtime.renderInfo.calls,
+        triangles: runtime.renderInfo.triangles,
+        lines: runtime.renderInfo.lines,
+        programs: runtime.renderInfo.programs,
         ...summarizeMotion(),
       },
     });
     frameTimeline.reset();
     torn = 0;
+    startDelays.length = 0;
+    overrunFrames = 0;
     motionSamples.length = 0;
   }
 }

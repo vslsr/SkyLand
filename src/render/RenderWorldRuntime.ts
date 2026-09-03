@@ -302,6 +302,22 @@ export class RenderWorldRuntime implements RenderWorldPort {
   }
 
   /**
+   * 渲染器底下的 WebGL 上下文。渲染线程拿它开 GPU 计时查询
+   * （`EXT_disjoint_timer_query_webgl2`），别的地方不该碰。
+   */
+  public get glContext(): WebGLRenderingContext | WebGL2RenderingContext {
+    return this.#renderer.getContext();
+  }
+
+  /** 上一次 `render()` 的绘制统计：draw call、三角形、线段、着色程序数。 */
+  public readonly renderInfo = { calls: 0, triangles: 0, lines: 0, programs: 0 };
+
+  /** 这一帧兑现的机位位置（`consumePublishedFrame` 读到的那一份）。逐帧复用，只读。 */
+  public get consumedCameraPosition(): readonly [number, number, number] {
+    return this.#cameraFrame.position;
+  }
+
+  /**
    * 一次读入这一刻已发布的机位与 transform SoA，两样出自同一帧。
    *
    * 渲染线程等到主线程这一拍翻面之后调它一次（见 `RenderFramePacer`）。机位与
@@ -364,6 +380,12 @@ export class RenderWorldRuntime implements RenderWorldPort {
     // 渲染循环自己手里的东西，跨边界发过来毫无意义。
     this.#composition?.renderScene.beforeRender(this.#renderer, this.#camera);
     this.#renderer.render(this.#scene, this.#camera);
+    // three 每次 render 之后自动清零这几个数，所以要在这里立刻抄走。
+    const info = this.#renderer.info;
+    this.renderInfo.calls = info.render.calls;
+    this.renderInfo.triangles = info.render.triangles;
+    this.renderInfo.lines = info.render.lines;
+    this.renderInfo.programs = info.programs?.length ?? 0;
   }
 
   public dispose(): void {
