@@ -76,9 +76,8 @@ resolveActorAction(target, context) -> { id, verb, blocked } | undefined
 
 | `interactable.action` | 状态 | 动作 id | 动词 |
 | --- | --- | --- | --- |
-| `held-item` | 是我手上那件 | `drop-held` | 丢下「X」 |
-| `mushroom-bite` | 我叼着 | `drop-held` | 放下「X」 |
-| | 我拉着 | `mushroom-release` | 松开「X」 |
+| **任意** | 是我手上那件 | `drop-held` | 放下「X」 |
+| `mushroom-bite` | 我拉着 | `mushroom-release` | 松开「X」 |
 | | 别人拉着 | — | 「X」正被叼住（blocked） |
 | | 空闲 | `mushroom-grab` | 叼住「X」 |
 | `pickup-stack` | — | `pickup-stack` | 拾取「X ×3」 |
@@ -89,9 +88,10 @@ resolveActorAction(target, context) -> { id, verb, blocked } | undefined
 | | 我的载具装着 | `cargo-unload` | 卸载「X」 |
 | | 别人的载具装着 | — | 已被其他木筏装载（blocked） |
 
-`held-item` 与 `mushroom-bite` 的前两支排在 `enabled` 检查之前：手上那件东西的
-`interactable` 是关着的（不参与就近搜索），但**一个已经建立的持续状态必须有一个
-确定的退出入口**。
+第一行排在 `switch` 之前，而且不看 `enabled`：手上那件东西的 `interactable` 是关着的
+（不参与就近搜索），但**一个已经建立的持续状态必须有一个确定的退出入口**——否则
+拿起来的东西再也放不下。它压过所有其它分支，所以叼着的蘑菇和快捷栏拿出来的手持物
+走的是同一条退出路径。
 
 ## 3. 拾取流程
 
