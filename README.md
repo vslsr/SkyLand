@@ -143,6 +143,20 @@ npm run dev
 - 开发房间服务端：`http://127.0.0.1:3090`
 - 生产预览：`http://127.0.0.1:4180`
 
+### 帧率与耗时
+
+开发运行时左上角常驻一块 `stats-gl` 面板（`src/debug/FrameStatsPanel.ts`），三列
+分别是 FPS、CPU 毫秒和 **GPU 毫秒**。GPU 那一列走
+`EXT_disjoint_timer_query_webgl2`，量的是显卡真正画完的时间——`performance.now()`
+只能量到命令提交为止，所以「主线程很闲、帧率却上不去」只有这一列看得见。
+面板走动态 import 且由 `isDevelopmentRuntime()` 把门，生产构建会把它切成一个
+永不请求的独立 chunk，玩家下载不到。
+
+它和控制台里每 10 秒一份的 `[frame]` 报表是两件事：报表来自
+`src/platform/FrameTimeline.ts`，给的是主线程各阶段自耗时的 p50/p95/max，回头
+定位是哪个阶段慢；面板给的是此刻的整帧现状。先看面板判断瓶颈在 CPU 还是 GPU，
+再翻报表找是哪个阶段。
+
 测试与构建：
 
 ```bash

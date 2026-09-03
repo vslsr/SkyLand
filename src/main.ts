@@ -6,6 +6,7 @@ import {
   formatFrameTimingReport,
   frameTimeline,
 } from './platform/index';
+import { createFrameStatsPanel } from './debug/FrameStatsPanel';
 import { GrasslandScene } from './scenes/GrasslandScene';
 import { SceneManager } from './scenes/SceneManager';
 
@@ -42,13 +43,17 @@ console.info(`SkyLand platform: ${describeThreadingCapabilities()}`);
 try {
   await initRapier(() => import('@dimforge/rapier3d'));
   const sceneManager = new SceneManager();
+  const canvas = requireElement<HTMLCanvasElement>('scene');
   const grasslandScene = new GrasslandScene({
-    canvas: requireElement<HTMLCanvasElement>('scene'),
+    canvas,
     sceneRoot: requireElement<HTMLElement>('app-shell'),
     baseLayer: requireElement<HTMLElement>('game-layer'),
     overlayRoot: requireElement<HTMLElement>('common-ui-root'),
   });
   sceneManager.switchTo(grasslandScene);
+  // 必须排在场景之后：渲染器要先拿走这块画布的 WebGL2 上下文，面板才只是
+  // 搭个便车读 GPU 计时，而不是抢先用默认 attributes 把上下文建出来。
+  const frameStats = await createFrameStatsPanel({ canvas });
 
   let previousTime = performance.now();
   const startedAt = previousTime;
@@ -61,12 +66,14 @@ try {
     const deltaSeconds = Math.min((now - previousTime) / 1000, 0.05);
     const elapsedSeconds = (now - startedAt) / 1000;
     previousTime = now;
+    frameStats?.begin();
     // 帧边界在这里，不在场景里：整帧减去各阶段之和就是还没打点的地方
     // （引擎迁移路线图 第 2 步——先有证据，再拆线程）。
     frameTimeline.beginFrame();
     sceneManager.update(deltaSeconds, elapsedSeconds);
     sceneManager.render(elapsedSeconds);
     frameTimeline.endFrame();
+    frameStats?.end();
     if (elapsedSeconds >= nextReportAt) {
       nextReportAt = elapsedSeconds + FRAME_REPORT_INTERVAL_SECONDS;
       console.info(`[frame]\n${formatFrameTimingReport(frameTimeline.report())}`);
