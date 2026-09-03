@@ -641,17 +641,13 @@ export class GrasslandScene extends Scene {
       renderWorld,
       topDownCameraOffset,
     );
-    // 蒙皮拖拽属于渲染侧：指针、相机和外壳都在这一边，玩家实体只经由
-    // setMouseFacingSuppressed 收到「一次手势归谁」那一个布尔。
-    //
-    // 它收的不是 `renderWorld.scene`（那是边界接口，没有拖拽方法），而是
-    // `SceneRenderer` 上那扇有名字的门——那两个有返回值的方法只从这里出去。
-    const dragSurface = this.renderer.slimeSurfaceDragSurface;
-    if (!dragSurface) throw new Error('当前场景没有渲染世界，无法建立蒙皮拖拽');
+    // 蒙皮拖拽是两侧之间的适配器：指针与相机在这一边，外壳在渲染世界，
+    // 玩家实体只经由 setMouseFacingSuppressed 收到「一次手势归谁」那一个布尔。
+    // 四个拖拽方法现在都在 `RenderScene` 上，所以它收的就是边界接口本身。
     this.slimeSurfaceDrag = new SlimeSurfaceDragController(
       this.canvas,
       this.input,
-      dragSurface,
+      renderWorld.scene,
       this.player.renderProxyId,
       () => this.controls.frame,
       (active) => this.player?.controller.setMouseFacingSuppressed(active),

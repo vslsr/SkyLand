@@ -18,6 +18,7 @@ import {
   type PlayerProxyDesc,
   type ProxyId,
   type RenderScene,
+  type SlimeSurfaceDragListener,
   type SlimeSurfaceDragRay,
 } from '../RenderScene';
 import {
@@ -116,6 +117,9 @@ export class ThreeRenderScene implements RenderScene {
   private readonly slimeAnimators = new Map<ProxyId, ThreeSlimeAnimator>();
   /** proxyId → 蒙皮拖拽。只有玩家 proxy 会建。 */
   private readonly slimeDrags = new Map<ProxyId, ThreeSlimeSurfaceDrag>();
+  /** 上一次回报出去的拖拽状态，用来只在真的翻转时发通知。 */
+  private readonly reportedSlimeDrag = new Map<ProxyId, boolean>();
+  private slimeDragListener?: SlimeSurfaceDragListener;
   /** 逐帧复用的参数读出缓冲，避免每个史莱姆每帧分配一个对象。 */
   private readonly slimeMotion: SlimeMotionParams = { ...SLIME_MOTION_AT_REST };
   /** proxyId → 客户端波面浮动的模式。没有海的地图上这张表永远是空的。 */
@@ -274,6 +278,9 @@ export class ThreeRenderScene implements RenderScene {
     this.guidePathStyles.delete(id);
     this.slimeDrags.get(id)?.dispose();
     this.slimeDrags.delete(id);
+    // proxy 没了，拖拽链路当然也断了。不补这一条，控制器会一直以为自己还拖着。
+    this.#reportSlimeSurfaceDrag(id, false);
+    this.reportedSlimeDrag.delete(id);
     this.slimeVisuals.delete(id);
     this.slimeAnimators.delete(id);
     this.waterMotions.delete(id);
@@ -404,30 +411,53 @@ export class ThreeRenderScene implements RenderScene {
   }
 
   /**
-   * 蒙皮拖拽。指针、相机和外壳全在渲染这一侧，所以这几个方法是渲染世界内部调用，
-   * 不是边界；玩法侧只会经由控制器收到「拖拽开始/结束」一个布尔。
+   * 蒙皮拖拽的三条命令，外加一条**反向通知**。
    *
-   * 但 `beginSlimeSurfaceDrag` 与 `isSlimeSurfaceDragging` **有返回值**，
-   * 而且调用方（`SlimeSurfaceDragController`）住在主线程。判据在这一侧：
-   * 命中测试打的是每帧被改写的软体外壳网格，玩法侧根本没有那份几何。
-   * 渲染循环进 worker 时这两条要改成「先乐观开拖，下一帧读渲染侧回报的状态位」——
-   * 有棘轮盯着（`tests/RenderSceneBoundary.test.ts`），清单只能变短。
+   * 「这一次按下有没有抓住外壳」的判据在这一侧：命中测试打的是每帧被求解器改写的
+   * 软体外壳网格，玩法侧根本没有那份几何。所以 `beginSlimeSurfaceDrag` 曾经
+   * **有返回值**——那是这条边界上最后一次「等对面回话」。
+   *
+   * 现在改成：命令照发（返回 `void`），抓没抓住由这一侧经
+   * `setSlimeSurfaceDragListener` 回报。单线程下这条通知在 `beginDrag` 里同步就发了，
+   * 所以行为和以前逐帧一致；上 worker 之后它晚一帧到，而按下那一帧指针还没动过，
+   * 相机轨道那一帧攒下的量是零。
    */
-  public beginSlimeSurfaceDrag(id: ProxyId, ray: SlimeSurfaceDragRay): boolean {
-    return this.slimeDrags.get(id)?.beginDrag(ray) ?? false;
+  public beginSlimeSurfaceDrag(id: ProxyId, ray: SlimeSurfaceDragRay): void {
+    const drag = this.slimeDrags.get(id);
+    if (!drag) return;
+    drag.beginDrag(ray);
+    this.#reportSlimeSurfaceDrag(id, drag.isDragging);
   }
 
-  /** 返回 void：命中与否只影响这一侧，三个调用点一个都没用过它的返回值。 */
+  /** 命中与否只影响这一侧：拖不动就是不动，没什么可回话的。 */
   public updateSlimeSurfaceDrag(id: ProxyId, ray: SlimeSurfaceDragRay): void {
     this.slimeDrags.get(id)?.updateDrag(ray);
   }
 
   public endSlimeSurfaceDrag(id: ProxyId): void {
-    this.slimeDrags.get(id)?.endDrag();
+    const drag = this.slimeDrags.get(id);
+    if (!drag) return;
+    drag.endDrag();
+    this.#reportSlimeSurfaceDrag(id, drag.isDragging);
+  }
+
+  /**
+   * 谁来收这条反向通知。同一时刻只有一个拖拽控制器（本地玩家那一个），
+   * 所以是「设一个」而不是「订阅一堆」——设与清都返回 `void`，
+   * 上 worker 之后这个监听器留在主线程那一侧的代理上，不跟着报文走。
+   */
+  public setSlimeSurfaceDragListener(listener?: SlimeSurfaceDragListener): void {
+    this.slimeDragListener = listener;
   }
 
   public isSlimeSurfaceDragging(id: ProxyId): boolean {
     return this.slimeDrags.get(id)?.isDragging ?? false;
+  }
+
+  #reportSlimeSurfaceDrag(id: ProxyId, dragging: boolean): void {
+    if (this.reportedSlimeDrag.get(id) === dragging) return;
+    this.reportedSlimeDrag.set(id, dragging);
+    this.slimeDragListener?.(id, dragging);
   }
 
   /** 渲染侧查找软体表现（能力实验室与测试用）。 */
@@ -604,8 +634,12 @@ export class ThreeRenderScene implements RenderScene {
     for (const guide of this.guidePaths.values()) guide.dispose();
     this.guidePaths.clear();
     this.guidePathStyles.clear();
-    for (const drag of this.slimeDrags.values()) drag.dispose();
+    for (const [id, drag] of this.slimeDrags) {
+      drag.dispose();
+      this.#reportSlimeSurfaceDrag(id, false);
+    }
     this.slimeDrags.clear();
+    this.reportedSlimeDrag.clear();
     this.slimeVisuals.clear();
     this.slimeAnimators.clear();
     this.waterMotions.clear();

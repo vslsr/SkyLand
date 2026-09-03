@@ -125,11 +125,23 @@ export interface PlayerProxyDesc {
   readonly surfaceDrag?: SlimeSurfaceDragDefinition;
 }
 
-/** 一条世界射线。指针与相机都在渲染这一侧，所以它不跨边界，只在渲染世界内部走。 */
+/**
+ * 一条世界射线。指针与相机都在主线程，所以这条射线是从那一侧发过来的：
+ * 六个数，结构化克隆过得去。
+ */
 export interface SlimeSurfaceDragRay {
   readonly origin: readonly [number, number, number];
   readonly direction: readonly [number, number, number];
 }
+
+/**
+ * 渲染世界回报「哪个 proxy 的蒙皮正被拖着」。
+ *
+ * 这是**边界上唯一一条反向通知**（另一条是 `ChunkViewSink.onGeneratorReady`）。
+ * 它存在的理由很具体：抓没抓住外壳的判据只有渲染侧有——命中测试打的是每帧被求解器
+ * 改写的软体网格。玩法侧发命令，渲染侧回报事实，两边都不用等对方。
+ */
+export type SlimeSurfaceDragListener = (id: ProxyId, dragging: boolean) => void;
 
 /**
  * 引导路径每帧可能变的那部分。**变长**，所以它走命令而不是参数段。
@@ -249,4 +261,17 @@ export interface RenderScene extends RenderCommandSink {
    * 渲染侧据此重建 `InstancedMesh`——**这一侧不知道那是什么**。
    */
   submitInstances(props: RenderInstanceBuffer, fruit: RenderInstanceBuffer): void;
+  /**
+   * 蒙皮拖拽。射线由主线程按指针与相机算好（六个数），命中测试在渲染侧做。
+   *
+   * `beginSlimeSurfaceDrag` 曾经返回「抓住了没有」，是这条边界上最后一次
+   * 「等对面回话」。现在它返回 `void`，结果经 `setSlimeSurfaceDragListener`
+   * 回报——单线程下那条通知同步就发了，上 worker 之后晚一帧到，而按下那一帧
+   * 指针还没动过，所以没有可见差别。
+   */
+  beginSlimeSurfaceDrag(id: ProxyId, ray: SlimeSurfaceDragRay): void;
+  updateSlimeSurfaceDrag(id: ProxyId, ray: SlimeSurfaceDragRay): void;
+  endSlimeSurfaceDrag(id: ProxyId): void;
+  /** 谁来收上面那条反向通知。同一时刻只有一个拖拽控制器，所以是「设一个」。 */
+  setSlimeSurfaceDragListener(listener?: SlimeSurfaceDragListener): void;
 }

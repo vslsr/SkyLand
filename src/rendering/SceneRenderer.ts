@@ -29,7 +29,6 @@ import type {
 import type { ThreeRenderScene } from '../render/three/ThreeRenderScene';
 import type { ProxyId } from '../render/RenderScene';
 import type { RenderWorldHandle } from '../render/RenderProxyTable';
-import type { SlimeSurfaceDragSurface } from '../controllers/SlimeSurfaceDragController';
 import type { SceneDefinition } from '../scenes/data/SceneDefinition';
 import type { SceneWorld } from '../scene/SceneWorld';
 import { DEFAULT_WEATHER, type WeatherType } from '../weather/index';
@@ -191,17 +190,6 @@ export class SceneRenderer {
     return this.renderWorldHandle;
   }
 
-  /**
-   * 蒙皮拖拽那一面。**这是 `renderWorld` 收窄之后仅剩的一扇够到具体后端的门**，
-   * 而且是有名字的一扇：它只暴露四个拖拽方法，不是整个后端。
-   *
-   * 之所以还需要它：`beginSlimeSurfaceDrag` / `isSlimeSurfaceDragging` 有返回值，
-   * 因为判据在渲染侧（命中测试打的是每帧被改写的软体外壳网格）。这两条不在
-   * `RenderScene` 上，`tests/RenderSceneBoundary.test.ts` 里另有清单盯着。
-   */
-  public get slimeSurfaceDragSurface(): SlimeSurfaceDragSurface | undefined {
-    return this.renderWorldHandle?.scene;
-  }
 
   public get grassInteractionTarget(): GrassInteractionTarget | undefined {
     return this.grassInteraction;

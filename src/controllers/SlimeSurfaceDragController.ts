@@ -1,5 +1,5 @@
 import type { CameraFrame } from '../camera/CameraTransform';
-import type { ProxyId, SlimeSurfaceDragRay } from '../render/RenderScene';
+import type { ProxyId, RenderScene, SlimeSurfaceDragRay } from '../render/RenderScene';
 import {
   PlayerInputTags,
   type InputActionEvent,
@@ -9,29 +9,30 @@ import {
 const CAMERA_FIELD_OF_VIEW_RADIANS = 50 * Math.PI / 180;
 
 /**
- * 渲染世界里能被拖拽蒙皮的那一面。`ThreeRenderScene` 结构上满足它，
- * 所以这个文件不 import 任何渲染实现，只认识 `ProxyId`。
- *
- * **前两个方法有返回值**，是这条边界上仅剩的两次「等对面回话」。判据确实在渲染侧
- * ——命中测试打的是每帧被改写的软体外壳网格，玩法侧没有那份几何。渲染循环进
- * worker 时的出路是「先乐观开拖，下一帧读渲染侧回报的状态位」，和玩家本地预测
- * 同一个套路：一帧的误判在 16ms 内自己纠正过来。
- *
- * 这两条不在 `RenderScene` 上，所以那条「每个方法返回 void」的棘轮盯不到它们；
- * `tests/RenderSceneBoundary.test.ts` 里另有一份清单专门盯这里。
+ * 渲染世界里能被拖拽蒙皮的那一面。四个方法全部返回 `void`，它们就在 `RenderScene`
+ * 上——不需要一扇绕过边界的门。
  */
-export interface SlimeSurfaceDragSurface {
-  isSlimeSurfaceDragging(id: ProxyId): boolean;
-  beginSlimeSurfaceDrag(id: ProxyId, ray: SlimeSurfaceDragRay): boolean;
-  updateSlimeSurfaceDrag(id: ProxyId, ray: SlimeSurfaceDragRay): void;
-  endSlimeSurfaceDrag(id: ProxyId): void;
-}
+export type SlimeSurfaceDragSurface = Pick<
+  RenderScene,
+  | 'beginSlimeSurfaceDrag'
+  | 'updateSlimeSurfaceDrag'
+  | 'endSlimeSurfaceDrag'
+  | 'setSlimeSurfaceDragListener'
+>;
 
 /**
  * 把语义化 Primary 输入与光标坐标适配成世界射线。
  *
- * 指针、相机和外壳都在渲染这一侧，所以这个控制器整体属于渲染侧；
- * 它往玩法侧只发一个布尔（`onDragActiveChanged`），用来让一次手势只有一个所有者。
+ * 指针与相机在主线程，外壳在渲染世界，所以这个控制器是**两侧之间的适配器**：
+ * 往渲染侧发射线，往玩法侧发一个布尔（`onDragActiveChanged`），
+ * 用来让一次手势只有一个所有者。
+ *
+ * 「这一次按下有没有抓住外壳」曾经是 `beginSlimeSurfaceDrag` 的返回值——最后一次
+ * 跨边界等回话。现在改成：命令照发，抓没抓住由渲染侧回报（`#handleDragChanged`）。
+ * **在收到那条回报之前不认领这次手势**，所以相机轨道照常走它自己那一帧；
+ * 而按下那一帧指针还没动过，攒下的轨道量是零，看不出差别。
+ *
+ * 单线程下那条回报在 `beginSlimeSurfaceDrag` 里同步就发了，行为逐帧不变。
  */
 export class SlimeSurfaceDragController {
   private readonly inputDisposer: () => void;
@@ -45,6 +46,8 @@ export class SlimeSurfaceDragController {
     pressAvailable: false,
   };
   private primaryDown = false;
+  /** 渲染侧回报的事实：这条拖拽链路活着没有。不是这一侧猜的。 */
+  private dragging = false;
 
   public constructor(
     private readonly canvas: HTMLCanvasElement,
@@ -54,6 +57,9 @@ export class SlimeSurfaceDragController {
     private readonly getCameraFrame: () => CameraFrame,
     private readonly onDragActiveChanged?: (active: boolean) => void,
   ) {
+    this.surface.setSlimeSurfaceDragListener((id, dragging) => {
+      this.handleDragChanged(id, dragging);
+    });
     this.inputDisposer = input.bind(
       PlayerInputTags.Primary,
       (event) => this.handlePrimaryInput(event),
@@ -68,7 +74,27 @@ export class SlimeSurfaceDragController {
   }
 
   private get isDragging(): boolean {
-    return this.surface.isSlimeSurfaceDragging(this.proxyId);
+    return this.dragging;
+  }
+
+  /**
+   * 渲染侧回报「抓住了 / 松开了」。手势的所有权在这里易主——不在按下那一刻。
+   */
+  private handleDragChanged(id: ProxyId, dragging: boolean): void {
+    if (id !== this.proxyId || dragging === this.dragging) return;
+    this.dragging = dragging;
+    if (dragging) {
+      this.onDragActiveChanged?.(true);
+      this.capturePointer();
+      // 从按下到回报之间指针可能已经动了，补一次目标，别丢掉这段位移。
+      const ray = this.pointer.available
+        ? this.createPointerRay(this.pointer.x, this.pointer.y)
+        : undefined;
+      if (ray) this.surface.updateSlimeSurfaceDrag(this.proxyId, ray);
+      return;
+    }
+    this.onDragActiveChanged?.(false);
+    this.releasePointerCapture();
   }
 
   public update(): void {
@@ -81,6 +107,7 @@ export class SlimeSurfaceDragController {
   public dispose(): void {
     this.inputDisposer();
     this.releaseDrag();
+    this.surface.setSlimeSurfaceDragListener(undefined);
     this.canvas.removeEventListener('pointerdown', this.handlePointerMove);
     this.canvas.removeEventListener('pointermove', this.handlePointerMove);
     this.canvas.removeEventListener('pointerenter', this.handlePointerMove);
@@ -163,11 +190,9 @@ export class SlimeSurfaceDragController {
     const pressRay = this.pointer.pressAvailable
       ? this.createPointerRay(this.pointer.pressX, this.pointer.pressY)
       : this.createPointerRay(this.pointer.x, this.pointer.y);
-    if (!pressRay || !this.surface.beginSlimeSurfaceDrag(this.proxyId, pressRay)) return;
-    this.onDragActiveChanged?.(true);
-    this.capturePointer();
-    const currentRay = this.createPointerRay(this.pointer.x, this.pointer.y);
-    if (currentRay) this.surface.updateSlimeSurfaceDrag(this.proxyId, currentRay);
+    if (!pressRay) return;
+    // 只发命令，不认领手势：抓没抓住由渲染侧回报（`handleDragChanged`）。
+    this.surface.beginSlimeSurfaceDrag(this.proxyId, pressRay);
   }
 
   private capturePointer(): void {
@@ -182,8 +207,13 @@ export class SlimeSurfaceDragController {
   private releaseDrag(): void {
     this.primaryDown = false;
     this.pointer.pressAvailable = false;
+    // 命令发出去，`dragging` 由回报翻回 false——`handleDragChanged` 会顺带
+    // 交还手势与指针捕获。渲染世界已经没了（换场景）时补一次兜底。
     this.surface.endSlimeSurfaceDrag(this.proxyId);
-    this.onDragActiveChanged?.(false);
+    if (this.dragging) this.handleDragChanged(this.proxyId, false);
+  }
+
+  private releasePointerCapture(): void {
     if (
       this.pointer.id < 0
       || !this.canvas.hasPointerCapture?.(this.pointer.id)

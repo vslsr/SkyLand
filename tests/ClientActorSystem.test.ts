@@ -1162,10 +1162,15 @@ test('史莱姆表面拖拽带动整团软体，命中处最强，接近上限�
   // 动态几何的标准三角拾取短暂漏报时，窄范围顶点容错仍应命中肉眼可见表面。
   const surfaceRaycast = visual.rig.surface.raycast;
   visual.rig.surface.raycast = () => undefined;
-  assert.equal(visual.scene.beginSlimeSurfaceDrag(visual.proxyId, {
+  // beginSlimeSurfaceDrag 返回 void：抓没抓住由反向通知回报，也照样能直接问渲染侧。
+  const dragReports: Array<[number, boolean]> = [];
+  visual.scene.setSlimeSurfaceDragListener((id, dragging) => dragReports.push([id, dragging]));
+  visual.scene.beginSlimeSurfaceDrag(visual.proxyId, {
     origin: [0, 3, 0],
     direction: [0, -1, 0],
-  }), true);
+  });
+  assert.deepEqual(dragReports, [[visual.proxyId, true]], '抓住了要回报一条 true');
+  assert.equal(visual.scene.isSlimeSurfaceDragging(visual.proxyId), true);
   visual.rig.surface.raycast = surfaceRaycast;
   // updateSlimeSurfaceDrag 返回 void：拖没拖动看的是形变本身（下面那几条断言），
   // 以及这条链路还活着没有。

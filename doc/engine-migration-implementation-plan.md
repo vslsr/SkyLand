@@ -993,29 +993,54 @@ this.physicsWorld?.dispose();
 `SceneRenderer.renderWorld` 的类型也从 `RenderWorldHandle<ThreeRenderScene>` 收窄成
 `RenderWorldHandle`——玩家实体、远端玩家本来就只用边界接口，看得到后端就迟早会用。
 
-收窄之后浮出来一件事，记在这里：**蒙皮拖拽有两次「等对面回话」**。
-`beginSlimeSurfaceDrag`（这一次按下有没有抓住外壳）与 `isSlimeSurfaceDragging`
-都有返回值，而它们不在 `RenderScene` 上，所以那条「每个方法返回 void」的棘轮盯不到。
-判据确实在渲染侧——命中测试打的是每帧被改写的软体外壳网格，玩法侧没有那份几何——
-所以不能像准星拾取那样改成「玩法侧自己解析求交」。出路是先乐观开拖、下一帧读渲染侧
-回报的状态位，和玩家本地预测同一个套路：一帧的误判在 16ms 内自己纠正过来。
+收窄之后浮出来一件事：**蒙皮拖拽有两次「等对面回话」**，见下一节。
 
-在那之前，这两条被关在一扇**有名字的门**后面（`SceneRenderer.slimeSurfaceDragSurface`，
-只暴露四个拖拽方法），另有一条棘轮盯着这扇门上还剩几个非 `void` 的方法。
-`updateSlimeSurfaceDrag` 的返回值三个调用点一个都没用过，已经改成 `void`。
+### 已经做了的：边界上最后一次「等对面回话」没了 ✅
+
+`beginSlimeSurfaceDrag(id, ray)` 返回「这一次按下有没有抓住外壳」，
+`isSlimeSurfaceDragging(id)` 返回「这条链路还活着没有」。两条都在 `RenderScene`
+**之外**，所以那条「每个方法返回 void」的棘轮一直看不见它们。
+
+这一笔和前面几笔不一样：判据**真的只有渲染侧有**。命中测试打的是每帧被求解器改写
+的软体外壳网格（外加一圈 `radius * 0.18` 的顶点容错），玩法侧根本没有那份几何。
+所以出路不是「玩法侧自己解析求交」——那是准星拾取那一笔的解法，这里用不上。
+
+出路是把「结果」从返回值改成**反向通知**：
+
+```
+玩法侧  →  beginSlimeSurfaceDrag(id, ray)     // void，射线是六个数
+渲染侧  →  setSlimeSurfaceDragListener 回报    // (id, dragging)
+```
+
+关键在于**手势的所有权在回报到达时才易主，不在按下那一刻**。认早了，点空地那一下
+会被拖拽吃掉、相机转不动；认晚了没关系，因为按下那一帧指针还没动过，
+`TopDownCameraOrbit` 那一帧攒下的量本来就是零。
+
+单线程下这条回报在 `beginDrag` 里同步就发了，所以逐帧行为和以前完全一致——
+现有那条端到端用例（`TopDownController.test.ts`）一个字都没改就仍然过。
+`tests/SlimeSurfaceDragChannel.test.ts` 专门把回报押后，盯的就是异步那一面：
+按下只发命令不认领、回报说抓住了才易手并补上这段位移、回报说没抓住则一切照旧、
+别人的 `ProxyId` 与我无关、proxy 中途消失能把手势收回来。
+
+反向通知这条路子不是新发明的：`ChunkViewSink.onGeneratorReady`（生成后端就位）
+已经是同一个形状，两条都不走命令队列，监听器留在主线程那一端的代理上。
+边界上现在**只有这两条反向通知**。
+
+于是那扇有名字的门（`SceneRenderer.slimeSurfaceDragSurface`）连同它那条专用棘轮
+一起删掉了：四个拖拽方法进了 `RenderScene`，由主棘轮盯着。
+`SlimeSurfaceDragSurface` 现在只是 `Pick<RenderScene, ...>`。
 
 ### 还没做的
 
 | | 说明 |
 | --- | --- |
 | 渲染循环整个进 worker | `SceneRenderer` 的 `WebGLRenderer` 那一层与 `transferControlToOffscreen` 本身。要搬的正好是 `update` 末尾那句 `updateVisuals`、`adoptComposition` 与 `render()` |
-| 蒙皮拖拽那两次等回话 | `beginSlimeSurfaceDrag` / `isSlimeSurfaceDragging`。判据在渲染侧，出路是乐观开拖 + 状态位回报，见上一节。有棘轮盯着 |
 
 §3 的前置全部落地：渲染栈不碰 DOM、玩法侧不碰 Three、chunk 与 Actor 两条主干都按
 game / render 切开、相机与合批内容都按字节过边界、装配有了自己的归属，
-**而且边界是单向的**。剩下的两项是搬运本身，不再是拆解。
+**而且边界上一次「等对面回话」都没有了**。剩下的一项是搬运本身，不再是拆解。
 
-需要说清楚的是：这两项**一项都不省帧时间**（`render-batches` p50 只有
+需要说清楚的是：这一项**不省帧时间**（`render-batches` p50 只有
 0.06–0.17 ms）。它们是第 2 步与第 3 步共同的结构前提。
 
 ## 第 4 步 · 换掉 Three.js（可无限期推迟）

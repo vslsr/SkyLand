@@ -191,43 +191,6 @@ test('还在 import 渲染侧模块的 Actor Component 只有已知的那几个'
 });
 
 /**
- * 那条「每个方法返回 void」的棘轮只盯 `RenderScene`。玩法侧还有**一扇**门够得到
- * 具体后端：`SlimeSurfaceDragSurface`（经由 `SceneRenderer.slimeSurfaceDragSurface`
- * 递给 `SlimeSurfaceDragController`）。这份清单盯的是那扇门上还剩几个有返回值的方法。
- *
- * 只剩两个：`beginSlimeSurfaceDrag`（这一次按下有没有抓住外壳）与
- * `isSlimeSurfaceDragging`（这条链路还活着没有）。判据确实在渲染侧——命中测试打的是
- * 每帧被改写的软体外壳网格，玩法侧没有那份几何——所以不能像准星拾取那样改成
- * 「玩法侧自己解析求交」。
- *
- * 出路是先乐观开拖、下一帧读渲染侧回报的状态位，和玩家本地预测同一个套路：
- * 一帧的误判在 16ms 内自己纠正过来。
- */
-const DRAG_SURFACE_METHODS_STILL_RETURNING_A_VALUE = [
-  'beginSlimeSurfaceDrag',
-  'isSlimeSurfaceDragging',
-];
-
-test('玩法侧够得到后端的那扇门上，还在等回话的方法只有已知的那几个', () => {
-  const source = readFileSync(
-    new URL('../src/controllers/SlimeSurfaceDragController.ts', import.meta.url),
-    'utf8',
-  );
-  const body = /export interface SlimeSurfaceDragSurface \{([^}]*)\}/.exec(source)?.[1];
-  assert.ok(body, '找不到 SlimeSurfaceDragSurface 的声明——这条断言失效了');
-  const offenders = [...body.matchAll(/^\s*(\w+)\([^)]*\): (\w+);$/gm)]
-    .filter(([, , returns]) => returns !== 'void')
-    .map(([, name]) => name)
-    .sort();
-
-  assert.deepEqual(
-    offenders,
-    [...DRAG_SURFACE_METHODS_STILL_RETURNING_A_VALUE].sort(),
-    '这份清单只能变短：有返回值就意味着调用方要等对面回话，线程边界上没有「等一下」',
-  );
-});
-
-/**
  * 玩法侧那几个「大类」也不许 import three。
  *
  * Component 与 System 已经各有一条棘轮，但真正决定第 2 步（Sim Worker）能不能成的
@@ -273,6 +236,12 @@ test('玩法侧的主干文件一个都不 import three', () => {
  *
  * 这条按源码文本检查而不是按类型：类型上 `void` 与「返回了但没人用」区分不开，
  * 而后者一样会在 worker 上炸。
+ *
+ * 最后一个下来的是蒙皮拖拽：`beginSlimeSurfaceDrag` 曾经回送「抓住了没有」，而且
+ * 它当时**不在这个接口上**，所以这条断言看不见它。判据确实只有渲染侧有（命中测试
+ * 打的是每帧被求解器改写的软体外壳网格），所以出路不是「玩法侧自己算」，而是
+ * 把结果改成一条反向通知（`setSlimeSurfaceDragListener`）。方法进了接口，
+ * 这条断言从此盯得住它。
  */
 test('RenderScene 上每一个方法都返回 void——边界是单向的', () => {
   const source = readFileSync(

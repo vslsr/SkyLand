@@ -8,6 +8,8 @@ import type {
   PlayerProxyDesc,
   ProxyId,
   RenderScene,
+  SlimeSurfaceDragListener,
+  SlimeSurfaceDragRay,
 } from '../RenderScene';
 import type { RenderInstanceBuffer } from '../RenderInstanceBuffer';
 import type { RenderTransformBuffer } from '../RenderTransformBuffer';
@@ -69,6 +71,12 @@ export type RenderCommand =
    */
   | { readonly kind: 'submitTransforms' }
   | { readonly kind: 'submitInstances' }
+  | {
+      readonly kind: 'beginSlimeSurfaceDrag' | 'updateSlimeSurfaceDrag';
+      readonly id: ProxyId;
+      readonly ray: SlimeSurfaceDragRay;
+    }
+  | { readonly kind: 'endSlimeSurfaceDrag'; readonly id: ProxyId }
   | { readonly kind: 'disposeRenderScene' }
   | { readonly kind: 'mountChunk'; readonly request: ChunkViewMountRequest }
   | { readonly kind: 'unmountChunk'; readonly key: string }
@@ -92,6 +100,7 @@ export class RenderCommandQueue implements RenderScene, ChunkViewSink {
   #transfer: ArrayBufferLike[] = [];
   readonly #generatorReady: ((kind: string) => void)[] = [];
   #generatorKind?: string;
+  #slimeDragListener?: SlimeSurfaceDragListener;
 
   /** 取走这一帧攒下的命令。空批返回 undefined，省掉一次 `postMessage`。 */
   public flush(): RenderCommandBatch | undefined {
@@ -208,6 +217,32 @@ export class RenderCommandQueue implements RenderScene, ChunkViewSink {
     this.#commands.push({ kind: 'clearChunks' });
   }
 
+  public beginSlimeSurfaceDrag(id: ProxyId, ray: SlimeSurfaceDragRay): void {
+    this.#commands.push({ kind: 'beginSlimeSurfaceDrag', id, ray });
+  }
+
+  public updateSlimeSurfaceDrag(id: ProxyId, ray: SlimeSurfaceDragRay): void {
+    this.#commands.push({ kind: 'updateSlimeSurfaceDrag', id, ray });
+  }
+
+  public endSlimeSurfaceDrag(id: ProxyId): void {
+    this.#commands.push({ kind: 'endSlimeSurfaceDrag', id });
+  }
+
+  /**
+   * 拖拽状态的回报也是**反向**的，和 `generatorReady` 一样不走命令队列：
+   * 监听器留在这一端，由持有这个队列的那一方在收到 worker 报文时调
+   * `slimeSurfaceDragChanged()`。
+   */
+  public setSlimeSurfaceDragListener(listener?: SlimeSurfaceDragListener): void {
+    this.#slimeDragListener = listener;
+  }
+
+  /** worker 报告某个 proxy 的蒙皮拖拽开始或结束。 */
+  public slimeSurfaceDragChanged(id: ProxyId, dragging: boolean): void {
+    this.#slimeDragListener?.(id, dragging);
+  }
+
   /**
    * 生成后端就位的通知是**反向**的，所以它不走命令队列，走 `generatorReady()`——
    * 由持有这个队列的那一端在收到 worker 报文时调用。
@@ -256,6 +291,15 @@ export function applyRenderCommand(
       return;
     case 'setHoveredProxy':
       target.scene.setHoveredProxy(command.id);
+      return;
+    case 'beginSlimeSurfaceDrag':
+      target.scene.beginSlimeSurfaceDrag(command.id, command.ray);
+      return;
+    case 'updateSlimeSurfaceDrag':
+      target.scene.updateSlimeSurfaceDrag(command.id, command.ray);
+      return;
+    case 'endSlimeSurfaceDrag':
+      target.scene.endSlimeSurfaceDrag(command.id);
       return;
     case 'submitInstances':
       target.scene.submitInstances(target.propInstances, target.fruitInstances);

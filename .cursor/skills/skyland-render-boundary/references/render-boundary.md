@@ -156,7 +156,14 @@ That last call used to sit at the end of `ClientActorSystem.update`. It worked b
 4. **Render-side files touching `document`/`window`** — currently only `SceneRenderer`, whose `devicePixelRatio` moves with the canvas it owns.
 5. **Scene components importing `three`** — currently empty, with no file excluded from the scan. A scene component that builds its own `Object3D` and pushes it into the scene graph blocks the worker move exactly like a Component holding one does. The way out is the one the falling leaves and the ability lab took: move the visual into the render world and send it descriptions. (`addWorldObject`/`removeWorldObject` and `onBeforeRender` — the two methods that handed out an `Object3D` slot and a live `THREE.Camera` — no longer exist, so those routes are now type errors rather than ratchet failures.)
 6. **Gameplay trunk files importing `three`** — `ClientActorSystem`, `ChunkStreamer`, `TerrainWorld`, `SceneWorld`, `createLineArtScene`. Currently empty. These are the snapshot, streaming, and assembly trunks; anything on this list is pinned to the main thread.
-7. **Non-`void` methods on `SlimeSurfaceDragSurface`** — `beginSlimeSurfaceDrag` and `isSlimeSurfaceDragging`. That interface is the one named door through which gameplay-side code reaches the concrete backend, so the `RenderScene` void rule cannot see it. The verdict genuinely lives on the render side (the hit test rays the soft-body shell mesh, rewritten every frame), so the fix is optimistic start plus a state bit reported back — the same shape as player prediction.
+There are exactly **two reverse notifications** on the boundary, and both exist for the same reason: the fact lives on the render side and the game side cannot derive it.
+
+| Notification | Why it cannot be a return value |
+| --- | --- |
+| `ChunkViewSink.onGeneratorReady` | which chunk generator backend loaded (WASM or JS) is only known once the module resolves |
+| `RenderScene.setSlimeSurfaceDragListener` | whether a press caught the slime's shell — the hit test rays the soft-body mesh, rewritten every frame by the solver |
+
+Neither rides the command queue; the listener stays on the caller's side of the thread and the render side calls it. For the drag, the rule that makes the asynchrony harmless is that **the gesture changes owner when the report arrives, not when the button goes down**: claiming early would eat the click that orbits the camera, while claiming late costs nothing because the pointer has not moved yet on the press frame.
 
 `RenderProxyComponent` importing from `src/render/` is intentional and allowed: it references the boundary types (`ProxyId`, the command sink), which is exactly what it should reference. The rule targets render *implementations*.
 
