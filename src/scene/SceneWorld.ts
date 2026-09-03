@@ -37,6 +37,7 @@ export class SceneWorld implements GrassInteractionTarget {
    */
   private fixedWaterWorld = false;
   private fixedWaterLevel = 0;
+  private setRenderTerrainCells?: SceneComposition['setRenderTerrainCells'];
 
   /** 换场景：把新组合里属于玩法的那几个句柄接过来。 */
   public adopt(composition: SceneComposition, water: {
@@ -49,6 +50,7 @@ export class SceneWorld implements GrassInteractionTarget {
     this.grassInteraction = composition.grassInteraction;
     this.fixedWaterWorld = water.fixedWaterWorld;
     this.fixedWaterLevel = water.fixedWaterLevel;
+    this.setRenderTerrainCells = composition.setRenderTerrainCells;
   }
 
   public clear(): void {
@@ -58,6 +60,7 @@ export class SceneWorld implements GrassInteractionTarget {
     this.grassInteraction = undefined;
     this.fixedWaterWorld = false;
     this.fixedWaterLevel = 0;
+    this.setRenderTerrainCells = undefined;
   }
 
   // --- 地形 ---------------------------------------------------------------
@@ -116,6 +119,9 @@ export class SceneWorld implements GrassInteractionTarget {
     const terrain = this.terrainWorld;
     if (!terrain) return;
     for (const cell of cells) terrain.setCellCode(cell.cellX, cell.cellZ, cell.code);
+    // 渲染世界按同一个种子自己推地形，编辑是它推不出来的那部分——雨要落在
+    // 改过的高度上，就得把同一批格子也发过去。
+    this.setRenderTerrainCells?.(cells);
   }
 
   /** 当前场景任意来源的地形 patch 通知。 */

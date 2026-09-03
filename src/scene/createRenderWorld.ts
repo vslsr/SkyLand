@@ -8,6 +8,7 @@ import { OceanSystem } from '../ocean/OceanSystem';
 import type { SceneDefinition } from '../scenes/data/SceneDefinition';
 import { DEFAULT_WORLD_SEED, toWorldSeed } from '../../shared/world/worldConfig.mjs';
 import { ChunkViewHost } from '../world/ChunkViewHost';
+import { TerrainWorld } from '../world/TerrainWorld';
 import { WeatherSystem } from '../weather/index';
 import { DayNightSystem } from '../environment/index';
 import {
@@ -26,11 +27,13 @@ import type { SceneFrameSystem } from './SceneVisualSystem';
  * 世界、没有 Actor。这正是「能不能搬进 worker」的判据：如果这个函数需要玩法侧的
  * 对象，那就搬不过去。
  *
- * **唯一的例外是 `sampleGroundHeight`**：天气要按地面高度落雨。它今天是一个指向
- * `TerrainWorld`（玩法侧）的回调，也就是渲染侧每帧反向读一次玩法侧——回调过不了
- * 线程边界。修法和 chunk 生成器、地形覆盖是同一个：地面高度是
- * `(种子, 编辑覆盖)` 的纯函数，渲染侧自己推得出来。留着这个参数是为了让这笔债
- * 在签名上看得见，而不是藏在某个字段里。
+ * 天气要按地面高度落雨，这一侧因此**自己建一份 `TerrainWorld`**。它是纯数学
+ * （不 import three），输入只有种子与海平面，所以两侧各推各的——和 chunk 生成器、
+ * 地形覆盖是同一个办法。服务端下发的地形编辑经 `setTerrainCells` 镜像过来，
+ * 两份 patch store 因此保持一致。
+ *
+ * 这里曾经收一个指向玩法侧 `TerrainWorld` 的 `sampleGroundHeight` 回调——
+ * 那是渲染侧每帧反向读一次玩法侧，而回调过不了线程边界。
  *
  * 反过来，玩法世界拿到的是这里返回的几个**命令口与字节段**：
  * `renderScene`（proxy 命令）、`chunkViews`（挂载命令）、`transforms`（SoA）。
@@ -50,17 +53,18 @@ export interface RenderWorldComposition {
   grassInteraction?: GrassInteractionTarget;
   weatherTarget: WeatherSystem;
   dayNightTarget: DayNightSystem;
-}
-
-export interface RenderWorldOptions {
-  /** 见上：渲染侧唯一还需要反向读玩法侧的一处。 */
-  sampleGroundHeight?: (x: number, z: number) => number;
+  /**
+   * 把服务端确认过的地形编辑镜像到这一侧的 patch store。
+   *
+   * 玩法侧写它自己那一份，同一批格子也要写到这里来——否则雨会落在没被编辑过的
+   * 高度上。这是一条**命令**（返回 void），跨线程之后原样变成一条报文。
+   */
+  setTerrainCells(cells: readonly { cellX: number; cellZ: number; code: number }[]): void;
 }
 
 export function createRenderWorld(
   definition: SceneDefinition,
   worldSeed?: number,
-  options: RenderWorldOptions = {},
 ): RenderWorldComposition {
   const { renderer } = definition;
   const environment = createSceneEnvironment(
@@ -71,6 +75,14 @@ export function createRenderWorld(
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(renderer.background);
   scene.fog = new THREE.Fog(renderer.fog.color, renderer.fog.near, renderer.fog.far);
+
+  // 这一侧自己的地形采样。流式地图才有地形；固定地图的地面是一块平板。
+  const terrain = renderer.world
+    ? new TerrainWorld(
+        toWorldSeed(worldSeed ?? DEFAULT_WORLD_SEED),
+        definition.gameplay.water?.seaLevel ?? 0,
+      )
+    : undefined;
 
   const visualSystems: SceneFrameSystem[] = [];
   // 昼夜先更新：天气要在同一帧里读它算出的天空底色，再合成最终环境。
@@ -87,7 +99,7 @@ export function createRenderWorld(
     runtime: environment.runtime,
     sky: dayNight,
     groundColor: renderer.palette.ground,
-    sampleGroundHeight: options.sampleGroundHeight,
+    sampleGroundHeight: terrain ? (x, z) => terrain.sampleGroundHeight(x, z) : undefined,
   });
   dayNight.setWeatherSource(weather);
   scene.add(dayNight.root);
@@ -169,5 +181,8 @@ export function createRenderWorld(
     grassInteraction,
     weatherTarget: weather,
     dayNightTarget: dayNight,
+    setTerrainCells: (cells) => {
+      for (const cell of cells) terrain?.setCellCode(cell.cellX, cell.cellZ, cell.code);
+    },
   };
 }

@@ -133,4 +133,13 @@ export interface SceneComposition {
   /** 规则地形的内容采样（草、水、编辑等）；玩家碰撞由 trimesh 负责。 */
   terrainWorld?: TerrainWorld;
   physicsWorld?: PhysicsWorld;
+  /**
+   * 把服务端确认过的地形编辑镜像进渲染世界那一份 patch store。
+   *
+   * 两侧各按同一个种子推地形，编辑是唯一推不出来的部分，所以要发过去。
+   * 是一条命令，不是一次查询。
+   */
+  setRenderTerrainCells?: (
+    cells: readonly { cellX: number; cellZ: number; code: number }[],
+  ) => void;
 }

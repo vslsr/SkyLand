@@ -6,7 +6,6 @@ import {
 } from '../models/sky/createCelestialVisuals';
 import type { SceneDayNightDefinition } from '../scenes/data/SceneDefinition';
 import type { SceneVisualSystem } from '../scene/SceneVisualSystem';
-import { DayNightClock } from './DayNightClock';
 import type {
   DayNightVisualTarget,
   SkyState,
@@ -85,7 +84,10 @@ export class DayNightSystem implements SceneVisualSystem, SkyStateSource, DayNig
   public readonly root: THREE.Group;
 
   private readonly visuals = createCelestialVisuals();
-  private readonly clock: DayNightClock;
+  /** 当前时刻。由主线程每帧发过来，见 `setTimeOfDay`。 */
+  private hour: number;
+  /** 时钟走不走。星空旋转要看它——冻结的时刻不该让星星继续转。 */
+  private clockRunning: boolean;
   private readonly background: THREE.Color;
   private readonly random = createRandom(0x1d3c_9f11);
   private readonly sunPosition = new THREE.Vector3();
@@ -116,12 +118,9 @@ export class DayNightSystem implements SceneVisualSystem, SkyStateSource, DayNig
   public constructor(definition: DayNightEnvironmentDefinition) {
     this.root = this.visuals.root;
     this.background = new THREE.Color(definition.backgroundColor);
-    this.clock = new DayNightClock(
-      definition.dayNight.startHour,
-      definition.dayNight.enabled && !definition.dayNight.paused
-        ? definition.dayNight.dayLengthSeconds
-        : 0,
-    );
+    this.hour = definition.dayNight.startHour;
+    this.clockRunning = definition.dayNight.enabled && !definition.dayNight.paused
+      && definition.dayNight.dayLengthSeconds > 0;
     for (let index = 0; index < CELESTIAL_VISUAL_CAPACITY.meteors; index += 1) {
       this.meteorStates.push({
         active: false,
@@ -143,12 +142,18 @@ export class DayNightSystem implements SceneVisualSystem, SkyStateSource, DayNig
     this.weatherSource = source;
   }
 
-  public get timeOfDay(): number {
-    return this.clock.timeOfDay;
-  }
-
-  public applyServerTime(timeOfDay: number, dayLengthSeconds: number): void {
-    this.clock.applyServerTime(timeOfDay, dayLengthSeconds);
+  /**
+   * 当前时刻由外面给（引擎迁移路线图 第 3 步）。
+   *
+   * 时钟原来住在这里，于是「现在几点」要**从渲染世界读回来**——调试菜单的时钟就是
+   * 这么显示的。`DayNightClock` 是纯状态（不 import three），本来就不该在这一侧。
+   *
+   * 现在它归主线程：那边推进、那边校正，每帧把小时数发过来。一个时刻只有一份，
+   * 不会因为两侧各推各的而漂开。
+   */
+  public setTimeOfDay(timeOfDay: number, running: boolean): void {
+    this.hour = timeOfDay;
+    this.clockRunning = running;
   }
 
   public getSkyState(): Readonly<SkyState> {
@@ -157,10 +162,9 @@ export class DayNightSystem implements SceneVisualSystem, SkyStateSource, DayNig
 
   public update(deltaSeconds: number, elapsedSeconds: number): void {
     if (this.disposed) return;
+    // 星空旋转与流星仍按帧步推进；只有「现在几点」不再由这一侧推。
     const dt = Math.max(0, Math.min(deltaSeconds, 0.1));
-    this.clock.advance(dt);
-
-    const hour = this.clock.timeOfDay;
+    const hour = this.hour;
     const field = this.weatherSource?.getWeatherField();
     const cloudCover = clamp01(field?.cloudCover ?? 0);
     // 云、降水与雾一起决定天空被挡住多少：厚云还能透出星星，落雨落雪不会。
@@ -324,7 +328,7 @@ export class DayNightSystem implements SceneVisualSystem, SkyStateSource, DayNig
     this.visuals.stars.visible = this.starOpacity > 0.004;
     if (!this.visuals.stars.visible) return;
     this.visuals.starMaterial.uniforms.uTime.value = elapsedSeconds;
-    if (this.clock.running) {
+    if (this.clockRunning) {
       this.visuals.stars.rotation.y += STAR_ROTATION_SPEED * deltaSeconds;
     }
   }

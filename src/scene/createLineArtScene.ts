@@ -26,7 +26,6 @@ export function createLineArtScene(
 ): SceneComposition {
   const { renderer } = definition;
 
-  // --- 玩法那一半先建：渲染侧的天气要按地面高度落雨，需要地形采样 ---
   // 一个场景一张碰撞网格：流式 chunk 往里放静态物件，Actor 往里放动态盒子，
   // 玩家推出和相机悬臂都只查它，不需要各自再维护一份碰撞体列表。
   const collisionWorld = new CollisionWorld();
@@ -38,12 +37,8 @@ export function createLineArtScene(
       )
     : undefined;
 
-  // --- 渲染那一半 ---
-  const render = createRenderWorld(definition, worldSeed, {
-    sampleGroundHeight: terrainWorld
-      ? (x, z) => terrainWorld.sampleGroundHeight(x, z)
-      : undefined,
-  });
+  // --- 渲染那一半。它只吃场景定义和世界种子；地形它自己按同一个种子建一份 ---
+  const render = createRenderWorld(definition, worldSeed);
 
   // --- 玩法那一半的其余部分 ---
   const gameSystems: SceneFrameSystem[] = [];
@@ -121,5 +116,8 @@ export function createLineArtScene(
     collisionWorld,
     terrainWorld,
     physicsWorld,
+    // 服务端确认过的地形编辑要写两份：玩法侧那份决定脚下踩到什么，
+    // 渲染侧那份决定雨落在多高。
+    setRenderTerrainCells: render.setTerrainCells,
   };
 }

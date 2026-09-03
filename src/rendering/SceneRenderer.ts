@@ -34,6 +34,7 @@ import type { TerrainWorld } from '../world/TerrainWorld';
 import type { PhysicsWorld } from '../../shared/physics/PhysicsWorld.mjs';
 import { DEFAULT_WEATHER, type WeatherType } from '../weather/index';
 import { DEFAULT_START_HOUR } from '../../shared/dayNight.mjs';
+import { DayNightClock } from '../environment/DayNightClock';
 
 const EMPTY_SCENE_COLOR = 0xfdfbf6;
 
@@ -85,6 +86,14 @@ export class SceneRenderer {
    * （大厅 → 房间 → 大厅 都是同一个）。
    */
   private readonly cameraChannel = new RenderCameraBuffer();
+  /**
+   * 昼夜时钟（引擎迁移路线图 第 3 步）。
+   *
+   * 它原来住在 `DayNightSystem` 里，于是「现在几点」要从渲染世界读回来——调试菜单
+   * 的时钟就是那么显示的。`DayNightClock` 是纯状态（不 import three），
+   * 本来就不该在那一侧。现在这边推进、这边校正，每帧把小时数**发**过去。
+   */
+  private readonly dayNightClock = new DayNightClock(DEFAULT_START_HOUR, 0);
   private readonly cameraFrame = createRenderCamera();
   private readonly beforeRenderListeners = new Set<SceneBeforeRenderListener>();
 
@@ -193,6 +202,10 @@ export class SceneRenderer {
     elapsedSeconds: number,
     context?: SceneUpdateContext,
   ): void {
+    // 时钟在这一侧推进，然后把结果发给渲染世界。一个时刻只有一份，
+    // 不会因为两侧各推各的而漂开。
+    this.dayNightClock.advance(Math.max(0, Math.min(deltaSeconds, 0.1)));
+    this.dayNightTarget?.setTimeOfDay(this.dayNightClock.timeOfDay, this.dayNightClock.running);
     // 逐个系统打点太碎；这里只分「Actor 世界那一支（自己再细分）」与「其余场景系统」，
     // 后者是草地、天气、昼夜、海面、chunk 流送这一批。
     for (const system of this.visualSystems) {
@@ -266,7 +279,7 @@ export class SceneRenderer {
    * 所以时间不会随快照频率跳动。
    */
   public setTimeOfDay(timeOfDay: number, dayLengthSeconds: number): void {
-    this.dayNightTarget?.applyServerTime(timeOfDay, dayLengthSeconds);
+    this.dayNightClock.applyServerTime(timeOfDay, dayLengthSeconds);
   }
 
   /** 当前场景的共享光照与雾 uniform；场景 Component 的表现接到同一份上。 */
@@ -276,7 +289,8 @@ export class SceneRenderer {
 
   /** 当前渲染用的时刻；没有加载场景时回落到正午。 */
   public get timeOfDay(): number {
-    return this.dayNightTarget?.timeOfDay ?? DEFAULT_START_HOUR;
+    // 读的是主线程自己那口时钟，不是从渲染世界问回来的。
+    return this.dayNightClock.timeOfDay;
   }
 
   /**
@@ -291,6 +305,12 @@ export class SceneRenderer {
     this.fixedWaterWorld = definition.renderer.content.ocean === true
       && definition.renderer.content.ground === false;
     this.fixedWaterLevel = definition.gameplay.water?.seaLevel ?? 0;
+    // 时钟按这张地图的配置重开：关掉昼夜或冻结时长度为 0，时刻停在 startHour。
+    const dayNight = definition.environment.dayNight;
+    this.dayNightClock.reset(
+      dayNight.startHour,
+      dayNight.enabled && !dayNight.paused ? dayNight.dayLengthSeconds : 0,
+    );
     this.replaceScene(createLineArtScene(definition, worldSeed));
   }
 
