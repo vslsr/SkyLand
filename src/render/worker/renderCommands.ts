@@ -9,6 +9,7 @@ import type {
   ProxyId,
   RenderScene,
 } from '../RenderScene';
+import type { RenderInstanceBuffer } from '../RenderInstanceBuffer';
 import type { RenderTransformBuffer } from '../RenderTransformBuffer';
 import type { ChunkViewMountRequest, ChunkViewSink } from '../../world/ChunkViewHost';
 
@@ -67,6 +68,7 @@ export type RenderCommand =
    * 排在 `updateVisuals` 之前，和单线程下的调用顺序一致。
    */
   | { readonly kind: 'submitTransforms' }
+  | { readonly kind: 'submitInstances' }
   | { readonly kind: 'disposeRenderScene' }
   | { readonly kind: 'mountChunk'; readonly request: ChunkViewMountRequest }
   | { readonly kind: 'unmountChunk'; readonly key: string }
@@ -172,6 +174,11 @@ export class RenderCommandQueue implements RenderScene, ChunkViewSink {
     this.#commands.push({ kind: 'submitTransforms' });
   }
 
+  public submitInstances(_props: RenderInstanceBuffer, _fruit: RenderInstanceBuffer): void {
+    // 和 submitTransforms 一样不带载荷：那两段字节 worker 一开始就有同一份。
+    this.#commands.push({ kind: 'submitInstances' });
+  }
+
   public updateVisuals(
     _transforms: RenderTransformBuffer,
     deltaSeconds: number,
@@ -225,6 +232,9 @@ export function applyRenderCommand(
   target: {
     readonly scene: RenderScene;
     readonly transforms: RenderTransformBuffer;
+    /** 合批内容那两段字节。和 transforms 一样，worker 一开始就持有同一份。 */
+    readonly propInstances: RenderInstanceBuffer;
+    readonly fruitInstances: RenderInstanceBuffer;
     readonly chunkViews?: ChunkViewSink;
   },
 ): void {
@@ -246,6 +256,9 @@ export function applyRenderCommand(
       return;
     case 'setHoveredProxy':
       target.scene.setHoveredProxy(command.id);
+      return;
+    case 'submitInstances':
+      target.scene.submitInstances(target.propInstances, target.fruitInstances);
       return;
     case 'setAbilityLabTarget':
       target.scene.setAbilityLabTarget(command.id);

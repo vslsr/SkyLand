@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { frameTimeline } from '../../platform/index';
 import type {
   AbilityLabAction,
   AbilityLabViewState,
@@ -24,12 +25,16 @@ import {
   SLIME_MOTION_AT_REST,
   type SlimeMotionParams,
 } from '../RenderSlimeMotion';
+import type { RenderInstanceBuffer } from '../RenderInstanceBuffer';
+import { EMPTY_ARCHETYPE_TABLE, type ArchetypeTable } from '../propInstanceLayout';
 import type { RenderTransform, RenderTransformBuffer } from '../RenderTransformBuffer';
 import { PARAM_SLIME_SPEED, PARAM_TEMPERATURE } from '../RenderVisualParams';
 import { ThreeFireVisual } from './ThreeFireVisual';
 import { ThreeGuidePathVisual } from './ThreeGuidePathVisual';
 import { ThreeHybridSlimeVisual } from './ThreeHybridSlimeVisual';
 import { ThreeAbilityLabVisual } from './ThreeAbilityLabVisual';
+import { ThreeFruitBatchVisual } from './ThreeFruitBatchVisual';
+import { ThreeHighCountBatchVisual } from './ThreeHighCountBatchVisual';
 import { ThreeAttachmentVisual } from './ThreeAttachmentVisual';
 import { ThreeDropRollVisual } from './ThreeDropRollVisual';
 import { ThreeElasticTetherVisual } from './ThreeElasticTetherVisual';
@@ -133,12 +138,47 @@ export class ThreeRenderScene implements RenderScene {
   private abilityLabState?: AbilityLabViewState;
   private readonly abilityLabCaster = new THREE.Vector3();
 
+  /**
+   * 合批内容的两层实例化网格（引擎迁移路线图 第 3 步）。
+   *
+   * 这两个曾经归 `ClientActorSystem` 建、由它每帧 `sync` 进场景图——一个玩法类
+   * 握着 `InstancedMesh`。它们读的本来就只是 `RenderInstanceBuffer` 里的定长记录
+   * （原型下标、几个状态位、位置与数量），不认识 Actor，所以整个属于这一侧。
+   *
+   * 原型表两侧各自从同一份场景定义建（`createArchetypeTable`），不走通道。
+   */
+  private readonly highCountBatches: ThreeHighCountBatchVisual;
+  private readonly fruitBatches: ThreeFruitBatchVisual;
+  private readonly archetypeOrder: readonly string[];
+  /** 玩法侧这一帧交上来的两段实例记录。没交过就是 undefined——这张图没有合批内容。 */
+  private propInstances?: RenderInstanceBuffer;
+  private fruitInstances?: RenderInstanceBuffer;
+
   public constructor(
     public readonly root: THREE.Group,
     private readonly environment: FillMaterialEnvironment,
     ocean?: OceanVisualDefinition,
+    /**
+     * 合批内容的原型表。默认是空表——没有掉落堆和果树的地图（以及绝大多数用例）
+     * 本来就不需要它。两侧各自从同一份场景定义建，见 `createArchetypeTable`。
+     */
+    archetypes: ArchetypeTable = EMPTY_ARCHETYPE_TABLE,
   ) {
+    this.archetypeOrder = archetypes.order;
+    this.highCountBatches = new ThreeHighCountBatchVisual(environment, archetypes.byId);
+    this.fruitBatches = new ThreeFruitBatchVisual(environment);
     this.waterMotionVisual = ocean ? new ThreeWaterMotionVisual(ocean) : undefined;
+  }
+
+  /**
+   * 这一帧的合批内容就绪。
+   *
+   * 和 `submitTransforms` 同一个形状：参数是**那段字节**，不是画出来的东西。
+   * 上 worker 之后同一个 SAB 一开始就在两侧，这条命令因此不带载荷。
+   */
+  public submitInstances(props: RenderInstanceBuffer, fruit: RenderInstanceBuffer): void {
+    this.propInstances = props;
+    this.fruitInstances = fruit;
   }
 
   public createMeshProxy(id: ProxyId, desc: MeshProxyDesc): void {
@@ -304,6 +344,20 @@ export class ThreeRenderScene implements RenderScene {
     // 悬停盒跟着目标走。放在最前是因为它读的是上一帧摆好的世界矩阵，
     // 和玩法侧原来在 sim-colliders 里调 hoverHelper.update() 的时机等价。
     this.hoverHelper?.update();
+    // 合批内容排在最前：它读的是玩法侧刚写完的那段实例记录，和 transform 翻面
+    // 是同一个 tick 的。挂载按需——没有合批内容的地图不会多出两层空节点。
+    if (this.propInstances && this.fruitInstances) {
+      frameTimeline.measure('render-batches', () => {
+        this.highCountBatches.sync(this.propInstances!, this.archetypeOrder);
+        this.fruitBatches.sync(this.fruitInstances!);
+        if (this.fruitBatches.instanceCount > 0 && !this.fruitBatches.root.parent) {
+          this.root.add(this.fruitBatches.root);
+        }
+        if (this.highCountBatches.root.children.length > 0 && !this.highCountBatches.root.parent) {
+          this.root.add(this.highCountBatches.root);
+        }
+      });
+    }
     if (this.abilityLab && this.abilityLabState) {
       this.abilityLab.update(
         deltaSeconds,
@@ -507,7 +561,20 @@ export class ThreeRenderScene implements RenderScene {
     return this.temperatureMarkersVisible;
   }
 
-  /** 让所有世界 UI 正对相机。由 beforeRender 驱动——它拿得到相机。 */
+  /**
+   * 渲染世界内部的每帧动作，由渲染循环在画完之前驱动。
+   *
+   * 这两件都**不在边界接口上**，而且不该在：线宽是像素单位，要 resize 之后的
+   * 真实画布尺寸；世界 UI 的朝向要相机。两个参数都是渲染循环自己手里的东西，
+   * 跨边界发过来毫无意义。曾经借 `ClientActorSystem.beforeRender` 路过一趟，
+   * 那让一个玩法类拿到了 `WebGLRenderer` 与 `Camera`。
+   */
+  public beforeRender(renderer: THREE.WebGLRenderer, camera: THREE.Camera): void {
+    this.setGuidePathResolution(renderer.domElement.width, renderer.domElement.height);
+    this.faceCameras(camera);
+  }
+
+  /** 让所有世界 UI 正对相机。 */
   public faceCameras(camera: THREE.Camera): void {
     for (const proxy of this.proxies) proxy?.markers.faceCamera(camera);
   }
@@ -520,6 +587,10 @@ export class ThreeRenderScene implements RenderScene {
 
   public dispose(): void {
     this.#disposeHoverHelper();
+    this.highCountBatches.dispose();
+    this.fruitBatches.dispose();
+    this.propInstances = undefined;
+    this.fruitInstances = undefined;
     this.abilityLab?.dispose();
     this.abilityLab = undefined;
     this.abilityLabState = undefined;

@@ -1,4 +1,3 @@
-import * as THREE from 'three';
 import {
   ACTOR_CONTROL_COMPONENT,
   ACTOR_RESIDENCY_COMPONENT,
@@ -59,15 +58,14 @@ import {
 import { toWorldSeed } from '../../shared/world/worldConfig.mjs';
 import { selectWorldPropVariant } from '../../shared/world/worldPropVariants.mjs';
 import type { FillMaterialEnvironment } from '../materials/createFillMaterial';
-import { NULL_PROXY_ID } from '../render/RenderScene';
+import { NULL_PROXY_ID, type RenderScene } from '../render/RenderScene';
 import { frameTimeline } from '../platform/index';
 import { RenderTransformBuffer } from '../render/RenderTransformBuffer';
-import { ThreeRenderScene } from '../render/three/ThreeRenderScene';
 import type { SnapshotActor, SnapshotPlayer } from '../network/protocol';
 import type { SceneDefinition } from '../scenes/data/SceneDefinition';
 import type {
   ActorInteractionCandidate,
-  SceneVisualSystem,
+  SceneFrameSystem,
   VesselHudState,
 } from '../scene/SceneVisualSystem';
 import { ActorSnapshotBuffer } from './ActorSnapshotBuffer';
@@ -86,8 +84,6 @@ import {
   FIRE_VISUAL_COMPONENT,
   FireVisualComponent,
 } from './components/FireVisualComponent';
-import { GeneratedPropFruitSystem } from './systems/GeneratedPropFruitSystem';
-import { HighCountActorBatchSystem } from './systems/HighCountActorBatchSystem';
 import {
   LOCAL_DERIVED_ACTOR_COMPONENT,
   LocalDerivedActorComponent,
@@ -100,7 +96,11 @@ import {
 import { RenderInstanceBuffer } from '../render/RenderInstanceBuffer';
 import { RenderProxyTable } from '../render/RenderProxyTable';
 import { modelBuildsFireVisual } from '../render/renderModelFacts';
-import { PROP_FLOAT_STRIDE, PROP_INT_STRIDE } from '../render/propInstanceLayout';
+import {
+  createArchetypeTable,
+  PROP_FLOAT_STRIDE,
+  PROP_INT_STRIDE,
+} from '../render/propInstanceLayout';
 import { FRUIT_FLOAT_STRIDE, FRUIT_INT_STRIDE } from '../render/fruitInstanceLayout';
 import { ActorFruitInstanceSystem } from './systems/ActorFruitInstanceSystem';
 
@@ -132,14 +132,15 @@ export interface ClientActorSystemOptions {
   collision?: CollisionWorld;
   physics?: PhysicsWorld;
   /**
-   * 场景共用的渲染世界与它的边界缓冲。
+   * 场景共用的渲染世界。
    *
-   * 传进来时 Actor Replica 与本地玩家共用同一个渲染世界、同一段 transform SoA
-   * ——本地玩家因此也能拿到 ProxyId。不传就自己建一对，单独使用这个 System 的
-   * 测试不需要额外搭场景。
+   * 类型是**边界接口**，不是 `ThreeRenderScene`：这一侧只发命令，不需要认识后端。
+   * 它是必填的——曾经不传就自己 `new ThreeRenderScene(...)` 兜底，那意味着一个玩法
+   * 类知道怎么建一个 Three 后端，也是这个文件 import three 的唯一原因。
    */
-  renderScene?: ThreeRenderScene;
-  transforms?: RenderTransformBuffer;
+  renderScene: RenderScene;
+  /** 那段边界字节。和渲染世界成对给——Actor 与本地玩家必须写同一份。 */
+  transforms: RenderTransformBuffer;
   /**
    * 一帧的建模预算，毫秒。测试传 `Infinity` 就回到「一帧建完」的旧行为，
    * 传 0 则每帧只建一个——预算再紧也保证有进度。
@@ -209,15 +210,21 @@ function resolveExternalAttachmentTransforms(
   });
 }
 
-/** 接收服务端完整 Actor 快照并维护对应的客户端 Replica。 */
-export class ClientActorSystem implements SceneVisualSystem {
+/**
+ * 接收服务端完整 Actor 快照并维护对应的客户端 Replica。
+ *
+ * 它是 `SceneFrameSystem` 而不是 `SceneVisualSystem`：**没有 `root`**。
+ * 曾经有一个，但那只是 `renderScene.root` 的转手——一个玩法类没有理由拿得到
+ * 场景图的节点。渲染世界的根现在只有渲染世界自己知道。
+ */
+export class ClientActorSystem implements SceneFrameSystem {
   /**
    * Game World 与 Render World 之间那条边界（路线图 §2 / 第 1 步）。
    * Actor 手上只有 proxyId；Object3D 全部住在 renderScene 里，
    * 两侧靠 transforms 这段字节通信。
    */
   private readonly transforms: RenderTransformBuffer;
-  private readonly renderScene: ThreeRenderScene;
+  private readonly renderScene: RenderScene;
   /**
    * 槽位表。**分配在这一侧**——渲染世界回不了话（见 `RenderScene.createMeshProxy`）。
    * 它同时是发给渲染世界的命令口，所以 `RenderProxyComponent` 拿到的是它，
@@ -238,9 +245,6 @@ export class ClientActorSystem implements SceneVisualSystem {
     return this.proxyIds;
   }
 
-  public get root(): THREE.Group {
-    return this.renderScene.root;
-  }
   private readonly world = new ActorWorld();
   private readonly archetypes: Map<string, SceneDefinition['actorArchetypes'][number]>;
   private readonly snapshots = new ActorSnapshotBuffer();
@@ -255,13 +259,11 @@ export class ClientActorSystem implements SceneVisualSystem {
   };
   private readonly collision: CollisionWorld;
   private readonly physics?: PhysicsWorld;
-  private readonly highCountBatches: HighCountActorBatchSystem;
   /** 合批内容的实例通道，以及渲染侧反查原型用的那张顺序表。 */
   private readonly instances = new RenderInstanceBuffer(PROP_INT_STRIDE, PROP_FLOAT_STRIDE);
   /** 树上果子走另一条通道：它的记录里没有原型、没有驻留态，形状不一样。 */
   private readonly fruitInstances = new RenderInstanceBuffer(FRUIT_INT_STRIDE, FRUIT_FLOAT_STRIDE);
-  private readonly archetypeOrder: string[];
-  private readonly fruit: GeneratedPropFruitSystem;
+  private readonly archetypeOrder: readonly string[];
   /** actorId → 登记进碰撞世界的实例，逐帧复用，避免每帧产生一批临时对象。 */
   private readonly colliderInstances = new Map<string, {
     collision: SimpleCollisionComponent;
@@ -311,20 +313,14 @@ export class ClientActorSystem implements SceneVisualSystem {
     this.now = options.now ?? (() => Date.now());
     this.collision = options.collision ?? new CollisionWorld();
     this.physics = options.physics;
-    this.highCountBatches = new HighCountActorBatchSystem(options.environment, this.archetypes);
     // 两侧共用的原型顺序：玩法侧写下标，渲染侧按同一份表反查 render 定义。
-    this.archetypeOrder = [...this.archetypes.keys()];
-    this.fruit = new GeneratedPropFruitSystem(options.environment);
+    // 两边都调 `createArchetypeTable`，输入是同一份场景定义，所以顺序必然一致。
+    this.archetypeOrder = createArchetypeTable(options.definition).order;
     this.spawnBudgetMilliseconds = options.spawnBudgetMilliseconds ?? REPLICA_SPAWN_BUDGET_MILLISECONDS;
     this.spawnClock = options.spawnClock
       ?? (() => (globalThis.performance ?? Date).now());
-    this.transforms = options.transforms ?? new RenderTransformBuffer();
-    this.renderScene = options.renderScene
-      ?? new ThreeRenderScene(
-        createActorWorldRoot(),
-        options.environment,
-        options.definition.renderer.ocean,
-      );
+    this.transforms = options.transforms;
+    this.renderScene = options.renderScene;
     this.proxyIds = new RenderProxyTable(this.renderScene);
     // 客户端不运行 AttachmentSystem：最终世界坐标来自快照插值，不能被
     // localTransform 再次解算覆盖。
@@ -475,31 +471,25 @@ export class ClientActorSystem implements SceneVisualSystem {
     }
   }
 
+  /**
+   * 这一帧的玩法。**这里不再驱动渲染世界的任何一帧动作。**
+   *
+   * 曾经这个方法里还有 `render-batches`（把实例记录同步成 InstancedMesh）与
+   * `render-visuals`（`renderScene.updateVisuals`）两段。它们是渲染工作，只是因为
+   * 「要排在 SoA 翻面之后」而借住在这里——排在最后是数组顺序的巧合，不是写下来的规则。
+   *
+   * 现在两段都归 `SceneRenderer` 在玩法阶段跑完之后驱动，那条规则因此写在调用点上。
+   */
   public update(deltaSeconds: number, elapsedSeconds: number): void {
-    // 打点按「第 2 步之后这段代码会在哪个线程上」分：
-    // `sim-actors` 进 Sim Worker，`render-batches` / `render-visuals` 留在主线程。
-    // `sim-actors` 只包玩法：快照应用与 Actor 世界的 System。
+    // 打点按「第 2 步之后这段代码会在哪个线程上」分：这里剩下的全部进 Sim Worker。
     // Replica 的装配单独打点——`createMeshProxy` 会在渲染世界里建一整棵模型，
     // 那是渲染成本，混进 sim 会把「搬进 worker 能省多少」算高。
     frameTimeline.measure('sim-actors', () => {
       this.applySnapshotSet(this.snapshots.sample(this.now()));
       this.world.update(deltaSeconds, elapsedSeconds);
     });
-    frameTimeline.measure('render-batches', () => {
-      this.highCountBatches.sync(this.instances, this.archetypeOrder);
-      this.fruit.sync(this.fruitInstances);
-      // 和高数量批次一样按需挂进场景：没有果树的地图不会多出一层空节点。
-      if (this.fruit.instanceCount > 0 && !this.fruit.root.parent) this.root.add(this.fruit.root);
-      if (this.highCountBatches.root.children.length > 0 && !this.highCountBatches.root.parent) {
-        this.root.add(this.highCountBatches.root);
-      }
-    });
-    // 渲染世界自己的表现系统。它们读的是刚翻面的参数段，所以排在 world.update 之后。
-    // deltaSeconds 目前仍来自模拟侧——第 3 步渲染进 worker 后换成渲染线程的时钟。
-    frameTimeline.measure(
-      'render-visuals',
-      () => this.renderScene.updateVisuals(this.transforms, deltaSeconds, elapsedSeconds),
-    );
+    // 实例记录这一帧写完了。和 `submitTransforms` 一样：交的是那段字节，不是画面。
+    this.renderScene.submitInstances(this.instances, this.fruitInstances);
     frameTimeline.measure('sim-colliders', () => this.publishColliders());
   }
 
@@ -549,16 +539,6 @@ export class ClientActorSystem implements SceneVisualSystem {
     }
   }
 
-  public beforeRender(renderer: THREE.WebGLRenderer, camera: THREE.Camera): void {
-    // 线宽是像素单位，要 resize 之后的真实画布尺寸；世界 UI 的朝向也只有到这里
-    // 才拿得到相机。两件都是渲染世界自己的事，这里只负责把参数递过去。
-    this.renderScene.setGuidePathResolution(
-      renderer.domElement.width,
-      renderer.domElement.height,
-    );
-    this.renderScene.faceCameras(camera);
-  }
-
   public dispose(): void {
     // 高亮盒归渲染世界释放（`ThreeRenderScene.dispose`）；这一侧只清自己的记账。
     this.hoveredActorId = undefined;
@@ -569,8 +549,6 @@ export class ClientActorSystem implements SceneVisualSystem {
     }
     this.colliderInstances.clear();
     this.externalParentActorIds.clear();
-    this.highCountBatches.dispose();
-    this.fruit.dispose();
     this.world.dispose();
     // world.dispose() 逐个跑 endPlay，正常路径下每个 RenderProxyComponent 都会
     // 还掉自己的槽位。这一句兜住不正常的路径：渲染世界的资源不该依赖「每个 proxy
@@ -587,8 +565,13 @@ export class ClientActorSystem implements SceneVisualSystem {
     return this.world.getActor(actorId) as Actor | undefined;
   }
 
-  /** 渲染世界本身。表现搬过去之后，测试与调试代码经由它查渲染侧状态。 */
-  public getRenderScene(): ThreeRenderScene {
+  /**
+   * 渲染世界本身。表现搬过去之后，测试与调试代码经由它查渲染侧状态。
+   *
+   * 返回的是边界接口。想看后端里的东西（`resolve`、`root`）得自己往下转——
+   * 那一步只发生在测试里（`tests/renderProxyProbe.ts`）。
+   */
+  public getRenderScene(): RenderScene {
     return this.renderScene;
   }
 
@@ -1232,11 +1215,4 @@ export class ClientActorSystem implements SceneVisualSystem {
       this.generatedPropArchetypeVariants.get(kind) ?? [],
     )?.archetype;
   }
-}
-
-/** 没有注入渲染世界时（独立使用这个 System 的测试）自己建的那个根节点。 */
-function createActorWorldRoot(): THREE.Group {
-  const root = new THREE.Group();
-  root.name = 'replicated-actor-world';
-  return root;
 }

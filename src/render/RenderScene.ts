@@ -6,6 +6,7 @@ import type {
   ActorArchetypeDefinition,
   ActorRenderDefinition,
 } from '../scenes/data/SceneDefinition';
+import type { RenderInstanceBuffer } from './RenderInstanceBuffer';
 import type { RenderTransformBuffer } from './RenderTransformBuffer';
 
 /**
@@ -166,10 +167,13 @@ export interface RenderCommandSink {
  * 就绕过了那条「每个方法返回 void」的棘轮——而那条棘轮是 canvas 能不能进线程的
  * 唯一保障。
  *
- * 两个**没有**列在这里的方法：`faceCameras(THREE.Camera)` 与
- * `setGuidePathResolution(w, h)`。它们收的是 Three 的相机和画布尺寸，是渲染世界
- * **内部**的每帧动作，只是眼下经由 `ClientActorSystem.beforeRender` 路过——
- * 渲染循环进线程之后它们跟着走，不会出现在边界上。
+ * 一个**没有**列在这里的方法：`ThreeRenderScene.beforeRender(renderer, camera)`。
+ * 它收的是 Three 的渲染器与相机——引导线宽要 resize 之后的真实画布尺寸，世界 UI
+ * 要相机朝向。两个参数都是**渲染循环自己手里的东西**，跨边界发过来毫无意义，
+ * 所以它由渲染循环直接驱动，跟着 canvas 一起进线程。
+ *
+ * 它曾经经由 `ClientActorSystem.beforeRender` 路过一趟，那让一个玩法类拿到了
+ * `WebGLRenderer` 与 `Camera`。现在玩法侧没有任何一处碰得到它们。
  */
 export interface RenderScene extends RenderCommandSink {
   /**
@@ -237,4 +241,12 @@ export interface RenderScene extends RenderCommandSink {
    * 落地形式。上 worker 之后调用方变成渲染线程，实现不变。
    */
   submitTransforms(transforms: RenderTransformBuffer): void;
+  /**
+   * 把这一帧的合批内容兑现到渲染世界。
+   *
+   * 和 `submitTransforms` 同一个形状、同一个理由：掉落堆与树上果子都是几百上千个
+   * 同模型实例，一个一个建 proxy 是纯浪费，所以它们走定长记录的实例通道。
+   * 渲染侧据此重建 `InstancedMesh`——**这一侧不知道那是什么**。
+   */
+  submitInstances(props: RenderInstanceBuffer, fruit: RenderInstanceBuffer): void;
 }

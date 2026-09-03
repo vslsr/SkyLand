@@ -181,6 +181,11 @@ export class SceneRenderer {
     for (const system of this.visualSystems) {
       system.beforeRender?.(this.renderer, this.camera);
     }
+    // 渲染世界自己的 beforeRender。这两件（引导线宽要 resize 之后的真实画布尺寸、
+    // 世界 UI 要正对相机）都是渲染世界**内部**的每帧动作，所以不在边界接口上——
+    // 它们跟着渲染循环走，而不是跨边界被驱动。曾经借 `ClientActorSystem.beforeRender`
+    // 路过，那让一个玩法类拿到了 `WebGLRenderer` 和 `Camera`。
+    this.renderWorldHandle?.scene.beforeRender(this.renderer, this.camera);
     this.renderer.render(this.scene, this.camera);
   }
 
@@ -230,6 +235,18 @@ export class SceneRenderer {
         'scene-systems',
         () => system.update(deltaSeconds, elapsedSeconds, context),
       );
+    }
+    // 渲染阶段：玩法那一批全部跑完、SoA 也翻过面之后，渲染世界才跑自己的一帧。
+    //
+    // 这一句曾经藏在 `ClientActorSystem.update` 的末尾——它排在最后是数组顺序的
+    // 巧合，不是写下来的规则。放在这里，「渲染读的永远是这一 tick 写完的字节」
+    // 就是调用点本身的形状。渲染循环进 worker 那天，要搬走的就是这一句以下的部分。
+    if (this.renderWorldHandle) {
+      frameTimeline.measure('render-visuals', () => this.renderWorldHandle!.scene.updateVisuals(
+        this.renderWorldHandle!.transforms,
+        deltaSeconds,
+        elapsedSeconds,
+      ));
     }
     this.updatePhysicsDebug();
   }

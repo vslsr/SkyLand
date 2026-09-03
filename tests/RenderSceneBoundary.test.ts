@@ -191,6 +191,40 @@ test('还在 import 渲染侧模块的 Actor Component 只有已知的那几个'
 });
 
 /**
+ * 玩法侧那几个「大类」也不许 import three。
+ *
+ * Component 与 System 已经各有一条棘轮，但真正决定第 2 步（Sim Worker）能不能成的
+ * 是这几个：它们是快照、流送、场景装配这三条主干本身。`ClientActorSystem` 是最后
+ * 一个下来的——它曾经握着两层 `InstancedMesh`、一个 `root` getter、一个收
+ * `WebGLRenderer` 的 `beforeRender`，还在自己的 `update` 末尾驱动渲染世界的一帧。
+ *
+ * 这份清单是空的。任何一项回到这里，都意味着那条主干又被钉在了主线程上。
+ */
+const GAMEPLAY_FILES_STILL_IMPORTING_THREE: string[] = [];
+
+test('玩法侧的主干文件一个都不 import three', () => {
+  const files = [
+    ['../src/actors/', 'ClientActorSystem.ts'],
+    ['../src/world/', 'ChunkStreamer.ts'],
+    ['../src/world/', 'TerrainWorld.ts'],
+    ['../src/scene/', 'SceneWorld.ts'],
+    ['../src/scene/', 'createLineArtScene.ts'],
+  ] as const;
+  const offenders = files
+    .filter(([folder, name]) => (
+      /from 'three'/.test(readFileSync(new URL(name, new URL(folder, import.meta.url)), 'utf8'))
+    ))
+    .map(([, name]) => name)
+    .sort();
+
+  assert.deepEqual(
+    offenders,
+    GAMEPLAY_FILES_STILL_IMPORTING_THREE,
+    '这份清单只能变短：玩法主干碰 three，第 2 步就搬不动',
+  );
+});
+
+/**
  * 第 3 步的棘轮（`doc/engine-migration-implementation-plan.md` §3）。
  *
  * **边界必须是单向的**：`RenderScene` 上每一个方法都返回 `void`。

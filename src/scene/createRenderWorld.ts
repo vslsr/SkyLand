@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { createArchetypeTable } from '../render/propInstanceLayout';
 import { RenderTransformBuffer } from '../render/RenderTransformBuffer';
 import { ThreeRenderScene } from '../render/three/ThreeRenderScene';
 import { GrassFieldSystem, type GrassInteractionTarget } from '../grass';
@@ -114,7 +115,14 @@ export function createRenderWorld(
   // 渲染世界的根总是挂进场景：本地玩家的 proxy 也在它下面，与有没有 Replica 无关。
   const renderWorldRoot = new THREE.Group();
   renderWorldRoot.name = 'render-world';
-  const renderScene = new ThreeRenderScene(renderWorldRoot, environment, renderer.ocean);
+  const renderScene = new ThreeRenderScene(
+    renderWorldRoot,
+    environment,
+    renderer.ocean,
+    // 玩法侧写的是原型下标；这一侧按同一份表反查 render 定义。两边都从
+    // `definition` 建，所以顺序必然一致——不需要每帧把这张表塞进通道。
+    createArchetypeTable(definition),
+  );
   const transforms = new RenderTransformBuffer();
 
   let grassInteraction: GrassInteractionTarget | undefined;

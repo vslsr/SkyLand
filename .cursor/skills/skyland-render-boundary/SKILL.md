@@ -87,6 +87,8 @@ Inside `ClientActorSystem`, System order is load-bearing:
 
 `publish()` copies the new read bank back onto the write bank, so a slot nobody wrote holds last frame's value rather than a two-frame-old one.
 
+The frame then has one more step, and it belongs to the caller: after every `SceneFrameSystem` has run, `SceneRenderer.update` calls `renderScene.updateVisuals(...)` once. Batched piles and fruit sync there too, off the instance buffers the game phase just wrote. Nothing on the gameplay side drives the render world's frame.
+
 ## Answer "which side?" before writing code
 
 Ask what the code needs in order to run.

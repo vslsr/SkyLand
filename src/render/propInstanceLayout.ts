@@ -1,3 +1,8 @@
+import type {
+  ActorArchetypeDefinition,
+  SceneDefinition,
+} from '../scenes/data/SceneDefinition';
+
 /**
  * 掉落堆实例通道的字段布局（`RenderInstanceBuffer` 的一种记录形状）。
  *
@@ -11,7 +16,11 @@ export const PROP_INT_STRIDE = 5;
 /** 每条记录的连续字段个数。 */
 export const PROP_FLOAT_STRIDE = 6;
 
-/** 原型在场景原型表里的下标。渲染侧据此找到 render 定义、建材质与模板。 */
+/**
+ * 原型在场景原型表里的下标。渲染侧据此找到 render 定义、建材质与模板。
+ *
+ * 「场景原型表」由 `createArchetypeTable` 定义，两侧各自从同一份场景定义建。
+ */
 export const PROP_ARCHETYPE = 0;
 /** 驻留态（`ActorResidencyComponent.state`），按下面那份顺序编号。 */
 export const PROP_RESIDENCY = 1;
@@ -55,4 +64,29 @@ export function residencyCode(state: string | undefined): number {
 
 export function residencyName(code: number): string {
   return PROP_RESIDENCY_STATES[code] ?? PROP_RESIDENCY_STATES[0];
+}
+
+/**
+ * `PROP_ARCHETYPE` 指向的那张表。
+ *
+ * 玩法侧写下标，渲染侧按下标反查 render 定义——两侧必须是同一份顺序。
+ * 与其把这张表每帧塞进通道（它一整局都不变），不如**两侧各自从同一份场景定义建**：
+ * 输入是同一段 JSON，`Map` 的插入序是确定的，于是结果必然一致。
+ * 和地形「两侧各按同一个种子推」是同一个套路。
+ *
+ * 定义放在通道这一层而不是任何一侧，就是为了让「同一份顺序」只有一处实现。
+ */
+export interface ArchetypeTable {
+  readonly byId: ReadonlyMap<string, ActorArchetypeDefinition>;
+  readonly order: readonly string[];
+}
+
+/** 没有合批内容的渲染世界（固定地图、绝大多数用例）用的空表。 */
+export const EMPTY_ARCHETYPE_TABLE: ArchetypeTable = { byId: new Map(), order: [] };
+
+export function createArchetypeTable(definition: SceneDefinition): ArchetypeTable {
+  const byId = new Map(
+    definition.actorArchetypes.map((archetype) => [archetype.id, archetype]),
+  );
+  return { byId, order: [...byId.keys()] };
 }

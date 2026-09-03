@@ -31,7 +31,7 @@ export function createWoodLogCutGeometry(radius: number): THREE.CylinderGeometry
   return geometry;
 }
 
-/** 独立预览模型；运行时高数量圆木由 HighCountActorBatchSystem 合批绘制。 */
+/** 独立预览模型；运行时高数量圆木由 ThreeHighCountBatchVisual 合批绘制。 */
 export function createWoodLogModel(
   environment: FillMaterialEnvironment,
   definition: WoodLogRender,

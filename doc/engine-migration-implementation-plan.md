@@ -923,19 +923,54 @@ worker 已经在传的 `[globalCellX, globalCellZ, code, ...]`。
 
 **场景组件的棘轮清单现在是空的。**
 
+### 已经做了的：`ClientActorSystem` 交出渲染那一半 ✅
+
+清完场景组件之后，玩法侧还剩最后一个跨在边界上的类，而且是最大的那个：
+`ClientActorSystem` 的 `update` 里有四段，其中两段是渲染工作。
+
+| 曾经在这个玩法类里的东西 | 现在在哪 |
+| --- | --- |
+| `HighCountActorBatchSystem`（掉落堆合批，498 行 `InstancedMesh`） | `ThreeHighCountBatchVisual`，渲染世界里 |
+| `GeneratedPropFruitSystem`（树上果子） | `ThreeFruitBatchVisual`，渲染世界里 |
+| `get root(): THREE.Group` | 删了。它只是 `renderScene.root` 的转手——一个玩法类没有理由拿得到场景图节点 |
+| `beforeRender(WebGLRenderer, Camera)` | `ThreeRenderScene.beforeRender`，由渲染循环直接驱动 |
+| `update` 末尾那句 `renderScene.updateVisuals(...)` | `SceneRenderer.update` 的最后一句 |
+
+两个合批系统读的本来就只是 `RenderInstanceBuffer` 里的定长记录，不认识 Actor——
+它们借住在那里的唯一理由是「要排在 SoA 翻面之后」。新增一条 `submitInstances`
+命令（和 `submitTransforms` 同形状、同样不带载荷），这条理由就没了。
+
+它们要的原型表不走通道：那张表一整局都不变，**两侧各自调 `createArchetypeTable`
+从同一份场景定义建**，插入序确定，结果必然一致。和地形「两侧各按同一个种子推」
+是同一个套路，`PROP_ARCHETYPE` 存的正是这张表里的下标。
+
+`updateVisuals` 从「藏在一个玩法类 `update` 的末尾」变成「`SceneRenderer` 在玩法
+那一批全部跑完之后调的最后一句」。它以前排在最后是**数组顺序的巧合**，不是写下来的
+规则；现在「渲染读的永远是这一 tick 写完的字节」就是调用点本身的形状，
+而渲染循环进 worker 那天要搬走的，就是这一句以下的部分。
+
+`renderScene` 与 `transforms` 因此都变成必填，类型也从 `ThreeRenderScene` 收窄成
+边界接口 `RenderScene`：不传就自己 `new ThreeRenderScene(...)` 兜底，是这个文件
+import three 的最后一个理由。兜底搬进 `tests/renderProxyProbe.ts`——用例仍然要断言
+画出来的东西，但**往下转成后端这一步只发生在测试里**，在类型上看得见。
+
+于是 `ClientActorSystem` 是一个**完全不 import three 的玩法类**，
+`SceneFrameSystem` 而不是 `SceneVisualSystem`（没有 `root`）。新棘轮盯着玩法侧那五个
+主干文件：`ClientActorSystem`、`ChunkStreamer`、`TerrainWorld`、`SceneWorld`、
+`createLineArtScene`，清单是空的。
+
 ### 还没做的
 
 | | 说明 |
 | --- | --- |
-| 渲染循环整个进 worker | `SceneRenderer` 的 `root` / `beforeRender` / `WebGLRenderer` 那一层，以及 `transferControlToOffscreen` 本身 |
-| `faceCameras` / `setGuidePathResolution` | 收的是 `THREE.Camera` 与画布尺寸，是渲染世界**内部**的每帧动作，眼下经由 `ClientActorSystem.beforeRender` 路过。渲染循环进线程之后跟着走，不会出现在边界上 |
+| 渲染循环整个进 worker | `SceneRenderer` 的 `root` / `beforeRender` / `WebGLRenderer` 那一层，以及 `transferControlToOffscreen` 本身。要搬的正好是 `SceneRenderer.update` 末尾那句 `updateVisuals` 与 `render()` 全体 |
 | `GrasslandScene` 的装配归属 | 它同时握着输入、相机、玩家实体和渲染器；canvas 搬走时装配要跟着走 |
 
 §3 的前置全部落地：渲染栈不碰 DOM、玩法侧不碰 Three、chunk 与 Actor 两条主干都按
 game / render 切开、相机与合批内容都按字节过边界，**而且边界是单向的**。
-剩下的三项是搬运本身，不再是拆解。
+剩下的两项是搬运本身，不再是拆解。
 
-需要说清楚的是：这三项**一项都不省帧时间**（`render-batches` p50 只有
+需要说清楚的是：这两项**一项都不省帧时间**（`render-batches` p50 只有
 0.06–0.17 ms）。它们是第 2 步与第 3 步共同的结构前提。
 
 ## 第 4 步 · 换掉 Three.js（可无限期推迟）

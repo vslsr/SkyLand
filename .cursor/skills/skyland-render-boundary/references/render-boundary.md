@@ -77,8 +77,8 @@ A guide path is a list of waypoints of unknown length that changes rarely, so it
 
 | Channel | Layout | Writer | Reader |
 | --- | --- | --- | --- |
-| dropped piles / logs | `propInstanceLayout.ts` | `ActorInstanceSystem` | `HighCountActorBatchSystem` |
-| fruit on trees | `fruitInstanceLayout.ts` | `ActorFruitInstanceSystem` | `GeneratedPropFruitSystem` |
+| dropped piles / logs | `propInstanceLayout.ts` | `ActorInstanceSystem` | `ThreeHighCountBatchVisual` |
+| fruit on trees | `fruitInstanceLayout.ts` | `ActorFruitInstanceSystem` | `ThreeFruitBatchVisual` |
 
 Why these need their own channel: `createReplica` returns early for any archetype with `itemStack` **without creating a proxy**, and fruit are not Actors at all. There is no slot in the transform SoA to write to.
 
@@ -129,10 +129,16 @@ Player entities (local and remote) also write into this SoA, and they run **befo
 | Chunk planning, terrain overrides, collider registration | Game | `ChunkStreamer` |
 | Chunk geometry, materials, grass, ocean | Render | `ChunkViewHost` |
 | Proxy models, markers, visual params | Render | `ThreeRenderScene` / `ThreeMeshProxy` |
-| Batched piles, fruit | Render | `HighCountActorBatchSystem`, `GeneratedPropFruitSystem` |
+| Batched piles, fruit | Render | `ThreeHighCountBatchVisual`, `ThreeFruitBatchVisual`, driven from `updateVisuals` |
 | Canvas, camera, draw call | Render | `SceneRenderer` |
 
-`ChunkStreamer` still exposes `root` and `beforeRender` because it is the scene's `SceneVisualSystem`. That outer layer moves when the render loop itself moves.
+Neither `ClientActorSystem` nor `ChunkStreamer` has a `root` or a `beforeRender`: they are `SceneFrameSystem`s, not `SceneVisualSystem`s. A gameplay class that can reach a scene-graph node can hand one out, and a `beforeRender` taking a `WebGLRenderer` is the render loop leaking into gameplay. `ThreeRenderScene.beforeRender` is driven by the render loop directly, so it moves with the canvas.
+
+## The frame has two phases
+
+`SceneRenderer.update` runs the game phase — every `SceneFrameSystem` in composition order, ending with `ClientActorSystem`, whose `RenderTransformSyncSystem` publishes the SoA — and only then the render phase: one call to `renderScene.updateVisuals(transforms, dt, elapsed)`.
+
+That last call used to sit at the end of `ClientActorSystem.update`. It worked because that System happened to be last in the array — an accident of ordering, not a stated rule. Putting it in the caller makes "the render world reads bytes this tick already finished writing" the shape of the call site, and marks exactly what moves when the render loop moves onto a worker: that line and everything in `render()`.
 
 ## The ratchets
 

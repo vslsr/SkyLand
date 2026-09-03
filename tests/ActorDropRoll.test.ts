@@ -22,7 +22,8 @@ import type { ThreeMeshProxy } from '../src/render/three/ThreeMeshProxy';
 import { RenderProxyTable } from '../src/render/RenderProxyTable';
 import { ThreeRenderScene } from '../src/render/three/ThreeRenderScene';
 import { ActorSnapshotBuffer } from '../src/actors/ActorSnapshotBuffer';
-import { ClientActorSystem } from '../src/actors/ClientActorSystem';
+import type { ClientActorSystem } from '../src/actors/ClientActorSystem';
+import { createTestActorSystem, stepActorFrame } from './renderProxyProbe';
 import type { SceneDefinition } from '../src/scenes/data/SceneDefinition';
 import { INTERPOLATION_DELAY_MS } from '../shared/networkTuning.mjs';
 import type { SnapshotActor } from '../src/network/protocol';
@@ -390,7 +391,7 @@ test('端到端：快照说我叼着它，按一次交互键就发出放下请�
   } as unknown as SnapshotActor);
 
   let now = 1_000;
-  const system = new ClientActorSystem({
+  const system = createTestActorSystem({
     definition,
     environment: ENVIRONMENT,
     now: () => now,
@@ -426,7 +427,7 @@ test('端到端：快照说我叼着它，按一次交互键就发出放下请�
       releaseRevision: 0, revision: 1,
     },
   })], now);
-  system.update(1 / 60, 0);
+  stepActorFrame(system, 1 / 60, 0);
   trigger();
   controller.update(frame);
   assert.deepEqual(sent, ['m1'], '拉着时按 E 没有发出请求');
@@ -444,7 +445,7 @@ test('端到端：快照说我叼着它，按一次交互键就发出放下请�
     speed: 0, ackTick: 0, sequence: 0,
   }]);
   now += INTERPOLATION_DELAY_MS;
-  system.update(1 / 60, 1);
+  stepActorFrame(system, 1 / 60, 1);
   const attached = system.getActor('m1')!;
   const attachedTransform = attached.requireComponent(TRANSFORM_COMPONENT) as TransformComponent;
   assert.ok(Math.abs(attachedTransform.x - (2 + Math.sin(0.5) * 0.36)) < 1e-6);

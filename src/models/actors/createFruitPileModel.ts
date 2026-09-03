@@ -9,7 +9,7 @@ type FruitPileRender = Extract<ActorRenderDefinition, { model: 'line-art-fruit-p
 
 /**
  * 四颗堆在一起的果子，其中一颗用点缀色。摆位写死，和其它堆叠物一样：
- * 掉落物由 HighCountActorBatchSystem 统一绘制，模板必须是确定的一份。
+ * 掉落物由 ThreeHighCountBatchVisual 统一绘制，模板必须是确定的一份。
  */
 export const FRUIT_PILE_PIECES = [
   { offsetX: -0.36, offsetY: 0.62, offsetZ: -0.20, scale: 1.00, accent: false },
@@ -22,7 +22,7 @@ export function createFruitGeometry(radius: number): THREE.BufferGeometry {
   return new THREE.SphereGeometry(radius * 0.34, 7, 5);
 }
 
-/** 独立预览模型；实际高数量掉落由 HighCountActorBatchSystem 合并绘制。 */
+/** 独立预览模型；实际高数量掉落由 ThreeHighCountBatchVisual 合并绘制。 */
 export function createFruitPileModel(
   environment: FillMaterialEnvironment,
   definition: FruitPileRender,

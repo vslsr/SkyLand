@@ -7,8 +7,14 @@ import {
   type CargoComponent,
   type ElasticTetherComponent,
 } from '../shared/actor/index.mjs';
-import { ClientActorSystem } from '../src/actors/ClientActorSystem';
-import { renderProxyOf } from './renderProxyProbe';
+import type { ClientActorSystem } from '../src/actors/ClientActorSystem';
+import {
+  createTestActorSystem,
+  renderBackendOf,
+  renderProxyOf,
+  renderRootOf,
+  stepActorFrame,
+} from './renderProxyProbe';
 import { ActorInteractionController } from '../src/controllers/ActorInteractionController';
 import {
   createPlayerInputScheme,
@@ -152,7 +158,7 @@ const FAKE_RENDERER = {
 
 test('异构 Actor 创建线稿模型，准星选中货箱并提供木筏 HUD 状态', () => {
   let now = 1_000;
-  const system = new ClientActorSystem({
+  const system = createTestActorSystem({
     definition,
     environment: { fogColor: '#ffffff', fogNear: 20, fogFar: 60 },
     now: () => now,
@@ -161,13 +167,13 @@ test('异构 Actor 创建线稿模型，准星选中货箱并提供木筏 HUD �
     spawnBudgetMilliseconds: Number.POSITIVE_INFINITY,
   });
   system.syncSnapshots([raftSnapshot, cargoSnapshot, reefSnapshot], 1_000);
-  system.update(0, 0);
+  stepActorFrame(system, 0, 0);
 
   const picked = system.pickInteractableActor([0, 0.4, 5], [0, 0, -1]);
   assert.equal(picked?.actorId, 'cargo-1');
   assert.equal(picked?.carrierActorId, null);
   system.setHoveredActorId('cargo-1');
-  assert.ok(system.root.getObjectByName('actor-interaction-highlight'));
+  assert.ok(renderRootOf(system).getObjectByName('actor-interaction-highlight'));
   assert.equal(system.getVesselHudState('player-1')?.speed, 1.25);
 
   now = 1_100;
@@ -177,7 +183,7 @@ test('异构 Actor 创建线稿模型，准星选中货箱并提供木筏 HUD �
     reefSnapshot,
   ], 1_100);
   now = 1_230;
-  system.update(0, 0);
+  stepActorFrame(system, 0, 0);
   const cargo = system.getActor('cargo-1')?.requireComponent(CARGO_COMPONENT) as CargoComponent;
   assert.equal(cargo.carrierActorId, 'raft-1');
   assert.equal(system.getVesselHudState('player-1')?.cargoMass, 55);
@@ -185,8 +191,8 @@ test('异构 Actor 创建线稿模型，准星选中货箱并提供木筏 HUD �
   now = 1_400;
   system.syncSnapshots([raftSnapshot, reefSnapshot], 1_400);
   now = 1_530;
-  system.update(0, 0);
-  assert.equal(system.root.getObjectByName('actor-interaction-highlight'), undefined);
+  stepActorFrame(system, 0, 0);
+  assert.equal(renderRootOf(system).getObjectByName('actor-interaction-highlight'), undefined);
   system.dispose();
 });
 
@@ -368,7 +374,7 @@ test('靠近生成树时显示砍伐提示，并直接发送自描述 Actor id',
 
 test('弹性蘑菇 Replica 拉长并在释放后回弹，标记组件始终可面向相机', () => {
   let now = 1_000;
-  const system = new ClientActorSystem({
+  const system = createTestActorSystem({
     definition,
     environment: { fogColor: '#ffffff', fogNear: 20, fogFar: 60 },
     now: () => now,
@@ -377,7 +383,7 @@ test('弹性蘑菇 Replica 拉长并在释放后回弹，标记组件始终可�
     spawnBudgetMilliseconds: Number.POSITIVE_INFINITY,
   });
   system.syncSnapshots([mushroomSnapshot], 1_000);
-  system.update(0, 0);
+  stepActorFrame(system, 0, 0);
   assert.equal(system.findNearbyInteractableActor({ x: 0.6, z: 0 })?.actorId, 'mushroom-1');
 
   system.setInteractionMarkerActorId('mushroom-1', 'E');
@@ -388,8 +394,8 @@ test('弹性蘑菇 Replica 拉长并在释放后回弹，标记组件始终可�
   assert.equal(markers.interactionLabel, 'E');
   const camera = new THREE.PerspectiveCamera();
   camera.position.set(4, 6, 8);
-  system.beforeRender(FAKE_RENDERER, camera);
-  const markerRoot = system.root.getObjectByName('actor-interaction-marker');
+  renderBackendOf(system).beforeRender(FAKE_RENDERER, camera);
+  const markerRoot = renderRootOf(system).getObjectByName('actor-interaction-marker');
   assert.ok(markerRoot);
   assert.equal(markerRoot.userData.controlLabel, 'E');
   const glyph = markerRoot.getObjectByName('actor-interaction-marker-glyph');
@@ -406,7 +412,7 @@ test('弹性蘑菇 Replica 拉长并在释放后回弹，标记组件始终可�
     },
   }], 1_100);
   now = 1_230;
-  for (let index = 0; index < 90; index += 1) system.update(1 / 60, index / 60);
+  for (let index = 0; index < 90; index += 1) stepActorFrame(system, 1 / 60, index / 60);
   const render = renderProxyOf(system, actor!.id)!;
   const stretchedScale = render.elasticTetherRig?.stemRoot.scale.y ?? 1;
   assert.ok(stretchedScale > 2);
@@ -423,7 +429,7 @@ test('弹性蘑菇 Replica 拉长并在释放后回弹，标记组件始终可�
     },
   }], 1_400);
   now = 1_530;
-  for (let index = 0; index < 180; index += 1) system.update(1 / 60, 2 + index / 60);
+  for (let index = 0; index < 180; index += 1) stepActorFrame(system, 1 / 60, 2 + index / 60);
   const returnedScale = render.elasticTetherRig?.stemRoot.scale.y ?? 99;
   assert.ok(returnedScale < stretchedScale);
   assert.ok(Math.abs(returnedScale - 1) < 0.2);
@@ -438,7 +444,7 @@ test('弹性蘑菇 Replica 拉长并在释放后回弹，标记组件始终可�
  * 掉落物仍然拾得到**——合并之前那是单独一条代码路径。
  */
 
-const pickSystem = (): ClientActorSystem => new ClientActorSystem({
+const pickSystem = (): ClientActorSystem => createTestActorSystem({
   definition,
   environment: { fogColor: '#ffffff', fogNear: 20, fogFar: 60 },
   now: () => 1_000,
@@ -456,7 +462,7 @@ test('准星拾取取最近的那一个，不是查询里第一个', () => {
   const system = pickSystem();
   // 沿 -Z 排两个货箱：远的先入世界，命中必须仍是近的。
   system.syncSnapshots([crateAt('far', 0, -6), crateAt('near', 0, -2)], 1_000);
-  system.update(0, 0);
+  stepActorFrame(system, 0, 0);
   assert.equal(system.pickInteractableActor([0, 0.4, 2], [0, 0, -1])?.actorId, 'near');
   // 反过来从另一头打，最近的换成另一个。
   assert.equal(system.pickInteractableActor([0, 0.4, -10], [0, 0, 1])?.actorId, 'far');
@@ -466,7 +472,7 @@ test('准星拾取取最近的那一个，不是查询里第一个', () => {
 test('打偏了就是没命中——解析求交不是「离得近就算」', () => {
   const system = pickSystem();
   system.syncSnapshots([crateAt('crate', 0, -3)], 1_000);
-  system.update(0, 0);
+  stepActorFrame(system, 0, 0);
   // 半宽 0.45，横向偏 2 米：射线从旁边过去。
   assert.equal(system.pickInteractableActor([2, 0.4, 2], [0, 0, -1]), undefined);
   // 抬高到箱顶以上也一样：高度区间是求交的一部分，不只看 XZ。
@@ -480,7 +486,7 @@ test('盒子的朝向算数：转过来的箱子挡得住，原朝向挡不住',
   const pickAt = (yaw: number): string | undefined => {
     const system = pickSystem();
     system.syncSnapshots([crateAt('crate', 0, -3, yaw)], 1_000);
-    system.update(0, 0);
+    stepActorFrame(system, 0, 0);
     // 半宽 0.49（由模型尺寸派生），这条射线在 0.58 处贴着边缘过去。
     const picked = system.pickInteractableActor([0.58, 0.3, 2], [0, 0, -1])?.actorId;
     system.dispose();
@@ -497,7 +503,7 @@ test('盒子的朝向算数：转过来的箱子挡得住，原朝向挡不住',
 test('超出射程与 enabled=false 都不算命中', () => {
   const system = pickSystem();
   system.syncSnapshots([crateAt('crate', 0, -20)], 1_000);
-  system.update(0, 0);
+  stepActorFrame(system, 0, 0);
   assert.equal(system.pickInteractableActor([0, 0.4, 0], [0, 0, -1])?.actorId, 'crate');
   assert.equal(
     system.pickInteractableActor([0, 0.4, 0], [0, 0, -1], 5),
@@ -519,7 +525,7 @@ test('超出射程与 enabled=false 都不算命中', () => {
 test('方向向量不必是单位长度，射程按米算而不是按它的长度算', () => {
   const system = pickSystem();
   system.syncSnapshots([crateAt('crate', 0, -20)], 1_000);
-  system.update(0, 0);
+  stepActorFrame(system, 0, 0);
   // 传一个长度 10 的方向：射程仍是 30 米，够得到 20 米外的箱子。
   assert.equal(
     system.pickInteractableActor([0, 0.4, 0], [0, 0, -10])?.actorId,
