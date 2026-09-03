@@ -1,15 +1,7 @@
 import type { RoomSummary } from '../network/RoomClient';
-import type { InputDeviceKind } from '../input/index';
 import type { VesselHudState } from '../scene/SceneVisualSystem';
 
-export type InputPromptResolver = (
-  mode: 'fly' | 'topdown',
-  deviceKind: InputDeviceKind,
-  state: 'locked' | 'unlocked',
-) => string;
-
 export class HudController {
-  private readonly lockHint: HTMLElement;
   private readonly roomLabel: HTMLElement;
   private readonly roomPopulation: HTMLElement;
   private readonly menuButton: HTMLButtonElement;
@@ -20,14 +12,9 @@ export class HudController {
   private readonly vesselEvent: HTMLElement;
   private readonly interactionPrompt: HTMLElement;
   private menuHandler?: () => void;
-  private inputDeviceKind: InputDeviceKind = 'keyboardMouse';
-  private locked = false;
-  private controlMode: 'fly' | 'topdown' = 'fly';
-  private promptResolver?: InputPromptResolver;
   private vesselEventRevision = 0;
 
   public constructor() {
-    this.lockHint = this.requireElement<HTMLElement>('lock-hint');
     this.roomLabel = this.requireElement<HTMLElement>('room-label');
     this.roomPopulation = this.requireElement<HTMLElement>('room-population');
     this.menuButton = this.requireElement<HTMLButtonElement>('game-menu-button');
@@ -59,33 +46,12 @@ export class HudController {
   }
 
   public setLocked(locked: boolean): void {
-    this.locked = locked;
     document.body.classList.toggle('is-locked', locked);
-    this.refreshControlHint();
   }
 
   public setControlMode(mode: 'fly' | 'topdown'): void {
-    this.controlMode = mode;
     document.body.classList.toggle('is-topdown', mode === 'topdown');
-    if (mode === 'topdown') {
-      document.body.classList.remove('is-locked');
-      this.locked = false;
-    }
-    this.refreshControlHint();
-  }
-
-  public setInputDevice(deviceKind: InputDeviceKind): void {
-    this.inputDeviceKind = deviceKind;
-    this.refreshControlHint();
-  }
-
-  public setInputPromptResolver(resolver: InputPromptResolver): void {
-    this.promptResolver = resolver;
-    this.refreshInputPrompt();
-  }
-
-  public refreshInputPrompt(): void {
-    this.refreshControlHint();
+    if (mode === 'topdown') document.body.classList.remove('is-locked');
   }
 
   public setVesselStatus(state: VesselHudState | undefined): void {
@@ -122,14 +88,6 @@ export class HudController {
     this.interactionPrompt.textContent = text ?? '';
     this.interactionPrompt.hidden = !text;
     document.body.classList.toggle('has-interaction-target', Boolean(text));
-  }
-
-  private refreshControlHint(): void {
-    this.lockHint.textContent = this.promptResolver?.(
-      this.controlMode,
-      this.inputDeviceKind,
-      this.locked ? 'locked' : 'unlocked',
-    ) ?? '';
   }
 
   private requireElement<T extends HTMLElement>(id: string): T {

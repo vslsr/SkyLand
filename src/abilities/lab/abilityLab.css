@@ -241,10 +241,6 @@
   line-height: 1.45;
 }
 
-body.is-ability-lab .hud--footer {
-  opacity: 0.72;
-}
-
 @media (max-width: 640px) {
   .ability-lab-panel {
     top: 62px;

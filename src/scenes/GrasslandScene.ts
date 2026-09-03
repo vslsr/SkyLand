@@ -188,15 +188,11 @@ export class GrasslandScene extends Scene {
       device: virtualInput,
       config: this.inputScheme.virtualControls,
     });
-    this.hud.setInputPromptResolver((mode, deviceKind, state) => (
-      this.inputScheme.getPrompt(mode, deviceKind, state)
-    ));
     this.inputScheme.onBindingsChanged(() => {
       this.input.replaceMappingContexts(this.inputScheme.contexts);
       keyboardInput.setPreventDefaultControls(this.inputScheme.getPreventDefaultControls());
       this.refreshDebugMenuShortcut();
       this.refreshInventoryShortcut();
-      this.hud.refreshInputPrompt();
     });
     // 场景的两半:渲染核心与玩法查询。第 3 步搬 canvas 时只有前者跟着走。
     this.world = new SceneWorld();
@@ -257,7 +253,6 @@ export class GrasslandScene extends Scene {
       canOpen: () => Boolean(this.joinedRoom && this.player) && this.commonUI.size === 0,
     });
     this.controls.onModeChange((mode) => this.hud.setControlMode(mode));
-    this.input.onActiveDeviceChanged((deviceKind) => this.hud.setInputDevice(deviceKind));
 
     this.commonUI.onStackChange(() => {
       const allowsGameInteraction = this.commonUI.allowsGameInteraction;
