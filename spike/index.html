@@ -1,0 +1,22 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>render worker spike</title></head>
+<body style="margin:0">
+<canvas id="c" width="960" height="540"></canvas>
+<pre id="log" style="font:12px monospace"></pre>
+<script type="module">
+const log = document.getElementById('log');
+const canvas = document.getElementById('c');
+const offscreen = canvas.transferControlToOffscreen();
+const worker = new Worker(new URL('./renderWorker.worker.ts', import.meta.url), { type: 'module' });
+worker.addEventListener('message', (e) => {
+  const { stage, ok, detail } = e.data;
+  log.textContent += `${ok ? 'OK  ' : 'FAIL'} ${stage}${detail ? ' — ' + detail : ''}\n`;
+  if (stage === 'done' || !ok) window.__spikeDone = true;
+});
+worker.addEventListener('error', (e) => {
+  log.textContent += `FAIL worker-error — ${e.message}\n`;
+  window.__spikeDone = true;
+});
+worker.postMessage({ canvas: offscreen }, [offscreen]);
+</script>
+</body></html>
