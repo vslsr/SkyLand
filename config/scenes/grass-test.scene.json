@@ -19,7 +19,7 @@
     "fog": { "color": "#fbf7ec", "near": 1000, "far": 1001 },
     "content": { "ground": true, "trees": false, "grass": true, "ocean": false },
     "palette": {
-      "ground": "#f0ead9",
+      "ground": "#e1d8bf",
       "grass": "#b8d39f",
       "treeTrunk": "#d6bea3",
       "treeNeedles": "#cbdcbc"
