@@ -7,32 +7,12 @@ import {
   MAX_PATROL_WAYPOINTS,
 } from '../../shared/actor/components/PatrolPathComponent.mjs';
 import { itemCatalog } from '../../shared/items/index.mjs';
+import { modelHasTrait } from '../../shared/actor/models/index.mjs';
 
 export const DEFAULT_ACTOR_DIRECTORY = fileURLToPath(new URL('../../config/actors/', import.meta.url));
 
 const ID_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
-
-/** 走高数量合批绘制的堆叠模型。新增一种堆叠物就在这里登记。 */
-const PILE_RENDER_MODELS = new Set([
-  'line-art-wood-pile',
-  'line-art-wood-log',
-  'line-art-stone-pile',
-  'line-art-fruit-pile',
-]);
 const COLOR_PATTERN = /^#[0-9a-f]{6}$/i;
-/**
- * 能当玩家外壳的 render 模型。导出是有意的：场景校验与房间 DS 都要问同一个
- * 问题，各自写一串 `!==` 会让新增一种玩家外壳变成三处独立的改动。
- */
-export const PLAYER_RENDER_MODELS = new Set([
-  'line-art-player-slime',
-  'line-art-pbf-slime',
-  'line-art-legged-slime',
-]);
-
-export function isPlayerRenderModel(model) {
-  return PLAYER_RENDER_MODELS.has(model);
-}
 
 function requireObject(value, path) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
@@ -949,13 +929,13 @@ function validateActorArchetype(raw, filename) {
   if (elasticDetach && (!elasticTether || !components.dropMotion)) {
     throw new TypeError(`${filename}.components.elasticDetach 需要 elasticTether 和 dropMotion`);
   }
-  if (playerMovement && !PLAYER_RENDER_MODELS.has(render?.model)) {
+  if (playerMovement && !modelHasTrait(render?.model, 'playerShell')) {
     throw new TypeError(`${filename}.components.playerMovement 需要玩家史莱姆 render`);
   }
   if (pickupDrop && !playerMovement) {
     throw new TypeError(`${filename}.components.pickupDrop 需要 playerMovement`);
   }
-  if (playerJump && (!playerMovement || !PLAYER_RENDER_MODELS.has(render?.model))) {
+  if (playerJump && (!playerMovement || !modelHasTrait(render?.model, 'playerShell'))) {
     throw new TypeError(`${filename}.components.playerJump 需要玩家移动与玩家史莱姆 render`);
   }
   if (render?.model === 'line-art-player-slime' && !playerMovement) {
@@ -1018,7 +998,7 @@ function validateActorArchetype(raw, filename) {
     );
   }
   // 堆叠模型由 HighCountActorBatchSystem 合批绘制，没有 itemStack 就没有东西可画。
-  if (PILE_RENDER_MODELS.has(render?.model) && !itemStack) {
+  if (modelHasTrait(render?.model, 'pile') && !itemStack) {
     throw new TypeError(`${filename}.components.render ${render.model} 需要 itemStack`);
   }
   if (generatedProp && interactable?.action !== 'harvest-prop') {

@@ -42,6 +42,7 @@ import {
   VesselMotorComponent,
 } from '../../shared/actor/index.mjs';
 import { createSimpleCollisionFromRender } from '../../shared/actor/simpleCollision.mjs';
+import { modelHasTrait } from '../../shared/actor/models/index.mjs';
 import {
   COLLISION_LAYER,
   COLLISION_LAYER_SOLID,
@@ -879,16 +880,15 @@ export class ClientActorSystem implements SceneVisualSystem {
   private createInstanceCatalog(): ActorInstanceCatalog {
     const archetypeIndex = new Map<string, number>();
     this.archetypeOrder.forEach((id, index) => archetypeIndex.set(id, index));
-    const singleModels = new Set(['line-art-fruit-pile', 'line-art-wood-log']);
     return {
       archetypeIndex,
       isBatched: (archetypeId) => (
         this.archetypes.get(archetypeId)?.components.itemStack !== undefined
       ),
-      supportsSingle: (archetypeId) => {
-        const model = this.archetypes.get(archetypeId)?.components.render?.model;
-        return model !== undefined && singleModels.has(model);
-      },
+      supportsSingle: (archetypeId) => modelHasTrait(
+        this.archetypes.get(archetypeId)?.components.render?.model,
+        'pileSingle',
+      ),
     };
   }
 

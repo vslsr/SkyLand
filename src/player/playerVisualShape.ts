@@ -1,4 +1,5 @@
 import { leggedSlimeTopY } from '../../shared/actor/leggedSlimeShape.mjs';
+import { modelHasTrait } from '../../shared/actor/models/index.mjs';
 import type { PlayerRenderDefinition } from '../render/RenderScene';
 import type { ActorRenderDefinition } from '../scenes/data/SceneDefinition';
 
@@ -19,9 +20,7 @@ export interface PlayerVisualShape {
 export function isPlayerRenderDefinition(
   definition: ActorRenderDefinition | undefined,
 ): definition is PlayerRenderDefinition {
-  return definition?.model === 'line-art-player-slime'
-    || definition?.model === 'line-art-pbf-slime'
-    || definition?.model === 'line-art-legged-slime';
+  return modelHasTrait(definition?.model, 'playerShell');
 }
 
 export function resolvePlayerVisualShape(

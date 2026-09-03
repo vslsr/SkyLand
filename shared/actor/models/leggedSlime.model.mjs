@@ -10,6 +10,8 @@ import { uprightCylinder } from './authoringShapes.mjs';
  */
 export const leggedSlimeModel = {
   id: 'line-art-legged-slime',
+  /** 两头都能用：带 playerMovement 是玩家外壳，不带就是场景里的野生史莱姆。 */
+  traits: { playerShell: true },
   collision: (render) => {
     const radius = positiveNumber(render.radius, 0.42);
     const hipHeight = positiveNumber(render.hipHeight, radius * 1.8);

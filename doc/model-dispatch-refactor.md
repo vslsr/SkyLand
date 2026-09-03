@@ -66,13 +66,14 @@ src/scenes/data/SceneDefinition.ts           ← 登记
 | A5 | `src/scenes/data/SceneDefinition.ts:60-219` | 判别式联合 | 16 个成员 | 同一套字段清单，第三遍 |
 | A6 | `src/actors/systems/HighCountActorBatchSystem.ts:34-46, 215-227` | `definition.model` | `PILE_RENDER_MODELS` + 3 个 `if` | 哪些走合批、每种堆怎么摆 |
 | A7 | `src/player/playerVisualShape.ts:19-50` | `definition.model` | 3 个 `\|\|` + 2 个 `if` | 哪些能当玩家外壳、胶囊尺寸 |
+| A7b | `src/render/RenderScene.ts:92-95` | 判别式联合 | 3 个模型名 | `PlayerRenderDefinition`，玩家外壳清单的第三份（清点时漏记，Step 2 时补上） |
 | A8 | `src/render/three/ThreeRenderScene.ts:183-191, 214-240` | `desc.render.model` | 4 个 `if` | 建哪套 rig（软体蒙皮/骨骼腿/动画器） |
 
 零散单点（同一维度，散落各处）：
 `src/actors/ClientActorSystem.ts:882`（`singleModels` 集合）、`:1028`（腿部地面探针）、
 `src/player/PlayerEntity.ts:192`、`src/player/RemotePlayer.ts:93`。
 
-**两份同名常量各自维护：**
+**同一份清单的多处副本：**
 
 - `PILE_RENDER_MODELS` 同时存在于 `server/actors/ActorCatalog.mjs:16` 和
   `src/actors/systems/HighCountActorBatchSystem.ts:41`，内容相同，互不引用。
@@ -263,10 +264,34 @@ test('两张模型注册表的键完全一致', () => {
 新增的常驻护栏：注册表键集合 == 快照表键集合 == `ActorRenderDefinition` 联合成员集合。
 少登记一个模型、两个描述符抢同一个 id，都已变异验证会被挡下。
 
-**Step 2 · 收掉重复常量（1 天，下一步）**
+**Step 2 · 收掉重复常量 ✅ 已完成**
 
-加 `traits`，删掉两份 `PILE_RENDER_MODELS` 和 `isPlayerRenderDefinition`/`PLAYER_RENDER_MODELS`，
-改为派生。
+描述符加了 `traits`（白名单 `playerShell` / `pile` / `pileSingle`，拼错的 trait 名在加载时或
+调用时就抛，而不是永远安静地返回 `false`）。四份手写清单删掉：
+
+| 原处 | 之后 |
+| --- | --- |
+| `ActorCatalog.mjs` 的 `PILE_RENDER_MODELS` | `modelHasTrait(model, 'pile')` |
+| `ActorCatalog.mjs` 的 `PLAYER_RENDER_MODELS` + `isPlayerRenderModel` | `modelHasTrait(model, 'playerShell')`，两个导出一并删掉，`ServerScene` / `SceneCatalog` 改为直接问注册表 |
+| `HighCountActorBatchSystem.ts` 的同名 `PILE_RENDER_MODELS` | 同上；那个不安全的 `as PileRender['model']` 转换也没了 |
+| `playerVisualShape.ts` 的三个 `\|\|` | 同上 |
+| `ClientActorSystem.ts` 的 `singleModels` | `modelHasTrait(model, 'pileSingle')` |
+
+清点时漏记的**第四份玩家外壳清单**：`src/render/RenderScene.ts` 的 `PlayerRenderDefinition`
+也硬编码了那三个名字（原文档 §3 只数到两份，这里补上）。
+
+**TS 类型没法从运行时值推导**，所以类型这一侧必然还要留字面量：`PLAYER_SHELL_MODELS`
+和合批系统的 `PILE_MODELS`，各自用 `as const` 元组推出对应的 `Extract<>` 类型。
+它们不再有各自的运行时副本——运行时判定一律走 trait，两份字面量由
+`tests/ActorModelRegistry.test.ts` 钉住与注册表一致。合批系统里四个逐模型的
+`*Render` 别名改成从 `PileRender` 再 `Extract`，这样 `PILE_MODELS` 仍是唯一的清单。
+
+**验证**：与重构前那四份清单对拍，16 个模型 + 未注册 + 空串 + `undefined` / `null` / `0`
+共 21 个探针 × 3 个 trait，0 处不一致。变异验证——给模型加了 `pile` 但合批类型清单没跟上、
+`PLAYER_SHELL_MODELS` 少一项、`pileSingle` 脱开 `pile` 单独出现——三者分别被对应用例和加载期检查挡下。
+`npm test` 672 项全绿，`npm run build` 通过。
+
+**这一步之后，A6 / A7 两处以及 A8 的一半已经不再各自持有模型清单。**
 
 **Step 3 · 字段规格与 schema 生成（2-3 天，收益最大）**
 

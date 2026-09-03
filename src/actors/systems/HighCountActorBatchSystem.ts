@@ -29,21 +29,34 @@ import {
   createWoodLogCutGeometry,
 } from '../../models/actors/createWoodLogModel';
 import type { ActorArchetypeDefinition } from '../../scenes/data/SceneDefinition';
+import { modelHasTrait } from '../../../shared/actor/models/index.mjs';
 
 type ActorRender = ActorArchetypeDefinition['components']['render'];
-type WoodPileRender = Extract<ActorRender, { model: 'line-art-wood-pile' }>;
-type WoodLogRender = Extract<ActorRender, { model: 'line-art-wood-log' }>;
-type StonePileRender = Extract<ActorRender, { model: 'line-art-stone-pile' }>;
-type FruitPileRender = Extract<ActorRender, { model: 'line-art-fruit-pile' }>;
-type PileRender = WoodPileRender | WoodLogRender | StonePileRender | FruitPileRender;
 
-/** 走合批绘制的堆叠模型。新增一种堆叠物就在这里登记，并补一个 pieces 构造。 */
-const PILE_RENDER_MODELS = new Set<PileRender['model']>([
+/**
+ * 走合批绘制的堆叠模型。
+ *
+ * 这份清单**只为推出下面那个类型而存在**——运行时判定走注册表的 `pile` trait
+ * （`isPileRender`）。TS 类型没法从运行时值推导，所以类型这一侧必然要有一份
+ * 字面量；两者由 `tests/ActorModelRegistry.test.ts` 钉住一致。
+ *
+ * 新增一种堆叠物：模型描述符上加 `pile` trait，这里加一项，再补一个 pieces 构造。
+ */
+const PILE_MODELS = [
   'line-art-wood-pile',
   'line-art-wood-log',
   'line-art-stone-pile',
   'line-art-fruit-pile',
-]);
+] as const;
+
+type PileRender = Extract<ActorRender, { model: (typeof PILE_MODELS)[number] }>;
+
+// 每种堆的 pieces 构造各要自己那一种；从 PileRender 里取，而不是各自再写一次
+// Extract<ActorRender, ...>——那样 PILE_MODELS 就不再是唯一的清单了。
+type WoodPileRender = Extract<PileRender, { model: 'line-art-wood-pile' }>;
+type WoodLogRender = Extract<PileRender, { model: 'line-art-wood-log' }>;
+type StonePileRender = Extract<PileRender, { model: 'line-art-stone-pile' }>;
+type FruitPileRender = Extract<PileRender, { model: 'line-art-fruit-pile' }>;
 
 /**
  * 模板里的一块。位置与朝向写死在矩阵里，颜色随顶点走，
@@ -57,7 +70,7 @@ interface PilePiece {
 }
 
 function isPileRender(render: ActorRender | undefined): render is PileRender {
-  return render !== undefined && PILE_RENDER_MODELS.has(render.model as PileRender['model']);
+  return render !== undefined && modelHasTrait(render.model, 'pile');
 }
 
 interface BatchEntry {

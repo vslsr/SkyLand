@@ -20,7 +20,24 @@
  * @property {(render: Record<string, unknown>) => object} collision
  *   从 authoring 尺寸派生简易碰撞。纯函数，返回值交给
  *   `createSimpleCollisionDefinition` 补默认值。
+ * @property {Partial<Record<ModelTrait, boolean>>} [traits]
+ *   这个模型「是哪一类」。缺省即全部为否。
  */
+
+/**
+ * 已登记的 trait。
+ *
+ * 写成白名单而不是随便什么字符串：`modelHasTrait(m, 'piles')` 这种手误会永远
+ * 安静地返回 false，而那正是这次重构要消灭的那一类 bug。拼错的 trait 名在
+ * 加载时或调用时就抛。
+ *
+ * - `playerShell` 能当玩家外壳（带 playerMovement 时）
+ * - `pile` 走 HighCountActorBatchSystem 合批绘制的堆叠物
+ * - `pileSingle` 该堆叠物有单件形态，不只是把整堆缩小
+ *
+ * @typedef {'playerShell' | 'pile' | 'pileSingle'} ModelTrait
+ */
+export const MODEL_TRAITS = Object.freeze(['playerShell', 'pile', 'pileSingle']);
 
 import { campfireModel } from './campfire.model.mjs';
 import { cargoCrateModel } from './cargoCrate.model.mjs';
@@ -67,7 +84,24 @@ for (const descriptor of DESCRIPTORS) {
   if (MODELS.has(descriptor.id)) {
     throw new TypeError(`渲染模型 id 重复：${descriptor.id}`);
   }
+  for (const trait of Object.keys(descriptor.traits ?? {})) {
+    if (!MODEL_TRAITS.includes(trait)) {
+      throw new TypeError(`模型 ${descriptor.id} 带了未登记的 trait：${trait}`);
+    }
+  }
+  // 单件形态是堆叠物的一种形态，脱开 pile 单独存在没有意义——合批系统根本
+  // 不会去问一个非堆叠模型有没有单件模板。
+  if (descriptor.traits?.pileSingle && !descriptor.traits.pile) {
+    throw new TypeError(`模型 ${descriptor.id} 的 pileSingle 需要同时带 pile`);
+  }
   MODELS.set(descriptor.id, descriptor);
+}
+
+function requireTrait(trait) {
+  if (!MODEL_TRAITS.includes(trait)) {
+    throw new TypeError(`未登记的模型 trait：${trait}`);
+  }
+  return trait;
 }
 
 /**
@@ -81,4 +115,27 @@ export function actorModel(id) {
 /** 注册表里全部模型 id，按登记顺序。 */
 export function actorModelIds() {
   return [...MODELS.keys()];
+}
+
+/**
+ * 这个模型是不是某一类。未登记的模型一律为否——调用方问的是「它是不是堆叠物」，
+ * 对一个不存在的模型，答案就是不是。
+ *
+ * @param {unknown} id
+ * @param {ModelTrait} trait
+ */
+export function modelHasTrait(id, trait) {
+  return actorModel(id)?.traits?.[requireTrait(trait)] === true;
+}
+
+/**
+ * 带某个 trait 的全部模型 id，按登记顺序。
+ *
+ * @param {ModelTrait} trait
+ * @returns {string[]}
+ */
+export function modelsWithTrait(trait) {
+  requireTrait(trait);
+  return DESCRIPTORS.filter((descriptor) => descriptor.traits?.[trait] === true)
+    .map((descriptor) => descriptor.id);
 }

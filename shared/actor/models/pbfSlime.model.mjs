@@ -4,6 +4,8 @@ import { uprightCylinder } from './authoringShapes.mjs';
 /** 软体史莱姆：外壳可以先包住障碍并形变，内部圆柱只阻止软核心穿透。 */
 export const pbfSlimeModel = {
   id: 'line-art-pbf-slime',
+  /** 能当玩家外壳。 */
+  traits: { playerShell: true },
   collision: (render) => {
     const radius = positiveNumber(render.radius, 0.9);
     const collisionRadius = Math.min(

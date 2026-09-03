@@ -1,7 +1,8 @@
 import { readdir, readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { join } from 'node:path';
-import { ActorCatalog, isPlayerRenderModel } from '../actors/ActorCatalog.mjs';
+import { ActorCatalog } from '../actors/ActorCatalog.mjs';
+import { modelHasTrait } from '../../shared/actor/models/index.mjs';
 import { CHUNK_SIZE, WORLD_PLAY_AREA } from '../../shared/world/worldConfig.mjs';
 import { PROP_KIND_BY_NAME } from '../../shared/world/generatedProp.mjs';
 import {
@@ -571,7 +572,7 @@ function validateSceneDefinition(raw, filename, actorCatalog) {
   const playerRenderModel = playerActorArchetype.components.render.model;
   if (
     !playerActorArchetype.components.playerMovement
-    || !isPlayerRenderModel(playerRenderModel)
+    || !modelHasTrait(playerRenderModel, 'playerShell')
   ) {
     throw new TypeError(
       `${filename}.gameplay.playerActor 需要 playerMovement + 玩家史莱姆 render 原型`,

@@ -89,9 +89,22 @@ export interface GuidePathStyle {
 /**
  * 玩家史莱姆的渲染定义。本地玩家与远端玩家都用它，普通 Actor 也可以。
  */
+/**
+ * 能当玩家外壳的模型。
+ *
+ * 这份清单**只为推出下面那个类型而存在**——运行时判定走注册表的 `playerShell`
+ * trait（`isPlayerRenderDefinition`）。TS 类型没法从运行时值推导，所以类型这一侧
+ * 必然要有一份字面量；两者由 `tests/ActorModelRegistry.test.ts` 钉住一致。
+ */
+export const PLAYER_SHELL_MODELS = [
+  'line-art-player-slime',
+  'line-art-pbf-slime',
+  'line-art-legged-slime',
+] as const;
+
 export type PlayerRenderDefinition = Extract<
   ActorRenderDefinition,
-  { model: 'line-art-player-slime' | 'line-art-pbf-slime' | 'line-art-legged-slime' }
+  { model: (typeof PLAYER_SHELL_MODELS)[number] }
 >;
 
 export type SlimeSurfaceDragDefinition = NonNullable<
