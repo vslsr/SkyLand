@@ -3,11 +3,22 @@ import type { InputSubsystem } from '../input/core/InputSubsystem';
 import { buildInventoryView, type InventoryModelLike } from '../inventory/index';
 import type { InventoryCommand } from '../network/messages';
 import type { InventoryItemAction } from '../ui/InventoryItemMenu';
-import type { InventoryPage } from '../ui/pages/InventoryPage';
+import type {
+  InventoryDragSource,
+  InventoryDragTarget,
+  InventoryPage,
+} from '../ui/pages/InventoryPage';
 
 export interface InventoryPort {
   /** 当前角色的背包 Component；没进房间或角色已销毁时是 undefined。 */
   getInventory(): InventoryModelLike | undefined;
+  /**
+   * 告诉输入层「接下来的使用键说的是这件东西」。
+   *
+   * 背包里点「使用」授予的是一条能力，激活要按使用键——两边说的必须是同一件东西，
+   * 所以这条和 `use:arm` 在同一刻发出。传 undefined 是撤销。
+   */
+  armItem(itemType: string | undefined): void;
   /** 背包界面现在是不是 CommonUI 栈顶。 */
   isOpen(): boolean;
   /** 把界面推入或弹出 CommonUI 栈。 */
@@ -49,48 +60,85 @@ export class InventoryController {
       { phases: ['triggered'] },
     );
     this.view.onItemAction((action, itemType) => this.applyItemAction(action, itemType));
+    this.view.onDragDrop((source, target) => this.applyDragDrop(source, target));
   }
 
   /**
    * 背包菜单里那三条各自兑现成什么。
    *
-   * **「使用」只是把它送到手上并让开画面**，不代按一次使用键。这个项目里的 `use`
-   * 是一个世界动作：投掷要蓄力（`mode: 'charge'`，菜单里按不出力度），工具要面前
-   * 正好有可采集的目标（背包盖着画面时玩家根本没在瞄）。代按一次得到的只会是一次
-   * 脚下的软投或一次打空的敲击——比什么都不做更糟。菜单能诚实做到的是上手。
+   * **「使用」不再是「拿到手上」**。这个项目里的使用是一条临时授予玩家的能力：
+   * 点一下菜单把它挂上去，随后按使用键激活（点按物品当场结算，长按物品要按住走
+   * 完那圈圆形倒计时），完成后能力收回。它因此和物品栏是两条独立的路——用一次
+   * 燃烧瓶不该顺手改写物品栏的一格，也不该让玩家先装配再切格再按键。
+   *
+   * 「装配」才是把背包里那一摞搬进物品栏。
    */
   private applyItemAction(action: InventoryItemAction, itemType: string): void {
     if (action === 'use') {
-      this.port.send({ kind: 'hold', itemType });
+      // 让开画面：激活要按使用键，而使用键在背包盖着画面时收不到。
+      this.port.armItem(itemType);
+      this.port.send({ kind: 'use:arm', itemType });
       this.close();
       return;
     }
     if (action === 'drop') {
-      // 走 `drop:stack` 而不是「先 hold 再 drop」：后者会顺手改写快捷栏一格、
-      // 把原本握着的东西换下去，丢完还自动再抽一个同类的到手上。
+      // 走 `drop:stack` 而不是「先装配再丢」：后者会顺手改写物品栏一格、
+      // 把原本握着的东西换下去。
       this.port.send({ kind: 'drop:stack', itemType });
       return;
     }
     const slotIndex = this.resolveEquipSlot(itemType);
     if (slotIndex === undefined) return;
+    // 动了物品栏就作废「刚刚在背包里点出来的那件」：服务端在同一批命令上撤同一条
+    // 能力，两边说的因此始终是同一件东西。
+    this.port.armItem(undefined);
     this.port.send({ kind: 'assign', slotIndex, itemType });
   }
 
   /**
-   * 装备放进哪一格：已经配着它的那格 → 第一个空格 → 当前选中格。
+   * 拖拽：把一摞货从一本账搬到另一本账。
    *
-   * 和 `InventoryComponent.holdItemType` 是同一套顺序，两条路进物品栏的落点因此
-   * 一致；服务端仍会自己校验序号，这里算错最多是一次没有效果的请求。
+   * 三种落点各自对应一条命令，语义都是转移而不是配置：
+   *
+   * - 背包 → 物品栏某格：装配（`assign`）；
+   * - 物品栏 → 物品栏另一格：对调（`hotbar:swap`），玩家在排 1-9 的顺序；
+   * - 物品栏 → 背包：收回（`hotbar:stow`）。
+   */
+  private applyDragDrop(source: InventoryDragSource, target: InventoryDragTarget): void {
+    // 和「装配」同一个理由：动过物品栏，背包里点出来的那条能力就不再指向玩家想的
+    // 那件东西了。
+    this.port.armItem(undefined);
+    if (source.kind === 'backpack') {
+      if (target.kind !== 'hotbar') return;
+      this.port.send({ kind: 'assign', slotIndex: target.slotIndex, itemType: source.itemType });
+      return;
+    }
+    if (target.kind === 'backpack') {
+      this.port.send({ kind: 'hotbar:stow', slotIndex: source.slotIndex });
+      return;
+    }
+    if (target.slotIndex === source.slotIndex) return;
+    this.port.send({
+      kind: 'hotbar:swap',
+      fromIndex: source.slotIndex,
+      slotIndex: target.slotIndex,
+    });
+  }
+
+  /**
+   * 装配放进哪一格：已经装着它的那格 → 第一个空格 → 当前选中格。
+   *
+   * 服务端仍会自己校验序号与账本，这里算错最多是一次没有效果的请求。
    */
   private resolveEquipSlot(itemType: string): number | undefined {
-    const hotbar = this.port.getInventory()?.hotbar;
+    const inventory = this.port.getInventory();
+    const hotbar = inventory?.hotbar;
     if (!hotbar || hotbar.length === 0) return undefined;
-    const existing = hotbar.indexOf(itemType);
+    const existing = hotbar.findIndex((slot) => slot?.itemType === itemType);
     if (existing >= 0) return existing;
-    const firstEmpty = hotbar.indexOf(null);
+    const firstEmpty = hotbar.findIndex((slot) => slot === null);
     if (firstEmpty >= 0) return firstEmpty;
-    const active = this.port.getInventory()?.activeHotbarIndex ?? 0;
-    return Math.max(0, active);
+    return Math.max(0, inventory?.activeHotbarIndex ?? 0);
   }
 
   public toggle(): void {

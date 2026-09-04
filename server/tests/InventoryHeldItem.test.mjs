@@ -7,7 +7,7 @@ import {
   ItemLedger,
   NO_HOTBAR_SLOT,
   StowableComponent,
-  chargeRatio,
+  holdRatio,
   resolveActorAction,
   resolveHeldItemAction,
 } from '../../shared/actor/index.mjs';
@@ -39,26 +39,69 @@ test('不占货位的物品不吃背包格数', () => {
   assert.equal(ledger.add('wood', 1), 1);
 });
 
-test('快捷栏存的是物品种类：用光了配置还在，补货回来自动握住', () => {
-  const inventory = new InventoryComponent({ slotCapacity: 8, hotbarCapacity: 4 });
-  inventory.add('wood', 2);
-  assert.equal(inventory.holdItemType('wood'), true);
-  assert.equal(inventory.heldItemType, 'wood');
+test('装配是一次转移：那一摞从背包搬进物品栏，背包里就没有了', () => {
+  const inventory = new InventoryComponent({ slotCapacity: 8, hotbarCapacity: 9 });
+  inventory.add('wood', 120);
 
-  inventory.remove('wood', 2);
-  // 货没了手就空着，但那一格仍然记着木材。
+  assert.equal(inventory.assignHotbarSlot(0, 'wood'), true);
+  // 一格一摞，最多堆到 stackLimit；剩下的留在背包里。
+  assert.deepEqual(inventory.hotbar[0], { itemType: 'wood', quantity: 99 });
+  assert.equal(inventory.quantityOf('wood'), 21, '背包里只剩没搬走的那些');
+  assert.equal(inventory.totalQuantityOf('wood'), 120, '身上一共还是这么多');
+
+  inventory.setActiveHotbarSlot(0);
+  assert.equal(inventory.heldItemType, 'wood');
+  assert.equal(inventory.heldQuantity, 99);
+
+  // 用掉的是物品栏那一格；用光了那一格直接空出来，不留一个「配置还在」的壳。
+  assert.equal(inventory.consumeHeldItem(99), 99);
+  assert.equal(inventory.hotbar[0], null);
   assert.equal(inventory.heldItemType, undefined);
-  assert.equal(inventory.hotbar[0], 'wood');
-
-  inventory.add('wood', 1);
-  assert.equal(inventory.heldItemType, 'wood');
+  assert.equal(inventory.quantityOf('wood'), 21, '背包那 21 个不受影响');
 });
 
-test('同一种物品只占快捷栏一格', () => {
-  const inventory = new InventoryComponent({ hotbarCapacity: 4 });
+test('收回背包也是一次转移；背包满了就原样留在物品栏', () => {
+  const inventory = new InventoryComponent({ slotCapacity: 1, hotbarCapacity: 9 });
+  inventory.add('wood', 99);
   inventory.assignHotbarSlot(0, 'wood');
-  inventory.assignHotbarSlot(2, 'wood');
-  assert.deepEqual(inventory.hotbar, [null, null, 'wood', null]);
+  assert.equal(inventory.quantityOf('wood'), 0);
+
+  // 唯一那个货位被石料占住：整摞放不回去，就一个都不放。
+  inventory.add('stone', 99);
+  assert.equal(inventory.clearHotbarSlot(0), false);
+  assert.deepEqual(inventory.hotbar[0], { itemType: 'wood', quantity: 99 });
+  assert.equal(inventory.quantityOf('wood'), 0, '撤销要撤干净，不能塞进去半摞');
+  assert.equal(inventory.quantityOf('stone'), 99);
+
+  inventory.remove('stone', 99);
+  assert.equal(inventory.clearHotbarSlot(0), true);
+  assert.equal(inventory.hotbar[0], null);
+  assert.equal(inventory.quantityOf('wood'), 99);
+});
+
+test('同一种物品只占物品栏一格：装到新格是把它挪过去', () => {
+  const inventory = new InventoryComponent({ hotbarCapacity: 9 });
+  inventory.add('wood', 10);
+  inventory.assignHotbarSlot(0, 'wood');
+  assert.equal(inventory.assignHotbarSlot(2, 'wood'), true);
+  assert.deepEqual(
+    inventory.hotbar.map((slot) => slot?.itemType ?? null),
+    [null, null, 'wood', null, null, null, null, null, null],
+  );
+  assert.equal(inventory.hotbar[2].quantity, 10, '整摞挪过去，不是再从背包抽一摞');
+});
+
+test('两格对调：玩家在物品栏上排 1-9 的顺序', () => {
+  const inventory = new InventoryComponent({ hotbarCapacity: 9 });
+  inventory.add('wood', 4);
+  inventory.add('stone', 6);
+  inventory.assignHotbarSlot(0, 'wood');
+  inventory.assignHotbarSlot(1, 'stone');
+
+  assert.equal(inventory.swapHotbarSlots(0, 1), true);
+  assert.equal(inventory.hotbar[0].itemType, 'stone');
+  assert.equal(inventory.hotbar[1].itemType, 'wood');
+  assert.equal(inventory.swapHotbarSlots(3, 4), false, '两个空格对调什么都没变');
 });
 
 test('再按一次当前格是收手，循环切换绕回第一格', () => {
@@ -73,17 +116,19 @@ test('再按一次当前格是收手，循环切换绕回第一格', () => {
   assert.equal(inventory.activeHotbarIndex, 2);
 });
 
-test('快照带上快捷栏，客户端镜像跟着重建', () => {
-  const server = new InventoryComponent({ hotbarCapacity: 4 });
+test('快照带上物品栏（含数量），客户端镜像跟着重建', () => {
+  const server = new InventoryComponent({ hotbarCapacity: 9 });
   server.add('stone', 3);
-  server.holdItemType('stone');
+  server.assignHotbarSlot(0, 'stone');
+  server.setActiveHotbarSlot(0);
 
-  const client = new InventoryComponent({ hotbarCapacity: 4 });
+  const client = new InventoryComponent({ hotbarCapacity: 9 });
   assert.equal(
     client.applySnapshot(server.snapshot(), server.revision, server.hotbarSnapshot()),
     true,
   );
   assert.equal(client.heldItemType, 'stone');
+  assert.equal(client.heldQuantity, 3, '数量记在格子上：背包账上已经查不到它了');
   assert.equal(client.activeHotbarIndex, server.activeHotbarIndex);
   // revision 与内容都没变时不该再报一次变化，否则界面每帧重画。
   assert.equal(
@@ -111,18 +156,20 @@ test('装卸的前置条件由动作表挡下，两端读的是同一份判定',
   );
 });
 
-test('使用方式来自物品目录，点按是蓄力的退化情形', () => {
+test('使用方式来自物品目录：长按有倒计时，点按没有', () => {
   const bomb = resolveHeldItemAction('firebomb');
   assert.equal(bomb.action, 'throw');
   assert.equal(bomb.input, 'primary');
-  assert.equal(bomb.mode, 'charge');
-  assert.equal(chargeRatio(bomb.chargeSeconds / 2, bomb.chargeSeconds), 0.5);
-  assert.equal(chargeRatio(99, bomb.chargeSeconds), 1);
+  assert.equal(bomb.mode, 'hold');
+  assert.equal(bomb.id, 'Ability.Item.firebomb', '一件物品的用法就是一条能力');
+  // 圈满那一刻就是激活那一刻：两端跑同一个 holdRatio。
+  assert.equal(holdRatio(bomb.holdSeconds / 2, bomb.holdSeconds), 0.5);
+  assert.equal(holdRatio(99, bomb.holdSeconds), 1);
 
   const hammer = resolveHeldItemAction('harvest-hammer');
   assert.equal(hammer.mode, 'tap');
-  // tap 的蓄力时长是 0，强度恒为满值，不需要单独一条支路。
-  assert.equal(chargeRatio(0, hammer.chargeSeconds), 1);
+  // tap 没有倒计时，点一下就激活，不需要单独一条支路。
+  assert.equal(holdRatio(0, hammer.holdSeconds), 1);
 
   assert.equal(resolveHeldItemAction('medkit'), undefined);
 });
@@ -171,62 +218,61 @@ test('目标装满时差额留在来源，不会凭空消失', () => {
   assert.equal(container.quantityOf('wood'), moved);
 });
 
-test('收回背包会清掉选中格，否则长按等于没发生', () => {
-  const inventory = new InventoryComponent({ slotCapacity: 8, hotbarCapacity: 4 });
-  inventory.add('wood', 3);
-  inventory.holdItemType('wood');
-  // 权威侧拿在手上的那一个是从账本里扣掉的：账上 2，手上 1。
-  inventory.remove('wood', 1);
-
-  const heldActor = {
-    id: 'held-1',
-    getComponent: (name) => (name === 'itemStack' ? { itemType: 'wood', quantity: 1 } : undefined),
-  };
-  const pickupDrop = { heldActorId: 'held-1', drop() { this.heldActorId = null; return true; } };
-  const player = {
-    id: 'p1',
-    getComponent: (name) => ({ inventory, pickupDrop }[name]),
-  };
-  const removed = [];
-  heldActor.parent = { id: 'p1' };
-  const scene = {
-    actorWorld: {
-      getActor: (id) => (id === 'held-1' ? heldActor : undefined),
-      setActorParent: () => { heldActor.parent = undefined; },
-    },
-    removeItemStackActor: (id) => removed.push(id),
-  };
-
-  assert.equal(stowHeldItem(scene, player), true);
-  assert.equal(inventory.quantityOf('wood'), 3, '手上那一个回到账本');
-  assert.equal(inventory.activeHotbarIndex, NO_HOTBAR_SLOT, '收回之后是空手');
-  assert.equal(inventory.hotbar[0], 'wood', '那一格的配置留着');
-  assert.deepEqual(removed, ['held-1']);
-});
-
-test('背包满了收不回来时，东西留在手上而不是消失', () => {
-  const inventory = new InventoryComponent({ slotCapacity: 1, hotbarCapacity: 4 });
-  inventory.add('stone', 99);
-  const heldActor = {
-    id: 'held-2',
+/** 手持表现体的替身：只有模型该有的那些，没有掉落物理、没有生命期。 */
+function heldItemHarness(inventory, { id = 'held-1' } = {}) {
+  const actor = {
+    id,
     parent: { id: 'p1' },
     getComponent: (name) => (name === 'itemStack' ? { itemType: 'wood', quantity: 1 } : undefined),
   };
-  const pickupDrop = { heldActorId: 'held-2', drop() { this.heldActorId = null; return true; } };
+  const pickupDrop = { heldActorId: id, drop() { this.heldActorId = null; return true; } };
   const player = { id: 'p1', getComponent: (name) => ({ inventory, pickupDrop }[name]) };
   const removed = [];
   const scene = {
-    actorWorld: { getActor: () => heldActor, setActorParent: () => {} },
-    removeItemStackActor: (id) => removed.push(id),
+    actorWorld: {
+      getActor: (candidate) => (candidate === id ? actor : undefined),
+      setActorParent: () => { actor.parent = undefined; },
+    },
+    removeHeldItemActor: (candidate) => removed.push(candidate),
   };
+  return { actor, pickupDrop, player, scene, removed };
+}
+
+test('收回背包把整摞搬回去，并清掉选中格——否则长按等于没发生', () => {
+  const inventory = new InventoryComponent({ slotCapacity: 8, hotbarCapacity: 9 });
+  inventory.add('wood', 3);
+  inventory.assignHotbarSlot(0, 'wood');
+  inventory.setActiveHotbarSlot(0);
+  // 账全程在物品栏那一格上：手上挂的那个只是模型，不额外记一份。
+  assert.equal(inventory.quantityOf('wood'), 0);
+
+  const { player, scene, removed } = heldItemHarness(inventory);
+
+  assert.equal(stowHeldItem(scene, player), true);
+  assert.equal(inventory.quantityOf('wood'), 3, '整摞回到背包');
+  assert.equal(inventory.hotbar[0], null, '物品栏那一格空出来');
+  assert.equal(inventory.activeHotbarIndex, NO_HOTBAR_SLOT, '收回之后是空手');
+  assert.deepEqual(removed, ['held-1'], '表现体跟着消失');
+});
+
+test('背包满了收不回来时，那一摞留在物品栏而不是消失', () => {
+  const inventory = new InventoryComponent({ slotCapacity: 1, hotbarCapacity: 9 });
+  inventory.add('wood', 1);
+  inventory.assignHotbarSlot(0, 'wood');
+  inventory.setActiveHotbarSlot(0);
+  // 唯一那个货位这时被石料占住了。
+  inventory.add('stone', 99);
+
+  const { player, scene, removed, pickupDrop } = heldItemHarness(inventory, { id: 'held-2' });
 
   assert.equal(stowHeldItem(scene, player), false);
-  assert.deepEqual(removed, [], '收不回来就不删 Actor');
+  assert.deepEqual(removed, [], '收不回来就不删表现体');
   assert.equal(pickupDrop.heldActorId, 'held-2', '还拿在手上');
+  assert.deepEqual(inventory.hotbar[0], { itemType: 'wood', quantity: 1 });
 });
 
 test('叼着的世界物件也能收进背包，按它自己声明的物品回账', () => {
-  const inventory = new InventoryComponent({ slotCapacity: 8, hotbarCapacity: 4 });
+  const inventory = new InventoryComponent({ slotCapacity: 8, hotbarCapacity: 9 });
   // 蘑菇不是物品堆：它没有 itemStack，只有 stowable 说明「装进包里算什么」。
   const stowable = new StowableComponent({ itemType: 'mushroom' });
   const mushroom = {
@@ -243,7 +289,7 @@ test('叼着的世界物件也能收进背包，按它自己声明的物品回�
       setActorParent: () => { mushroom.parent = undefined; },
       removeActor: (id) => removed.push(id),
     },
-    removeItemStackActor: () => { throw new Error('世界物件不该走物品堆的删除'); },
+    removeHeldItemActor: () => { throw new Error('世界物件不该走手持表现体的删除'); },
   };
 
   assert.equal(stowHeldItem(scene, player), true);
@@ -306,9 +352,10 @@ function dropHarness(inventory, { archetypes = new Map([['wood-drop', { componen
   return { player, scene, spawned, pickupDrop };
 }
 
-test('背包里的「丢弃」直接从账本扣，手上那件原样不动', () => {
-  const inventory = new InventoryComponent({ slotCapacity: 8, hotbarCapacity: 4 });
+test('背包里的「丢弃」直接从背包账上扣，手上那件原样不动', () => {
+  const inventory = new InventoryComponent({ slotCapacity: 8, hotbarCapacity: 9 });
   inventory.add('wood', 3);
+  inventory.add('stone', 5);
   inventory.assignHotbarSlot(0, 'stone');
   const { player, scene, spawned, pickupDrop } = dropHarness(inventory);
 
@@ -320,9 +367,9 @@ test('背包里的「丢弃」直接从账本扣，手上那件原样不动', ()
   // 落点推到身前：就地生成会和角色碰撞体重叠，把人卡住。yaw 为 0 时正对 +Z。
   assert.ok(Math.abs(spawned[0].position[2] - (-2 + 0.85)) < 1e-6, `落点应当在身前：${spawned[0].position}`);
 
-  // 这条命令的全部意义就在这里：手上那件和快捷栏都没被动过。
+  // 这条命令的全部意义就在这里：手上那件和物品栏都没被动过。
   assert.equal(pickupDrop.heldActorId, 'held-1');
-  assert.equal(inventory.hotbar[0], 'stone');
+  assert.deepEqual(inventory.hotbar[0], { itemType: 'stone', quantity: 5 });
 });
 
 test('包里没有、或者这件东西掉在地上没有原型时，一个都不扣', () => {

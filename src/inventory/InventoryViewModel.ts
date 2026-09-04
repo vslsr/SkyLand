@@ -32,12 +32,17 @@ export interface ItemDefinitionLike {
   readonly contraband: boolean;
   readonly pooled: boolean;
   readonly holdable?: boolean;
-  /** 手持交互配置；不写表示只能拿着，按键没反应。见 `config/items` 的 `use`。 */
+  /**
+   * 使用配置；不写表示这件东西没有用法。见 `config/items` 的 `use`。
+   *
+   * 使用的兑现路径是「授予玩家一条 Ability → 按 mode 激活 → 完成后收回」，
+   * `mode` 决定按一下还是按住 `holdSeconds` 秒。
+   */
   readonly use?: {
     readonly action: 'tool' | 'throw';
-    readonly input: 'primary' | 'secondary';
-    readonly mode: 'tap' | 'charge';
-    readonly chargeSeconds: number;
+    readonly input: 'primary';
+    readonly mode: 'tap' | 'hold';
+    readonly holdSeconds: number;
     readonly value: number;
   };
 }
@@ -48,6 +53,12 @@ export interface ItemCatalogLike {
   list?(): readonly ItemDefinitionLike[];
 }
 
+/** 物品栏一格持有的那一摞；空格是 null。 */
+export interface HotbarSlotModelLike {
+  readonly itemType: string;
+  readonly quantity: number;
+}
+
 /** 背包 Component 里视图关心的部分；`InventoryComponent` 天然满足这个形状。 */
 export interface InventoryModelLike {
   readonly slotCapacity: number;
@@ -55,8 +66,13 @@ export interface InventoryModelLike {
   readonly revision: number;
   readonly slots: readonly { readonly itemType: string; readonly quantity: number }[];
   readonly pooled: readonly { readonly itemType: string; readonly quantity: number }[];
-  /** 快捷栏配置；旧快照没有这一段时界面只是不画那一排。 */
-  readonly hotbar?: readonly (string | null)[];
+  /**
+   * 物品栏每格实际持有的那一摞。
+   *
+   * 它是一条**独立的账本**，不是指向背包的引用：装配把那一摞从背包搬进来，之后
+   * 背包里就查不到它了。所以数量记在格子上，界面不用回背包找。
+   */
+  readonly hotbar?: readonly (HotbarSlotModelLike | null)[];
   readonly activeHotbarIndex?: number;
   readonly heldItemType?: string;
   /** 交互键按住多久算「收回背包」。来自玩家原型，两端读同一份。 */
@@ -79,8 +95,14 @@ export interface InventoryStackView {
   readonly full: boolean;
   readonly coinValue?: number;
   readonly contraband: boolean;
-  /** 能不能拿到手上；界面据此决定这一格点不点得动。 */
+  /** 能不能装配到物品栏；界面据此决定这一格拖不拖得动。 */
   readonly holdable: boolean;
+  /** 有没有用法。没有的话菜单里那条「使用」列出来但点不动。 */
+  readonly usable: boolean;
+  /** `tap` 点一下就结算，`hold` 要按住走完圆形倒计时。没有用法时是 undefined。 */
+  readonly useMode?: 'tap' | 'hold';
+  /** 长按倒计时多长，秒。`tap` 是 0。 */
+  readonly holdSeconds: number;
 }
 
 /** 分类页。第一页固定是「全部」，其余按物品目录的分类顺序，空分类不出现。 */
@@ -90,7 +112,7 @@ export interface InventoryPageView {
   readonly stacks: readonly InventoryStackView[];
 }
 
-/** 快捷栏一格。配置着但没货时 `quantity` 为 0——格子还在，手上是空的。 */
+/** 物品栏一格。空格的 `itemType` 是 undefined、`quantity` 为 0。 */
 export interface HotbarSlotView {
   readonly index: number;
   readonly itemType?: string;
@@ -99,8 +121,10 @@ export interface HotbarSlotView {
   readonly tint?: string;
   readonly quantity: number;
   readonly active: boolean;
-  /** 有没有使用方式；界面据此决定要不要提示「按住蓄力」。 */
+  /** 有没有使用方式；界面据此决定要不要提示按一下还是按住。 */
   readonly usable: boolean;
+  /** `hold` 的那些要画圆形倒计时，`tap` 点一下就结算。没有用法时是 undefined。 */
+  readonly useMode?: 'tap' | 'hold';
 }
 
 export interface InventoryView {
@@ -118,8 +142,10 @@ export interface InventoryView {
   /** 分类页，第一页是全部。 */
   readonly pages: readonly InventoryPageView[];
   readonly hotbar: readonly HotbarSlotView[];
-  /** 真正握在手上的那一种；配置还在但货用光了时是 undefined。 */
+  /** 真正握在手上的那一种；空手时是 undefined。 */
   readonly heldItemType?: string;
+  /** 选中的是哪一格；空手时是 -1。装配时用它决定「放哪一格」的默认落点。 */
+  readonly activeHotbarIndex: number;
   readonly revision: number;
 }
 
@@ -148,6 +174,9 @@ function toStackView(
     contraband: definition.contraband,
     // 目录没写就按可手持处理，和 ItemCatalog 的默认一致（弹药那类显式写了 false）。
     holdable: definition.holdable ?? true,
+    usable: definition.use !== undefined,
+    useMode: definition.use?.mode,
+    holdSeconds: definition.use?.holdSeconds ?? 0,
   };
 }
 
@@ -194,6 +223,7 @@ export function buildInventoryView(
     pages: buildPages([...slots, ...pooled], catalog),
     hotbar: buildHotbar(inventory, catalog),
     heldItemType: inventory.heldItemType,
+    activeHotbarIndex: inventory.activeHotbarIndex ?? -1,
     revision: inventory.revision,
   };
 }
@@ -233,41 +263,32 @@ function catalogOrder(catalog: ItemCatalogLike): Map<string, number> {
   return order;
 }
 
+/**
+ * 物品栏。
+ *
+ * 数量直接读格子：物品栏自己持有那一摞，不需要回背包账上找，也不需要为「拿在
+ * 手上那一个」补一笔——手上挂的只是一个模型，账从头到尾都在这一格上。
+ */
 function buildHotbar(
   inventory: InventoryModelLike,
   catalog: ItemCatalogLike,
 ): HotbarSlotView[] {
   const slots = inventory.hotbar ?? [];
   const activeIndex = inventory.activeHotbarIndex ?? -1;
-  return slots.map((itemType, index) => {
-    const definition = itemType ? catalog.get(itemType) : undefined;
-    const quantity = definition
-      ? quantityOf(inventory, definition.id) + (inventory.heldItemType === definition.id ? 1 : 0)
-      : 0;
+  return slots.map((slot, index) => {
+    const definition = slot ? catalog.get(slot.itemType) : undefined;
     return {
       index,
       itemType: definition?.id,
       displayName: definition?.displayName,
       iconId: definition?.iconId,
       tint: definition?.tint,
-      quantity,
+      quantity: definition ? slot?.quantity ?? 0 : 0,
       active: index === activeIndex,
       usable: Boolean(definition?.use),
+      useMode: definition?.use?.mode,
     };
   });
-}
-
-/**
- * 快捷栏上显示的数量要把「已经拿在手上那一个」算回去。
- *
- * 手持物在世界里是一个真 Actor，为了不让同一件东西同时存在于账本和世界里，账上
- * 那一个是被扣掉的。界面上不加回来的话，拿起最后一个木材时那一格会显示 0。
- */
-function quantityOf(inventory: InventoryModelLike, itemType: string): number {
-  let total = 0;
-  for (const entry of inventory.slots) if (entry.itemType === itemType) total += entry.quantity;
-  for (const entry of inventory.pooled) if (entry.itemType === itemType) total += entry.quantity;
-  return total;
 }
 
 /** 容器界面里的一行：同一种物品，箱内和身上的数量并排。 */
@@ -306,6 +327,10 @@ export interface ContainerModelLike {
 
 /**
  * 把容器和背包并成界面能直接画的一张表。
+ *
+ * 「身上」指的是**背包**那一本账，不含物品栏：箱子前面能存进去的只有包里那些，
+ * 手上正拿着的那一摞要先收回背包才搬得动（见 `transferItems`）。把物品栏也算进这
+ * 一列，玩家会按着一个搬不动的数字去点「存」。
  *
  * 一行 = 一种物品，箱内和身上并排——这是「存 / 取」两个按钮能成立的前提：玩家要
  * 决定搬哪一边，就得同时看见两边。分成两个面板再让人拖来拖去，是把这个判断拆散

@@ -897,6 +897,36 @@ export class ClientActorSystem implements SceneFrameSystem {
     };
   }
 
+  /** 出生就挂在别人身上的物品堆 = 手持表现体，只画模型，不参与世界。 */
+  private isHeldItemVisual(
+    snapshot: SnapshotActor,
+    archetype: SceneDefinition['actorArchetypes'][number],
+  ): boolean {
+    return Boolean(snapshot.parentActorId) && Boolean(archetype.components.itemStack);
+  }
+
+  /**
+   * 手持表现体的 Replica：Transform + ItemStack + 复制标记，到此为止。
+   *
+   * 没有 `SimpleCollisionComponent`（不挡人、不被准星扫到）、没有 `dropMotion`
+   * （不滚、不掉）、没有 `interactable`（交互键指向它由 HotbarController 按
+   * heldActorId 判定，不走候选搜索）。坐标每帧来自权威快照插值，和服务端那边
+   * 由 Actor 嵌套解算出来的是同一个值。
+   */
+  private completeHeldItemVisual(
+    actor: Actor,
+    snapshot: SnapshotActor,
+    archetype: SceneDefinition['actorArchetypes'][number],
+  ): Actor {
+    actor.addComponent(new ItemStackComponent({
+      ...archetype.components.itemStack,
+      quantity: snapshot.itemStack?.quantity,
+    }));
+    actor.addComponent(new ReplicationComponent());
+    this.world.addActor(actor);
+    return actor;
+  }
+
   private createReplica(snapshot: SnapshotActor): Actor {
     const archetypeId = this.resolveSnapshotArchetypeId(snapshot);
     const archetype = this.archetypes.get(archetypeId);
@@ -907,6 +937,11 @@ export class ClientActorSystem implements SceneFrameSystem {
       position: [snapshot.transform.x, snapshot.transform.y, snapshot.transform.z],
       yaw: snapshot.transform.yaw,
     }));
+    // 一开始就挂在别人身上的物品堆是**手持表现体**：服务端那边已经把物理、生命期
+    // 与可交互摘掉了（见 `heldItemArchetype`），客户端照原型重建会把它们又装回来——
+    // 于是手上那件会挡住自己走路、会被准星选中、还会挡住它身后真正想选的东西。
+    // 物品堆只有这一种情况会带父级，而且是出生时就带着，所以这个判断一次定型。
+    if (this.isHeldItemVisual(snapshot, archetype)) return this.completeHeldItemVisual(actor, snapshot, archetype);
     if (archetype.components.guidePath) {
       actor.addComponent(new GuidePathComponent(archetype.components.guidePath));
     }

@@ -14,6 +14,8 @@ class FakeElement extends EventTarget {
   public tabIndex = 0;
   public type = '';
   public disabled = false;
+  /** 拖拽用：界面给拖得动的格子写 true，测试要读得回来。 */
+  public draggable = false;
   /** 菜单摆位会写 left/top；没有排版引擎，这里只要写得进去。 */
   public readonly style: Record<string, string> = {};
   public readonly dataset: Record<string, string> = {};
@@ -222,7 +224,7 @@ test('不占货位的物品和别的物品排在一起，靠标记区分而不�
     page.setInventory(inventoryView(4, [['wood', 3], ['light-ammo', 60]]));
 
     // 分类页签接管了分组，所以不再有第二个网格把同一堆货画两遍。
-    assert.equal(cellsOf(page, 'inventory__grid--pooled')[0].children.length, 0);
+    assert.equal(cellsOf(page, 'inventory__grid--pooled').length, 0);
     // 全部页：木材 + 弹药 + 三个空货位。弹药不吃格数，空格仍然是三个。
     assert.equal(cellsOf(page, 'inventory__cell').length, 2 + 3);
 
@@ -274,7 +276,7 @@ test('可手持的格子点一下弹出动作菜单，拿不到手上的不响�
     assert.equal(menu.hidden, false);
     assert.deepEqual(
       menuEntries(page).map((entry) => entry.textContent),
-      ['使用', '装备', '丢弃'],
+      ['使用', '装配', '丢弃'],
     );
     assert.equal(cellsOf(page, 'inventory-menu__title')[0].textContent, '木材');
 
@@ -339,22 +341,100 @@ test('点别处收起菜单；再点同一格是「我不选了」', () => {
   });
 });
 
-test('已经配在物品栏上时，「装备」列出来但点不动', () => {
+test('已经装配在物品栏上时，「装配」列出来但点不动', () => {
   withFakeDocument(() => {
-    const inventory = new InventoryComponent({ slotCapacity: 6, hotbarCapacity: 4 });
+    const inventory = new InventoryComponent({ slotCapacity: 6, hotbarCapacity: 9 });
     inventory.add('wood', 3);
+    // 装配是一次转移：这之后木材整摞在物品栏上，背包里没有了，所以从物品栏那一格
+    // 上点开菜单。
     inventory.assignHotbarSlot(0, 'wood');
     const page = new InventoryPage();
     const actions: string[] = [];
     page.onItemAction((action) => actions.push(action));
     page.setInventory(buildInventoryView(inventory as never));
 
+    assert.equal(
+      cellsOf(page, 'inventory__cell').some((cell) => cell.dataset.itemType === 'wood'),
+      false,
+      '装配之后背包里不再有它：物品栏是另一本账，不是一个引用',
+    );
+
+    // 再往包里放一些，背包那一格就回来了——这时「装配」那条应当是点不动的。
+    inventory.add('wood', 2);
+    page.setInventory(buildInventoryView(inventory as never));
     clickCell(page, 'wood');
     const equip = menuEntries(page).find((entry) => entry.dataset.action === 'equip');
     assert.ok(equip);
     assert.equal(equip.disabled, true);
     equip.dispatchEvent(new Event('click'));
     assert.deepEqual(actions, [], '点不动的那条不该报出意图');
+  });
+});
+
+test('下方那条物品栏画的是它自己持有的那一摞，格子拖得动', () => {
+  withFakeDocument(() => {
+    const inventory = new InventoryComponent({ slotCapacity: 6, hotbarCapacity: 9 });
+    inventory.add('wood', 120);
+    inventory.assignHotbarSlot(1, 'wood');
+    inventory.setActiveHotbarSlot(1);
+    const page = new InventoryPage();
+    page.setInventory(buildInventoryView(inventory as never));
+
+    const slots = cellsOf(page, 'inventory-hotbar__slot');
+    assert.equal(slots.length, 9, '一格一个数字键，1-9');
+    assert.equal(slots[1].dataset.state, 'ready');
+    assert.equal(slots[1].dataset.active, 'true', '选中的那一格标出来');
+    // 一摞最多 99：装配搬走 99 个，剩下 21 个留在背包里。
+    assert.equal(
+      cellsOf(page, 'inventory-hotbar__quantity')[1].textContent,
+      String(itemCatalog.require('wood').stackLimit),
+    );
+    assert.equal(slots[0].dataset.state, 'empty');
+    assert.equal(slots[0].draggable, false, '空格没什么可拖的');
+    assert.equal(slots[1].draggable, true);
+  });
+});
+
+test('拖拽的三个方向：背包 → 物品栏、物品栏之间、物品栏 → 背包', () => {
+  withFakeDocument(() => {
+    const inventory = new InventoryComponent({ slotCapacity: 6, hotbarCapacity: 9 });
+    inventory.add('wood', 120);
+    inventory.assignHotbarSlot(0, 'wood');
+    const page = new InventoryPage();
+    const drops: [unknown, unknown][] = [];
+    page.onDragDrop((source, target) => drops.push([source, target]));
+    page.setInventory(buildInventoryView(inventory as never));
+
+    const backpackCell = cellsOf(page, 'inventory__cell')
+      .find((cell) => cell.dataset.itemType === 'wood');
+    const hotbarSlots = cellsOf(page, 'inventory-hotbar__slot');
+    const grid = cellsOf(page, 'inventory__grid')[0];
+    assert.ok(backpackCell);
+
+    backpackCell.dispatchEvent(new Event('dragstart'));
+    hotbarSlots[2].dispatchEvent(new Event('drop'));
+    assert.deepEqual(drops.at(-1), [
+      { kind: 'backpack', itemType: 'wood' },
+      { kind: 'hotbar', slotIndex: 2 },
+    ]);
+
+    hotbarSlots[0].dispatchEvent(new Event('dragstart'));
+    hotbarSlots[3].dispatchEvent(new Event('drop'));
+    assert.deepEqual(drops.at(-1), [
+      { kind: 'hotbar', slotIndex: 0 },
+      { kind: 'hotbar', slotIndex: 3 },
+    ]);
+
+    hotbarSlots[0].dispatchEvent(new Event('dragstart'));
+    grid.dispatchEvent(new Event('drop'));
+    assert.deepEqual(drops.at(-1), [{ kind: 'hotbar', slotIndex: 0 }, { kind: 'backpack' }]);
+
+    // 拖到界面外面松手：`dragend` 清掉来源，下一次落点不该带着上一次的货。
+    const before = drops.length;
+    hotbarSlots[0].dispatchEvent(new Event('dragstart'));
+    hotbarSlots[0].dispatchEvent(new Event('dragend'));
+    grid.dispatchEvent(new Event('drop'));
+    assert.equal(drops.length, before, '没有来源的那次落点什么都不报');
   });
 });
 

@@ -68,8 +68,16 @@ export interface SnapshotPlayer {
   /** 背包只发给本人：别人包里有什么不是这名玩家该知道的。 */
   inventory?: Array<{ itemType: string; quantity: number }>;
   inventoryRevision?: number;
-  /** 快捷栏配置与选中格；同样只发给本人。 */
-  hotbar?: { slots: Array<string | null>; activeIndex: number };
+  /**
+   * 物品栏内容与选中格；同样只发给本人。
+   *
+   * 每格带数量，因为物品栏自己持有那一摞——它是一条特殊的背包，装配是转移不是
+   * 引用，所以数量在背包那份快照里已经查不到了。
+   */
+  hotbar?: {
+    slots: Array<{ itemType: string; quantity: number } | null>;
+    activeIndex: number;
+  };
   /** PickupDrop Component 的运行态；口部挂点来自玩家 Actor 原型。 */
   heldActorId?: string | null;
   pickupDropRevision?: number;

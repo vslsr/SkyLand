@@ -7,15 +7,24 @@ import type { InputSubsystem } from '../input/core/InputSubsystem';
 import type { InventoryModelLike } from '../inventory/index';
 import type { InventoryCommand } from '../network/messages';
 import type { TagLike } from '../tags';
-import { chargeRatio, resolveHeldItemAction } from '../../shared/actor/index.mjs';
+import { holdRatio, resolveHeldItemAction } from '../../shared/actor/index.mjs';
 
-/** 界面要画的那两圈进度；没有正在进行的按住时是 undefined。 */
+/** 界面要画的那圈圆形倒计时；没有正在进行的按住时是 undefined。 */
 export interface HeldItemProgress {
-  /** `charge` 是使用蓄力，`stow` 是交互键长按收回背包。 */
-  readonly kind: 'charge' | 'stow';
-  /** [0, 1]。到 1 表示服务端也认为满了。 */
+  /** `use` 是物品能力的长按激活，`stow` 是交互键长按收回背包。 */
+  readonly kind: 'use' | 'stow';
+  /** [0, 1]。到 1 表示服务端也认为倒计时走完了。 */
   readonly ratio: number;
   readonly label: string;
+  /**
+   * 这圈倒计时说的是不是物品栏里那一格。
+   *
+   * 是的话，圈画在那一格上就够了——**手持物品不需要在玩家上方再画一次**：同一件
+   * 事画两遍，玩家的眼睛要在两处之间来回找，而格子上那圈已经同时说清了「哪一格」
+   * 和「还要多久」。叼着的蘑菇和从背包里点出来的用法没有格子，那时才轮到准星
+   * 下方那块牌子。
+   */
+  readonly onHotbar: boolean;
   /**
    * 要一直按住的那个键，按当前设备的绑定取（键盘是 `E`，手柄是 `Y`）。
    *
@@ -32,7 +41,7 @@ export interface HotbarPort {
    * 手上那个 Actor 的 id；空手时是 undefined。
    *
    * 用它而不是 `inventory.heldItemType` 来判断「手上有没有东西」：叼着的蘑菇是个
-   * 世界物件，不在快捷栏里，按 itemType 判断会让它整条漏掉长按计时——那正是
+   * 世界物件，不在物品栏里，按 itemType 判断会让它整条漏掉长按计时——那正是
    * 「按下就掉」的成因。换手的作废检测也用它，因为它对两种手持物都成立。
    */
   getHeldActorId(): string | undefined;
@@ -41,13 +50,13 @@ export interface HotbarPort {
   /** 当前绑定下这个 Action 的键位显示名；重绑定后立刻跟着变。 */
   getInputLabel(tag: TagLike): string | undefined;
   send(command: InventoryCommand): void;
-  /** 每帧把进度交给界面；undefined 表示收掉那两圈。 */
+  /** 每帧把进度交给界面；undefined 表示收掉那圈。 */
   setProgress(progress: HeldItemProgress | undefined): void;
 }
 
 /** 一次还没结束的按住。 */
 interface PendingHold {
-  readonly kind: 'charge' | 'stow';
+  readonly kind: 'use' | 'stow';
   /**
    * 按住开始那一刻手上是哪个 Actor。
    *
@@ -56,23 +65,35 @@ interface PendingHold {
    */
   readonly heldActorId: string | undefined;
   readonly startedAt: number;
+  /** 倒计时多长。0 表示这是一次点按，没有圈可画，松手即结算。 */
   readonly durationSeconds: number;
   readonly label: string;
+  readonly onHotbar: boolean;
   /** 按下那一刻的键位。记在这次按住上：中途重绑定不该改写正在进行的这一次。 */
   readonly inputLabel?: string;
+  /** 倒计时已经走完：服务端在同一刻激活了，松手不再有含义。 */
+  completed: boolean;
 }
 
 /**
- * 快捷栏与手持物的输入层。
+ * 物品栏与物品使用的输入层。
  *
- * 它只做三件事：把按键翻译成意图、把按住的时长翻译成给玩家看的进度、在状态变化时
- * 取消掉不再成立的按住。**它不判定结果**——蓄力够不够、长按算不算收包，全由服务端
- * 按自己记的时刻算。这里画的圈是预期，不是许可。
+ * 它只做三件事：把按键翻译成意图、把按住的时长翻译成给玩家看的圆形倒计时、在
+ * 状态变化时取消掉不再成立的按住。**它不判定结果**——长按算不算数、投掷成不成立，
+ * 全由服务端按自己记的时刻算。这里画的圈是预期，不是许可。
  *
- * 两端跑同一个 `chargeRatio`，圈满那一刻就是服务端判定满的那一刻。
+ * 两端跑同一个 `holdRatio`，圈满那一刻就是服务端激活那一刻。长按尤其如此：激活
+ * 发生在倒计时走完的那一瞬间，不是松手那一瞬间，所以圈画满之后就不必再按着了。
  */
 export class HotbarController {
   private pending?: PendingHold;
+  /**
+   * 背包菜单里点「使用」之后授予的那件东西。
+   *
+   * 它优先于手持物：玩家刚刚显式点了背包里那一件，接下来的使用键说的就是它。
+   * 一次激活、一次取消、或者换手都会把它清掉。
+   */
+  private armedItemType?: string;
   private readonly disposers: (() => void)[] = [];
 
   public constructor(
@@ -106,27 +127,48 @@ export class HotbarController {
     );
   }
 
-  /** 每帧调用：推进进度圈，并在手上那件变了时作废正在进行的按住。 */
+  /**
+   * 背包里点了「使用」：接下来的使用键说的是这件东西。
+   *
+   * 传 undefined 是撤销。由 `InventoryController` 在发出 `use:arm` 的同一刻调用，
+   * 两边说的是同一件事。
+   */
+  public armItem(itemType: string | undefined): void {
+    this.armedItemType = itemType;
+  }
+
+  /** 每帧调用：推进倒计时，并在手上那件变了时作废正在进行的按住。 */
   public update(): void {
     if (this.pending && this.port.getHeldActorId() !== this.pending.heldActorId) {
       // 换手了，这次按住指向的东西已经不在手上，继续算下去会打在新道具头上。
       this.cancelPending();
     }
-    if (!this.pending) {
+    if (!this.pending || this.pending.completed || this.pending.durationSeconds <= 0) {
+      // 点按没有倒计时可画；走完的那一次已经在服务端结算过，圈留着只会误导。
       this.port.setProgress(undefined);
       return;
     }
     const elapsed = (this.now() - this.pending.startedAt) / 1000;
+    const ratio = holdRatio(elapsed, this.pending.durationSeconds);
+    if (ratio >= 1 && this.pending.kind === 'use') {
+      // 圈满即激活：服务端在同一刻自己动手，客户端不再发任何东西，也不再画圈。
+      this.pending.completed = true;
+      this.port.setProgress(undefined);
+      this.armedItemType = undefined;
+      return;
+    }
     this.port.setProgress({
       kind: this.pending.kind,
-      ratio: chargeRatio(elapsed, this.pending.durationSeconds),
+      ratio,
       label: this.pending.label,
+      onHotbar: this.pending.onHotbar,
       inputLabel: this.pending.inputLabel,
     });
   }
 
   public reset(): void {
     this.cancelPending();
+    this.armedItemType = undefined;
   }
 
   public dispose(): void {
@@ -140,18 +182,20 @@ export class HotbarController {
     if (!this.port.isActive() || !inventory) return;
     // 超出这名角色实际格数的数字键什么都不做，而不是报错或绕回第一格。
     if (index >= (inventory.hotbar?.length ?? 0)) return;
+    this.armedItemType = undefined;
     this.port.send({ kind: 'select', slotIndex: index });
   }
 
   private cycle(direction: 1 | -1): void {
     if (!this.port.isActive()) return;
+    this.armedItemType = undefined;
     this.port.send({ kind: 'cycle', direction });
   }
 
   /**
    * 交互键：手上有东西时短按放下、长按收回背包；空手时这里不参与。
    *
-   * 「手上有东西」按嘴上那个 Actor 判，不按快捷栏：叼着的蘑菇也要走这条计时，
+   * 「手上有东西」按嘴上那个 Actor 判，不按物品栏：叼着的蘑菇也要走这条计时，
    * 否则它会落回 `ActorInteractionController` 的按下即触发，一按就掉。
    */
   private handleStow(phase: string): void {
@@ -167,7 +211,10 @@ export class HotbarController {
         startedAt: this.now(),
         durationSeconds: inventory.stowHoldSeconds ?? 0.6,
         label: '收进背包',
+        // 手上那件来自物品栏时圈画在那一格上；叼着的蘑菇没有格子。
+        onHotbar: inventory.heldItemType !== undefined,
         inputLabel: this.port.getInputLabel(PlayerInputTags.WorldInteract),
+        completed: false,
       }, { kind: 'stow:begin' });
       return;
     }
@@ -182,22 +229,33 @@ export class HotbarController {
     this.port.send({ kind: 'stow:release' });
   }
 
+  /**
+   * 使用键：激活当前授予的那条物品能力。
+   *
+   * 用哪件东西的用法，看的是「玩家刚在背包里点出来的那件」，其次才是手上那件——
+   * 两者都由服务端授予同一个能力槽位，客户端这里只是把同一份判断复述一遍，好在
+   * 按下的那一刻就知道该不该画圈。
+   */
   private handleUse(slot: keyof typeof ItemUseInputTags, phase: string): void {
-    const heldItemType = this.port.getInventory()?.heldItemType;
-    const use = resolveHeldItemAction(heldItemType);
-    // 这件道具没登记这个输入槽，就当这个键在手持这件东西时没有含义。
+    const itemType = this.armedItemType ?? this.port.getInventory()?.heldItemType;
+    const use = resolveHeldItemAction(itemType);
+    // 这件道具没登记这个输入槽，就当这个键在它身上没有含义。
     if (!this.port.isActive() || !use || use.input !== slot) {
       if (phase !== 'started') this.cancelPending();
       return;
     }
     if (phase === 'started') {
       this.begin({
-        kind: 'charge',
+        kind: 'use',
         heldActorId: this.port.getHeldActorId(),
         startedAt: this.now(),
-        durationSeconds: use.chargeSeconds,
+        // 点按没有倒计时；长按的圈满那一刻就是服务端激活那一刻。
+        durationSeconds: use.mode === 'hold' ? use.holdSeconds : 0,
         label: use.verb,
+        // 从背包点出来的那条没有格子，圈只能画在准星下方。
+        onHotbar: this.armedItemType === undefined,
         inputLabel: this.port.getInputLabel(ItemUseInputTags[slot]),
+        completed: false,
       }, { kind: 'use:begin' });
       return;
     }
@@ -205,9 +263,13 @@ export class HotbarController {
       this.cancelPending();
       return;
     }
-    if (this.pending?.kind !== 'charge') return;
+    if (this.pending?.kind !== 'use') return;
+    const completed = this.pending.completed;
     this.pending = undefined;
     this.port.setProgress(undefined);
+    // 倒计时已经走完的那一次，服务端在圈满那一刻就结算了，松手不再有含义。
+    if (completed) return;
+    this.armedItemType = undefined;
     this.port.send({ kind: 'use:release' });
   }
 
@@ -221,9 +283,12 @@ export class HotbarController {
 
   private cancelPending(): void {
     if (!this.pending) return;
-    const kind = this.pending.kind;
+    const { kind, completed } = this.pending;
     this.pending = undefined;
     this.port.setProgress(undefined);
-    this.port.send({ kind: kind === 'charge' ? 'use:cancel' : 'stow:cancel' });
+    if (kind === 'use') this.armedItemType = undefined;
+    // 已经结算过的那次没有什么可取消的，再发一条只会打断下一次按住。
+    if (completed) return;
+    this.port.send({ kind: kind === 'use' ? 'use:cancel' : 'stow:cancel' });
   }
 }

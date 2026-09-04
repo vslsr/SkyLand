@@ -21,11 +21,15 @@ export const ITEM_CATEGORIES = Object.freeze([
 const POOLED_CATEGORIES = new Set(['ammunition', 'tool']);
 
 /**
- * 手持时按使用键做什么。
+ * 使用这件物品时做什么。
  *
  * 只登记**已经有系统兑现**的效果：`tool` 走 `GeneratedProp.applyDamage`，
  * `throw` 走掉落物的 `DropMotion` 抛体。「吃下回血」这类要等角色身上先有一条
  * 可回复的属性——在那之前写进目录只会得到一个按下去没反应的动词。
+ *
+ * 这一段同时是**物品能力的定义源**：使用一件物品的兑现路径是「授予玩家一条
+ * Ability → 按下面的 mode 激活 → 完成后收回」，`action` 决定那条 Ability 激活
+ * 时执行什么，见 `shared/items/ItemAbility.mjs`。
  */
 export const ITEM_USE_ACTIONS = Object.freeze(['tool', 'throw']);
 
@@ -42,14 +46,14 @@ export const ITEM_USE_ACTIONS = Object.freeze(['tool', 'throw']);
 export const ITEM_USE_INPUTS = Object.freeze(['primary']);
 
 /**
- * 怎么按。
+ * 怎么激活这条能力。
  *
- * - `tap`：按下即结算，强度恒为满值。锤子敲一下就是一下。
- * - `charge`：按住蓄力、松手结算，蓄力比例 ∈ [0,1] 乘进强度。投掷蓄得越久扔得
- *   越远；以后的弓箭是同一条路径——多的只是一个 `shoot` 分支，按键、蓄力、
- *   结算这一套不用再写一遍。
+ * - `tap`：点一下就激活。锤子敲一下就是一下。
+ * - `hold`：按住 `holdSeconds` 秒，**倒计时走完的那一刻激活**，中途松手是取消。
+ *   长按不是「蓄力越久越强」——强度恒为 `value`，倒计时只决定成不成立。玩家看到
+ *   的那圈圆形倒计时因此和判定是同一件事：圈满 = 激活。
  */
-export const ITEM_USE_MODES = Object.freeze(['tap', 'charge']);
+export const ITEM_USE_MODES = Object.freeze(['tap', 'hold']);
 
 function requireObject(value, path) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
@@ -79,7 +83,7 @@ function requireInteger(value, path, minimum, maximum) {
   return value;
 }
 
-/** 手持交互配置。整块不写就是「只能拿着，按键没反应」。 */
+/** 使用配置。整块不写就是「这件东西没有用法」。 */
 function validateUse(raw, path, holdable) {
   if (raw === undefined) return undefined;
   const definition = requireObject(raw, path);
@@ -93,20 +97,20 @@ function validateUse(raw, path, holdable) {
   if (!ITEM_USE_MODES.includes(definition.mode)) {
     throw new TypeError(`${path}.mode 必须是 ${ITEM_USE_MODES.join(' / ')} 之一`);
   }
-  const charged = definition.mode === 'charge';
-  const chargeSeconds = definition.chargeSeconds;
-  if (charged !== (chargeSeconds !== undefined)) {
-    throw new TypeError(`${path}.chargeSeconds 只属于 charge，且蓄力必须给出蓄满时长`);
+  const held = definition.mode === 'hold';
+  const holdSeconds = definition.holdSeconds;
+  if (held !== (holdSeconds !== undefined)) {
+    throw new TypeError(`${path}.holdSeconds 只属于 hold，且长按必须给出倒计时长度`);
   }
-  if (charged && (!Number.isFinite(chargeSeconds) || chargeSeconds <= 0 || chargeSeconds > 10)) {
-    throw new TypeError(`${path}.chargeSeconds 必须是 (0, 10] 的秒数`);
+  if (held && (!Number.isFinite(holdSeconds) || holdSeconds <= 0 || holdSeconds > 10)) {
+    throw new TypeError(`${path}.holdSeconds 必须是 (0, 10] 的秒数`);
   }
   return Object.freeze({
     action: definition.action,
     input: definition.input,
     mode: definition.mode,
-    /** tap 蓄力时长为 0：结算时强度恒为满值，不需要再分一条支路。 */
-    chargeSeconds: charged ? chargeSeconds : 0,
+    /** tap 的倒计时长度是 0：点一下就激活，不需要再分一条支路。 */
+    holdSeconds: held ? holdSeconds : 0,
     value: requireInteger(definition.value, `${path}.value`, 1, 1000),
   });
 }
@@ -161,7 +165,10 @@ function validateItem(raw, index) {
     contraband: definition.contraband === true,
     /** 不占货位的物品由独立上限池承载，背包格数对它们没有约束力。 */
     pooled,
-    /** 能不能拿在手上。手持物是挂在角色手部挂点上的一个真 Actor。 */
+    /**
+     * 能不能拿在手上。手持物是挂在角色手部挂点上的一个纯表现 Actor：
+     * 没有碰撞、没有掉落物理，坐标完全由 Actor 嵌套关系解算。
+     */
     holdable,
     /** 怎么用它；不可使用时是 undefined。 */
     use,

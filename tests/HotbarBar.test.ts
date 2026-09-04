@@ -128,12 +128,19 @@ function plateOf(bar: HotbarBar): FakeElement {
   return plate;
 }
 
-test('一格只写一种状态：空 / 有货 / 用光，拿在手上的只有一格', () => {
+/** 每一格上盖着的那圈圆形倒计时。 */
+function dialsOf(bar: HotbarBar): FakeElement[] {
+  const root = bar.element as unknown as FakeElement;
+  return root.collect((element) => element.className === 'hotbar__dial');
+}
+
+test('一格只写一种状态：空 / 有货，拿在手上的只有一格', () => {
   withFakeDocument(() => {
     const bar = new HotbarBar();
     bar.setSlots([
       slot(0),
       slot(1, { itemType: 'wood', displayName: '木材', quantity: 4 }),
+      // 物品栏自己持有那一摞，用光的格子直接空出来，没有「配置还在货没了」这一态。
       slot(2, { itemType: 'bandage', displayName: '绷带', quantity: 0 }),
       slot(3, { itemType: 'torch', displayName: '火把', quantity: 2, active: true }),
     ]);
@@ -141,7 +148,7 @@ test('一格只写一种状态：空 / 有货 / 用光，拿在手上的只有�
     const buttons = slotsOf(bar);
     assert.deepEqual(
       buttons.map((button) => button.dataset.state),
-      ['empty', 'ready', 'depleted', 'ready'],
+      ['empty', 'ready', 'empty', 'ready'],
     );
     assert.deepEqual(
       buttons.map((button) => button.dataset.held),
@@ -185,8 +192,8 @@ test('牌子平时写手上拿的是什么，按住时改写这次按住', () =>
     assert.equal(plate.hidden, false);
     assert.equal(plate.textContent, '火把');
 
-    bar.setProgress({ kind: 'charge', ratio: 0.5, label: '蓄力' });
-    assert.equal(plate.textContent, '蓄力');
+    bar.setProgress({ kind: 'use', ratio: 0.5, label: '投掷「火把」', onHotbar: true });
+    assert.equal(plate.textContent, '投掷「火把」');
     assert.equal(plate.dataset.progress, 'true');
 
     bar.setProgress(undefined);
@@ -195,18 +202,21 @@ test('牌子平时写手上拿的是什么，按住时改写这次按住', () =>
   });
 });
 
-test('进度圈画在手持那一格上，换手时旧格子上的圈被抹掉', () => {
+test('圆形倒计时盖在手持那一格上，换手时旧格子上的圈被抹掉', () => {
   withFakeDocument(() => {
     const bar = new HotbarBar();
     bar.setSlots([
       slot(0, { itemType: 'wood', displayName: '木材', quantity: 4, active: true }),
       slot(1, { itemType: 'torch', displayName: '火把', quantity: 2 }),
     ]);
-    bar.setProgress({ kind: 'stow', ratio: 0.25, label: '收回背包' });
+    bar.setProgress({ kind: 'stow', ratio: 0.25, label: '收回背包', onHotbar: true });
 
     const buttons = slotsOf(bar);
+    const dials = dialsOf(bar);
     assert.equal(buttons[0].dataset.progress, 'stow');
-    assert.equal(buttons[0].style['--hotbar-progress'], '25%');
+    assert.equal(dials[0].hidden, false);
+    assert.equal(dials[0].style['--hotbar-progress'], '25%');
+    assert.equal(dials[1].hidden, true, '没拿在手上的那一格不画圈');
     assert.equal(buttons[1].dataset.progress, undefined);
 
     bar.setSlots([
@@ -214,20 +224,35 @@ test('进度圈画在手持那一格上，换手时旧格子上的圈被抹掉',
       slot(1, { itemType: 'torch', displayName: '火把', quantity: 2, active: true }),
     ]);
     assert.equal(buttons[0].dataset.progress, undefined, '换手后旧格子上不能留着半圈');
-    assert.equal(buttons[0].style['--hotbar-progress'], undefined);
+    assert.equal(dials[0].hidden, true);
+    assert.equal(dials[0].style['--hotbar-progress'], undefined);
     assert.equal(plateOf(bar).textContent, '火把');
   });
 });
 
-test('货用光的那一格拿不到手上，没有圈也没有牌子', () => {
+test('不属于物品栏的那次按住不在格子上画圈：同一件事不画两遍', () => {
+  withFakeDocument(() => {
+    const bar = new HotbarBar();
+    bar.setSlots([slot(0, { itemType: 'wood', displayName: '木材', quantity: 4, active: true })]);
+    // 叼着的蘑菇、背包里点出来的用法都没有格子，它们的圈在准星下方那块牌子上。
+    bar.setProgress({ kind: 'stow', ratio: 0.9, label: '收进背包', onHotbar: false });
+
+    assert.equal(slotsOf(bar)[0].dataset.progress, undefined);
+    assert.equal(dialsOf(bar)[0].hidden, true);
+    assert.equal(plateOf(bar).textContent, '木材', '牌子仍然只说手上拿的是什么');
+  });
+});
+
+test('空格拿不到手上，没有圈也没有牌子', () => {
   withFakeDocument(() => {
     const bar = new HotbarBar();
     bar.setSlots([slot(0, { itemType: 'bandage', displayName: '绷带', quantity: 0, active: true })]);
-    bar.setProgress({ kind: 'charge', ratio: 0.9, label: '蓄力' });
+    bar.setProgress({ kind: 'use', ratio: 0.9, label: '投掷「绷带」', onHotbar: true });
 
     const button = slotsOf(bar)[0];
-    assert.equal(button.dataset.state, 'depleted');
+    assert.equal(button.dataset.state, 'empty');
     assert.equal(button.dataset.progress, undefined);
+    assert.equal(dialsOf(bar)[0].hidden, true);
     assert.equal(plateOf(bar).hidden, true);
   });
 });

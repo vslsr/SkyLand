@@ -153,7 +153,9 @@ export function createServerActor(spawn, archetype, runtime = {}) {
     combustible.fuel = runtime.thermal.fuel ?? combustible.fuel;
     combustible.burning = runtime.thermal.burning ?? combustible.burning;
   }
-  if (archetype.components.render) {
+  // `collision: false` 是给纯表现体用的（手持物）：它有模型但不该挡住任何人，
+  // 也不该出现在碰撞索引里。
+  if (archetype.components.render && runtime.collision !== false) {
     actor.addComponent(new SimpleCollisionComponent(createSimpleCollisionFromRender(
       archetype.components.render,
       // 可脱离物在附着阶段仍需保留模型的完整支撑面；真正断裂后由

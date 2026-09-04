@@ -1,7 +1,15 @@
 import rawItemCatalog from '../../config/items/item-catalog.json' with { type: 'json' };
 import { ItemCatalog } from './ItemCatalog.mjs';
 
-export { ItemCatalog, ITEM_CATEGORIES } from './ItemCatalog.mjs';
+export { ItemCatalog, ITEM_CATEGORIES, ITEM_USE_MODES } from './ItemCatalog.mjs';
+export {
+  createItemUseAbility,
+  holdRatio,
+  itemAbilityId,
+  resolveItemUse,
+  ITEM_USE_ABILITY_SLOT,
+  ITEM_USE_STATE_TAG,
+} from './ItemAbility.mjs';
 
 /**
  * 全局物品定义表。

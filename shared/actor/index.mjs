@@ -51,6 +51,7 @@ export {
   DEFAULT_STOW_HOLD_SECONDS,
   INVENTORY_COMPONENT,
   InventoryComponent,
+  MAXIMUM_HOTBAR_CAPACITY,
   NO_HOTBAR_SLOT,
 } from './components/InventoryComponent.mjs';
 export {
@@ -66,10 +67,17 @@ export {
 } from './components/StowableComponent.mjs';
 export {
   ACTOR_ACTION_IDS,
-  chargeRatio,
+  holdRatio,
   resolveActorAction,
   resolveHeldItemAction,
 } from './ActorActionTable.mjs';
+export {
+  createItemUseAbility,
+  itemAbilityId,
+  resolveItemUse,
+  ITEM_USE_ABILITY_SLOT,
+  ITEM_USE_STATE_TAG,
+} from '../items/ItemAbility.mjs';
 export {
   INTERACTABLE_COMPONENT,
   InteractableComponent,
