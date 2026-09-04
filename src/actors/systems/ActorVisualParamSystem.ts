@@ -30,6 +30,7 @@ import {
   PARAM_ELASTIC_TARGET_Z,
   PARAM_CONTAINER_OPEN_TARGET,
   PARAM_FIRE_TARGET_INTENSITY,
+  PARAM_HEALTH_DEATH_REVISION,
   PARAM_POINT_LIGHT_INTENSITY,
   PARAM_TEMPERATURE,
   RENDER_VISUAL_PARAM_COUNT,
@@ -61,6 +62,8 @@ import {
   type ElasticDetachComponent,
   ELASTIC_TETHER_COMPONENT,
   type ElasticTetherComponent,
+  HEALTH_COMPONENT,
+  type HealthComponent,
   TEMPERATURE_COMPONENT,
   type TemperatureComponent,
 } from '../../../shared/actor/index.mjs';
@@ -97,6 +100,14 @@ export class ActorVisualParamSystem {
         proxy.proxyId,
         PARAM_POINT_LIGHT_INTENSITY,
         light ? light.targetIntensity : 0,
+      );
+      // 死亡计数：活着的、没有生命值的都写 0。渲染侧靠它变化踢一次倒下动画，
+      // 塌到百分之几由那一侧自己积分（见 RenderDeathCollapse.ts）。
+      const health = actor.getComponent(HEALTH_COMPONENT) as HealthComponent | undefined;
+      this.transforms.writeParam(
+        proxy.proxyId,
+        PARAM_HEALTH_DEATH_REVISION,
+        health?.dead ? health.deathRevision : 0,
       );
       const temperature = actor.getComponent(
         TEMPERATURE_COMPONENT,

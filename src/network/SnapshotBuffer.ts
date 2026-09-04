@@ -45,6 +45,7 @@ function toState(player: SnapshotPlayer): InterpolatedPlayerState {
     ...(player.slimeDrag ? { slimeDrag: player.slimeDrag } : {}),
     ...(player.bitingPlayerId ? { bitingPlayerId: player.bitingPlayerId } : {}),
     ...(player.leash ? { leash: player.leash } : {}),
+    ...(player.health ? { health: player.health } : {}),
   };
 }
 
@@ -76,6 +77,9 @@ function blend(from: SnapshotPlayer, to: SnapshotPlayer, amount: number): Interp
     // 缰绳同样取最新的那一份：它进的是本地预测，插值出来的中间锚点不对应
     // 服务端重放时用过的任何一个值。
     ...(to.leash ? { leash: to.leash } : {}),
+    // 血量取最新的那一份：飘字与死亡都靠计数变化触发，插出来的中间值会把
+    // 「掉了 30」摊成两帧各掉 15，飘字就成了两条。
+    ...(to.health ? { health: to.health } : {}),
   };
 }
 

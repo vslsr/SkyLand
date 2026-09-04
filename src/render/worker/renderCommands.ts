@@ -71,6 +71,13 @@ export type RenderCommand =
       readonly casterZ: number;
       readonly succeeded: boolean;
     }
+  | {
+      readonly kind: 'spawnHealthPopup';
+      readonly x: number;
+      readonly y: number;
+      readonly z: number;
+      readonly amount: number;
+    }
   | { readonly kind: 'setTemperatureMarkersVisible'; readonly visible: boolean }
   | { readonly kind: 'setSimpleCollisionVisible'; readonly visible: boolean }
   /**
@@ -245,6 +252,10 @@ export class RenderCommandQueue implements RenderScene, ChunkViewSink, RenderWor
       casterZ,
       succeeded,
     });
+  }
+
+  public spawnHealthPopup(x: number, y: number, z: number, amount: number): void {
+    this.#commands.push({ kind: 'spawnHealthPopup', x, y, z, amount });
   }
 
   public setTemperatureMarkersVisible(visible: boolean): void {
@@ -534,6 +545,9 @@ export function applyRenderCommand(
         command.casterZ,
         command.succeeded,
       );
+      return;
+    case 'spawnHealthPopup':
+      target.scene.spawnHealthPopup(command.x, command.y, command.z, command.amount);
       return;
     case 'setTemperatureMarkersVisible':
       target.scene.setTemperatureMarkersVisible(command.visible);

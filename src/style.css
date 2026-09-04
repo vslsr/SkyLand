@@ -193,8 +193,35 @@ body.has-interaction-target .crosshair {
 }
 
 .interaction-prompt[hidden],
+.death-notice[hidden],
 .vessel-status[hidden] {
   display: none;
+}
+
+/* 阵亡横幅：和交互提示同一套纸面配色，位置抬到准星上方，两者不会打架。 */
+.death-notice {
+  position: fixed;
+  top: calc(50% - 72px);
+  left: 50%;
+  z-index: var(--layer-hud);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 16px;
+  pointer-events: none;
+  color: rgba(28, 26, 23, 0.86);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-align: center;
+  background: rgba(253, 251, 246, 0.9);
+  border: 1px solid rgba(165, 62, 44, 0.6);
+  transform: translateX(-50%);
+}
+
+.death-notice strong {
+  color: #a53e2c;
+  font-size: 13px;
+  letter-spacing: 0.16em;
 }
 
 /*

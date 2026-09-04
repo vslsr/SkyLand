@@ -403,6 +403,14 @@ export interface ActorArchetypeDefinition {
       cooldownMs: number;
       partId: string;
     };
+    /**
+     * 实体生命值。权威数值住在服务端同一个 Actor 的 GAS `Health` 属性里，
+     * 客户端只按原型知道上限，运行态从快照来。
+     */
+    health?: {
+      maximum: number;
+      corpseSeconds?: number;
+    };
     temperature?: {
       initialTemperature: number;
       ambientTemperature: number;

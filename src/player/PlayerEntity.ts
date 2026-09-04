@@ -29,6 +29,7 @@ import {
   writeSlimeMotionParams,
   type SlimeMotionParams,
 } from '../render/RenderSlimeMotion';
+import { PARAM_HEALTH_DEATH_REVISION } from '../render/RenderVisualParams';
 import {
   SLIME_DRAG_AT_REST,
   writeSlimeDragParams,
@@ -60,6 +61,7 @@ import {
 import type { PhysicsWorld } from '../../shared/physics/PhysicsWorld.mjs';
 import type {
   PlayerInputStep,
+  SnapshotHealth,
   SnapshotLeash,
   SnapshotSlimeDrag,
 } from '../network/protocol';
@@ -147,6 +149,14 @@ export class PlayerEntity extends Actor {
    * 被服务端拉回来。
    */
   private chewingRatio?: number;
+  /**
+   * 自己的死亡计数，从快照来。
+   *
+   * **本地不预测死亡**：血量是权威的，客户端算不出自己什么时候死；这里存的是
+   * 服务端说的那个计数，写进参数段之后由渲染侧踢一次倒下动画。
+   */
+  private deathRevision = 0;
+  private isDead = false;
 
   public constructor(
     playerId: string,
@@ -290,6 +300,17 @@ export class PlayerEntity extends Actor {
   /** 被外力拴住时的缰绳，转交本地预测；见 TopDownController.setLeash。 */
   public setLeash(leash: SnapshotLeash | undefined): void {
     this.controller.setLeash(leash);
+  }
+
+  /** 服务端复制回来的生命值。死了之后自己不再驱动角色，见 `dead`。 */
+  public setHealth(health: SnapshotHealth | undefined): void {
+    this.isDead = health?.dead === true;
+    this.deathRevision = health?.dead ? health.deathRevision : 0;
+  }
+
+  /** 死了没有。场景据它切自由视角，控制器据它停止驱动角色。 */
+  public get dead(): boolean {
+    return this.isDead;
   }
 
   public setReplicatedSlimeDrag(drag: SnapshotSlimeDrag | undefined): void {
@@ -443,6 +464,8 @@ export class PlayerEntity extends Actor {
       this.transform.rotation.y,
     );
     writeSlimeMotionParams(this.transforms, this.proxyId, this.motion);
+    // 死亡计数：自己的死也是从服务端复制回来的，本地不预测。0 表示活着。
+    this.transforms.writeParam(this.proxyId, PARAM_HEALTH_DEATH_REVISION, this.deathRevision);
     // 本地玩家的拖拽整个在渲染侧完成，不经过这条复制通道；但槽位仍要每帧写，
     // 否则回收来的槽位会带着上一位玩家的残留把自己的外壳拉出去。
     // 自己的鼠标拖拽整个在渲染侧完成，不经过这条复制通道；走这里的只有被别人

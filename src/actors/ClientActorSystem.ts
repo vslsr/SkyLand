@@ -21,6 +21,8 @@ import {
   ELASTIC_TETHER_COMPONENT,
   ElasticTetherComponent,
   HazardComponent,
+  HEALTH_COMPONENT,
+  HealthComponent,
   HEAT_EMITTER_COMPONENT,
   HeatEmitterComponent,
   GENERATED_PROP_COMPONENT,
@@ -65,6 +67,10 @@ import {
 } from '../../shared/world/generatedProp.mjs';
 import { toWorldSeed } from '../../shared/world/worldConfig.mjs';
 import { selectWorldPropVariant } from '../../shared/world/worldPropVariants.mjs';
+import {
+  HealthPopupEmitter,
+  healthPopupAnchorY,
+} from '../health/HealthPopupEmitter';
 import { NULL_PROXY_ID, type RenderScene } from '../render/RenderScene';
 import { resolveSlimeLegGroundProbeLayout } from '../render/RenderSlimeLegs';
 import { frameTimeline } from '../platform/index';
@@ -330,8 +336,13 @@ export class ClientActorSystem implements SceneFrameSystem {
   private readonly spawnClock: () => number;
   /** 地形高度查询；只有长腿 Actor 的落脚采样会用到。 */
   private readonly sampleGroundHeight?: GroundHeightSampler;
+  /** 挨打的 Replica 头上那条飘字。玩家自己那条由场景发（他们不是 Replica）。 */
+  private readonly healthPopups: HealthPopupEmitter;
+  /** 原型 id → 飘字起飞高度。按原型算一次就够，模型不会中途变。 */
+  private readonly healthPopupAnchors = new Map<string, number>();
 
   public constructor(options: ClientActorSystemOptions) {
+    this.healthPopups = new HealthPopupEmitter(options.renderScene);
     this.archetypes = new Map(
       options.definition.actorArchetypes.map((definition) => [definition.id, definition]),
     );
@@ -503,6 +514,7 @@ export class ClientActorSystem implements SceneFrameSystem {
         && !liveIds.has(actor.id)
       ) {
         this.externalParentActorIds.delete(actor.id);
+        this.healthPopups.forget(actor.id);
         this.world.removeActor(actor.id);
       }
     }
@@ -913,6 +925,15 @@ export class ClientActorSystem implements SceneFrameSystem {
     this.chewingItem = actorId === undefined ? undefined : { actorId, ratio };
   }
 
+  /** 这个原型的飘字从多高飞出来。按模型算一次，之后查表。 */
+  private healthPopupAnchor(archetypeId: string): number {
+    const cached = this.healthPopupAnchors.get(archetypeId);
+    if (cached !== undefined) return cached;
+    const anchor = healthPopupAnchorY(this.archetypes.get(archetypeId)?.components.render);
+    this.healthPopupAnchors.set(archetypeId, anchor);
+    return anchor;
+  }
+
   private createInstanceCatalog(): ActorInstanceCatalog {
     const archetypeIndex = new Map<string, number>();
     this.archetypeOrder.forEach((id, index) => archetypeIndex.set(id, index));
@@ -1014,6 +1035,16 @@ export class ClientActorSystem implements SceneFrameSystem {
     }
     if (archetype.components.hazard) {
       actor.addComponent(new HazardComponent(archetype.components.hazard));
+    }
+    if (archetype.components.health) {
+      // 上限来自原型，运行态来自快照。客户端这一侧没有 GAS 实体——权威血量住在
+      // 服务端同一个 Actor 的 `Health` 属性里，这里拿到的只是它的复制面。
+      actor.addComponent(new HealthComponent({
+        ...archetype.components.health,
+        current: snapshot.health?.current,
+        dead: snapshot.health?.dead,
+        deathRevision: snapshot.health?.deathRevision,
+      }));
     }
     if (archetype.components.temperature) {
       actor.addComponent(new TemperatureComponent(archetype.components.temperature));
@@ -1264,6 +1295,20 @@ export class ClientActorSystem implements SceneFrameSystem {
           detachable.dropCollisionApplied = true;
         }
       }
+    }
+    if (snapshot.health) {
+      const health = actor.requireComponent(HEALTH_COMPONENT) as HealthComponent;
+      health.applySnapshot(snapshot.health);
+      // 飘字从这一帧的权威位置头顶飞出来。判据是事件计数，不是两帧血量相减——
+      // 10Hz 的快照会把一次 30 点摊成好几条小数字。
+      this.healthPopups.observe(
+        actor.id,
+        snapshot.health,
+        transform.x,
+        transform.y,
+        transform.z,
+        this.healthPopupAnchor(actor.archetypeId),
+      );
     }
     if (snapshot.thermal) {
       const temperature = actor.requireComponent(TEMPERATURE_COMPONENT) as TemperatureComponent;

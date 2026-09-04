@@ -292,6 +292,17 @@ export interface RenderScene extends RenderCommandSink {
     casterZ: number,
     succeeded: boolean,
   ): void;
+  /**
+   * 放一条伤害 / 治疗飘字。`amount` 为负是伤害、为正是治疗。
+   *
+   * 走命令而不是参数段：它是**一次性事件**，不是每帧状态——参数段回答的是
+   * 「这一帧是什么样」，而飘字回答的是「刚刚发生了什么」。飘多高、什么时候淡掉
+   * 整个在渲染侧积分，玩法侧不知道也不需要知道。
+   *
+   * 坐标是世界坐标而不是 proxyId：挨打的可能是一个还没建 proxy 的目标（合批
+   * 掉落物、刚出视野的 Replica），而飘字该照飘。
+   */
+  spawnHealthPopup(x: number, y: number, z: number, amount: number): void;
   /** 两个调试开关。它们是渲染世界自己的状态，不在 Actor 上镜像。 */
   setTemperatureMarkersVisible(visible: boolean): void;
   setSimpleCollisionVisible(visible: boolean): void;

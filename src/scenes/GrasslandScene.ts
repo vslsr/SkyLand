@@ -31,6 +31,10 @@ import { VesselControlController } from '../controllers/VesselControlController'
 import { RoomClient, type JoinedRoom, type RoomSummary } from '../network/RoomClient';
 import { SnapshotBuffer } from '../network/SnapshotBuffer';
 import type { InterpolatedPlayerState, RoomSnapshot } from '../network/protocol';
+import {
+  HealthPopupEmitter,
+  healthPopupAnchorY,
+} from '../health/HealthPopupEmitter';
 import { frameTimeline } from '../platform/index';
 import { PlayerEntity } from '../player/PlayerEntity';
 import { SlimeSurfaceDragController } from '../controllers/SlimeSurfaceDragController';
@@ -99,6 +103,13 @@ export class GrasslandScene extends Scene {
   private readonly pointerRay: PointerRayTracker;
   private readonly gameInteractions = new GameInteractionLayer();
   private readonly hud = new HudController();
+  /**
+   * 玩家头上那条飘字。Replica 的那份由 `ClientActorSystem` 自己发——玩家不是
+   * Replica，走的是 players 快照，所以这一条在这里。
+   */
+  private healthPopups?: HealthPopupEmitter;
+  /** 上一帧本地玩家死了没有。只在翻面的那一帧切相机，不每帧重设。 */
+  private localPlayerDead = false;
   private readonly roomClient = new RoomClient();
   private readonly lobbyPage = new RoomLobbyPage();
   private readonly gameMenuPage = new GameMenuPage();
@@ -233,6 +244,9 @@ export class GrasslandScene extends Scene {
       });
       this.debugMenuPage.onTimeOfDaySelect((timeOfDay) => {
         if (this.joinedRoom) this.roomClient.setTimeOfDay(timeOfDay);
+      });
+      this.debugMenuPage.onHealthCommand((target, amount) => {
+        if (this.joinedRoom) this.roomClient.sendHealthDebug(target, amount);
       });
       this.refreshDebugMenuShortcut();
     }
@@ -470,6 +484,10 @@ export class GrasslandScene extends Scene {
       const own = states.find((state) => state.id === localPlayerId);
       this.localPlayerBiting = own?.bitingPlayerId !== undefined;
       this.player?.setReplicatedSlimeDrag(own?.slimeDrag);
+      // 血量是权威的，本地不预测：死亡计数写进参数段之后由渲染侧踢一次倒下动画。
+      this.player?.setHealth(own?.health);
+      this.syncLocalPlayerDeath();
+      this.emitHealthPopups(states, localPlayerId);
       // 被咬住的尖不过网络：快照里只有「谁咬着谁」，两边的位置又都是权威的，
       // 所以这里按**这一帧插值后的**位置当场算，尖因此始终贴着那张嘴。
       collectBiters(states, this.biters);
@@ -530,11 +548,55 @@ export class GrasslandScene extends Scene {
   }
 
   /**
+   * 死了就把相机交给自由视角，活着（或者换了角色）再交回去。
+   *
+   * 自由视角本来就是这个场景的**兜底控制器**（大厅背后飞的那一个），所以这里
+   * 不需要另造一套：把玩家控制器摘掉，路由自己会切过去，并且带一段机位过渡。
+   * 玩家控制器同时被 `setInputEnabled(false)`，于是不再产生任何预测步——
+   * 服务端那一侧也已经把死者的输入丢掉了（见 ServerScene.stepPlayerOnce）。
+   */
+  private syncLocalPlayerDeath(): void {
+    const dead = this.player?.dead === true;
+    if (dead === this.localPlayerDead) return;
+    this.localPlayerDead = dead;
+    this.hud.setDead(dead);
+    if (!this.player) return;
+    this.controls.setPlayerController(dead ? undefined : this.player.controller);
+  }
+
+  /**
+   * 玩家（自己和别人）头上的伤害 / 治疗飘字。
+   *
+   * 位置取的是**这一帧看到的那个身影**：自己用渲染坐标（含嚼东西那点抖动），
+   * 别人用插值之后的位置，所以数字始终从头顶飞出来，而不是从上一份快照的位置。
+   */
+  private emitHealthPopups(
+    states: readonly InterpolatedPlayerState[],
+    localPlayerId: string | undefined,
+  ): void {
+    const emitter = this.healthPopups;
+    const archetype = this.playerArchetype;
+    if (!emitter || !archetype) return;
+    const anchorY = healthPopupAnchorY(archetype.components.render);
+    for (const state of states) {
+      if (state.id === localPlayerId) {
+        const render = this.player?.renderPosition;
+        if (!render) continue;
+        emitter.observe(state.id, state.health, render.x, render.y, render.z, anchorY);
+        continue;
+      }
+      emitter.observe(state.id, state.health, state.x, state.y ?? 0, state.z, anchorY);
+    }
+  }
+
+  /**
    * 世界应该围绕谁展开：有玩家时是玩家，还没有玩家时是相机。
    * 流式加载靠它决定加载哪些 chunk，大厅背后看到的因此也是一片正常的世界。
    */
   private currentFocus(): SceneUpdateContext {
-    const player = this.player?.controller.position;
+    // 死了之后镜头自己飞，世界就该围着镜头转——否则玩家飞出去几百米，
+    // 加载的还是尸体脚下那几块 chunk。
+    const player = this.localPlayerDead ? undefined : this.player?.controller.position;
     if (player) {
       const render = this.player?.renderPosition;
       return {
@@ -898,6 +960,9 @@ export class GrasslandScene extends Scene {
       () => this.controls.frame,
       (active) => this.player?.controller.setCameraDragSuppressed(active),
     );
+    this.healthPopups = new HealthPopupEmitter(renderWorld.scene);
+    this.localPlayerDead = false;
+    this.hud.setDead(false);
     this.controls.setPlayerController(this.player.controller);
     this.timeSinceInputSent = 0;
   }
@@ -915,6 +980,10 @@ export class GrasslandScene extends Scene {
     this.buildPanel.setInventory(undefined);
     this.hotbar.reset();
     this.remotePlayers.setRenderWorld(undefined);
+    this.healthPopups?.clear();
+    this.healthPopups = undefined;
+    this.localPlayerDead = false;
+    this.hud.setDead(false);
     this.slimeSurfaceDrag?.dispose();
     this.performanceOverlay?.dispose();
     this.hotbar.dispose();

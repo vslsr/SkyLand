@@ -3,6 +3,12 @@ import type { LeggedSlimeRenderDefinition } from '../../models/actors/createLegg
 import type { SlimeLegVisualRig } from '../../models/actors/ActorVisualModel';
 import type { RenderTransform } from '../RenderTransformBuffer';
 import { leggedSlimeBodyCenterY } from '../../../shared/actor/leggedSlimeShape.mjs';
+import {
+  DeathCollapseTimer,
+  LEGGED_DEATH_COLLAPSE_SECONDS,
+  deathFreeFall,
+  deathImpactSquash,
+} from '../RenderDeathCollapse';
 import { sampleSlimeGroundProbe, type SlimeGroundProbeParams } from '../RenderSlimeLegs';
 import type { SlimeMotionParams } from '../RenderSlimeMotion';
 
@@ -22,6 +28,11 @@ const DERIVED_VELOCITY_RESPONSE = 12;
 const PARAM_VELOCITY_EPSILON = 1e-4;
 /** 脚尖向外撇的比例（相对朝前的分量）。见 applyPose 里为什么不能只朝正前方。 */
 const FOOT_SPLAY = 0.75;
+/** 倒下之后髋点停在多高，按身体半径算。0.44 的半径落在 0.18 米左右。 */
+const DEATH_HIP_RATIO = 0.4;
+/** 触地那一下横向鼓出多少、纵向压扁多少。 */
+const DEATH_SQUASH_PLANAR = 0.35;
+const DEATH_SQUASH_VERTICAL = 0.45;
 const UP = new THREE.Vector3(0, 1, 0);
 
 interface LegGaitState {
@@ -68,6 +79,7 @@ export class ThreeSlimeLegVisual {
   private readonly maximumConcurrentSteps: number;
   /** 身体相对髋高的上下浮动，跟着落脚点的平均高度走。 */
   private bodyLift = 0;
+  private readonly death = new DeathCollapseTimer();
   /** 这一帧用来预判落脚点的水平速度，可能来自参数段也可能是差分出来的。 */
   private driveVelocityX = 0;
   private driveVelocityZ = 0;
@@ -109,6 +121,7 @@ export class ThreeSlimeLegVisual {
     world: RenderTransform,
     motion: SlimeMotionParams,
     probe: SlimeGroundProbeParams,
+    deathRevision = 0,
   ): void {
     // 参数段是 f32，正常路径下永远有限；NaN 会一次性污染所有落脚点，之后每帧
     // 都是 NaN，所以这一帧直接不驱动。
@@ -124,11 +137,47 @@ export class ThreeSlimeLegVisual {
       this.hasPose = true;
     }
 
+    // 倒下的进度先算：这一帧的髋高由它决定，而髋高又是步态与 IK 的输入。
+    const collapse = this.death.update(
+      deathRevision,
+      frameSeconds,
+      LEGGED_DEATH_COLLAPSE_SECONDS,
+    );
+    const fall = deathFreeFall(collapse);
+
     this.updateDriveVelocity(frameSeconds, world, motion);
-    this.updateBodyLift(frameSeconds, world, airborne);
-    const hipY = world.y + this.definition.hipHeight + this.bodyLift;
-    this.advanceSteps(frameSeconds, world, sinYaw, cosYaw, probe, hipY, airborne);
-    this.applyPose(world, sinYaw, cosYaw, hipY);
+    // 死了之后身体不再追落脚点的平均高度：它是掉下去的，不是站在腿上的。
+    if (!this.death.dead) this.updateBodyLift(frameSeconds, world, airborne);
+    // 髋部按自由落体掉到贴地高度；两节骨头因此被动折起来，脚留在倒下前那一步上。
+    const hipHeight = this.definition.hipHeight
+      + (this.definition.radius * DEATH_HIP_RATIO - this.definition.hipHeight) * fall;
+    const hipY = world.y + hipHeight + this.bodyLift;
+    // 死了就不再迈步：踏步相位停在倒下的那一刻，落脚点原地不动。
+    if (!this.death.dead) {
+      this.advanceSteps(frameSeconds, world, sinYaw, cosYaw, probe, hipY, airborne);
+    }
+    // 身体坐在髋点上：髋掉下去，身体跟着掉，两者读的是同一个 hipHeight。
+    this.applyPose(world, sinYaw, cosYaw, hipY, hipHeight);
+    this.applyDeathSquash(collapse);
+  }
+
+  /**
+   * 触地那一下把身体压扁一次，再松回一部分之后停住——它是趴下了，不是弹回来。
+   *
+   * 写的是 `bodyRoot` 的缩放，不是软体自己的 `body`：后者被
+   * `ThreeSlimeAnimator` 每帧按走路挤压写满，两边写同一个节点会互相覆盖。
+   */
+  private applyDeathSquash(collapse: number): void {
+    const squash = deathImpactSquash(collapse);
+    if (squash <= 0 && !this.death.dead) {
+      this.rig.bodyRoot.scale.set(1, 1, 1);
+      return;
+    }
+    this.rig.bodyRoot.scale.set(
+      1 + squash * DEATH_SQUASH_PLANAR,
+      1 - squash * DEATH_SQUASH_VERTICAL,
+      1 + squash * DEATH_SQUASH_PLANAR,
+    );
   }
 
   /**
@@ -368,9 +417,10 @@ export class ThreeSlimeLegVisual {
     sinYaw: number,
     cosYaw: number,
     hipY: number,
+    hipHeight: number,
   ): void {
     this.rig.bodyRoot.position.y = leggedSlimeBodyCenterY(
-      this.definition.hipHeight,
+      hipHeight,
       this.definition.radius,
     ) + this.bodyLift;
     const { thighLength, shinLength, stepHeight, footLength } = this.definition;

@@ -152,6 +152,12 @@ export type ClientMessage =
     }
   | { type: 'player:slime-drag'; drag: SlimeDragState | null }
   | { type: 'player:bite' }
+  /**
+   * 调试用的伤害 / 治疗。**工具武器落地之前的临时验证入口**：`amount` 为负是
+   * 伤害、为正是治疗，目标只有「自己」或「身边最近的生物」两种，射程与合法性
+   * 由服务端判（见 `ServerScene.applyHealthDebugCommand`）。
+   */
+  | { type: 'debug:health'; target: 'self' | 'nearest'; amount: number }
   | { type: 'debug:transform-log:start' }
   | {
       type: 'debug:transform-log:events';

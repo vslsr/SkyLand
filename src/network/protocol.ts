@@ -47,6 +47,24 @@ export interface SnapshotLeash {
   anchorVelocityZ: number;
 }
 
+/**
+ * 一个实体的生命值复制面（服务端 `HealthComponent.snapshot()`）。
+ *
+ * `deathRevision` 与 `eventRevision` 是**自增计数**而不是布尔：死亡动画和飘字都是
+ * 一次性表现，靠「和上一份不一样」触发，布尔在两帧之间翻回去就会被漏掉。
+ * 玩家与普通 Actor 走各自的快照通道，但读的是同一个形状。
+ */
+export interface SnapshotHealth {
+  current: number;
+  maximum: number;
+  dead: boolean;
+  deathRevision: number;
+  /** 最近一次血量变化：正是治疗，负是伤害。飘字读它。 */
+  lastDelta: number;
+  eventRevision: number;
+  revision: number;
+}
+
 /** 房间快照里的单名玩家，坐标由服务端权威计算。 */
 export interface SnapshotPlayer {
   id: string;
@@ -78,6 +96,8 @@ export interface SnapshotPlayer {
     slots: Array<{ itemType: string; quantity: number } | null>;
     activeIndex: number;
   };
+  /** 生命值与死亡状态。血量是公开信息：别人头上的飘字大家都该看见。 */
+  health?: SnapshotHealth;
   /** PickupDrop Component 的运行态；口部挂点来自玩家 Actor 原型。 */
   heldActorId?: string | null;
   pickupDropRevision?: number;
@@ -160,6 +180,7 @@ export interface SnapshotActor {
   hazard?: {
     radius: number;
   };
+  health?: SnapshotHealth;
   thermal?: {
     temperature: number;
     burning: boolean;
@@ -271,4 +292,5 @@ export interface InterpolatedPlayerState {
   slimeDrag?: SnapshotSlimeDrag;
   bitingPlayerId?: string;
   leash?: SnapshotLeash;
+  health?: SnapshotHealth;
 }

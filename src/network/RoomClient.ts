@@ -156,6 +156,14 @@ export class RoomClient {
     this.send({ type: 'daynight:set', timeOfDay }, 'control');
   }
 
+  /**
+   * 调试伤害 / 治疗。工具武器落地之前，生命值系统靠它才看得见（飘字、死亡动画、
+   * 自由视角）；服务端仍然自己判目标与射程，客户端指定不了任意 Actor。
+   */
+  public sendHealthDebug(target: 'self' | 'nearest', amount: number): boolean {
+    return this.send({ type: 'debug:health', target, amount }, 'control');
+  }
+
   /** 上报仍未被服务端确认的固定模拟步；丢包时下一包会自然重带旧步。 */
   public sendPlayerInput(inputs: readonly PlayerInputStep[]): number | undefined {
     if (inputs.length === 0) return undefined;

@@ -153,5 +153,18 @@ export const PARAM_CONTAINER_OPEN_TARGET = 46;
  */
 export const PARAM_POINT_LIGHT_INTENSITY = 47;
 
+/**
+ * 死亡计数。**0 表示还活着**——和 AIRBORNE、DRAG_REVISION 同一个道理：
+ * 不驱动这项表现的槽位每帧写 0，而服务端的死亡计数从 1 起。
+ *
+ * 过边界的是计数而不是「死了没有」：倒下那一段是**一次性**动画，渲染侧靠
+ * 「和上一帧不一样」踢它一脚，布尔在两帧之间翻回去就会被漏掉（和松手回弹
+ * 那条 `PARAM_ELASTIC_RELEASE_REVISION` 是同一套）。
+ *
+ * 摊开与倒下的曲线整个在渲染侧积分：玩法侧只知道「这一具死了」，
+ * 不知道它这一帧塌到了百分之几。
+ */
+export const PARAM_HEALTH_DEATH_REVISION = 48;
+
 /** 每个 proxy 槽位的参数个数。新增参数就在上面加常量并把这里加一。 */
-export const RENDER_VISUAL_PARAM_COUNT = 48;
+export const RENDER_VISUAL_PARAM_COUNT = 49;

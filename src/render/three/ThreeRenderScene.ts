@@ -52,10 +52,15 @@ import {
   type SlimeGroundProbeParams,
 } from '../RenderSlimeLegs';
 import type { RenderTransform, RenderTransformBuffer } from '../RenderTransformBuffer';
-import { PARAM_SLIME_SPEED, PARAM_TEMPERATURE } from '../RenderVisualParams';
+import {
+  PARAM_HEALTH_DEATH_REVISION,
+  PARAM_SLIME_SPEED,
+  PARAM_TEMPERATURE,
+} from '../RenderVisualParams';
 import { ThreeFireVisual } from './ThreeFireVisual';
 import { ThreePointLightVisual } from './ThreePointLightVisual';
 import { ThreeGuidePathVisual } from './ThreeGuidePathVisual';
+import { ThreeHealthPopupVisual } from './ThreeHealthPopupVisual';
 import { ThreeHybridSlimeVisual } from './ThreeHybridSlimeVisual';
 import { ThreeAbilityLabVisual } from './ThreeAbilityLabVisual';
 import { ThreeFruitBatchVisual } from './ThreeFruitBatchVisual';
@@ -186,6 +191,14 @@ export class ThreeRenderScene implements RenderScene {
   /** 建造幽灵。不是 proxy：没有槽位，只是一个跟着指针走的半透明模型。 */
   private readonly buildPreview = new ThreeBuildPreviewVisual();
   /**
+   * 伤害 / 治疗飘字。同样不是 proxy——它挂在世界坐标上，和挨打的那个东西
+   * 有没有 proxy 无关，池子大小固定，见 `ThreeHealthPopupVisual`。
+   *
+   * **第一条飘字到了才建**：一整池牌子各带一块离屏画布，而绝大多数场景
+   * （大厅背后那一片、纯观察用的地图）一条飘字都不会有。
+   */
+  private healthPopups?: ThreeHealthPopupVisual;
+  /**
    * 能力实验室的表现（引擎迁移路线图 第 3 步）。
    *
    * 它以前住在主线程：`AbilityLabSceneComponent` 先 `getActorRenderProxy` 拿到活的
@@ -228,6 +241,14 @@ export class ThreeRenderScene implements RenderScene {
     this.highCountBatches = new ThreeHighCountBatchVisual(environment, archetypes.byId);
     this.fruitBatches = new ThreeFruitBatchVisual(environment);
     this.waterMotionVisual = ocean ? new ThreeWaterMotionVisual(ocean) : undefined;
+  }
+
+  public spawnHealthPopup(x: number, y: number, z: number, amount: number): void {
+    if (!this.healthPopups) {
+      this.healthPopups = new ThreeHealthPopupVisual();
+      this.root.add(this.healthPopups.root);
+    }
+    this.healthPopups.spawn(x, y, z, amount);
   }
 
   /**
@@ -517,6 +538,8 @@ export class ThreeRenderScene implements RenderScene {
       proxy.markers.setTemperature(transforms.readParam(proxy.id, PARAM_TEMPERATURE));
     }
     for (const guide of this.guidePaths.values()) guide.update(deltaSeconds);
+    // 飘字和别的表现一样按渲染帧走：玩法侧只在血量变的那一帧发一条命令。
+    this.healthPopups?.update(deltaSeconds);
     // 权威 yaw 取的是 submitTransforms 刚摆好的 root 角度：外壳要抵消的正是
     // 「root 这一级实际被转了多少」，父子情况下那已经是相对 yaw。
     for (const [id, slime] of this.slimeVisuals) {
@@ -534,6 +557,8 @@ export class ThreeRenderScene implements RenderScene {
         elapsedSeconds,
         proxy.root.rotation.y,
         readSlimeMotionParams(transforms, id, this.slimeMotion),
+        // 死亡计数：变了就踢一次摊开，塌到百分之几由这一侧自己积分。
+        transforms.readParam(id, PARAM_HEALTH_DEATH_REVISION),
       );
     }
     // 腿排在身体之前：它解出的水平速率是身体挤压动画的输入。两者写的不是同一个
@@ -546,6 +571,7 @@ export class ThreeRenderScene implements RenderScene {
         transforms.readTransform(id, this.legWorld),
         readSlimeMotionParams(transforms, id, this.slimeMotion),
         readSlimeGroundProbeParams(transforms, id, this.slimeGroundProbe),
+        transforms.readParam(id, PARAM_HEALTH_DEATH_REVISION),
       );
     }
     for (const [id, animator] of this.slimeAnimators) {
@@ -794,6 +820,7 @@ export class ThreeRenderScene implements RenderScene {
   /** 让所有世界 UI 正对相机。 */
   public faceCameras(camera: THREE.Camera): void {
     for (const proxy of this.proxies) proxy?.markers.faceCamera(camera);
+    this.healthPopups?.faceCamera(camera);
   }
 
   /** 简易碰撞盒的可视化开关。是渲染世界自己的状态，遍历不经过任何 Actor。 */
@@ -804,6 +831,8 @@ export class ThreeRenderScene implements RenderScene {
 
   public dispose(): void {
     this.#disposeHoverHelper();
+    this.healthPopups?.dispose();
+    this.healthPopups = undefined;
     this.pointLights.dispose();
     this.buildPreview.dispose();
     this.highCountBatches.dispose();

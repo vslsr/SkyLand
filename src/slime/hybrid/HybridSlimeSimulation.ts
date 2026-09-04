@@ -39,6 +39,15 @@ export interface HybridSlimeSurfaceDragOptions {
   readonly influenceRadius: number;
 }
 
+/**
+ * 死亡摊开的两个终值：横向铺到 1.4 倍、整团压到贴地 0.25 倍
+ * （设计稿 `doc/designer-toolandweapon.md`）。
+ */
+const DEATH_COLLAPSE_PLANAR_SPREAD = 1.4;
+const DEATH_COLLAPSE_VERTICAL_FLATTEN = 0.25;
+/** 摊平时蒙皮阻尼的额外倍率：塌下去的那一滩不再回弹。 */
+const DEATH_COLLAPSE_DAMPING_GAIN = 1.6;
+
 const FIXED_STEP_SECONDS = 1 / 120;
 const MAX_FRAME_SECONDS = 0.1;
 const MAX_BODY_LAG_RADIUS_RATIO = 0.22;
@@ -131,6 +140,8 @@ export class HybridSlimeSimulation {
   /** 蒙皮胡克弹簧的速度偏置吸引点，也是渲染球形核心的位置。 */
   public readonly forceCenter: Float32Array;
   public readonly coreScale = new Float32Array([1, 1, 1]);
+  /** 死亡摊开的进度 [0, 1]，由 `setDeathCollapse` 写入。 */
+  private deathCollapse = 0;
   public readonly vertexCount: number;
   public coreYaw = 0;
   public isActive = false;
@@ -358,6 +369,25 @@ export class HybridSlimeSimulation {
     this.stableSeconds = 0;
   }
 
+  /**
+   * 死亡摊开。
+   *
+   * 改的是**胡克目标**（锚点）而不是顶点本身：那一滩是被弹簧拉过去的，
+   * 所以它有塌下去的过程，也仍然会被咬、被拖、被碰撞影响。直接改顶点的话
+   * 得到的是一个瞬间被压扁的形状，下一帧又被弹簧拽回球形。
+   *
+   * 进度由渲染侧的一次性计时器给（`RenderDeathCollapse.ts`），
+   * 玩法侧只知道「这一具死了」。
+   */
+  public setDeathCollapse(amount: number): void {
+    const next = clamp(Number.isFinite(amount) ? amount : 0, 0, 1);
+    if (Math.abs(next - this.deathCollapse) < 1e-4) return;
+    this.deathCollapse = next;
+    // 锚点变了就得醒过来，否则已经睡着的史莱姆会保持生前的形状。
+    this.isActive = true;
+    this.stableSeconds = 0;
+  }
+
   public setDriveVelocity(velocityX: number, velocityZ: number): void {
     const safeX = Number.isFinite(velocityX) ? velocityX : 0;
     const safeZ = Number.isFinite(velocityZ) ? velocityZ : 0;
@@ -567,7 +597,11 @@ export class HybridSlimeSimulation {
         this.positions[offset] += (this.anchors[offset] - this.positions[offset]) * directFollow;
       }
     }
-    const dampingMultiplier = Math.exp(-this.options.skinDamping * deltaSeconds);
+    // 摊开时蒙皮变稠（设计稿里的 viscosity 10 → 26）：一滩死掉的软体不再回弹。
+    const dampingMultiplier = Math.exp(
+      -this.options.skinDamping * (1 + this.deathCollapse * DEATH_COLLAPSE_DAMPING_GAIN)
+      * deltaSeconds,
+    );
     const positions = this.positions;
     const velocities = this.velocities;
     const accelerations = this.accelerations;
@@ -782,6 +816,8 @@ export class HybridSlimeSimulation {
 
   private rebuildAnchors(deltaSeconds: number): void {
     const directions = this.options.surfaceDirections;
+    const deathPlanarScale = 1 + this.deathCollapse * (DEATH_COLLAPSE_PLANAR_SPREAD - 1);
+    const deathVerticalScale = 1 - this.deathCollapse * (1 - DEATH_COLLAPSE_VERTICAL_FLATTEN);
     const lagRatio = clamp(
       Math.hypot(this.coreX, this.coreZ) / Math.max(1e-6, this.maximumBodyLag),
       0,
@@ -1098,9 +1134,12 @@ export class HybridSlimeSimulation {
         }
       }
 
-      this.anchors[offset] = this.coreX + shapedLocalX;
-      this.anchors[offset + 1] = this.centerY + this.coreY + shapedLocalY;
-      this.anchors[offset + 2] = this.coreZ + shapedLocalZ;
+      // 死亡摊开：横向铺开、整团压向地面。压的是**世界高度**而不是相对身体中心的
+      // 偏移——绕中心缩会把底面抬起来，那是「变薄的球」而不是「摊在地上的一滩」。
+      const anchorY = this.centerY + this.coreY + shapedLocalY;
+      this.anchors[offset] = this.coreX + shapedLocalX * deathPlanarScale;
+      this.anchors[offset + 1] = anchorY * deathVerticalScale;
+      this.anchors[offset + 2] = this.coreZ + shapedLocalZ * deathPlanarScale;
     }
   }
 

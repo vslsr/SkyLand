@@ -1,6 +1,11 @@
 import type { PbfSlimeRenderDefinition } from '../../models/actors/createPbfSlimeModel';
 import type { PbfSlimeVisualRig } from '../../models/actors/ActorVisualModel';
 import { HybridSlimeSimulation } from '../../slime/hybrid/HybridSlimeSimulation';
+import {
+  DeathCollapseTimer,
+  PBF_DEATH_COLLAPSE_SECONDS,
+  deathCollapseEaseOut,
+} from '../RenderDeathCollapse';
 import type { SlimeMotionParams } from '../RenderSlimeMotion';
 
 const REFERENCE_FACE_TURN_RESPONSE = 5.27;
@@ -32,6 +37,8 @@ export class ThreeHybridSlimeVisual {
   private collisionContactSeconds = 0;
   private fluidFacingYaw = 0;
   private hasMotionPresentation = false;
+  private readonly death = new DeathCollapseTimer();
+  private deathAmount = 0;
 
   public constructor(
     public readonly rig: PbfSlimeVisualRig,
@@ -60,9 +67,15 @@ export class ThreeHybridSlimeVisual {
     elapsedSeconds: number,
     authorityYaw: number,
     motion: SlimeMotionParams,
+    deathRevision = 0,
   ): void {
     const frameSeconds = Math.max(0, Math.min(deltaSeconds, 0.1));
     this.collisionContactSeconds = Math.max(0, this.collisionContactSeconds - frameSeconds);
+    // 摊开要排在运动表现之前：这一帧的锚点由它一起决定，写在后面就晚一帧。
+    this.deathAmount = deathCollapseEaseOut(
+      this.death.update(deathRevision, frameSeconds, PBF_DEATH_COLLAPSE_SECONDS),
+    );
+    this.simulation.setDeathCollapse(this.deathAmount);
     this.updateMotionPresentation(frameSeconds, authorityYaw, motion);
     if (this.simulation.update(frameSeconds)) this.applySimulationSurface();
     this.updateContents(elapsedSeconds, authorityYaw);
@@ -143,9 +156,11 @@ export class ThreeHybridSlimeVisual {
       this.simulation.coreScale[2],
     );
 
+    // 摊开的那 0.9 秒里气泡依次浮完就不再生成：一滩死掉的软体不会继续冒泡。
+    const bubbleFade = Math.max(0, 1 - this.deathAmount * 1.6);
     for (const bubble of this.rig.bubbles) {
       const progress = (elapsedSeconds * this.definition.bubbleSpeed + bubble.phase) % 1;
-      const fadeScale = Math.max(0.08, Math.sin(progress * Math.PI));
+      const fadeScale = Math.max(0.08, Math.sin(progress * Math.PI)) * bubbleFade;
       // 气泡只在核心附近上浮。旧实现从外壳顶点取位置，受形变后可能穿出蒙皮，
       // 看起来像史莱姆本体长出随机凸块。
       const angle = bubble.particleIndex * 2.399963229728653 + progress * 0.7;

@@ -21,6 +21,23 @@ const TIME_PRESETS: readonly TimePresetDefinition[] = Object.freeze([
   { label: '黄昏', hour: DAY_PHASE_HOURS.dusk },
 ]);
 
+interface HealthPresetDefinition {
+  label: string;
+  target: 'self' | 'nearest';
+  amount: number;
+}
+
+/**
+ * 调试伤害与治疗的几个档。**这是工具武器落地之前的临时入口**：设计稿里
+ * `@w` 的 `D` 还没有承接系统，生命值系统需要一个能看得见的触发点。
+ */
+const HEALTH_PRESETS: readonly HealthPresetDefinition[] = Object.freeze([
+  { label: '打最近的 -25', target: 'nearest', amount: -25 },
+  { label: '打最近的 -100', target: 'nearest', amount: -100 },
+  { label: '打自己 -25', target: 'self', amount: -25 },
+  { label: '治自己 +25', target: 'self', amount: 25 },
+]);
+
 function formatClock(timeOfDay: number): string {
   const totalMinutes = Math.round(timeOfDay * 60) % (24 * 60);
   const hours = Math.floor(totalMinutes / 60);
@@ -50,6 +67,7 @@ export class DebugMenuPage extends ModalWindow {
   private temperatureToggleHandler?: (visible: boolean) => void;
   private profilerToggleHandler?: (visible: boolean) => void;
   private weatherSelectHandler?: (weather: WeatherType) => void;
+  private healthCommandHandler?: (target: 'self' | 'nearest', amount: number) => void;
   private transformLogToggleHandler?: (recording: boolean) => void;
   private transformLogState: PlayerTransformLogState = 'inactive';
   private transformLogAvailable = false;
@@ -192,6 +210,28 @@ export class DebugMenuPage extends ModalWindow {
       this.dayNightStatus,
     );
 
+    // 生命值：工具武器落地之前，这一组按钮是唯一能产生伤害的入口，
+    // 生命值系统的飘字、死亡动画与自由视角都靠它验证。
+    const healthSection = document.createElement('section');
+    healthSection.className = 'debug-menu__section';
+    const healthHeading = document.createElement('h3');
+    healthHeading.textContent = 'ENTITY HEALTH';
+    const healthDescription = document.createElement('p');
+    healthDescription.textContent = '临时验证入口：工具与武器尚未落地，先用它触发权威伤害与治疗。目标由服务端判定，只能是自己或身边最近的生物。';
+    const healthGrid = document.createElement('div');
+    healthGrid.className = 'debug-menu__weather-grid';
+    healthGrid.setAttribute('role', 'group');
+    healthGrid.setAttribute('aria-label', '调试伤害与治疗');
+    for (const preset of HEALTH_PRESETS) {
+      const button = document.createElement('button');
+      button.className = 'paper-button debug-menu__weather-button';
+      button.type = 'button';
+      button.textContent = preset.label;
+      button.addEventListener('click', () => this.healthCommandHandler?.(preset.target, preset.amount));
+      healthGrid.append(button);
+    }
+    healthSection.append(healthHeading, healthDescription, healthGrid);
+
     this.bodyElement.append(
       // 房间环境是最常用的即时调试项，放在首屏，避免被较长的诊断区挤到
       // 滚动区域底部后看起来像是没有昼夜控制。
@@ -201,6 +241,7 @@ export class DebugMenuPage extends ModalWindow {
       profilerSection,
       collisionSection,
       temperatureSection,
+      healthSection,
     );
     this.setTransformLogState('inactive');
     this.setTransformLogAvailable(false);
@@ -209,6 +250,13 @@ export class DebugMenuPage extends ModalWindow {
     this.setTemperatureVisible(false);
     this.setWeather(DEFAULT_WEATHER);
     this.setTimeOfDay(DEFAULT_START_HOUR);
+  }
+
+  /** 调试伤害 / 治疗。`amount` 为负是伤害、为正是治疗。 */
+  public onHealthCommand(
+    handler: (target: 'self' | 'nearest', amount: number) => void,
+  ): void {
+    this.healthCommandHandler = handler;
   }
 
   public onProfilerToggle(handler: (visible: boolean) => void): void {

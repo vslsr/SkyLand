@@ -11,6 +11,7 @@ export class HudController {
   private readonly vesselCondition: HTMLElement;
   private readonly vesselEvent: HTMLElement;
   private readonly interactionPrompt: HTMLElement;
+  private readonly deathNotice: HTMLElement;
   private menuHandler?: () => void;
   private vesselEventRevision = 0;
   private interactionPromptText = '';
@@ -26,6 +27,7 @@ export class HudController {
     this.vesselCondition = this.requireElement<HTMLElement>('vessel-condition');
     this.vesselEvent = this.requireElement<HTMLElement>('vessel-event');
     this.interactionPrompt = this.requireElement<HTMLElement>('interaction-prompt');
+    this.deathNotice = this.requireElement<HTMLElement>('death-notice');
     this.menuButton.addEventListener('click', () => this.menuHandler?.());
   }
 
@@ -45,6 +47,13 @@ export class HudController {
     this.menuButton.hidden = true;
     this.setVesselStatus(undefined);
     this.setInteractionPrompt(undefined);
+    this.setDead(false);
+  }
+
+  /** 阵亡横幅。死了之后相机交给自由视角，这条告诉玩家为什么按键不动了。 */
+  public setDead(dead: boolean): void {
+    if (this.deathNotice.hidden === !dead) return;
+    this.deathNotice.hidden = !dead;
   }
 
   public setLocked(locked: boolean): void {
