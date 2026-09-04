@@ -23,10 +23,10 @@ const VALID_MATERIAL = {
   summary: '测试用材料。',
 };
 
-test('目录就是设计稿上那张物品表：木头、石头、果子、蘑菇', () => {
+test('目录就是设计稿上那张物品表：木头、石头、果子、蘑菇、弹弓', () => {
   assert.deepEqual(
     itemCatalog.list().map((item) => item.id),
-    ['wood', 'stone', 'fruit', 'mushroom'],
+    ['wood', 'stone', 'fruit', 'mushroom', 'slingshot'],
   );
 
   // 材料只是材料：占一格、能堆、没有用法。
@@ -49,6 +49,20 @@ test('目录就是设计稿上那张物品表：木头、石头、果子、蘑�
     assert.ok(definition.use.holdSeconds > 0);
     assert.equal(definition.use.value, 1);
   }
+
+  // 弹弓：工具走独立池，一格一把（弹药记在那一格上的前提），石头当弹药，
+  // 蓄力松手打出去，打完有冷却。发射本身由武器系统注册执行器兑现。
+  const slingshot = itemCatalog.require('slingshot');
+  assert.equal(slingshot.category, 'tool');
+  assert.equal(slingshot.slotCost, 0);
+  assert.equal(slingshot.pooled, true);
+  assert.equal(slingshot.stackLimit, 1);
+  assert.deepEqual(slingshot.ammo.accepts, ['stone']);
+  assert.ok(slingshot.ammo.capacity > 0);
+  assert.equal(slingshot.use.action, 'shoot');
+  assert.equal(slingshot.use.mode, 'charge');
+  assert.ok(slingshot.use.holdSeconds > 0);
+  assert.ok(slingshot.use.cooldownSeconds > 0);
 
   // 耐久现在全是 0：没有「用一次掉一点」的系统，写成别的数只会是一个空承诺。
   for (const definition of itemCatalog.list()) {

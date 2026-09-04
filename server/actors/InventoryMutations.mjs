@@ -151,6 +151,7 @@ export function dropHotbarItem(scene, player, slotIndex) {
   // 先确认这件东西掉在地上长什么样：没有掉落原型就丢不出去，这时账不能先扣。
   const archetypeId = findItemArchetypeId(scene.actorWorld.context.archetypes, slot.itemType);
   if (!archetypeId) return false;
+  salvageAmmo(scene, player, { kind: 'hotbar', slotIndex });
   if (inventory.consumeHotbarSlot(slotIndex, 1) !== 1) return false;
   spawnDropInFront(scene, player, archetypeId, 1);
   // 那一格可能还剩几个，也可能刚好空了：重新对齐一次，手上跟着变。
@@ -175,10 +176,35 @@ export function dropInventoryItem(scene, player, itemType, quantity = 1) {
   // 先确认这件东西掉在地上长什么样：没有掉落原型就丢不出去，这时账不能先扣。
   const archetypeId = findItemArchetypeId(scene.actorWorld.context.archetypes, itemType);
   if (!archetypeId) return false;
+  salvageAmmo(scene, player, { kind: 'backpack', itemType });
   const removed = inventory.remove(itemType, wanted);
   if (removed <= 0) return false;
   spawnDropInFront(scene, player, archetypeId, removed);
   return true;
+}
+
+/**
+ * 丢掉一件装着弹药的东西之前，先把弹药抢救出来。
+ *
+ * 掉落物身上还没有弹药位（掉在地上的那一堆是「几个同类」，不是「哪一件」），所以
+ * 连着弹药一起丢下去等于让那几发凭空蒸发。落点按卸下的规矩来：先回玩家身上（手上
+ * → 物品栏 → 背包），身上一发都收不下的才跟着一起掉在地上——总之不消失。
+ *
+ * @returns 这一格现在还剩几发装不掉的（正常情况恒为 0）
+ */
+function salvageAmmo(scene, player, ref) {
+  const inventory = player?.getComponent(INVENTORY_COMPONENT);
+  const ammo = inventory?.ammoAt(ref);
+  if (!ammo) return 0;
+  const ammoType = ammo.itemType;
+  inventory.unloadAmmo(ref);
+  const left = inventory.ammoAt(ref)?.quantity ?? 0;
+  if (left === 0) return 0;
+  const archetypeId = findItemArchetypeId(scene.actorWorld.context.archetypes, ammoType);
+  if (!archetypeId) return left;
+  spawnDropInFront(scene, player, archetypeId, left);
+  inventory.consumeAmmo(ref, left);
+  return 0;
 }
 
 /** 身前 0.85 米、抬高 0.35 米。就地生成会和角色的碰撞体重叠，把人卡住。 */

@@ -29,11 +29,11 @@ Use this reference when writing a new entry into a design note, or when reviewin
 | name + summary | What it is, in one line | Summary longer than 64 chars — `summary` is capped |
 | `M` | One model, used for both dropped and held | Describing a separate held model; there is only one |
 | `I` | What the icon depicts | Naming an icon that has no sprite yet |
-| `F` | Tap or hold, what happens, how much | Writing a verb no system implements; only eat / tool / throw exist |
+| `F` | Tap, hold or charge; what happens, how much, and the cooldown | Writing a verb no system implements; only eat / shoot / tool / throw exist, and `shoot` is executed by the weapon system |
 | `G` | One of 材料 / 补给 / 投掷物 / 弹药 / 价值货物 / 工具 | Inventing a category; the enum is closed |
 | `N` | Stack limit | Forgetting that a `slotCost: 0` item does not consume backpack slots |
 | `R` | Durability, or `0` | Expecting durability to be consumed — no system does yet |
-| `AM` | Which ammo it takes and how many rounds, or absent | Putting `AM` on a stackable item — only `N: 1` may carry ammo, and no system reads it yet |
+| `AM` | Which ammo it takes and how many rounds, or absent | Putting `AM` on a stackable item — only `N: 1` in the pooled categories may carry ammo. Name the ammo by item, not by category |
 | `A` | Which states move, which part, driven by what | Naming an action or asset; there is no skeletal animation. The state list is open — reject a state only if it is unclear, not because it is unlisted |
 
 Also decide, though the notation does not ask: the kebab-case `id`, the `tint`, `slotCost`, and whether it is `holdable`.

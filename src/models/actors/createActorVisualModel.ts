@@ -14,6 +14,7 @@ import { createCampfireModel } from './createCampfireModel';
 import { createDryHayModel } from './createDryHayModel';
 import { createFruitPileModel } from './createFruitPileModel';
 import { createMushroomPileModel } from './createMushroomPileModel';
+import { createSlingshotModel } from './createSlingshotModel';
 import { createStonePileModel } from './createStonePileModel';
 import { createWoodPileModel } from './createWoodPileModel';
 import { createPbfSlimeModel } from './createPbfSlimeModel';
@@ -72,6 +73,9 @@ export function createActorVisualModel(
   }
   if (definition.model === 'line-art-fruit-pile') {
     return createFruitPileModel(environment, definition);
+  }
+  if (definition.model === 'line-art-slingshot-pile') {
+    return createSlingshotModel(environment, definition);
   }
   if (definition.model === 'line-art-build-foundation') {
     return createBuildFoundationModel(environment, definition);

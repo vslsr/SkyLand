@@ -923,6 +923,7 @@ export class ClientActorSystem implements SceneFrameSystem {
       'line-art-stone-pile',
       'line-art-fruit-pile',
       'line-art-mushroom-pile',
+      'line-art-slingshot-pile',
     ]);
     return {
       archetypeIndex,

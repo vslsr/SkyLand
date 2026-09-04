@@ -111,6 +111,8 @@ const HOTBAR_COMMAND_KINDS = new Set([
   'hotbar:swap',
   'hotbar:stow',
   'drop:hotbar',
+  'ammo:load',
+  'ammo:unload',
 ]);
 
 function roundCoordinate(value) {
@@ -171,6 +173,22 @@ function sanitizeActorId(value) {
 function sanitizeItemType(value) {
   const id = String(value ?? '');
   return itemCatalog.has(id) ? id : undefined;
+}
+
+/**
+ * 上行的「哪一格」。
+ *
+ * 形状和界面上那一格、`InventoryComponent.entryAt` 三处一致，所以这里只做清洗，
+ * 不做翻译：物品栏认第几格，背包认物品种类，别的都当成无效。
+ */
+function sanitizeSlotAddress(value) {
+  if (value?.kind === 'hotbar') {
+    const slotIndex = Math.trunc(toFiniteNumber(value.slotIndex, -1));
+    return slotIndex >= 0 ? { kind: 'hotbar', slotIndex } : undefined;
+  }
+  if (value?.kind !== 'backpack') return undefined;
+  const itemType = sanitizeItemType(value.itemType);
+  return itemType ? { kind: 'backpack', itemType } : undefined;
 }
 
 function resolvePlayerActorArchetype(definition) {
@@ -838,6 +856,19 @@ export class ServerScene {
         // 那件东西，不该顺手把手上握着的换掉。
         changed = dropInventoryItem(this, player, sanitizeItemType(command.itemType), 1);
         break;
+      case 'ammo:load': {
+        // 装填：从来源那一格扣，记到目标那一格的弹药位上。装什么、装几发由物品
+        // 目录的 `ammo` 说了算，客户端只发「从哪一格到哪一格」。
+        const slot = sanitizeSlotAddress(command.slot);
+        const from = sanitizeSlotAddress(command.source);
+        changed = Boolean(slot && from) && inventory.loadAmmo(slot, from) > 0;
+        break;
+      }
+      case 'ammo:unload': {
+        const slot = sanitizeSlotAddress(command.slot);
+        changed = Boolean(slot) && inventory.unloadAmmo(slot) > 0;
+        break;
+      }
       case 'container:open':
       case 'container:close':
       case 'container:transfer':

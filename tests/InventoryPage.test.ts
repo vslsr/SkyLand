@@ -547,3 +547,86 @@ test('没有权威数据时显示空态，关闭提示跟着按键走', () => {
     assert.equal(hint.textContent, 'Esc 或 B 关闭');
   });
 });
+
+test('装着弹药的那一格右下角画个小框，空着时整个不画', () => {
+  withFakeDocument(() => {
+    const inventory = new InventoryComponent({ slotCapacity: 6, hotbarCapacity: 9 });
+    inventory.add('slingshot', 1);
+    inventory.add('stone', 3);
+    const page = new InventoryPage();
+    page.setInventory(buildInventoryView(inventory as never));
+    // 一个空框看起来像坏了，而不像「没装」。
+    assert.equal(cellsOf(page, 'inventory__ammo').length, 0);
+
+    inventory.loadAmmo({ kind: 'backpack', itemType: 'slingshot' }, { kind: 'backpack', itemType: 'stone' });
+    page.setInventory(buildInventoryView(inventory as never));
+    const boxes = cellsOf(page, 'inventory__ammo');
+    assert.equal(boxes.length, 1);
+    assert.equal(cellsOf(page, 'inventory__ammo-count')[0].textContent, '3');
+    assert.ok(boxes[0].getAttribute('title')?.includes('石头'), boxes[0].getAttribute('title') ?? '');
+
+    // 读屏的人只有 aria-label 这一句能知道弓里还有几发。
+    const cell = gridCells(page).find((candidate) => candidate.dataset.itemType === 'slingshot');
+    assert.ok(cell?.getAttribute('aria-label')?.includes('装着 3 / 5 石头'), cell?.getAttribute('aria-label') ?? '');
+  });
+});
+
+test('吃弹药的那一格菜单里多一条「卸下弹药」，没装时点不动', () => {
+  withFakeDocument(() => {
+    const inventory = new InventoryComponent({ slotCapacity: 6, hotbarCapacity: 9 });
+    inventory.add('slingshot', 1);
+    inventory.add('stone', 2);
+    const page = new InventoryPage();
+    const actions: unknown[] = [];
+    page.onItemAction((action, slot) => actions.push([action, slot]));
+    page.setInventory(buildInventoryView(inventory as never));
+
+    clickCell(page, 'slingshot');
+    assert.deepEqual(
+      menuEntries(page).map((entry) => entry.textContent),
+      ['使用', '装配', '卸下弹药', '丢弃'],
+    );
+    assert.equal(
+      menuEntries(page).find((entry) => entry.dataset.action === 'unload')?.disabled,
+      true,
+      '空着的时候列出来但点不动',
+    );
+
+    // 不吃弹药的东西身上没有这回事，菜单不该为它变长。
+    clickCell(page, 'stone');
+    assert.deepEqual(
+      menuEntries(page).map((entry) => entry.textContent),
+      ['使用', '装配', '丢弃'],
+    );
+
+    inventory.loadAmmo({ kind: 'backpack', itemType: 'slingshot' }, { kind: 'backpack', itemType: 'stone' });
+    page.setInventory(buildInventoryView(inventory as never));
+    clickCell(page, 'slingshot');
+    const unload = menuEntries(page).find((entry) => entry.dataset.action === 'unload');
+    assert.equal(unload?.disabled, false);
+    unload?.dispatchEvent(new Event('click'));
+    assert.deepEqual(actions, [['unload', { kind: 'backpack', itemType: 'slingshot' }]]);
+  });
+});
+
+test('背包里吃弹药的那一格自己接得住拖拽：装填说的是「装到这一件上」', () => {
+  withFakeDocument(() => {
+    const inventory = new InventoryComponent({ slotCapacity: 6, hotbarCapacity: 9 });
+    inventory.add('slingshot', 1);
+    inventory.add('stone', 2);
+    const page = new InventoryPage();
+    const drops: unknown[] = [];
+    page.onDragDrop((source, target) => drops.push([source, target]));
+    page.setInventory(buildInventoryView(inventory as never));
+
+    const stone = gridCells(page).find((cell) => cell.dataset.itemType === 'stone');
+    const slingshot = gridCells(page).find((cell) => cell.dataset.itemType === 'slingshot');
+    assert.ok(stone && slingshot);
+    stone.dispatchEvent(new Event('dragstart'));
+    slingshot.dispatchEvent(new Event('drop'));
+    assert.deepEqual(drops, [[
+      { kind: 'backpack', itemType: 'stone' },
+      { kind: 'backpack', itemType: 'slingshot' },
+    ]]);
+  });
+});

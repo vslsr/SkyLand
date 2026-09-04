@@ -1,6 +1,6 @@
 import { ActorComponent } from '../ActorComponent.mjs';
 import { itemCatalog } from '../../items/index.mjs';
-import { DEFAULT_SLOT_CAPACITY, ItemLedger } from '../ItemLedger.mjs';
+import { DEFAULT_SLOT_CAPACITY, ItemLedger, sameAmmo, sanitizeAmmo } from '../ItemLedger.mjs';
 
 export const INVENTORY_COMPONENT = 'inventory';
 
@@ -158,9 +158,14 @@ export class InventoryComponent extends ActorComponent {
     if (available === 0) return false;
     // 腾格子：原有那一摞先回背包，回不去就放弃这次装配。
     if (!this.clearHotbarSlot(slotIndex, { allowEmpty: true })) return false;
-    const moved = this.ledger.remove(next, available);
-    if (moved === 0) return false;
-    this.hotbar[slotIndex] = { itemType: next, quantity: moved };
+    // 整条搬：装着弹药的那一条连弹药一起过来，装配一次弓不该把箭留在包里。
+    const moved = this.ledger.takeEntry(next, available);
+    if (!moved) return false;
+    this.hotbar[slotIndex] = {
+      itemType: next,
+      quantity: moved.quantity,
+      ...(moved.ammo ? { ammo: moved.ammo } : {}),
+    };
     this.revision += 1;
     return true;
   }
@@ -179,12 +184,9 @@ export class InventoryComponent extends ActorComponent {
     if (!this.isHotbarSlot(slotIndex)) return false;
     const slot = this.hotbar[slotIndex];
     if (!slot) return allowEmpty;
-    const accepted = this.ledger.add(slot.itemType, slot.quantity);
-    if (accepted !== slot.quantity) {
-      // 整摞放不回去就一个都不放：先撤销刚刚塞进去的那些，那一摞原样留在物品栏。
-      this.ledger.remove(slot.itemType, accepted);
-      return false;
-    }
+    // 整摞放不回去就一个都不放（`putEntry` 自己保证），那一摞原样留在物品栏；
+    // 装着的弹药跟着一起回包。
+    if (!this.ledger.putEntry(slot)) return false;
     this.hotbar[slotIndex] = null;
     this.revision += 1;
     return true;
@@ -329,6 +331,108 @@ export class InventoryComponent extends ActorComponent {
   }
 
   /**
+   * 一格的地址：`{ kind: 'hotbar', slotIndex }` 或 `{ kind: 'backpack', itemType }`。
+   *
+   * 两本账用两种寻址方式，是因为它们本来就是两种东西：物品栏有固定的第几格，
+   * 背包里是一摞摞按种类排的货。界面上那一格（`InventorySlotRef`）说的是同一件事，
+   * 所以两边共用同一个形状，命令过网时不用再翻译一次。
+   *
+   * 背包侧按种类寻址对**弹药位**足够精确：装得下弹药的东西 `stackLimit` 恒为 1、
+   * 又在独立池里（每种只有一条），所以「包里哪一把弹弓」不会有第二个答案。
+   *
+   * @returns 那一格里的那一摞（账本里的原对象，改它就是改账）；空格时是 undefined。
+   */
+  entryAt(ref) {
+    if (ref?.kind === 'hotbar') {
+      return this.isHotbarSlot(ref.slotIndex) ? this.hotbar[ref.slotIndex] ?? undefined : undefined;
+    }
+    if (ref?.kind !== 'backpack') return undefined;
+    return [...this.ledger.pooled, ...this.ledger.slots]
+      .find((entry) => entry.itemType === ref.itemType);
+  }
+
+  /** 这一格装着什么弹药、还剩几发；没装时是 undefined。 */
+  ammoAt(ref) {
+    return this.entryAt(ref)?.ammo;
+  }
+
+  /**
+   * 往一格里装弹药。
+   *
+   * 弹药记在**那一格**上，不记在物品目录里：同一把弹弓，装着 5 颗石头和空着是
+   * 两种状态，而这两种状态属于那一把弹弓。所以装填是一次转移——从来源那一格扣掉，
+   * 记到目标那一格的弹药位上。
+   *
+   * 装什么由目标物品的 `ammo.accepts` 说了算，装多少到 `capacity` 为止；一次尽量
+   * 装满，来源见底或装满就停，剩下的原样留在来源那一格。**已经装着别的弹药时不
+   * 混装**：先卸下再换。
+   *
+   * @param {{kind: string}} target 装到哪一格
+   * @param {{kind: string}} source 弹药从哪一格来
+   * @returns {number} 实际装进去几发
+   */
+  loadAmmo(target, source, quantity = Number.POSITIVE_INFINITY) {
+    const entry = this.entryAt(target);
+    const slot = entry ? this.catalog.get(entry.itemType)?.ammo : undefined;
+    const from = this.entryAt(source);
+    if (!entry || !slot || !from) return 0;
+    const ammoType = from.itemType;
+    if (!slot.accepts.includes(ammoType)) return 0;
+    const loaded = entry.ammo;
+    if (loaded && loaded.itemType !== ammoType) return 0;
+    const wanted = Number.isFinite(quantity)
+      ? requestedQuantity(quantity)
+      : Number.MAX_SAFE_INTEGER;
+    const taken = Math.min(wanted, from.quantity, slot.capacity - (loaded?.quantity ?? 0));
+    if (taken <= 0) return 0;
+    const moved = source.kind === 'hotbar'
+      ? this.consumeHotbarSlot(source.slotIndex, taken)
+      : this.remove(ammoType, taken);
+    if (moved === 0) return 0;
+    if (loaded) loaded.quantity += moved;
+    else entry.ammo = { itemType: ammoType, quantity: moved };
+    this.revision += 1;
+    return moved;
+  }
+
+  /**
+   * 把一格里装着的弹药卸回身上，落点和拾取一样：先手上、再物品栏、最后背包。
+   *
+   * 收不下的**留在武器上**，不落地也不消失：卸下是一次收纳动作，玩家没有要求把
+   * 东西丢出去。一发都收不下时整件事不做。
+   *
+   * @returns {number} 实际收回几发
+   */
+  unloadAmmo(target) {
+    const entry = this.entryAt(target);
+    const ammo = entry?.ammo;
+    if (!ammo) return 0;
+    const accepted = this.receive(ammo.itemType, ammo.quantity);
+    if (accepted === 0) return 0;
+    ammo.quantity -= accepted;
+    if (ammo.quantity === 0) delete entry.ammo;
+    this.revision += 1;
+    return accepted;
+  }
+
+  /**
+   * 打掉几发。发射的那一下扣的是这里，不是背包里那摞石头。
+   *
+   * @returns {number} 实际扣掉几发；不够就扣多少算多少。
+   */
+  consumeAmmo(target, quantity = 1) {
+    const entry = this.entryAt(target);
+    const ammo = entry?.ammo;
+    const wanted = requestedQuantity(quantity);
+    if (!ammo || wanted === 0) return 0;
+    const taken = Math.min(wanted, ammo.quantity);
+    ammo.quantity -= taken;
+    if (ammo.quantity === 0) delete entry.ammo;
+    this.revision += 1;
+    return taken;
+  }
+
+  /**
    * 切到物品栏某一格；再按一次当前格，或传 `NO_HOTBAR_SLOT`，都是收手。
    *
    * @returns 手持是否真的变了。
@@ -365,7 +469,10 @@ export class InventoryComponent extends ActorComponent {
    */
   hotbarSnapshot() {
     return {
-      slots: this.hotbar.map((slot) => (slot ? { ...slot } : null)),
+      // 弹药那一段也复制一份：快照发出去之后不该还指着账本里那个对象。
+      slots: this.hotbar.map((slot) => (
+        slot ? { ...slot, ...(slot.ammo ? { ammo: { ...slot.ammo } } : {}) } : null
+      )),
       activeIndex: this.activeHotbarIndex,
     };
   }
@@ -406,7 +513,12 @@ export class InventoryComponent extends ActorComponent {
     const definition = raw ? this.catalog.get(raw.itemType) : undefined;
     const quantity = requestedQuantity(raw?.quantity);
     if (!definition || quantity === 0) return null;
-    return { itemType: definition.id, quantity: Math.min(quantity, definition.stackLimit) };
+    const ammo = sanitizeAmmo(raw?.ammo, definition, this.catalog);
+    return {
+      itemType: definition.id,
+      quantity: Math.min(quantity, definition.stackLimit),
+      ...(ammo ? { ammo } : {}),
+    };
   }
 
   matches(slots, pooled) { return this.ledger.matches(slots, pooled); }
@@ -414,5 +526,7 @@ export class InventoryComponent extends ActorComponent {
 
 function sameHotbarSlot(left, right) {
   if (!left || !right) return left === right;
-  return left.itemType === right.itemType && left.quantity === right.quantity;
+  return left.itemType === right.itemType
+    && left.quantity === right.quantity
+    && sameAmmo(left.ammo, right.ammo);
 }

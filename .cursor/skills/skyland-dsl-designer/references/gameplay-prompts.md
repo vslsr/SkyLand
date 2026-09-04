@@ -75,11 +75,12 @@ Read this reference only when the task touches gameplay entries (`@i`, `@b`, `@w
 | 说明 | `summary`（≤ 64 字） | ✅ |
 | `M` | 掉落物原型的 `components.render`（`model` + 颜色 + 尺寸） | ✅ |
 | `I` | `iconId` + `tint`；SVG 画进 `src/ui/icons/ItemIconSprite.ts` | ✅ |
-| `F` | `use: { action, input, mode, holdSeconds, value }`；**「不能使用」= 整个 `use` 不写** | ✅ 动词限 `eat` / `tool` / `throw` |
+| `F` | `use: { action, input, mode, holdSeconds, cooldownSeconds, value }`；**「不能使用」= 整个 `use` 不写** | ✅ 动词限 `eat` / `shoot` / `tool` / `throw`；`mode` 有 `tap` / `hold` / `charge`（蓄力松手才结算）。`shoot` 的执行器由**武器系统**注册，见 `server/actors/ItemUseActions.mjs` |
 | `G` | `category` | ✅ 见下表 |
 | `N` | `stackLimit`；另配 `slotCost`（占几个货位，`0` 走独立池） | ✅ |
 | `R` | `durability`，`0` 或不写就不写这个字段 | ⚠️ 字段可配，还没有系统消耗它 |
-| `AM` | 目录里一个 `ammo: { accepts, capacity }`，加上格子上的一段弹药状态 | ❌ 还没有系统承接；设计见 [`doc/designer-inventory.md`](../../../../doc/designer-inventory.md) 的「物品的弹药配置」 |
+| 冷却 | `use.cooldownSeconds`；落成能力自己的 `cooldown`，按**物品种类**分组 | ✅ 冷却中按不下去，圈都不开始画 |
+| `AM` | 目录里一个 `ammo: { accepts, capacity }`（`accepts` 写**物品 id**，不写分类），加上格子上的一段弹药状态 | ✅ 只有 `slotCost: 0` + `stackLimit: 1` 的物品能写；装填 / 卸下走 `ammo:load` / `ammo:unload`。掉落物还记不住弹药，丢下时先卸回身上 |
 | `A` | 渲染侧代码，不是 JSON。见[动画字段 A 落到哪](#动画字段-a-落到哪) | ⚠️ 吃东西那段已落地，其余靠一事一议 |
 
 `G` 的取值对照 `category` 枚举：

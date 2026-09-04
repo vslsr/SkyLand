@@ -52,6 +52,18 @@
       }
     },
     {
+      "id": "slingshot-01",
+      "archetype": "slingshot-pile",
+      "localTransform": {
+        "position": [
+          -1.8,
+          0,
+          4.6
+        ],
+        "yaw": 0.6
+      }
+    },
+    {
       "id": "storage-chest-01",
       "archetype": "storage-chest",
       "localTransform": {

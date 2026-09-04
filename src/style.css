@@ -1033,6 +1033,38 @@ body.is-topdown .virtual-controls.is-desktop-debug {
   font-weight: 700;
 }
 
+/*
+ * 右下角那个弹药小框：装着的那种弹药 + 还剩几发。
+ *
+ * 绝对定位在格子角上，因为它说的是「这一格里那件东西的状态」，不是格子内容的一
+ * 部分——排进流里会把图标和名字挤下去，而物品栏那种 46 像素的小格根本挤不下。
+ * 没装弹药时这个元素整个不存在（见 `createAmmoBox`），所以这里不需要空态。
+ */
+.inventory__ammo {
+  position: absolute;
+  right: 2px;
+  bottom: 2px;
+  display: flex;
+  gap: 2px;
+  align-items: center;
+  padding: 1px 3px;
+  color: #35281f;
+  background: color-mix(in srgb, var(--item-tint, #b9b4a8) 42%, #fdfbf6);
+  border: 1px solid rgba(28, 26, 23, 0.34);
+}
+
+.inventory__ammo-icon {
+  display: block;
+  width: 11px;
+  height: 11px;
+}
+
+.inventory__ammo-count {
+  font-size: 9px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+}
+
 .inventory__badge {
   padding: 1px 6px;
   color: rgba(28, 26, 23, 0.72);
@@ -1208,6 +1240,27 @@ body.is-topdown .virtual-controls.is-desktop-debug {
 }
 
 /*
+ * 还剩几发弹药，画在格子左下角。
+ *
+ * 和右下角的堆叠数量分两个角：一件东西**有几个**和它**装着几发**是两回事，
+ * 挤在同一个角上会读成一个奇怪的分数。没装弹药的格子整个不画，理由同背包里
+ * 那个小框——一个空框看起来像坏了。
+ */
+.hotbar__ammo {
+  position: absolute;
+  bottom: 4px;
+  left: 6px;
+  color: rgba(226, 168, 88, 0.96);
+  font-size: 10px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.hotbar__ammo[hidden] {
+  display: none;
+}
+
+/*
  * 长按时盖在这一格上的圆形倒计时。
  *
  * 是一个真正的**环**，不是把方格底色填掉一角：倒计时说的是「还剩多少时间」，
@@ -1238,6 +1291,16 @@ body.is-topdown .virtual-controls.is-desktop-debug {
 
 .hotbar__slot[data-progress] {
   --hotbar-progress-color: rgba(201, 120, 104, 0.92);
+}
+
+/*
+ * 蓄力拉满了。
+ *
+ * 蓄力那一圈满了不会自己打出去，它停在满圈上等松手——所以「满了」必须自己有个
+ * 记号，否则玩家只能靠盯着那圈还在不在猜这一下到没到顶。
+ */
+.hotbar__dial[data-charged='true'] {
+  --hotbar-progress-color: rgba(226, 168, 88, 0.96);
 }
 
 /*

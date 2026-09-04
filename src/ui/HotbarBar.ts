@@ -25,6 +25,8 @@ interface HotbarSlot {
   readonly shortcut: HTMLElement;
   readonly figure: HTMLElement;
   readonly quantity: HTMLElement;
+  /** 还剩几发弹药。没装弹药的格子上整个收起来，和背包里那个小框同一条规矩。 */
+  readonly ammo: HTMLElement;
   /** 长按时盖在这一格上的那圈圆形倒计时。平时是收起来的。 */
   readonly dial: HTMLElement;
 }
@@ -85,6 +87,8 @@ export class HotbarBar {
       slot.tint ?? '',
       slot.quantity,
       slot.active ? 1 : 0,
+      // 弹药也算进签名：打掉一发之后这一格看得见地变了，不重画就停在旧发数上。
+      slot.ammo ? `${slot.ammo.itemType}x${slot.ammo.quantity}` : '',
     ].join(':')).join('|');
     if (this.rendered === signature) return;
     this.rendered = signature;
@@ -121,6 +125,9 @@ export class HotbarBar {
     held.dial.hidden = false;
     held.dial.style.setProperty('--hotbar-progress', `${Math.round(progress.ratio * 100)}%`);
     held.button.dataset.progress = progress.action;
+    // 蓄力拉满之后圈停在满圈上等松手，所以要有一个「已经满了」的记号——
+    // 否则玩家只能靠盯着那一圈还在不在猜这一下已经到顶。
+    held.dial.dataset.charged = String(progress.mode === 'charge' && progress.ratio >= 1);
     this.syncPlate();
   }
 
@@ -133,6 +140,7 @@ export class HotbarBar {
     for (const slot of this.slots) {
       slot.dial.hidden = true;
       slot.dial.style.removeProperty('--hotbar-progress');
+      delete slot.dial.dataset.charged;
       delete slot.button.dataset.progress;
     }
     this.syncPlate();
@@ -173,6 +181,10 @@ export class HotbarBar {
       quantity.className = 'hotbar__quantity';
       quantity.hidden = true;
 
+      const ammo = document.createElement('span');
+      ammo.className = 'hotbar__ammo';
+      ammo.hidden = true;
+
       // 圆形倒计时是一层独立的盖片，不是格子的背景：它要盖住图标、要能单独收起，
       // 也不该在换手重画时跟着格子内容一起被清掉。
       const dial = document.createElement('span');
@@ -180,9 +192,9 @@ export class HotbarBar {
       dial.hidden = true;
       dial.setAttribute('aria-hidden', 'true');
 
-      button.append(shortcut, figure, quantity, dial);
+      button.append(shortcut, figure, quantity, ammo, dial);
       this.track.append(button);
-      this.slots.push({ button, shortcut, figure, quantity, dial });
+      this.slots.push({ button, shortcut, figure, quantity, ammo, dial });
     }
   }
 
@@ -194,8 +206,11 @@ export class HotbarBar {
     button.setAttribute('aria-pressed', String(view.active));
     slot.dial.hidden = true;
     slot.dial.style.removeProperty('--hotbar-progress');
+    delete slot.dial.dataset.charged;
     delete button.dataset.progress;
     slot.shortcut.textContent = String(view.index + 1);
+    slot.ammo.hidden = view.ammo === undefined;
+    slot.ammo.textContent = view.ammo ? String(view.ammo.quantity) : '';
 
     if (view.active && state === 'ready') {
       this.heldSlot = slot;
@@ -205,6 +220,7 @@ export class HotbarBar {
     if (state === 'empty') {
       slot.figure.replaceChildren();
       slot.quantity.hidden = true;
+      slot.ammo.hidden = true;
       button.setAttribute('aria-label', `第 ${view.index + 1} 格 空`);
       return;
     }
@@ -219,6 +235,7 @@ export class HotbarBar {
     button.setAttribute(
       'aria-label',
       `第 ${view.index + 1} 格 ${view.displayName ?? ''} ×${view.quantity}`
+      + (view.ammo ? `，装着 ${view.ammo.quantity} 发${view.ammo.displayName}` : '')
       + (view.active ? '，正拿在手上' : ''),
     );
   }

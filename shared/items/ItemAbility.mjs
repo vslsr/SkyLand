@@ -23,6 +23,7 @@ export const ITEM_USE_STATE_TAG = 'State.Item.Using';
 
 const USE_VERBS = Object.freeze({
   eat: '吃下',
+  shoot: '发射',
   tool: '敲击',
   throw: '投掷',
 });
@@ -33,14 +34,25 @@ export function itemAbilityId(itemType) {
 }
 
 /**
+ * 冷却按物品种类分组。
+ *
+ * 能力本身每次激活完就被收回、下次用时重新授予，所以冷却不能挂在「这一条能力实例」
+ * 上——它得挂在一个换手、收回都不动的名字上。物品种类就是那个名字。
+ */
+export function itemCooldownGroup(itemType) {
+  return `Cooldown.Item.${itemType}`;
+}
+
+/**
  * 一件物品用起来是什么样：动作、走哪个输入槽、点按还是长按、倒计时多长。
  *
  * 目录里没登记 `use` 的物品返回 undefined——它没有用法，不该被授予能力，
  * 按键在它身上也不该有反应。
  *
  * @returns {{ id: string, action: string, itemType: string, displayName: string,
- *   verb: string, input: string, mode: 'tap' | 'hold', holdSeconds: number,
- *   value: number } | undefined}
+ *   verb: string, input: string, mode: 'tap' | 'hold' | 'charge', holdSeconds: number,
+ *   cooldownSeconds: number, value: number, ammo?: { accepts: readonly string[],
+ *   capacity: number } } | undefined}
  */
 export function resolveItemUse(itemType, catalog = itemCatalog) {
   const definition = itemType ? catalog.get(itemType) : undefined;
@@ -56,15 +68,21 @@ export function resolveItemUse(itemType, catalog = itemCatalog) {
     input: use.input,
     mode: use.mode,
     holdSeconds: use.holdSeconds,
+    cooldownSeconds: use.cooldownSeconds,
     value: use.value,
+    /** 这件东西的弹药位；执行器要扣弹药时读它，不用再回目录查一次。 */
+    ammo: definition.ammo,
   };
 }
 
 /**
- * 把一次长按的已按时长换算成圆形倒计时的比例。
+ * 把一次按住的已按时长换算成圆形倒计时的比例。
  *
  * 服务端按自己记的按下时刻算，客户端按本地时刻算同一个公式，所以圈画满那一刻
  * 和服务端判定倒计时结束是同一个时刻；客户端上报的时长只用来对齐表现。
+ *
+ * `charge` 读的是同一个函数：圈画到哪，蓄力就到哪。松手那一刻的这个比例就是这次
+ * 蓄了几成，服务端按自己记的时刻算一遍，客户端上报的时长不作数。
  *
  * @returns {number} [0, 1]。`tap` 恒为 1——点一下就激活，没有倒计时可画。
  */
@@ -82,6 +100,10 @@ export function holdRatio(heldSeconds, holdSeconds) {
  * 一遍 `execute`，跑完能力自己就结束了，调用方随后把它从槽位上收回——「完成后
  * 关闭能力」在这里是两步：能力自己结束，槽位由 Runtime 释放。
  *
+ * 冷却写在能力上而不是物品运行时里：GAS 已经有一套冷却，激活请求在那一层就被挡下，
+ * 物品侧因此不用再写一遍「还能不能用」。冷却按**物品种类**分组——换手不该洗掉这把
+ * 弹弓的冷却，而两把同种的弹弓也不该各有各的冷却。
+ *
  * @param {ReturnType<typeof resolveItemUse>} use
  * @param {(context: { use: object, payload: unknown }) => boolean} execute
  *   真正的世界效果。返回 false 表示这次激活什么都没做（面前没有可采集的目标之类）。
@@ -98,6 +120,9 @@ export function createItemUseAbility(use, execute) {
     concurrency: 'blocking',
     concurrencyGroup: ITEM_USE_ABILITY_SLOT,
     ownedTags: Object.freeze([ITEM_USE_STATE_TAG]),
+    ...(use.cooldownSeconds > 0
+      ? { cooldown: { seconds: use.cooldownSeconds, group: itemCooldownGroup(use.itemType) } }
+      : {}),
     onActivate: (context) => {
       execute({ use, payload: context.payload });
     },

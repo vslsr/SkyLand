@@ -12,12 +12,19 @@ import {
   type InventorySlotView,
 } from '../InventorySlotCell';
 import type { CommonUICloseReason } from '../common/CommonUIPage';
-import type { InventoryView } from '../../inventory/index';
+import type { InventoryView, ItemUseMode } from '../../inventory/index';
 
 /** 一次拖拽从哪本账上拿的、落到哪本账上。两头说的都是「哪一格」。 */
 export type InventoryDragSource = InventorySlotRef;
+/**
+ * 落到哪。
+ *
+ * 背包那一片整体是一个落点（「放回包里」，包里的顺序本来就是自动排的），但落在
+ * **一件吃弹药的东西**上时说的是那一格——把石头拖到弓上和把石头扔回包里是两件事，
+ * 所以这时带上 `itemType`。
+ */
 export type InventoryDragTarget =
-  | { readonly kind: 'backpack' }
+  | { readonly kind: 'backpack'; readonly itemType?: string }
   | { readonly kind: 'hotbar'; readonly slotIndex: number };
 
 /**
@@ -257,13 +264,20 @@ export class InventoryPage extends ModalWindow {
       endDrag: () => { this.dragSource = undefined; },
       isDragging: () => this.dragSource !== undefined,
       // 物品栏那一条的每一格都是落点（拖进来 = 装配到这一格）；背包那边整片是
-      // 一个落点，所以背包格子自己不接。
-      dropOn: slot.ref.kind === 'hotbar'
+      // 一个落点，所以背包格子自己不接——**除了吃弹药的那一格**：装填说的是「装到
+      // 这一件上」，那一格必须自己接得住，不能被「放回包里」吞掉。
+      // 背包格子接下之后 `dragSource` 已经清空，冒泡到整片的那次因此自己空转。
+      dropOn: slot.ref.kind === 'hotbar' || slot.ammoSlot !== undefined
         ? (target) => {
           const source = this.dragSource;
           this.dragSource = undefined;
-          if (!source || target.ref.kind !== 'hotbar') return;
-          this.dragHandler?.(source, { kind: 'hotbar', slotIndex: target.ref.slotIndex });
+          if (!source) return;
+          this.dragHandler?.(
+            source,
+            target.ref.kind === 'hotbar'
+              ? { kind: 'hotbar', slotIndex: target.ref.slotIndex }
+              : { kind: 'backpack', itemType: target.ref.itemType },
+          );
         }
         : undefined,
     });
@@ -327,6 +341,7 @@ export class InventoryPage extends ModalWindow {
           label: '收回背包',
           hint: '把这一格整摞搬回背包，那一格空出来',
         },
+        ...ammoEntries(slot),
         { action: 'drop', label: '丢弃', hint: '把这一格的一个丢到身前的地上' },
       ];
     }
@@ -338,6 +353,7 @@ export class InventoryPage extends ModalWindow {
         hint: equipped ? '已经在物品栏上了' : '交给物品栏的空格，数字键就能切到手上',
         disabled: equipped || !slot.holdable,
       },
+      ...ammoEntries(slot),
       { action: 'drop', label: '丢弃', hint: '把一个丢到身前的地上' },
     ];
   }
@@ -364,6 +380,25 @@ export class InventoryPage extends ModalWindow {
   }
 }
 
+/**
+ * 「卸下弹药」那一条：只在吃弹药的那些格子上出现。
+ *
+ * 空着的时候仍然列出来但点不动——这一格**能**装弹药是它的属性，藏起来会让菜单
+ * 在装弹前后长得不一样，玩家得先数一遍才知道点的是哪一条。
+ */
+function ammoEntries(slot: InventorySlotView): InventoryItemMenuEntry[] {
+  if (!slot.ammoSlot) return [];
+  const loaded = slot.ammo;
+  return [{
+    action: 'unload',
+    label: '卸下弹药',
+    hint: loaded
+      ? `把 ${loaded.quantity} 个${loaded.displayName}收回身上`
+      : '这一格现在空着，没有弹药可卸',
+    disabled: !loaded,
+  }];
+}
+
 function sameSlot(left: InventorySlotRef | undefined, right: InventorySlotRef): boolean {
   if (!left || left.kind !== right.kind) return false;
   return left.kind === 'backpack' && right.kind === 'backpack'
@@ -374,13 +409,16 @@ function sameSlot(left: InventorySlotRef | undefined, right: InventorySlotRef): 
 /** 「使用」那一条说什么，取决于这件东西按一下还是按住、又在哪本账上。 */
 function describeUse(
   usable: boolean,
-  useMode: 'tap' | 'hold' | undefined,
+  useMode: ItemUseMode | undefined,
   holdSeconds: number,
   onHotbar: boolean,
 ): string {
   if (!usable) return '这件东西没有用法';
-  const press = useMode === 'hold' && holdSeconds > 0
-    ? `按住使用键 ${holdSeconds} 秒`
+  // 蓄力和长按画同一个圈，说法却相反：一个是「按住等它走完」，一个是「拉满了松手」。
+  const press = holdSeconds > 0 && (useMode === 'hold' || useMode === 'charge')
+    ? (useMode === 'charge'
+      ? `按住使用键蓄力 ${holdSeconds} 秒，松手打出去`
+      : `按住使用键 ${holdSeconds} 秒`)
     : '按一下使用键';
   return onHotbar ? `切到这一格并关掉背包，${press}` : `关掉背包，${press}`;
 }

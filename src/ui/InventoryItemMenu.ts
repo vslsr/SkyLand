@@ -1,13 +1,16 @@
 import type { InventorySlotRef } from './InventorySlotCell';
 
 /**
- * 菜单上那三条。语义由 `InventoryController` 兑现，这里只负责说出意图。
+ * 菜单上那几条。语义由 `InventoryController` 兑现，这里只负责说出意图。
  *
- * 三条对两本账各有一种读法：背包那一格是「使用 / 装配 / 丢弃」，物品栏那一格是
+ * 前三条对两本账各有一种读法：背包那一格是「使用 / 装配 / 丢弃」，物品栏那一格是
  * 「使用 / 收回背包 / 丢弃」。中间那条方向相反，所以它是两个动词而不是一个开关
  * ——`equip` 往物品栏搬，`unequip` 往背包搬。
+ *
+ * `unload`（卸下弹药）只出现在**吃弹药**的那些格子上：别的东西身上没有这回事，
+ * 列一条永远点不动的出来只会让菜单变长。
  */
-export type InventoryItemAction = 'use' | 'equip' | 'unequip' | 'drop';
+export type InventoryItemAction = 'use' | 'equip' | 'unequip' | 'drop' | 'unload';
 
 export interface InventoryItemMenuEntry {
   readonly action: InventoryItemAction;

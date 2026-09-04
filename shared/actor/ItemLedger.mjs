@@ -86,6 +86,9 @@ export class ItemLedger {
     for (const entry of entries) {
       if (remaining === 0) break;
       if (entry.itemType !== itemType) continue;
+      // 装着弹药的那一条不收新的同类：它已经不是「一把普通的弹弓」了，并进来之后
+      // 那几发弹药就说不清归哪一件。
+      if (entry.ammo) continue;
       const taken = Math.min(remaining, definition.stackLimit - entry.quantity);
       if (taken <= 0) continue;
       entry.quantity += taken;
@@ -134,6 +137,63 @@ export class ItemLedger {
     return removed;
   }
 
+  /**
+   * 整条取走一摞，**连同它装着的弹药**。
+   *
+   * 和 `remove` 的区别只在带弹药的那一条：`remove` 按数量扣，扣到一半那几发弹药
+   * 就不知道该跟着哪一半走，所以带弹药的条目只能整条搬。装配到物品栏、从箱子里
+   * 取出来走的都是这条，「弹药跟着那一格走」因此不需要每个调用点各写一遍。
+   *
+   * @param {number} [quantity] 最多取几个；带弹药的那一条只在装得下整条时才被取走。
+   * @returns {{ itemType: string, quantity: number, ammo?: { itemType: string,
+   *   quantity: number } } | undefined} 一个都取不到时是 undefined。
+   */
+  takeEntry(itemType, quantity = Number.POSITIVE_INFINITY) {
+    const wanted = Number.isFinite(quantity) ? requestedQuantity(quantity) : Number.MAX_SAFE_INTEGER;
+    if (wanted === 0) return undefined;
+    for (const entries of [this.pooled, this.slots]) {
+      for (let index = entries.length - 1; index >= 0; index -= 1) {
+        const entry = entries[index];
+        if (entry.itemType !== itemType || !entry.ammo || entry.quantity > wanted) continue;
+        entries.splice(index, 1);
+        return { itemType, quantity: entry.quantity, ammo: entry.ammo };
+      }
+    }
+    const taken = this.remove(itemType, wanted);
+    return taken > 0 ? { itemType, quantity: taken } : undefined;
+  }
+
+  /**
+   * 把一整条放回来，**连同它装着的弹药**。全有或全无。
+   *
+   * 不带弹药的那些照旧并进已有的堆叠；带弹药的那一条自成一条，理由同 `add`。
+   *
+   * @returns 放没放进去。放不下时账本原样不动——一半留在手里、一半进包，
+   *   等于凭空销毁另一半。
+   */
+  putEntry(entry) {
+    const definition = this.catalog.get(entry?.itemType);
+    const quantity = requestedQuantity(entry?.quantity);
+    if (!definition || quantity === 0) return false;
+    if (!entry.ammo) {
+      const accepted = this.add(definition.id, quantity);
+      if (accepted === quantity) return true;
+      this.remove(definition.id, accepted);
+      return false;
+    }
+    if (quantity > definition.stackLimit) return false;
+    if (definition.pooled) {
+      if (this.pooled.some((existing) => existing.itemType === definition.id)) return false;
+    } else if (this.freeSlots < definition.slotCost) return false;
+    (definition.pooled ? this.pooled : this.slots).push({
+      itemType: definition.id,
+      quantity,
+      slotCost: definition.pooled ? 0 : definition.slotCost,
+      ammo: { ...entry.ammo },
+    });
+    return true;
+  }
+
   clear() {
     if (this.isEmpty) return false;
     this.slots.length = 0;
@@ -149,9 +209,10 @@ export class ItemLedger {
    * slotCost 与分类两端都能从物品目录查到，不进快照。
    */
   snapshot() {
-    return [...this.slots, ...this.pooled].map(({ itemType, quantity }) => ({
+    return [...this.slots, ...this.pooled].map(({ itemType, quantity, ammo }) => ({
       itemType,
       quantity,
+      ...(ammo ? { ammo: { ...ammo } } : {}),
     }));
   }
 
@@ -173,6 +234,8 @@ export class ItemLedger {
         quantity,
         slotCost: definition.pooled ? 0 : definition.slotCost,
       };
+      const ammo = sanitizeAmmo(entry?.ammo, definition, this.catalog);
+      if (ammo) stack.ammo = ammo;
       (definition.pooled ? pooled : slots).push(stack);
     }
     const changed = !this.matches(slots, pooled);
@@ -185,9 +248,32 @@ export class ItemLedger {
     const same = (left, right) => (
       left.length === right.length
       && left.every((entry, index) => (
-        entry.itemType === right[index].itemType && entry.quantity === right[index].quantity
+        entry.itemType === right[index].itemType
+        && entry.quantity === right[index].quantity
+        && sameAmmo(entry.ammo, right[index].ammo)
       ))
     );
     return same(this.slots, slots) && same(this.pooled, pooled);
   }
+}
+
+/**
+ * 弹药位的清洗：目录说得通才留着。
+ *
+ * 客户端镜像和快照都过这一关：这件东西不吃弹药、装的不是它收的那一种、发数越界，
+ * 一律当成没装。客户端只画服务端说的，但它不该因为一条脏数据画出一个不存在的弹药框。
+ */
+export function sanitizeAmmo(raw, definition, catalog) {
+  const slot = definition?.ammo;
+  if (!raw || !slot) return undefined;
+  const ammoType = catalog.get(raw.itemType)?.id;
+  if (!ammoType || !slot.accepts.includes(ammoType)) return undefined;
+  const quantity = Math.min(requestedQuantity(raw.quantity), slot.capacity);
+  return quantity > 0 ? { itemType: ammoType, quantity } : undefined;
+}
+
+/** 两个弹药位一不一样。都没装也算一样。 */
+export function sameAmmo(left, right) {
+  if (!left || !right) return !left && !right;
+  return left.itemType === right.itemType && left.quantity === right.quantity;
 }

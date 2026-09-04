@@ -285,3 +285,58 @@ test('已经握在手上的那一格点「使用」不再发 select：再切一�
   assert.deepEqual(harness.armed, [undefined, 'mushroom'], '接下来那一下说的是它');
   assert.equal(harness.open, false, '仍然让开画面，等玩家按使用键');
 });
+
+test('把石头拖到弹弓上是装填，不是把两格对调', () => {
+  const harness = createHarness();
+  harness.inventory.add('slingshot', 1);
+  harness.inventory.add('stone', 4);
+  harness.inventory.assignHotbarSlot(0, 'slingshot');
+  harness.controller.open();
+
+  // 背包里那摞石头 → 物品栏第 0 格那把弹弓：来源是它收的弹药，所以这一条是装填。
+  harness.view.dropItem?.({ kind: 'backpack', itemType: 'stone' }, { kind: 'hotbar', slotIndex: 0 });
+  assert.deepEqual(harness.sent.at(-1), {
+    kind: 'ammo:load',
+    slot: { kind: 'hotbar', slotIndex: 0 },
+    source: { kind: 'backpack', itemType: 'stone' },
+  });
+
+  // 弹弓不吃木头：那还是一次普通的「搬」，兑现成装配。
+  harness.view.dropItem?.({ kind: 'backpack', itemType: 'wood' }, { kind: 'hotbar', slotIndex: 0 });
+  assert.deepEqual(harness.sent.at(-1), { kind: 'assign', slotIndex: 0, itemType: 'wood' });
+});
+
+test('背包里那把弹弓也接得住石头：装填在哪本账上都是同一件事', () => {
+  const harness = createHarness();
+  harness.inventory.add('slingshot', 1);
+  harness.inventory.add('stone', 2);
+  harness.controller.open();
+
+  harness.view.dropItem?.(
+    { kind: 'backpack', itemType: 'stone' },
+    { kind: 'backpack', itemType: 'slingshot' },
+  );
+  assert.deepEqual(harness.sent.at(-1), {
+    kind: 'ammo:load',
+    slot: { kind: 'backpack', itemType: 'slingshot' },
+    source: { kind: 'backpack', itemType: 'stone' },
+  });
+});
+
+test('菜单里的「卸下弹药」对着被点的那一格，两本账各说各的', () => {
+  const harness = createHarness();
+  harness.inventory.add('slingshot', 1);
+  harness.controller.open();
+
+  harness.view.selectAction?.('unload', { kind: 'backpack', itemType: 'slingshot' });
+  assert.deepEqual(harness.sent.at(-1), {
+    kind: 'ammo:unload',
+    slot: { kind: 'backpack', itemType: 'slingshot' },
+  });
+
+  harness.view.selectAction?.('unload', { kind: 'hotbar', slotIndex: 2 });
+  assert.deepEqual(harness.sent.at(-1), {
+    kind: 'ammo:unload',
+    slot: { kind: 'hotbar', slotIndex: 2 },
+  });
+});

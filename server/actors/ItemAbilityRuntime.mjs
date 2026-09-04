@@ -3,10 +3,11 @@ import {
   ITEM_USE_ABILITY_SLOT,
   createItemUseAbility,
   holdRatio,
+  itemCooldownGroup,
   resolveItemUse,
 } from '../../shared/actor/index.mjs';
 import { GAME_ABILITY_COMPONENT } from '../../shared/abilities/index.mjs';
-import { findItemArchetypeId } from './ItemArchetypes.mjs';
+import { createItemUseContext, runItemUseAction } from './ItemUseActions.mjs';
 
 /**
  * 物品使用的权威运行时。
@@ -66,8 +67,14 @@ export function armItemAbility(scene, player, itemType, source) {
   const armed = { itemType: use.itemType, source, slotIndex, use, succeeded: false };
   abilities.grant(
     ITEM_USE_ABILITY_SLOT,
-    createItemUseAbility(use, () => {
-      armed.succeeded = executeItemUse(scene, player, use, source, slotIndex);
+    createItemUseAbility(use, ({ payload }) => {
+      armed.succeeded = runItemUseAction(createItemUseContext(scene, player, {
+        use,
+        source,
+        slotIndex,
+        heldSeconds: payload?.heldSeconds ?? 0,
+        chargeRatio: payload?.chargeRatio ?? 1,
+      }));
     }),
     `item:${use.itemType}`,
   );
@@ -92,12 +99,30 @@ export function revokeItemAbility(player) {
  * 按下使用键。
  *
  * `tap` 在这里不激活：一次点击是「按下再松开」，激活留给 `releaseItemUse`，
- * 按住不放不会连发。`hold` 记下起点，倒计时由 `updateItemUse` 每 tick 推进。
+ * 按住不放不会连发。`hold` 与 `charge` 记下起点，圈由 `updateItemUse` 每 tick 推进。
+ *
+ * **冷却中的那一下在这里就被挡住**，而不是等到激活时被能力系统拒绝：不挡的话，
+ * 玩家会先看到一圈画满的蓄力，松手才发现这一下从来没算数。
  */
 export function beginItemUse(player, now) {
-  if (!player?.itemAbility) return false;
+  if (!player?.itemAbility || itemUseCooldownRemaining(player) > 0) return false;
   player.itemUseStartedAt = now;
   return true;
+}
+
+/**
+ * 手上这件东西还要等多久才能再用一次，秒；没有冷却时是 0。
+ *
+ * 冷却记在 GAS 上、按**物品种类**分组，所以它跨得过能力的授予与收回——用完就收回
+ * 那条能力，冷却却不该跟着一起消失。快照把它发给客户端画冷却圆盘。
+ */
+export function itemUseCooldownRemaining(player) {
+  const armed = player?.itemAbility;
+  // 直接问 runtime 而不是 `abilitySystem`：后者在组件还没挂上 Actor 时会抛，
+  // 而这里被每 tick 的快照调用，抛出去等于整个房间停摆。
+  const runtime = player?.getComponent(GAME_ABILITY_COMPONENT)?.runtime;
+  if (!armed || !runtime) return 0;
+  return runtime.getCooldownRemaining(itemCooldownGroup(armed.itemType));
 }
 
 /**
@@ -106,13 +131,15 @@ export function beginItemUse(player, now) {
  * - `tap`：这就是那一下点击，激活。
  * - `hold`：倒计时还没走完就松手 = 取消。走完的那一刻已经由 `updateItemUse`
  *   激活并清掉了起点，所以这里再收到的松手是一次空操作。
+ * - `charge`：**松手这一刻就是那一下**，蓄了几成由服务端记的按下时刻算出来，
+ *   随激活一起交给执行器。圈画满之后不自己激活，停在满圈上等这一下。
  */
 export function releaseItemUse(scene, player, now) {
   const armed = player?.itemAbility;
   const startedAt = player?.itemUseStartedAt;
   if (!armed || startedAt === undefined) return false;
   player.itemUseStartedAt = undefined;
-  if (armed.use.mode !== 'tap') return false;
+  if (armed.use.mode === 'hold') return false;
   return activateItemAbility(scene, player, (now - startedAt) / 1000);
 }
 
@@ -128,6 +155,9 @@ export function cancelItemUse(player) {
  *
  * 激活发生在**倒计时结束那一刻**，不是松手那一刻：玩家看到的圈满就是结算，
  * 松不松手不改变结果。这条也是「客户端只画圈、不判定」成立的原因。
+ *
+ * 只管 `hold`。`charge` 画的是同一个圈，但圈满不是结算——它停在满圈上等松手，
+ * 由 `releaseItemUse` 收尾。
  *
  * @returns 这一 tick 有没有激活出效果。
  */
@@ -152,87 +182,16 @@ function activateItemAbility(scene, player, heldSeconds) {
   const abilities = player?.getComponent(GAME_ABILITY_COMPONENT);
   if (!armed || !abilities) return false;
   armed.succeeded = false;
+  // 蓄力比例按**服务端记的按下时刻**算，和客户端画的那个圈读同一个 `holdSeconds`：
+  // 圈画到哪，这一下就蓄到哪。非 charge 的用法恒为 1——它们没有「蓄了几成」这回事。
+  const chargeRatio = armed.use.mode === 'charge'
+    ? holdRatio(heldSeconds, armed.use.holdSeconds)
+    : 1;
   const result = abilities.activate(ITEM_USE_ABILITY_SLOT, {
-    payload: { heldSeconds, source: armed.source },
+    payload: { heldSeconds, chargeRatio, source: armed.source },
   });
   const succeeded = result.ok === true && armed.succeeded;
   revokeItemAbility(player);
   syncItemAbility(scene, player);
   return succeeded;
-}
-
-/**
- * 能力激活时真正发生的事。
- *
- * 放在这里而不是能力定义里，是因为它要碰场景：投掷要生成一个掉落 Actor，采集要
- * 找面前那个可采集物件。能力定义留在 shared/，两端都读得到；世界效果留在服务端，
- * 只有权威侧跑得动。
- */
-function executeItemUse(scene, player, use, source, slotIndex) {
-  if (use.action === 'eat') return eatItem(player, use, source, slotIndex);
-  if (use.action === 'throw') return throwItem(scene, player, use, source, slotIndex);
-  if (use.action === 'tool') {
-    // 工具敲的是面前那个可采集物件，力度来自物品目录，不是写死在采集代码里。
-    // 工具不消耗：它在独立池里，敲一下少一把说不通。
-    const target = scene.findHarvestablePropNear?.(player, use);
-    return Boolean(target) && scene.applyToolHarvest(player, target, use.value) === true;
-  }
-  return false;
-}
-
-/**
- * 吃掉一个。
- *
- * 「吃」在这里就是**从账上扣掉 `value` 个**，扣不出来就当这次使用没做成——
- * 手上那一摞可能在倒计时走完之前被丢掉或收进了背包。
- *
- * 吃东西那段抖动是纯表现，跑在客户端：能力从按下到倒计时走完的那一整段就是嘴里
- * 嚼的那一段，圈满 = 咽下去 = 这里扣账。表现不过网，因为它没有任何权威含义——
- * 抖得对不对不改变背包里少了几个。
- *
- * 回血还没有：角色身上还没有一条可回复的属性。有了之后，加的是这一处的一行，
- * 而不是再来一条动词。
- */
-function eatItem(player, use, source, slotIndex) {
-  const inventory = player.getComponent(INVENTORY_COMPONENT);
-  if (!inventory) return false;
-  const eaten = source === 'hotbar'
-    ? inventory.consumeHotbarSlot(slotIndex, use.value)
-    : inventory.remove(use.itemType, use.value);
-  return eaten === use.value;
-}
-
-/**
- * 投出去一个。
- *
- * 扣的是**账上**那一个，抛出去的是一个新生成的掉落 Actor：手上挂的那个是纯表现
- * 体（没有碰撞、没有掉落物理），把它直接扔出去就得给它临时补上一整套物理，还要
- * 保证下一次手持同步不会把飞在半空的那个当成手上那件。生成一个真正的掉落物、
- * 让掉落物理从出手位姿接管，两条链路各自完整。
- */
-function throwItem(scene, player, use, source, slotIndex) {
-  const inventory = player.getComponent(INVENTORY_COMPONENT);
-  const archetypeId = findItemArchetypeId(scene.actorWorld.context.archetypes, use.itemType);
-  // 没有掉落原型就扔不出去，这时账不能先扣。
-  if (!inventory || !archetypeId) return false;
-  const consumed = source === 'hotbar'
-    ? inventory.consumeHotbarSlot(slotIndex, 1)
-    : inventory.remove(use.itemType, 1);
-  if (consumed !== 1) return false;
-
-  // 出手速度就是 `use.value`（十倍米每秒）。长按不再按比例缩放它：倒计时决定的是
-  // 这次投掷成不成立，不是它有多用力。
-  const speed = use.value / 10;
-  // 出手点抬到身前 0.6 米、0.6 米高：就地生成会和角色碰撞体重叠，第一帧就被弹开。
-  scene.spawnItemStack(archetypeId, {
-    position: [
-      player.x + Math.sin(player.yaw) * 0.6,
-      player.y + 0.6,
-      player.z + Math.cos(player.yaw) * 0.6,
-    ],
-    quantity: 1,
-    yaw: player.yaw,
-    velocity: [Math.sin(player.yaw) * speed, 1.6 + speed * 0.35, Math.cos(player.yaw) * speed],
-  });
-  return true;
 }

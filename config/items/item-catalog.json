@@ -56,6 +56,29 @@
         "holdSeconds": 1,
         "value": 1
       }
+    },
+    {
+      "id": "slingshot",
+      "displayName": "弹弓",
+      "category": "tool",
+      "stackLimit": 1,
+      "slotCost": 0,
+      "iconId": "item-slingshot",
+      "tint": "#8A6A46",
+      "summary": "一把树杈弹弓，装上石头，拉满了打出去。",
+      "durability": 0,
+      "ammo": {
+        "accepts": ["stone"],
+        "capacity": 5
+      },
+      "use": {
+        "action": "shoot",
+        "input": "primary",
+        "mode": "charge",
+        "holdSeconds": 0.9,
+        "cooldownSeconds": 0.5,
+        "value": 180
+      }
     }
   ]
 }

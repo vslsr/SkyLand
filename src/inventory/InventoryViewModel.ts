@@ -39,11 +39,23 @@ export interface ItemDefinitionLike {
    * `mode` 决定按一下还是按住 `holdSeconds` 秒。
    */
   readonly use?: {
-    readonly action: 'eat' | 'tool' | 'throw';
+    readonly action: 'eat' | 'shoot' | 'tool' | 'throw';
     readonly input: 'primary';
-    readonly mode: 'tap' | 'hold';
+    readonly mode: ItemUseMode;
     readonly holdSeconds: number;
+    /** 用完之后多久才能再用一次，秒；0 = 没有冷却。 */
+    readonly cooldownSeconds: number;
     readonly value: number;
+  };
+  /**
+   * 弹药位：这件东西吃哪几种弹药、装几发。不写 = 它不吃弹药。
+   *
+   * 界面读它来判断「这一摞石头能不能拖到这一格上」，判断的依据因此和服务端
+   * 装填时读的是同一份数据。
+   */
+  readonly ammo?: {
+    readonly accepts: readonly string[];
+    readonly capacity: number;
   };
 }
 
@@ -53,10 +65,37 @@ export interface ItemCatalogLike {
   list?(): readonly ItemDefinitionLike[];
 }
 
+/**
+ * 怎么激活一件东西的用法。
+ *
+ * `tap` 点一下，`hold` 按住走完圈（圈满即结算），`charge` 按住蓄力（圈满停住，
+ * **松手才是那一下**）。
+ */
+export type ItemUseMode = 'tap' | 'hold' | 'charge';
+
+/** 一格里装着的弹药。弹药记在格子上，不记在物品目录里。 */
+export interface AmmoLoadView {
+  readonly itemType: string;
+  readonly quantity: number;
+  readonly displayName: string;
+  readonly iconId: string;
+  readonly tint: string;
+  /** 这件东西最多装几发。格子上那个小框写「3 / 5」用的是它。 */
+  readonly capacity: number;
+}
+
 /** 物品栏一格持有的那一摞；空格是 null。 */
 export interface HotbarSlotModelLike {
   readonly itemType: string;
   readonly quantity: number;
+  readonly ammo?: { readonly itemType: string; readonly quantity: number };
+}
+
+/** 账本里的一条：一摞货，可能还装着弹药。 */
+export interface LedgerEntryLike {
+  readonly itemType: string;
+  readonly quantity: number;
+  readonly ammo?: { readonly itemType: string; readonly quantity: number };
 }
 
 /** 背包 Component 里视图关心的部分；`InventoryComponent` 天然满足这个形状。 */
@@ -64,8 +103,8 @@ export interface InventoryModelLike {
   readonly slotCapacity: number;
   readonly usedSlots: number;
   readonly revision: number;
-  readonly slots: readonly { readonly itemType: string; readonly quantity: number }[];
-  readonly pooled: readonly { readonly itemType: string; readonly quantity: number }[];
+  readonly slots: readonly LedgerEntryLike[];
+  readonly pooled: readonly LedgerEntryLike[];
   /**
    * 物品栏每格实际持有的那一摞。
    *
@@ -97,10 +136,14 @@ export interface InventoryStackView {
   readonly holdable: boolean;
   /** 有没有用法。没有的话菜单里那条「使用」列出来但点不动。 */
   readonly usable: boolean;
-  /** `tap` 点一下就结算，`hold` 要按住走完圆形倒计时。没有用法时是 undefined。 */
-  readonly useMode?: 'tap' | 'hold';
+  /** `tap` 点一下就结算，`hold` / `charge` 要按住走完圆形倒计时。没有用法时是 undefined。 */
+  readonly useMode?: ItemUseMode;
   /** 长按倒计时多长，秒。`tap` 是 0。 */
   readonly holdSeconds: number;
+  /** 这件东西吃哪几种弹药、装几发；不吃弹药时是 undefined。 */
+  readonly ammoSlot?: { readonly accepts: readonly string[]; readonly capacity: number };
+  /** 现在装着什么弹药；没装时是 undefined。 */
+  readonly ammo?: AmmoLoadView;
 }
 
 /** 分类页。第一页固定是「全部」，其余按物品目录的分类顺序，空分类不出现。 */
@@ -124,10 +167,14 @@ export interface HotbarSlotView {
   readonly active: boolean;
   /** 有没有使用方式；界面据此决定要不要提示按一下还是按住。 */
   readonly usable: boolean;
-  /** `hold` 的那些要画圆形倒计时，`tap` 点一下就结算。没有用法时是 undefined。 */
-  readonly useMode?: 'tap' | 'hold';
+  /** `hold` / `charge` 的那些要画圆形倒计时，`tap` 点一下就结算。没有用法时是 undefined。 */
+  readonly useMode?: ItemUseMode;
   /** 长按倒计时多长，秒。`tap` 与没有用法时是 0。 */
   readonly holdSeconds: number;
+  /** 这件东西吃哪几种弹药、装几发；不吃弹药时是 undefined。 */
+  readonly ammoSlot?: { readonly accepts: readonly string[]; readonly capacity: number };
+  /** 现在装着什么弹药；没装时是 undefined。 */
+  readonly ammo?: AmmoLoadView;
 }
 
 export interface InventoryView {
@@ -157,8 +204,9 @@ function isItemCategory(value: string): value is ItemCategory {
 }
 
 function toStackView(
-  entry: { readonly itemType: string; readonly quantity: number },
+  entry: LedgerEntryLike,
   definition: ItemDefinitionLike,
+  catalog: ItemCatalogLike,
 ): InventoryStackView {
   const category = isItemCategory(definition.category) ? definition.category : 'material';
   return {
@@ -180,6 +228,31 @@ function toStackView(
     usable: definition.use !== undefined,
     useMode: definition.use?.mode,
     holdSeconds: definition.use?.holdSeconds ?? 0,
+    ammoSlot: definition.ammo,
+    ammo: toAmmoView(entry.ammo, definition, catalog),
+  };
+}
+
+/**
+ * 一格里装着的弹药摊成界面能画的一份。
+ *
+ * 弹药的名字、图标、颜色照样从物品目录查：格子上那个小框画的是**一件物品**，
+ * 不是一个数字，它该和背包里那一摞石头长得一样。
+ */
+function toAmmoView(
+  ammo: { readonly itemType: string; readonly quantity: number } | undefined,
+  definition: ItemDefinitionLike,
+  catalog: ItemCatalogLike,
+): AmmoLoadView | undefined {
+  const loaded = ammo ? catalog.get(ammo.itemType) : undefined;
+  if (!ammo || !loaded || !definition.ammo) return undefined;
+  return {
+    itemType: loaded.id,
+    quantity: ammo.quantity,
+    displayName: loaded.displayName,
+    iconId: loaded.iconId,
+    tint: loaded.tint,
+    capacity: definition.ammo.capacity,
   };
 }
 
@@ -207,7 +280,7 @@ export function buildInventoryView(
       const definition = catalog.get(entry.itemType);
       // 目录里没有的物品不画：它进不了权威背包，出现在这里说明配置漏了登记。
       if (!definition) continue;
-      const view = toStackView(entry, definition);
+      const view = toStackView(entry, definition, catalog);
       target.push(view);
       if (view.coinValue !== undefined) cargoValue += view.coinValue * view.quantity;
       if (view.contraband) contrabandCount += view.quantity;
@@ -293,6 +366,8 @@ function buildHotbar(
       usable: Boolean(definition?.use),
       useMode: definition?.use?.mode,
       holdSeconds: definition?.use?.holdSeconds ?? 0,
+      ammoSlot: definition?.ammo,
+      ammo: definition ? toAmmoView(slot?.ammo, definition, catalog) : undefined,
     };
   });
 }
@@ -327,8 +402,8 @@ export interface ContainerModelLike {
   readonly usedSlots: number;
   readonly viewerCount: number;
   readonly revision: number;
-  readonly slots: readonly { readonly itemType: string; readonly quantity: number }[];
-  readonly pooled: readonly { readonly itemType: string; readonly quantity: number }[];
+  readonly slots: readonly LedgerEntryLike[];
+  readonly pooled: readonly LedgerEntryLike[];
 }
 
 /**
