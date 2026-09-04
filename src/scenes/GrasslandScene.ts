@@ -144,6 +144,8 @@ export class GrasslandScene extends Scene {
   private slimeDragReplicated = false;
   /** 本地玩家正咬着别人；交互键这时说的是「松口」。权威状态来自快照。 */
   private localPlayerBiting = false;
+  /** 快照里自己那条的位置。没有本地角色（自由镜头）时，建造靠它判距离。 */
+  private localPlayerPosition?: { x: number; z: number };
   /** 复用的上报缓冲：拖拽每帧都可能被读一次，不该每次都分配一个对象。 */
   private readonly slimeDragState: SlimeSurfaceDragState = {
     contactX: 0, contactY: 0, contactZ: 0, pullX: 0, pullY: 0, pullZ: 0,
@@ -293,7 +295,9 @@ export class GrasslandScene extends Scene {
     // 发给服务端。放不放得下由服务端按同一份规则裁决，这里只负责预期。
     this.pointerRay = new PointerRayTracker(options.canvas);
     this.builds = new BuildController(this.input, {
-      getPlayerPosition: () => this.player?.controller.position,
+      // 自由镜头的图没有本地角色，但服务端仍按权威角色判距离——用快照里自己
+      // 那条兜底，幽灵才不会在够不着的地方也是绿的。
+      getPlayerPosition: () => this.player?.controller.position ?? this.localPlayerPosition,
       pointerRay: () => this.pointerRay.resolve(this.renderer.getCameraView()),
       pickPoint: (origin, direction) => this.world.pickBuildPoint(origin, direction),
       listHulls: () => this.world.listBuildHulls(),
@@ -359,7 +363,10 @@ export class GrasslandScene extends Scene {
       getHeldActorId: () => (this.player?.getComponent(PICKUP_DROP_COMPONENT) as
         PickupDropComponent | undefined)?.heldActorId ?? undefined,
       // 界面盖着时不响应：背包开着按 1 应该翻页而不是换手。
-      isActive: () => Boolean(this.joinedRoom && this.player) && this.commonUI.allowsGameInteraction,
+      // 建造模式下主键说的是「放这一件」：手上那件东西这一下不该被吃掉、丢出去。
+      isActive: () => Boolean(this.joinedRoom && this.player)
+        && this.commonUI.allowsGameInteraction
+        && !this.builds.active,
       send: (command) => { this.roomClient.sendInventoryCommand(command); },
       getInputLabel: (tag) => this.resolveInputLabel(tag),
       // 同一次按住只画一处。属于物品栏的那次画在格子上（`onHotbar`），因为那圈
@@ -490,10 +497,12 @@ export class GrasslandScene extends Scene {
       this.hotbar.reset();
     } else if (this.builds.active) {
       // 建造模式同样独占：放件那一下不能顺手捡起脚边的东西或换手上的物品。
-      this.terrainEdits.update(this.controls.frame);
-      this.builds.update(this.controls.frame);
+      // 两个 reset 要排在 builds.update 之前——它们会清掉交互提示与悬停，
+      // 排在后面就会把建造刚写上去的那条提示连同拆除的高亮一起擦掉。
       this.actorInteractions.reset();
       this.hotbar.reset();
+      this.terrainEdits.update(this.controls.frame);
+      this.builds.update(this.controls.frame);
     } else {
       this.terrainEdits.update(this.controls.frame);
       this.builds.update(this.controls.frame);
@@ -712,6 +721,7 @@ export class GrasslandScene extends Scene {
     this.playerTransformLog?.stop();
     this.roomClient.leaveRoom();
     this.joinedRoom = undefined;
+    this.localPlayerPosition = undefined;
     this.terrainEditorPanel.setAvailable(false);
     this.buildPanel.setPieces([]);
     this.destroyPlayer();
@@ -740,6 +750,7 @@ export class GrasslandScene extends Scene {
 
     // 自己的那条不走插值：直接交给和解，把预测拉回服务器的结论。
     const own = snapshot.players.find((player) => player.id === this.joinedRoom?.player.id);
+    this.localPlayerPosition = own ? { x: own.x, z: own.z } : undefined;
     const player = this.player;
     if (!own || !player) {
       this.playerTransformLog?.record('client.snapshot_missing_local_player', {
@@ -830,6 +841,7 @@ export class GrasslandScene extends Scene {
   private handleDisconnect(): void {
     if (!this.joinedRoom) return;
     this.joinedRoom = undefined;
+    this.localPlayerPosition = undefined;
     this.terrainEditorPanel.setAvailable(false);
     this.buildPanel.setPieces([]);
     this.destroyPlayer();

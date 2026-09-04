@@ -1057,8 +1057,18 @@ export class ClientActorSystem implements SceneFrameSystem {
       return actor;
     }
     if (!archetype.components.render && archetype.components.buildGrid) {
-      // 船体根节点看不见：它的样子就是挂在它身上的那些地基。没有 proxy，只有位姿、
-      // 浮力和网格——幽灵吸附、驾驶与船况都从这里读。
+      // 船体根节点看不见：它的样子就是挂在它身上的那些地基。
+      //
+      // 但它仍要有一个 proxy——一个没有模型的空节点。船的浮沉与横摇纵摇画在它身上，
+      // 挂在它下面的板由 `ThreeAttachmentVisual` 顺着父子关系继承过去，整座船坞
+      // 因此是一块一起起伏、一起倾斜的刚体。没有这个空 proxy，父节点在渲染侧根本
+      // 不存在，每块板都会各自平躺在水面上。
+      const hullProxyId = this.proxyIds.acquire();
+      this.renderScene.createMeshProxy(hullProxyId, {
+        name: `actor-${snapshot.id}`,
+        waterMotion: 'hull',
+      });
+      actor.addComponent(new RenderProxyComponent(hullProxyId, this.proxyIds));
       this.world.addActor(actor);
       return actor;
     }

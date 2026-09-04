@@ -5,6 +5,8 @@ import type { BuildCommand } from '../src/network/messages.ts';
 import type { BuildPreviewState } from '../src/render/RenderScene.ts';
 import type { ActorArchetypeDefinition } from '../src/scenes/data/SceneDefinition.ts';
 import type { BuildCellStatus, BuildHullCandidate } from '../src/scene/SceneVisualSystem.ts';
+import { PlayerInputTags } from '../src/input/config/playerInput.ts';
+import type { TagLike } from '../src/tags/index.ts';
 import {
   BUILD_REJECTION_LABELS,
   BuildSiteIndex,
@@ -45,19 +47,30 @@ const WOOD_WALL = {
   },
 } as ActorArchetypeDefinition;
 
-/** 只实现 BuildController 用到的那两个成员：绑定交互键、读开关。 */
+/** 只实现 BuildController 用到的那两个成员：绑定放置键、读开关。 */
 function createFakeInput() {
-  const triggers: Array<() => void> = [];
+  const bindings = new Map<TagLike, Array<() => void>>();
   return {
     enabled: true,
-    bind(_tag: unknown, handler: () => void) {
-      triggers.push(handler);
+    bind(tag: TagLike, handler: () => void) {
+      const handlers = bindings.get(tag) ?? [];
+      handlers.push(handler);
+      bindings.set(tag, handlers);
       return () => {};
     },
-    click() {
-      for (const trigger of triggers) trigger();
+    /** 按下某个键；没绑过这个键就什么都不发生。 */
+    press(tag: TagLike) {
+      for (const handler of bindings.get(tag) ?? []) handler();
+    },
+    boundTags() {
+      return [...bindings.keys()];
     },
   };
+}
+
+/** 默认用主键放置：建造是「对着指针指的地方干这一下」。 */
+function click(input: ReturnType<typeof createFakeInput>): void {
+  input.press(PlayerInputTags.Primary);
 }
 
 const FRAME = {
@@ -120,7 +133,7 @@ test('没有船可吸附的水上地基：幽灵落在世界格中心，按下�
   assert.match(prompts.at(-1)!, /立一艘船/);
   assert.deepEqual(sent, [], '没按键不发');
 
-  input.click();
+  click(input);
   controller.update(FRAME);
   assert.deepEqual(sent, [{
     kind: 'place', archetypeId: 'float-foundation', surface: 'floating', cellX: 0, cellZ: 0,
@@ -130,7 +143,7 @@ test('没有船可吸附的水上地基：幽灵落在世界格中心，按下�
 test('水上地基指在陆地上：幽灵变红、提示要放在水里、按键不发', () => {
   const { controller, input, previews, prompts, sent } = harness({ cellStatus: 'land' });
   controller.setSelection({ kind: 'piece', archetype: FLOAT_FOUNDATION });
-  input.click();
+  click(input);
   controller.update(FRAME);
   assert.equal(previews.at(-1)!.valid, false);
   assert.equal(prompts.at(-1), BUILD_REJECTION_LABELS['needs-water']);
@@ -148,7 +161,7 @@ test('指到已有的船上就吸到那艘船的格上，报文带 hullActorId �
     position: { x: 11, z: 4 },
   });
   controller.setSelection({ kind: 'piece', archetype: FLOAT_FOUNDATION });
-  input.click();
+  click(input);
   controller.update(FRAME);
   const preview = previews.at(-1)!;
   assert.equal(preview.valid, true);
@@ -165,7 +178,7 @@ test('静态墙吸到最近的格边并带上边名；被人挡住时提示挡�
     cellStatus: 'land',
   });
   controller.setSelection({ kind: 'piece', archetype: WOOD_WALL });
-  input.click();
+  click(input);
   controller.update(FRAME);
   const preview = previews.at(-1)!;
   assert.equal(preview.valid, true);
@@ -177,7 +190,7 @@ test('静态墙吸到最近的格边并带上边名；被人挡住时提示挡�
 
   const blocked = harness({ point: { x: 5.2, y: 0.5, z: 1.9 }, cellStatus: 'land', blocked: true });
   blocked.controller.setSelection({ kind: 'piece', archetype: WOOD_WALL });
-  blocked.input.click();
+  click(blocked.input);
   blocked.controller.update(FRAME);
   assert.equal(blocked.previews.at(-1)!.valid, false);
   assert.equal(blocked.prompts.at(-1), BUILD_REJECTION_LABELS.blocked);
@@ -205,9 +218,33 @@ test('拆除模式：指着谁就高亮谁，按键发拆除报文', () => {
   assert.equal(previews.at(-1), undefined, '拆除没有幽灵');
   assert.equal(hovered.at(-1), 'build-3');
   assert.match(prompts.at(-1)!, /拆除「木墙」/);
-  input.click();
+  click(input);
   controller.update(FRAME);
   assert.deepEqual(sent, [{ kind: 'remove', actorId: 'build-3' }]);
+});
+
+test('主键和交互键都能放：鼠标点一下、触屏那颗按钮各走一条，但都只放一件', () => {
+  const withPrimary = harness();
+  withPrimary.controller.setSelection({ kind: 'piece', archetype: FLOAT_FOUNDATION });
+  withPrimary.input.press(PlayerInputTags.Primary);
+  withPrimary.controller.update(FRAME);
+  assert.equal(withPrimary.sent.length, 1, '主键放一件');
+
+  const withInteract = harness();
+  withInteract.controller.setSelection({ kind: 'piece', archetype: FLOAT_FOUNDATION });
+  withInteract.input.press(PlayerInputTags.WorldInteract);
+  withInteract.controller.update(FRAME);
+  assert.equal(withInteract.sent.length, 1, '触屏 / 手柄那颗键也放一件');
+
+  // 同一帧两个键都按下也只放一件：请求是一个布尔，不是计数。
+  const both = harness();
+  both.controller.setSelection({ kind: 'piece', archetype: FLOAT_FOUNDATION });
+  both.input.press(PlayerInputTags.Primary);
+  both.input.press(PlayerInputTags.WorldInteract);
+  both.controller.update(FRAME);
+  assert.equal(both.sent.length, 1);
+  // 提示里写的是主键：鼠标在手上时那才是玩家要按的键。
+  assert.match(both.prompts.at(-1)!, /^E · /, 'getInputLabel 在这个替身里对两个键都返回 E');
 });
 
 test('取消选择收起幽灵，之后每帧不再重复发「收起」', () => {

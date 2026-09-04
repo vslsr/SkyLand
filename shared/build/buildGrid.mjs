@@ -285,19 +285,35 @@ function fromSite(surface, surfaceKey, grid, piece, cellX, cellZ, edge, hull) {
   };
 }
 
-function nearestHullAt(point, hulls) {
+/**
+ * 离这个点最近的、**可以接上去**的那艘船。
+ *
+ * `accepts` 说明「接上去」是什么意思，两种件不一样：
+ *
+ * - **地基**要求这一格紧挨着已有甲板。这就是设计稿里的「前后左右与其他水上地基
+ *   对齐吸附」：挨着就接到那座船坞上，不挨着就不算这艘船的事——调用方会在那里
+ *   立一艘新的。范围（`extentCells`）不参与吸附，它只是那艘船还能长多大的上限。
+ * - **墙与物件**只按范围找船：它们本来就该落在船上，落在没有甲板的格子上时
+ *   幽灵停在船上变红说「下面没有地基撑着」，比跳回世界网格好读。
+ */
+function nearestHullAt(point, hulls, accepts) {
   let nearest;
   let nearestDistance = Number.POSITIVE_INFINITY;
   for (const hull of hulls) {
     const local = worldToHullLocal(hull, point.x, point.z);
-    const { cellX, cellZ } = cellOf(hull.grid, local.x, local.z);
-    if (!isWithinHullExtent(hull.grid, cellX, cellZ)) continue;
+    const site = cellOf(hull.grid, local.x, local.z);
     const distance = Math.hypot(point.x - hull.x, point.z - hull.z);
     if (distance >= nearestDistance) continue;
+    if (!accepts(hull, site.cellX, site.cellZ)) continue;
     nearest = { hull, local };
     nearestDistance = distance;
   }
   return nearest;
+}
+
+/** 这一格上有没有甲板：船体自带的算，已经铺上去的地基也算。 */
+function deckAt(hull, cellX, cellZ, hasDeck) {
+  return isHullCell(hull.grid, cellX, cellZ) || hasDeck(hull.actorId, cellX, cellZ);
 }
 
 /**
@@ -310,12 +326,23 @@ function nearestHullAt(point, hulls) {
  * @param {{ x: number, z: number }} point
  * @param {{ kind: string, surface: string, slot?: string, hull?: string }} piece
  * @param {readonly { actorId: string, x: number, y?: number, z: number, yaw: number, grid: HullBuildGrid }[]} hulls
- * @param {HullBuildGrid} [hullGrid] 这种地基立起来的船会用的网格（没有 hull 的件不传）
+ * @param {{
+ *   hullGrid?: HullBuildGrid,
+ *   hasDeck?: (surfaceKey: string, cellX: number, cellZ: number) => boolean,
+ * }} [options] `hullGrid` 是这种地基立起来的船会用的网格；`hasDeck` 说某格上有没有铺过地基
  * @returns {BuildPlacement}
  */
-export function resolveBuildPlacement(point, piece, hulls = [], hullGrid = undefined) {
+export function resolveBuildPlacement(point, piece, hulls = [], options = {}) {
+  const { hullGrid, hasDeck = () => false } = options;
   if (piece.surface === 'floating' || piece.surface === 'any') {
-    const hit = nearestHullAt(point, hulls);
+    const accepts = piece.kind === 'foundation'
+      // 挨着已有甲板才算接到这艘船上；不挨着的地方是一座新的船坞。
+      // 这一格自己就是甲板时也算这艘船的事——那样指着一块板会说「这里已经有东西了」，
+      // 而不是当成在别人的板上另起一座。
+      ? (hull, cellX, cellZ) => deckAt(hull, cellX, cellZ, hasDeck)
+        || cellNeighbors(cellX, cellZ).some(([x, z]) => deckAt(hull, x, z, hasDeck))
+      : (hull, cellX, cellZ) => isWithinHullExtent(hull.grid, cellX, cellZ);
+    const hit = nearestHullAt(point, hulls, accepts);
     if (hit) {
       return placeOnGrid('floating', hit.hull.actorId, hit.hull.grid, piece, hit.local.x, hit.local.z, hit.hull);
     }

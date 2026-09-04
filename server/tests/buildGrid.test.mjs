@@ -37,6 +37,14 @@ const GROUND_FOUNDATION = { kind: 'foundation', surface: 'static', reach: 6 };
 const STATIC_WALL = { kind: 'wall', surface: 'static', reach: 6 };
 const CAMPFIRE = { kind: 'fixture', surface: 'any', reach: 6, slot: 'hearth' };
 
+/** 吸附：地基要知道哪一格已经铺过板，才判得出「挨没挨着这座船坞」。 */
+function snap(point, piece, hulls = [], sites = new BuildSiteIndex()) {
+  return resolveBuildPlacement(point, piece, hulls, {
+    hullGrid: HULL_GRID,
+    hasDeck: (surfaceKey, cellX, cellZ) => sites.hasFoundation(surfaceKey, cellX, cellZ),
+  });
+}
+
 /** 规则上下文的默认值：什么都不挡、什么都买得起，逐条用例再改自己关心的那一项。 */
 function context(sites, overrides = {}) {
   return {
@@ -84,8 +92,8 @@ test('用地基立起来的船：第 (0,0) 格在根节点正下方，没有自�
   assert.equal(isWithinHullExtent(RAFT_GRID, 4, 0), false);
 });
 
-test('水上地基没有船可吸附时在世界格上立新船，有船时吸到那艘船的格上', () => {
-  const founding = resolveBuildPlacement({ x: 5.2, z: -3.9 }, FLOAT_FOUNDATION, [], HULL_GRID);
+test('水上地基：挨着甲板就接到那座船坞上，不挨着就是新的一座', () => {
+  const founding = snap({ x: 5.2, z: -3.9 }, FLOAT_FOUNDATION);
   assert.equal(founding.founding, true);
   assert.equal(founding.surface, 'floating');
   assert.equal(founding.surfaceKey, undefined);
@@ -93,28 +101,35 @@ test('水上地基没有船可吸附时在世界格上立新船，有船时吸�
   assert.deepEqual([founding.x, founding.z], [5, -3]);
   assert.equal(founding.hullGrid, HULL_GRID);
 
+  // 这艘船的第 (0,0) 格上铺着一块板；挨着它的那一格接到这艘船上。
   const hull = { actorId: 'hull-1', x: 5, y: 0, z: -3, yaw: 0, grid: HULL_GRID };
-  const next = resolveBuildPlacement({ x: 7.1, z: -3.2 }, FLOAT_FOUNDATION, [hull], HULL_GRID);
+  const sites = new BuildSiteIndex();
+  sites.add({ actorId: 'root', surfaceKey: 'hull-1', kind: 'foundation', cellX: 0, cellZ: 0 });
+  const next = snap({ x: 7.1, z: -3.2 }, FLOAT_FOUNDATION, [hull], sites);
   assert.equal(next.founding, false);
   assert.equal(next.hullActorId, 'hull-1');
   assert.deepEqual([next.cellX, next.cellZ], [1, 0]);
   assert.deepEqual([next.x, next.z], [7, -3]);
 
-  // 扩建范围之外的点不归这艘船：又是一次立船。
-  const far = resolveBuildPlacement({ x: 30, z: -3 }, FLOAT_FOUNDATION, [hull], HULL_GRID);
-  assert.equal(far.founding, true);
+  // 同一个点，船上那格还空着时不算挨着——那就是另一座船坞的开头。
+  assert.equal(snap({ x: 7.1, z: -3.2 }, FLOAT_FOUNDATION, [hull]).founding, true);
+  // 斜对角不算挨着。
+  assert.equal(snap({ x: 7.1, z: -1.2 }, FLOAT_FOUNDATION, [hull], sites).founding, true);
+  // 隔着一格的水面也不算：那里是新的一座。
+  assert.equal(snap({ x: 30, z: -3 }, FLOAT_FOUNDATION, [hull], sites).founding, true);
 });
 
 test('物件两边都能放：有船吸船，没船落地；静态件永远落地', () => {
   const hull = { actorId: 'hull-1', x: 0, y: 0, z: 0, yaw: 0, grid: HULL_GRID };
-  assert.equal(resolveBuildPlacement({ x: 0.3, z: 0.2 }, CAMPFIRE, [hull]).surfaceKey, 'hull-1');
-  assert.equal(resolveBuildPlacement({ x: 40, z: 40 }, CAMPFIRE, [hull]).surfaceKey, STATIC_SURFACE_KEY);
-  assert.equal(resolveBuildPlacement({ x: 0.3, z: 0.2 }, GROUND_FOUNDATION, [hull]).surfaceKey, STATIC_SURFACE_KEY);
+  // 墙和物件按范围找船：落在没有甲板的格子上时幽灵停在船上变红，不跳回世界网格。
+  assert.equal(snap({ x: 0.3, z: 0.2 }, CAMPFIRE, [hull]).surfaceKey, 'hull-1');
+  assert.equal(snap({ x: 40, z: 40 }, CAMPFIRE, [hull]).surfaceKey, STATIC_SURFACE_KEY);
+  assert.equal(snap({ x: 0.3, z: 0.2 }, GROUND_FOUNDATION, [hull]).surfaceKey, STATIC_SURFACE_KEY);
 });
 
 test('上行的格坐标能还原成同一个放置位；脏数据还原不出来', () => {
   const hull = { actorId: 'hull-1', x: 2, y: 0, z: 2, yaw: 0.7, grid: HULL_GRID };
-  const wall = resolveBuildPlacement({ x: 2.4, z: 3.3 }, FLOAT_WALL, [hull]);
+  const wall = snap({ x: 2.4, z: 3.3 }, FLOAT_WALL, [hull]);
   const restored = restoreBuildPlacement(
     { surface: 'floating', hullActorId: 'hull-1', cellX: wall.cellX, cellZ: wall.cellZ, edge: wall.edge },
     FLOAT_WALL,
@@ -144,35 +159,39 @@ test('整格落在活动范围内才算在范围内', () => {
 
 test('水上地基：立船要在水里，扩建要挨着甲板、不出范围、不盖自带甲板', () => {
   const sites = new BuildSiteIndex();
-  const founding = resolveBuildPlacement({ x: 1, z: 1 }, FLOAT_FOUNDATION, [], HULL_GRID);
+  const founding = snap({ x: 1, z: 1 }, FLOAT_FOUNDATION);
   assert.equal(validateBuildPlacement(founding, FLOAT_FOUNDATION, context(sites, { cellStatus: () => 'land' })).reason, BUILD_REJECTIONS.NEEDS_WATER);
   assert.equal(validateBuildPlacement(founding, FLOAT_FOUNDATION, context(sites, { cellStatus: () => 'bounds' })).reason, BUILD_REJECTIONS.BOUNDS);
   assert.equal(validateBuildPlacement(founding, FLOAT_FOUNDATION, context(sites, { cellStatus: () => 'water' })).ok, true);
   // 没有 hull 定义的水上地基立不了船。
   const noHull = { ...FLOAT_FOUNDATION, hull: undefined };
   assert.equal(validateBuildPlacement(
-    resolveBuildPlacement({ x: 1, z: 1 }, noHull, []),
+    resolveBuildPlacement({ x: 1, z: 1 }, noHull, [], {}),
     noHull,
     context(sites, { cellStatus: () => 'water' }),
   ).reason, BUILD_REJECTIONS.SUPPORT);
 
   const hull = { actorId: 'hull-1', x: 0, y: 0, z: 0, yaw: 0, grid: HULL_GRID };
   sites.add({ actorId: 'root', surfaceKey: 'hull-1', kind: 'foundation', cellX: 0, cellZ: 0 });
-  const adjacent = resolveBuildPlacement({ x: 2.2, z: 0 }, FLOAT_FOUNDATION, [hull]);
+  const adjacent = snap({ x: 2.2, z: 0 }, FLOAT_FOUNDATION, [hull], sites);
   assert.equal(validateBuildPlacement(adjacent, FLOAT_FOUNDATION, context(sites)).ok, true);
-  const diagonal = resolveBuildPlacement({ x: 2.2, z: 2.2 }, FLOAT_FOUNDATION, [hull]);
-  assert.equal(validateBuildPlacement(diagonal, FLOAT_FOUNDATION, context(sites)).reason, BUILD_REJECTIONS.SUPPORT);
-  const same = resolveBuildPlacement({ x: 0.2, z: 0 }, FLOAT_FOUNDATION, [hull]);
+  // 斜对角吸不到这艘船，它是另一座船坞的开头——那里得是水。
+  const diagonal = snap({ x: 2.2, z: 2.2 }, FLOAT_FOUNDATION, [hull], sites);
+  assert.equal(diagonal.founding, true);
+  assert.equal(validateBuildPlacement(diagonal, FLOAT_FOUNDATION, context(sites, { cellStatus: () => 'water' })).ok, true);
+  const same = snap({ x: 0.2, z: 0 }, FLOAT_FOUNDATION, [hull], sites);
   assert.equal(validateBuildPlacement(same, FLOAT_FOUNDATION, context(sites)).reason, BUILD_REJECTIONS.OCCUPIED);
 
-  // 预制木筏：自带甲板不能再铺，扩建范围以外不行。
+  // 预制木筏：自带甲板算甲板，挨着它就接上去，甲板本身不能再铺一层。
   const raft = { actorId: 'raft', x: 0, y: 0, z: 0, yaw: 0, grid: RAFT_GRID };
-  const onDeck = resolveBuildPlacement({ x: 0.2, z: 0.2 }, FLOAT_FOUNDATION, [raft]);
+  const onDeck = snap({ x: 0.2, z: 0.2 }, FLOAT_FOUNDATION, [raft]);
+  assert.equal(onDeck.hullActorId, 'raft');
   assert.equal(validateBuildPlacement(onDeck, FLOAT_FOUNDATION, context(sites)).reason, BUILD_REJECTIONS.OCCUPIED);
-  const beside = resolveBuildPlacement({ x: 2.2, z: 0.2 }, FLOAT_FOUNDATION, [raft]);
+  const beside = snap({ x: 2.2, z: 0.2 }, FLOAT_FOUNDATION, [raft]);
+  assert.equal(beside.hullActorId, 'raft');
   assert.equal(validateBuildPlacement(beside, FLOAT_FOUNDATION, context(sites)).ok, true);
-  // 扩建范围之外的点根本不会吸到船上；只有上行报文硬指一格时才会走到 EXTENT。
-  assert.equal(resolveBuildPlacement({ x: 5.5, z: 0.2 }, FLOAT_FOUNDATION, [raft], HULL_GRID).founding, true);
+  // 离甲板远的点根本不会吸到船上；只有上行报文硬指一格时才会走到 EXTENT。
+  assert.equal(snap({ x: 5.5, z: 0.2 }, FLOAT_FOUNDATION, [raft]).founding, true);
   const tooFar = restoreBuildPlacement({ surface: 'floating', hullActorId: 'raft', cellX: 4, cellZ: 0 }, FLOAT_FOUNDATION, raft);
   assert.equal(validateBuildPlacement(tooFar, FLOAT_FOUNDATION, context(sites)).reason, BUILD_REJECTIONS.EXTENT);
 });
@@ -181,16 +200,16 @@ test('墙要有地基撑着；静态墙也能直接立在地形格边上', () =>
   const sites = new BuildSiteIndex();
   const hull = { actorId: 'hull-1', x: 0, y: 0, z: 0, yaw: 0, grid: HULL_GRID };
   sites.add({ actorId: 'root', surfaceKey: 'hull-1', kind: 'foundation', cellX: 0, cellZ: 0 });
-  const onEdge = resolveBuildPlacement({ x: 0, z: 0.9 }, FLOAT_WALL, [hull]);
+  const onEdge = snap({ x: 0, z: 0.9 }, FLOAT_WALL, [hull]);
   assert.deepEqual([onEdge.cellX, onEdge.cellZ, onEdge.edge], [0, 0, 'north']);
   assert.equal(validateBuildPlacement(onEdge, FLOAT_WALL, context(sites)).ok, true);
-  const floating = resolveBuildPlacement({ x: 4, z: 2.9 }, FLOAT_WALL, [hull]);
+  const floating = snap({ x: 4, z: 2.9 }, FLOAT_WALL, [hull]);
   assert.equal(validateBuildPlacement(floating, FLOAT_WALL, context(sites)).reason, BUILD_REJECTIONS.SUPPORT);
   // 同一条边不能放两面墙。
   sites.add({ actorId: 'w1', surfaceKey: 'hull-1', kind: 'wall', cellX: 0, cellZ: 0, edge: 'north' });
   assert.equal(validateBuildPlacement(onEdge, FLOAT_WALL, context(sites)).reason, BUILD_REJECTIONS.OCCUPIED);
 
-  const onTerrain = resolveBuildPlacement({ x: 10, z: 9.9 }, STATIC_WALL, []);
+  const onTerrain = snap({ x: 10, z: 9.9 }, STATIC_WALL);
   assert.equal(validateBuildPlacement(onTerrain, STATIC_WALL, context(sites)).ok, true);
   assert.equal(validateBuildPlacement(onTerrain, STATIC_WALL, context(sites, { cellStatus: () => 'bounds' })).reason, BUILD_REJECTIONS.BOUNDS);
   assert.equal(validateBuildPlacement(onTerrain, STATIC_WALL, context(sites, { hasLand: false })).reason, BUILD_REJECTIONS.NO_LAND);
@@ -198,11 +217,11 @@ test('墙要有地基撑着；静态墙也能直接立在地形格边上', () =>
 
 test('静态地基能放在陆地和河床上；物件落地只能落在陆地格或地基上', () => {
   const sites = new BuildSiteIndex();
-  const pier = resolveBuildPlacement({ x: 10, z: 10 }, GROUND_FOUNDATION, []);
+  const pier = snap({ x: 10, z: 10 }, GROUND_FOUNDATION);
   assert.equal(validateBuildPlacement(pier, GROUND_FOUNDATION, context(sites, { cellStatus: () => 'water' })).ok, true);
   assert.equal(validateBuildPlacement(pier, GROUND_FOUNDATION, context(sites, { cellStatus: () => 'bounds' })).reason, BUILD_REJECTIONS.BOUNDS);
 
-  const fire = resolveBuildPlacement({ x: 10, z: 10 }, CAMPFIRE, []);
+  const fire = snap({ x: 10, z: 10 }, CAMPFIRE);
   assert.equal(validateBuildPlacement(fire, CAMPFIRE, context(sites)).ok, true);
   assert.equal(validateBuildPlacement(fire, CAMPFIRE, context(sites, { cellStatus: () => 'water' })).reason, BUILD_REJECTIONS.SUPPORT);
   sites.add({ actorId: 'f1', surfaceKey: STATIC_SURFACE_KEY, kind: 'foundation', cellX: 5, cellZ: 5 });
@@ -216,7 +235,7 @@ test('静态地基能放在陆地和河床上；物件落地只能落在陆地�
 
 test('几何都过了才轮到实体、预算与材料，顺序决定幽灵先说什么', () => {
   const sites = new BuildSiteIndex();
-  const pier = resolveBuildPlacement({ x: 10, z: 10 }, GROUND_FOUNDATION, []);
+  const pier = snap({ x: 10, z: 10 }, GROUND_FOUNDATION);
   assert.equal(validateBuildPlacement(pier, GROUND_FOUNDATION, context(sites, { distance: 7 })).reason, BUILD_REJECTIONS.REACH);
   assert.equal(validateBuildPlacement(pier, GROUND_FOUNDATION, context(sites, { isBlocked: () => true, canAfford: false })).reason, BUILD_REJECTIONS.BLOCKED);
   assert.equal(validateBuildPlacement(pier, GROUND_FOUNDATION, context(sites, { withinBudget: false, canAfford: false })).reason, BUILD_REJECTIONS.BUDGET);
@@ -229,19 +248,19 @@ test('高度：水上件按甲板面算本地高度，静态件按地面与地�
     groundTopAt: (x, z) => (x === 5 && z === 5 ? 1.5 : 0.4),
     foundationTopAt: (key, x, z) => (x === 5 && z === 5 ? 1.62 : undefined),
   };
-  const founding = resolveBuildPlacement({ x: 1, z: 1 }, FLOAT_FOUNDATION, [], HULL_GRID);
+  const founding = snap({ x: 1, z: 1 }, FLOAT_FOUNDATION);
   assert.ok(Math.abs(resolveBuildElevation(founding, { kind: 'foundation', thickness: 0.16 }, support)) < 1e-9);
   const hull = { actorId: 'hull-1', x: 0, y: 0, z: 0, yaw: 0, grid: HULL_GRID };
-  const wall = resolveBuildPlacement({ x: 0, z: 0.9 }, FLOAT_WALL, [hull]);
+  const wall = snap({ x: 0, z: 0.9 }, FLOAT_WALL, [hull]);
   assert.equal(resolveBuildElevation(wall, { kind: 'wall', thickness: 0 }, support), 0.16);
 
-  const pier = resolveBuildPlacement({ x: 11, z: 11 }, GROUND_FOUNDATION, []);
+  const pier = snap({ x: 11, z: 11 }, GROUND_FOUNDATION);
   assert.equal(resolveBuildElevation(pier, { kind: 'foundation', thickness: 0.12 }, support), 1.5);
-  const wallOnPier = resolveBuildPlacement({ x: 11, z: 11.9 }, STATIC_WALL, []);
+  const wallOnPier = snap({ x: 11, z: 11.9 }, STATIC_WALL);
   assert.equal(resolveBuildElevation(wallOnPier, { kind: 'wall', thickness: 0 }, support), 1.62, '取地基顶面');
-  const wallOnGround = resolveBuildPlacement({ x: 21, z: 21.9 }, STATIC_WALL, []);
+  const wallOnGround = snap({ x: 21, z: 21.9 }, STATIC_WALL);
   assert.equal(resolveBuildElevation(wallOnGround, { kind: 'wall', thickness: 0 }, support), 0.4, '没有地基就落地');
-  const fire = resolveBuildPlacement({ x: 11, z: 11 }, CAMPFIRE, []);
+  const fire = snap({ x: 11, z: 11 }, CAMPFIRE);
   assert.equal(resolveBuildElevation(fire, { kind: 'fixture', thickness: 0 }, support), 1.62);
 });
 
