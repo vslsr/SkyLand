@@ -184,6 +184,12 @@ export class RoomProcessManager extends EventEmitter {
     record.child.send({ type: 'weather:set', playerId, weather });
   }
 
+  giveDebugItem(roomId, playerId, itemType) {
+    const record = this.rooms.get(roomId);
+    if (!record || !record.players.has(playerId)) return;
+    record.child.send({ type: 'debug:give-item', playerId, itemType });
+  }
+
   setTimeOfDay(roomId, playerId, timeOfDay) {
     const record = this.rooms.get(roomId);
     if (!record || !record.players.has(playerId)) return;

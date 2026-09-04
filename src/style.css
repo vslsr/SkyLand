@@ -628,6 +628,45 @@ body.has-interaction-target .crosshair {
   letter-spacing: 0.04em;
 }
 
+/*
+ * F8 里的物品列表。
+ *
+ * 它收在按钮下面，而不是浮在窗口外：F8 这个窗口自己会滚动，浮层挂进来会被裁掉
+ * 半截，挂到外面又得自己算位置。物品多起来时它自己滚（`max-height`），所以这一栏
+ * 不会把整个调试菜单撑长。
+ */
+.debug-menu__item-menu {
+  display: grid;
+  gap: 4px;
+  max-height: 208px;
+  margin-top: 7px;
+  padding: 6px;
+  overflow-y: auto;
+  background: rgba(253, 251, 246, 0.72);
+  border: 1px solid rgba(28, 26, 23, 0.24);
+}
+
+.debug-menu__item-menu[hidden] {
+  display: none;
+}
+
+.debug-menu__item-button {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  justify-content: flex-start;
+  min-height: 30px;
+  padding: 0 9px;
+  text-align: left;
+}
+
+.debug-menu__item-id {
+  margin-left: auto;
+  opacity: 0.5;
+  font-size: 10px;
+  letter-spacing: 0.04em;
+}
+
 .debug-menu__weather-grid {
   display: flex;
   flex-wrap: wrap;

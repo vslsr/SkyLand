@@ -234,6 +234,9 @@ export class GrasslandScene extends Scene {
       this.debugMenuPage.onTimeOfDaySelect((timeOfDay) => {
         if (this.joinedRoom) this.roomClient.setTimeOfDay(timeOfDay);
       });
+      this.debugMenuPage.onItemGrant((itemType) => {
+        if (this.joinedRoom) this.roomClient.giveDebugItem(itemType);
+      });
       this.refreshDebugMenuShortcut();
     }
     this.virtualControls = new VirtualControls({
