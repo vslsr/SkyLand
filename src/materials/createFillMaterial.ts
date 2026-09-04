@@ -107,9 +107,19 @@ const VERTEX_SHADER = /* glsl */ `
   #endif
 
   void main() {
-    vec4 worldPosition = modelMatrix * vec4(position, 1.0);
+    // 合批的填充是 InstancedMesh：每个实例的位置写在 instanceMatrix 里，
+    // three 只在内置的 project_vertex 里替你乘，自定义顶点着色器必须自己乘。
+    // 漏掉它整批实例会塌回对象原点（世界 0,0,0），只剩 CPU 变换过的轮廓线还在原地。
+    vec4 localPosition = vec4(position, 1.0);
+    vec3 localNormal = normal;
+    #ifdef USE_INSTANCING
+      localPosition = instanceMatrix * localPosition;
+      localNormal = mat3(instanceMatrix) * localNormal;
+    #endif
+
+    vec4 worldPosition = modelMatrix * localPosition;
     vWorldPosition = worldPosition.xyz;
-    vWorldNormal = normalize(mat3(modelMatrix) * normal);
+    vWorldNormal = normalize(mat3(modelMatrix) * localNormal);
 
     #ifdef USE_VERTEX_TINT
       vTint = tint;
