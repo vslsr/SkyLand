@@ -21,9 +21,11 @@ description: Read, write, and implement SkyLand's `@` design-note DSL — the `@
 
 They mark different gaps, and confusing them wastes the most time:
 
-- **`#design`** sits in a value position (`T: #design`). The **design** is deliberately blank. Propose one, write the answer back into the entry, and then do whatever its mode says — see below.
-- **`#advice`** is `#design`'s dual: the content is **already written**, and you are asked what would make it better. It marks a block or a line, since there must be something there to improve. Same modes.
+- **`#design`** means the **design** is missing or half-written. Complete it, write the answer back into the entry, then do whatever its mode says — see below. It can fill a value slot (`T: #design`) or trail a line that names a topic or is only half-specified (`Effect: 受到攻击力的伤害，按照蓄力倍率缩放 #design`).
+- **`#advice`** is `#design`'s dual: the content is **already complete**, and you are asked what would make it better. Same modes.
 - **`@todo`** marks a whole block or a single line — on the line above a heading (or the blank line there) for a whole module, or trailing at end of line for just that line. The design is settled; only the **code** is missing. Implement what is written; do not redesign it.
+
+Position does not pick the marker — the starting point does: nothing there or only a direction sketched → `#design`; complete but improvable → `#advice`; complete and settled, only code missing → `@todo`. All three can trail a line; only `#design` also fills a value slot.
 
 A `#design` already implies unimplemented, so it needs no `@todo`. The reverse does not hold. A `@todo` block covers everything under it, so entries inside it are not marked again — and an entry carrying `@todo` is still a **complete, binding definition**: the marker says it has not shipped, not that it may be written loosely.
 
