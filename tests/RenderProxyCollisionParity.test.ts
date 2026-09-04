@@ -86,6 +86,14 @@ const RENDER_DEFINITIONS: ActorRenderDefinition[] = [
     model: 'line-art-fruit-pile',
     fruitColor: '#d4694f', accentColor: '#b3543d', inkColor: '#5c2f26', radius: 0.22, height: 0.2,
   },
+  {
+    model: 'line-art-build-foundation',
+    size: 2, thickness: 0.12, plankColor: '#d6bea3', accentColor: '#b98558', inkColor: '#51463e',
+  },
+  {
+    model: 'line-art-build-wall',
+    width: 2, height: 1.5, thickness: 0.18, color: '#d6bea3', accentColor: '#b98558', inkColor: '#51463e',
+  },
 ];
 
 test('每一种 render 模型的碰撞盒都等于那个 shared 纯函数的输出', () => {
@@ -106,7 +114,7 @@ test('这份定义表覆盖了 render union 的每一种模型', () => {
   assert.equal(covered.size, RENDER_DEFINITIONS.length, '定义表里有重复的 model');
   assert.equal(
     covered.size,
-    15,
+    17,
     'render union 的成员数变了：新增一种模型就要在这里加一条最小定义',
   );
 });

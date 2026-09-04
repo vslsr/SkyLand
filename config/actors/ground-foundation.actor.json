@@ -1,0 +1,23 @@
+{
+  "$schema": "./actor.schema.json",
+  "schemaVersion": 1,
+  "id": "ground-foundation",
+  "components": {
+    "buildPiece": {
+      "kind": "foundation",
+      "surface": "static",
+      "label": "静态地基",
+      "reach": 6,
+      "cost": [{ "itemType": "wood-log", "quantity": 2 }]
+    },
+    "replicationPolicy": { "mode": "aoi", "radiusChunks": 2 },
+    "render": {
+      "model": "line-art-build-foundation",
+      "size": 2,
+      "thickness": 0.12,
+      "plankColor": "#d6bea3",
+      "accentColor": "#b98558",
+      "inkColor": "#51463e"
+    }
+  }
+}

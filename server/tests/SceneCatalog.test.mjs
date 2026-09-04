@@ -122,7 +122,10 @@ test('loads every selectable map from an independent scene JSON', async () => {
     rock: [{ archetypeId: 'large-rock', weight: 1 }],
     mushroom: [{ archetypeId: 'elastic-mushroom', weight: 1 }],
   });
-  assert.deepEqual(openWorld.gameplay.runtimeActorArchetypes, []);
+  assert.deepEqual(
+    openWorld.gameplay.runtimeActorArchetypes,
+    ['ground-foundation', 'wood-wall', 'stone-wall', 'campfire', 'float-foundation', 'float-wall'],
+  );
   assert.deepEqual(openWorld.actors, []);
   assert.equal(openWorld.gameplay.water.seaLevel, -0.4);
   assert.equal(openWorld.renderer.ocean.deepColor, '#2f6f96');

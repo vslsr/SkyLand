@@ -21,7 +21,7 @@ import type {
   SceneUpdateContext,
   SceneFrameSystem,
 } from '../scene/SceneVisualSystem';
-import type { ProxyId } from '../render/RenderScene';
+import type { BuildPreviewState, ProxyId } from '../render/RenderScene';
 import type { RenderWorldHandle } from '../render/RenderProxyTable';
 import type { SceneDefinition } from '../scenes/data/SceneDefinition';
 import type { SceneWorld } from '../scene/SceneWorld';
@@ -214,6 +214,11 @@ export class SceneRenderer {
   /** 高亮一格地形；传 undefined 收起高亮。高度由渲染侧那份地形自己算。 */
   public setTerrainHighlight(cell?: { cellX: number; cellZ: number }): void {
     this.runtime.setTerrainHighlight(cell);
+  }
+
+  /** 建造幽灵：玩家正要放的那一件，吸附到网格上、按能不能放染色。传 undefined 收起。 */
+  public setBuildPreview(state: BuildPreviewState | undefined): void {
+    this.renderWorldHandle?.scene.setBuildPreview(state);
   }
 
   public setSimpleCollisionVisible(visible: boolean): void {

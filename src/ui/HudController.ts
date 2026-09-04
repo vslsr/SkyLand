@@ -77,6 +77,8 @@ export class HudController {
         'cargo:add': '货物已装载',
         'cargo:remove': '货物已卸载',
         damage: '船体受到损伤',
+        'structure:add': '船体已扩建',
+        'structure:remove': '船上的件已拆除',
       } as const;
       this.vesselEvent.textContent = eventLabels[state.lastEvent.type];
       this.vesselEvent.classList.remove('is-updated');

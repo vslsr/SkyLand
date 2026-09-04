@@ -79,6 +79,9 @@
   },
   "gameplay": {
     "playerActor": { "archetype": "pbf-slime" },
+    "runtimeActorArchetypes": [
+      "ground-foundation", "wood-wall", "stone-wall", "campfire", "float-foundation", "float-wall"
+    ],
     "worldProps": {
       "tree": [
         { "archetype": "generated-tree", "weight": 5 },

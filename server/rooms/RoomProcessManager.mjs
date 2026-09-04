@@ -314,6 +314,12 @@ export class RoomProcessManager extends EventEmitter {
     record.child.send({ type: 'inventory:command', playerId, command });
   }
 
+  sendBuildCommand(roomId, playerId, command) {
+    const record = this.rooms.get(roomId);
+    if (!record || !record.players.has(playerId)) return;
+    record.child.send({ type: 'build:command', playerId, command });
+  }
+
   scheduleEmptyRoomCleanup(record) {
     this.cancelEmptyRoomCleanup(record);
     if (record.players.size > 0 || this.shuttingDown) return;

@@ -18,6 +18,7 @@ import {
 } from '../../shared/networkTuning.mjs';
 import {
   ACTOR_CONTROL_COMPONENT,
+  BUILD_PIECE_COMPONENT,
   BUOYANCY_COMPONENT,
   BuoyancyComponent,
   CARGO_COMPONENT,
@@ -38,7 +39,8 @@ import {
   VESSEL_MOTOR_COMPONENT,
 } from '../../shared/actor/index.mjs';
 import { itemCatalog } from '../../shared/items/index.mjs';
-import { CollisionWorld } from '../../shared/collision/index.mjs';
+import { BuildSiteIndex, cellWithinBounds, footprintBlocked } from '../../shared/build/index.mjs';
+import { COLLISION_LAYER, CollisionWorld } from '../../shared/collision/index.mjs';
 import {
   createActorSnapshots,
   createServerActorWorld,
@@ -56,6 +58,7 @@ import {
   releaseElasticTether,
 } from '../actors/ElasticTetherMutations.mjs';
 import { dropPickedActor, pickupActor } from '../actors/PickupDropMutations.mjs';
+import { placeBuildPiece, removeBuildPiece } from '../actors/BuildMutations.mjs';
 import {
   discardHeldItemActor,
   dropHeldObject,
@@ -86,7 +89,8 @@ import {
 import { toWorldSeed } from '../../shared/world/worldConfig.mjs';
 import { SceneEnvironmentDirector } from './SceneEnvironmentDirector.mjs';
 import { TERRAIN_CELL_SIZE, TERRAIN_SURFACE } from '../../shared/world/terrainConfig.mjs';
-import { sampleTerrain } from '../../shared/world/terrainContent.mjs';
+import { sampleTerrain, terrainCellSurface } from '../../shared/world/terrainContent.mjs';
+import { terrainCellTopHeight } from '../../shared/world/terrainSupport.mjs';
 import { TerrainEditor } from '../../shared/world/terrainEditing.mjs';
 import { TerrainPatchStore } from '../../shared/world/terrainPatches.mjs';
 import {
@@ -214,6 +218,16 @@ export class ServerScene {
       : undefined;
     this.fixedWaterWorld = definition.renderer?.content?.ocean === true
       && definition.renderer?.content?.ground === false;
+    // 陆地建造要有地面：流式地形图，或没有地形但有固定地面的图；纯海域图没有。
+    this.landBuildable = this.terrainEnabled || definition.renderer?.content?.ground !== false;
+    // 建造件的占位表与编号。占位表是权威的「哪格有什么」，快照不带它——客户端按
+    // 各件复制过去的格坐标自己重建一份，两端因此不会各记一套。
+    this.buildSites = new BuildSiteIndex();
+    this.nextBuildId = 1;
+    // 这张地图发给新玩家的起始材料（纯海域图上扩建船体用的木头）。
+    this.startingInventory = Array.isArray(definition.gameplay?.startingInventory)
+      ? definition.gameplay.startingInventory
+      : [];
     if (!this.terrainEnabled && definition.renderer?.content?.ground !== false) {
       this.physics.setActorCollider('__fixed-ground', {
         shape: 'box',
@@ -358,6 +372,10 @@ export class ServerScene {
     this.actorWorld.addActor(actor);
     this.players.set(player.id, actor);
     actor.syncWaterMovementEffect(this.isWaterAt(actor.x, actor.z));
+    const inventory = actor.getComponent(INVENTORY_COMPONENT);
+    if (inventory) {
+      for (const entry of this.startingInventory) inventory.add(entry.itemType, entry.quantity);
+    }
   }
 
   removePlayer(playerId) {
@@ -614,6 +632,95 @@ export class ServerScene {
    * 回退），并且都以「改完权威 Component、让下一帧快照去确认」收尾。传输层因此只
    * 需要认识一个 case。
    */
+  /**
+   * 建造命令：放一件或拆一件。序号防重放，和背包命令一样；结果不回执——
+   * 放成了下一份快照里就有那个 Actor，没放成幽灵还在原地。
+   *
+   * @returns {boolean} 是否真的改了什么
+   */
+  applyBuildCommand(playerId, message) {
+    const player = this.players.get(playerId);
+    if (!player) return false;
+    const sequence = Math.floor(toFiniteNumber(message?.sequence, 0));
+    if (sequence <= player.buildCommandSequence) return false;
+    player.buildCommandSequence = sequence;
+    const command = message?.command;
+    if (!command || typeof command !== 'object') return false;
+    if (command.kind === 'place') return placeBuildPiece(this, player, command).ok;
+    if (command.kind === 'remove') return removeBuildPiece(this, player, command).ok;
+    return false;
+  }
+
+  /** 这张图的水面高度；水上建筑的船体根节点就立在这个高度上。 */
+  get seaLevel() {
+    return this.actorWorld.context.seaLevel;
+  }
+
+  /**
+   * 一个世界格是什么：出了活动范围 → bounds；水域格（或整张图都是海）→ water；
+   * 其余 → land。客户端 `SceneWorld.buildCellStatus` 是同一套判断。
+   */
+  buildCellStatus(cellX, cellZ) {
+    if (!cellWithinBounds(cellX, cellZ, this.bounds)) return 'bounds';
+    if (this.terrainPatches) {
+      return terrainCellSurface(this.terrainPatches.cellCodeAt(cellX, cellZ)) === TERRAIN_SURFACE.WATER
+        ? 'water'
+        : 'land';
+    }
+    return this.fixedWaterWorld ? 'water' : 'land';
+  }
+
+  /**
+   * 静态件落在一格上的支撑面：陆地格是最高角点，河床格是水面（码头板浮在水上），
+   * 固定地面图上是 0。没有可建的陆地或出了范围就是 undefined。
+   */
+  groundTopHeight(cellX, cellZ) {
+    if (!this.landBuildable) return undefined;
+    const status = this.buildCellStatus(cellX, cellZ);
+    if (status === 'bounds') return undefined;
+    if (!this.terrainPatches) return 0;
+    const top = terrainCellTopHeight(this.terrainPatches.cellCodeAt(cellX, cellZ));
+    return status === 'water' ? Math.max(top, this.seaLevel) : top;
+  }
+
+  /** 某格上已放地基的顶面高度（水上件是船体本地高度）；墙脚落在它上面。 */
+  buildFoundationTop(surfaceKey, cellX, cellZ) {
+    const record = this.buildSites.at(surfaceKey, cellX, cellZ);
+    if (!record || record.kind !== 'foundation') return undefined;
+    const actor = this.actorWorld.getActor(record.actorId);
+    const piece = actor?.getComponent(BUILD_PIECE_COMPONENT);
+    const transform = actor?.getComponent(TRANSFORM_COMPONENT);
+    if (!piece || !transform) return undefined;
+    const base = piece.placedSurface === 'floating' ? transform.localY : transform.y;
+    return base + piece.thickness;
+  }
+
+  /**
+   * 放置位有没有被玩家、掉落物或场景物件挡住。同一表面上已有的建造件不算——
+   * 它们之间靠占位槽互斥。
+   */
+  buildFootprintBlocked(footprint, ignoreSurfaceKey) {
+    const players = [];
+    for (const player of this.players.values()) {
+      players.push({
+        x: player.x,
+        y: player.y,
+        z: player.z,
+        radius: player.collisionRadius,
+        height: player.collisionHeight,
+      });
+    }
+    return footprintBlocked(footprint, {
+      forEachNear: (x, z, radius, visit) => {
+        this.collision.forEachNear(x, z, radius, COLLISION_LAYER.MOVEMENT, visit);
+      },
+      identify: (instance) => instance.actor?.id,
+      ignore: (actorId) => ignoreSurfaceKey !== undefined
+        && this.buildSites.getByActor(actorId)?.surfaceKey === ignoreSurfaceKey,
+      cylinders: players,
+    });
+  }
+
   applyInventoryCommand(playerId, message) {
     const player = this.players.get(playerId);
     if (!player) return false;

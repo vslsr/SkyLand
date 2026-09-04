@@ -90,7 +90,12 @@ export interface SnapshotPlayer {
 }
 
 export type ActorFloatState = 'afloat' | 'overloaded' | 'flooding' | 'sinking';
-export type ActorEventType = 'cargo:add' | 'cargo:remove' | 'damage';
+export type ActorEventType =
+  | 'cargo:add'
+  | 'cargo:remove'
+  | 'damage'
+  | 'structure:add'
+  | 'structure:remove';
 
 export interface SnapshotActor {
   id: string;
@@ -208,6 +213,19 @@ export interface SnapshotActor {
     /** 可再生物件下一次可采的绝对服务端秒数；两端各自判断有没有长回来。 */
     readyAt?: number;
     revision?: number;
+  };
+  /**
+   * 建造件放在哪一格。水上件的格坐标在船体本地网格里，随船走时不变；
+   * 客户端靠它重建占位表给幽灵判红绿。离散状态，不插值。
+   */
+  buildPiece?: {
+    kind: 'foundation' | 'wall' | 'fixture';
+    /** 实际放在了哪种表面（物件声明 any，放下去之后就是其中之一）。 */
+    surface: 'floating' | 'static';
+    cellX: number;
+    cellZ: number;
+    edge?: 'north' | 'east';
+    revision: number;
   };
 }
 

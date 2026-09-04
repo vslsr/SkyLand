@@ -306,6 +306,20 @@
           "uniqueItems": true,
           "items": { "type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$" }
         },
+        "startingInventory": {
+          "type": "array",
+          "description": "新玩家进房间时发到背包里的物品；给没有可采集材料的地图用（例如纯海域图上扩建船体的木头）",
+          "maxItems": 8,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["itemType", "quantity"],
+            "properties": {
+              "itemType": { "type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$" },
+              "quantity": { "type": "integer", "minimum": 1, "maximum": 999 }
+            }
+          }
+        },
         "worldProps": {
           "type": "object",
           "description": "流式世界里每种物件的带权原型变体；同一放置记录由世界种子哈希确定选择结果",

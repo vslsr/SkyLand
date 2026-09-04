@@ -1674,3 +1674,134 @@ body.is-topdown .virtual-controls.is-desktop-debug {
   line-height: 1.5;
   white-space: pre;
 }
+
+/* ---- 建造栏 ------------------------------------------------------------- */
+
+/*
+ * 贴在屏幕右侧中部，和左侧的地形编辑栏镜像；收起时只剩一条小标签。
+ * 每一行是一种件：图标、名字、材料价。买不起的那一行把价格标红，但仍然点得动——
+ * 幽灵会告诉玩家缺什么。
+ */
+.build-editor {
+  position: absolute;
+  right: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
+  flex-direction: row-reverse;
+  align-items: center;
+  gap: 8px;
+  pointer-events: none;
+  z-index: var(--layer-game-ui);
+}
+
+.build-editor[hidden] {
+  display: none;
+}
+
+.build-editor__tab {
+  pointer-events: auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 64px;
+  padding: 0;
+  border: 1px solid rgba(73, 52, 38, 0.55);
+  border-right: none;
+  border-radius: 14px 0 0 14px;
+  background: rgba(247, 242, 233, 0.97);
+  box-shadow: -2px 0 10px rgba(73, 52, 38, 0.16);
+  color: #35281f;
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease, box-shadow 120ms ease;
+}
+
+.build-editor__tab:hover,
+.build-editor__tab:focus-visible {
+  background: #fff;
+  color: #1d1712;
+}
+
+.build-editor.is-expanded .build-editor__tab {
+  background: #35281f;
+  color: #f6efe4;
+  border-color: #35281f;
+}
+
+.build-editor__tab-icon {
+  width: 20px;
+  height: 20px;
+  display: block;
+}
+
+.build-editor__tools {
+  pointer-events: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 156px;
+  padding: 12px 10px;
+  border: 1px solid rgba(73, 52, 38, 0.24);
+  border-radius: 18px;
+  background: rgba(253, 251, 246, 0.94);
+  box-shadow: 0 8px 24px rgba(73, 52, 38, 0.14);
+}
+
+.build-editor__tools[hidden] {
+  display: none;
+}
+
+.build-editor__tool {
+  display: grid;
+  grid-template-columns: 22px 1fr;
+  grid-template-rows: auto auto;
+  column-gap: 8px;
+  align-items: center;
+  padding: 6px 12px 6px 9px;
+  border: 1px solid rgba(73, 52, 38, 0.3);
+  border-radius: 12px;
+  background: #fdfbf6;
+  color: #493426;
+  text-align: left;
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease, transform 120ms ease;
+}
+
+.build-editor__tool:hover,
+.build-editor__tool:focus-visible {
+  transform: translateX(-2px);
+  background: #fff;
+}
+
+/* 选中的件用深色实心，和未选中的浅底一眼分得开。 */
+.build-editor__tool.is-active {
+  background: #35281f;
+  border-color: #35281f;
+  color: #f6efe4;
+}
+
+.build-editor__icon {
+  grid-row: 1 / span 2;
+  width: 22px;
+  height: 22px;
+}
+
+.build-editor__label {
+  font: 600 12px/1.25 system-ui, sans-serif;
+}
+
+.build-editor__cost {
+  font: 500 10px/1.25 system-ui, sans-serif;
+  letter-spacing: 0.04em;
+  opacity: 0.82;
+}
+
+.build-editor__tool.is-unaffordable .build-editor__cost {
+  color: #b0452f;
+  opacity: 1;
+}
+
+.build-editor__tool.is-active.is-unaffordable .build-editor__cost {
+  color: #f2b6a5;
+}

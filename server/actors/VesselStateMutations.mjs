@@ -38,6 +38,32 @@ export function removeVesselCargo(buoyancy, cargoId) {
   return true;
 }
 
+/**
+ * 水上地基一类的**结构件**：它自己带浮力，所以进 `parts` 而不是 `loads`——
+ * 载重表里不该出现自己的甲板，多铺几块板是船变大了，不是船装得更多了。
+ */
+export function addVesselStructurePart(buoyancy, part) {
+  if (!part.id || buoyancy.parts.some((candidate) => candidate.id === part.id)) return false;
+  buoyancy.parts.push({
+    id: part.id,
+    mass: clamp(Number(part.mass) || 0, 0, 1000),
+    buoyancy: clamp(Number(part.buoyancy) || 0, 0, 1000),
+    integrity: 1,
+    localX: Number(part.localX) || 0,
+    localZ: Number(part.localZ) || 0,
+  });
+  recordEvent(buoyancy, 'structure:add', part.id);
+  return true;
+}
+
+export function removeVesselStructurePart(buoyancy, partId) {
+  const index = buoyancy.parts.findIndex((part) => part.id === partId);
+  if (index < 0) return false;
+  buoyancy.parts.splice(index, 1);
+  recordEvent(buoyancy, 'structure:remove', partId);
+  return true;
+}
+
 export function damageVesselPart(buoyancy, partId, amount) {
   const part = buoyancy.parts.find((candidate) => candidate.id === partId);
   if (!part) return false;

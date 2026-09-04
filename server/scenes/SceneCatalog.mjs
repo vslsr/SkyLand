@@ -2,6 +2,7 @@ import { readdir, readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { join } from 'node:path';
 import { ActorCatalog, isPlayerRenderModel } from '../actors/ActorCatalog.mjs';
+import { itemCatalog } from '../../shared/items/index.mjs';
 import { CHUNK_SIZE, WORLD_PLAY_AREA } from '../../shared/world/worldConfig.mjs';
 import { PROP_KIND_BY_NAME } from '../../shared/world/generatedProp.mjs';
 import {
@@ -296,6 +297,24 @@ const PROP_KIND_CONTENT_KEY = { tree: 'trees', grass: 'grass' };
  * 变体表放在场景而不是原型里：同一片林子可以同时有普通树与果树，服务端和
  * 客户端再用房间种子 + 放置记录地址选择同一项。原型仍只描述「它是什么」。
  */
+/**
+ * `gameplay.startingInventory`：新玩家进房间时直接发到背包里的物品。
+ * 只在没有可采集材料的地图上用（纯海域图上扩建船体的木头）；条目必须是目录里的物品。
+ */
+function validateStartingInventory(raw, filename) {
+  if (raw === undefined) return [];
+  if (!Array.isArray(raw) || raw.length > 8) {
+    throw new TypeError(`${filename}.gameplay.startingInventory 必须是最多 8 项的数组`);
+  }
+  return raw.map((entry, index) => {
+    const path = `${filename}.gameplay.startingInventory[${index}]`;
+    const record = requireObject(entry, path);
+    const itemType = requireString(record.itemType, `${path}.itemType`, 48);
+    if (!itemCatalog.has(itemType)) throw new TypeError(`${path}.itemType 不是目录里的物品：${itemType}`);
+    return { itemType, quantity: requireInteger(record.quantity, `${path}.quantity`, 1, 999) };
+  });
+}
+
 function validateWorldProps(gameplay, filename, actorCatalog, world, content) {
   const path = `${filename}.gameplay.worldProps`;
   if (gameplay.worldProps === undefined) return {};
@@ -625,6 +644,27 @@ function validateSceneDefinition(raw, filename, actorCatalog) {
   if (new Set(runtimeActorArchetypeIds).size !== runtimeActorArchetypeIds.length) {
     throw new TypeError(`${filename}.gameplay.runtimeActorArchetypes 不能重复`);
   }
+  // 水上地基引用的船体根节点原型一并进场景表：立船时服务端要按它生成根节点，
+  // 客户端要按它给幽灵找网格。地基的大小还得和那艘船的格宽一致。
+  const hullArchetypes = runtimeActorArchetypes.flatMap((archetype, index) => {
+    const hullId = archetype.components.buildPiece?.hull;
+    if (!hullId) return [];
+    const path = `${filename}.gameplay.runtimeActorArchetypes[${index}]`;
+    let hull;
+    try {
+      hull = actorCatalog.require(hullId);
+    } catch {
+      throw new TypeError(`${path} 的 ${archetype.id} 引用了不存在的船体原型：${hullId}`);
+    }
+    if (!hull.components.buildGrid || !hull.components.buoyancy) {
+      throw new TypeError(`${path} 的船体原型 ${hullId} 需要 buildGrid + buoyancy`);
+    }
+    if (Math.abs(archetype.components.render.size - hull.components.buildGrid.cellSize) > 1e-6) {
+      throw new TypeError(`${path} 的 ${archetype.id} 尺寸必须等于 ${hullId} 的格宽`);
+    }
+    return [hull];
+  });
+  const startingInventory = validateStartingInventory(gameplay.startingInventory, filename);
   const worldProps = validateWorldProps(gameplay, filename, actorCatalog, world, content);
   if (
     sceneComponents.some((component) => (
@@ -716,6 +756,7 @@ function validateSceneDefinition(raw, filename, actorCatalog) {
       actorComposition.actorArchetypes.push(archetype);
     }
   };
+  for (const hull of hullArchetypes) includeArchetype(hull);
   for (const [kind, variants] of Object.entries(worldProps)) {
     for (const [index, variant] of variants.entries()) {
       const archetype = actorCatalog.require(variant.archetypeId);
@@ -802,6 +843,7 @@ function validateSceneDefinition(raw, filename, actorCatalog) {
     gameplay: {
       playerActor: { archetypeId: playerActorArchetype.id },
       runtimeActorArchetypes: runtimeActorArchetypeIds.slice(),
+      ...(startingInventory.length > 0 ? { startingInventory } : {}),
       worldProps: Object.fromEntries(
         Object.entries(worldProps).map(([kind, variants]) => [
           kind,

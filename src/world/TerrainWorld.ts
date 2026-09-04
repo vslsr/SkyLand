@@ -1,4 +1,5 @@
-import { sampleTerrain } from '../../shared/world/terrainContent.mjs';
+import { sampleTerrain, terrainCellSurface } from '../../shared/world/terrainContent.mjs';
+import { terrainCellTopHeight } from '../../shared/world/terrainSupport.mjs';
 import { terrainMovementHeight } from '../../shared/world/terrainMovement.mjs';
 import { TERRAIN_SURFACE } from '../../shared/world/terrainConfig.mjs';
 import { TerrainEditor } from '../../shared/world/terrainEditing.mjs';
@@ -66,6 +67,17 @@ export class TerrainWorld {
     return (
       sampleTerrain(this.worldSeed, x, z, SAMPLE, this.cellCodeAt) as TerrainSample
     ).groundY;
+  }
+
+  /** 一格地形的最高角点；地基放在它上面才不会陷进斜坡。和服务端算的是同一个格 code。 */
+  public sampleCellTopHeight(globalCellX: number, globalCellZ: number): number {
+    return terrainCellTopHeight(this.patches.cellCodeAt(globalCellX, globalCellZ));
+  }
+
+  /** 这一格是不是水域格：建造不能落在水上。 */
+  public isWaterCell(globalCellX: number, globalCellZ: number): boolean {
+    return terrainCellSurface(this.patches.cellCodeAt(globalCellX, globalCellZ))
+      === TERRAIN_SURFACE.WATER;
   }
 
   public isWaterAt(x: number, z: number): boolean {

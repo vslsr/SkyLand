@@ -1,0 +1,35 @@
+{
+  "$schema": "./actor.schema.json",
+  "schemaVersion": 1,
+  "id": "float-hull",
+  "components": {
+    "buoyancy": {
+      "minimumBeam": 2,
+      "minimumLength": 2,
+      "maximumTrimRadians": 0.08,
+      "minimumDraft": 0.04,
+      "maximumDraft": 0.2,
+      "parts": [
+        { "id": "keel", "mass": 0, "buoyancy": 0, "integrity": 1, "localX": 0, "localZ": 0 }
+      ]
+    },
+    "vesselMotor": {
+      "maximumForwardSpeed": 3.2,
+      "maximumReverseSpeed": 1.2,
+      "acceleration": 1.8,
+      "deceleration": 2.6,
+      "drag": 1.2,
+      "turnSpeed": 0.65,
+      "inputTimeoutMs": 300
+    },
+    "buildGrid": {
+      "cellSize": 2,
+      "columns": 0,
+      "rows": 0,
+      "deckHeight": 0.16,
+      "extentCells": 6,
+      "maxPieces": 48
+    },
+    "replicationPolicy": { "mode": "aoi", "radiusChunks": 2 }
+  }
+}

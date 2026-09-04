@@ -56,6 +56,10 @@ export class SceneCompositionHost {
       fixedWaterWorld: definition.renderer.content.ocean === true
         && definition.renderer.content.ground === false,
       fixedWaterLevel: definition.gameplay.water?.seaLevel ?? 0,
+      // 「有地面」才有陆地建造：流式地形图和固定地面图都算，纯海域图不算。
+      // 活动范围是陆地建造的另一条硬边界，和服务端用的是同一份。
+      hasLand: definition.renderer.content.ground !== false,
+      bounds: definition.gameplay.bounds,
     });
   }
 
@@ -63,7 +67,7 @@ export class SceneCompositionHost {
   public clear(): void {
     this.#disposePrevious();
     this.render.clearRenderScene();
-    this.#install({ visualSystems: [] }, { fixedWaterWorld: false, fixedWaterLevel: 0 });
+    this.#install({ visualSystems: [] }, { fixedWaterWorld: false, fixedWaterLevel: 0, hasLand: false });
     this.world.clear();
   }
 
@@ -84,7 +88,7 @@ export class SceneCompositionHost {
 
   #install(
     next: SceneComposition,
-    water: { fixedWaterWorld: boolean; fixedWaterLevel: number },
+    water: Parameters<SceneWorld['adopt']>[1],
   ): void {
     this.#composition = next;
     this.#collision = next.collisionWorld;

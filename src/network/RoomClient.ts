@@ -9,7 +9,7 @@ import type {
   RoomSummary,
   VesselInputFrame,
 } from './messages';
-import type { InventoryCommand, TerrainEditOperation } from './messages';
+import type { BuildCommand, InventoryCommand, TerrainEditOperation } from './messages';
 import type { PlayerInputStep, RoomSnapshot, SlimeDragState } from './protocol';
 import type { WeatherType } from '../weather/index';
 import { HttpRoomDirectory, type RoomDirectory } from './RoomDirectory';
@@ -73,6 +73,7 @@ export class RoomClient {
   private actorInteractionSequence = 0;
   private inventoryCommandSequence = 0;
   private terrainEditSequence = 0;
+  private buildCommandSequence = 0;
 
   public constructor(options: RoomClientOptions = {}) {
     this.transport = options.transport ?? new WebSocketTransport();
@@ -268,6 +269,18 @@ export class RoomClient {
     return sequence;
   }
 
+  /**
+   * 发一条建造意图：放一件或拆一件。序号单调递增，服务端据此丢掉重放与乱序。
+   * 不做本地预测——件由下一帧快照里的新 Actor 兑现，拒了就是什么都不发生。
+   */
+  public sendBuildCommand(command: BuildCommand): number | undefined {
+    const sequence = this.buildCommandSequence + 1;
+    const sent = this.send({ type: 'build:command', sequence, command }, 'control');
+    if (!sent) return undefined;
+    this.buildCommandSequence = sequence;
+    return sequence;
+  }
+
   public onRoomUpdate(listener: RoomUpdateListener): () => void {
     this.roomListeners.add(listener);
     return () => this.roomListeners.delete(listener);
@@ -348,5 +361,6 @@ export class RoomClient {
     this.actorEventSequences.clear();
     this.actorInteractionSequence = 0;
     this.terrainEditSequence = 0;
+    this.buildCommandSequence = 0;
   }
 }

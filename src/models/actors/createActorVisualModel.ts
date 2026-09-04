@@ -18,6 +18,8 @@ import { createWoodPileModel } from './createWoodPileModel';
 import { createWoodLogModel } from './createWoodLogModel';
 import { createPbfSlimeModel } from './createPbfSlimeModel';
 import { createLeggedSlimeModel } from './createLeggedSlimeModel';
+import { createBuildFoundationModel } from './createBuildFoundationModel';
+import { createBuildWallModel } from './createBuildWallModel';
 
 export function createActorVisualModel(
   environment: FillMaterialEnvironment,
@@ -70,6 +72,12 @@ export function createActorVisualModel(
   }
   if (definition.model === 'line-art-fruit-pile') {
     return createFruitPileModel(environment, definition);
+  }
+  if (definition.model === 'line-art-build-foundation') {
+    return createBuildFoundationModel(environment, definition);
+  }
+  if (definition.model === 'line-art-build-wall') {
+    return createBuildWallModel(environment, definition);
   }
   return createReefModel(environment, definition);
 }

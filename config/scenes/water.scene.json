@@ -69,6 +69,11 @@
   },
   "gameplay": {
     "playerActor": { "archetype": "player-slime" },
+    "runtimeActorArchetypes": ["float-foundation", "float-wall", "campfire"],
+    "startingInventory": [
+      { "itemType": "wood-log", "quantity": 24 },
+      { "itemType": "stone", "quantity": 6 }
+    ],
     "bounds": { "minimumX": -48, "maximumX": 48, "minimumZ": -48, "maximumZ": 48 },
     "spawn": { "centerX": 0, "centerZ": 0, "radius": 3, "slots": 8 },
     "water": { "seaLevel": 0 }

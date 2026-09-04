@@ -10,6 +10,9 @@ import type { ActorFloatState, ActorEventType } from '../network/protocol';
 import type { WeatherType } from '../weather/index';
 import type { TerrainWorld } from '../world/TerrainWorld';
 import type { PhysicsWorld } from '../../shared/physics/PhysicsWorld.mjs';
+import type { BuildSiteIndex } from '../../shared/build/BuildSiteIndex.mjs';
+import type { BuildFootprint } from '../../shared/build/buildFootprint.mjs';
+import type { HullBuildGrid } from '../../shared/build/buildGrid.mjs';
 
 /**
  * 每帧传给场景系统的上下文。
@@ -89,6 +92,38 @@ export interface ActorSnapshotTarget {
   refreshColliders(): void;
   setSimpleCollisionVisible(visible: boolean): void;
   setTemperatureVisible(visible: boolean): void;
+  /** 建造：快照里建造件的占位表；幽灵靠它判红绿。 */
+  getBuildSites?(): BuildSiteIndex;
+  /** 视野里每一艘能建的船：id、这一帧的位姿、它的网格。 */
+  listBuildHulls?(): readonly BuildHullCandidate[];
+  /** 离某个点最近的建造件（水平距离在 radius 内）；拆除模式靠它决定指着谁。 */
+  findBuildPieceNear?(x: number, z: number, radius: number): BuildPieceCandidate | undefined;
+  /** 某格上已放地基的顶面高度（水上件是船体本地高度）。 */
+  buildFoundationTop?(surfaceKey: string, cellX: number, cellZ: number): number | undefined;
+  /** 放置位有没有被实体挡住；同一表面上已有的建造件不算。 */
+  buildFootprintBlocked?(footprint: BuildFootprint, ignoreSurfaceKey?: string): boolean;
+}
+
+/** 陆地格能不能建：`no-land` 是这张图既没有地形也没有地面（纯海域）。 */
+/** 一个世界格是什么：出了活动范围、水域（或整张图都是海）、陆地。 */
+export type BuildCellStatus = 'bounds' | 'water' | 'land';
+
+/** 一艘能建的船（船体根节点）：id、权威位姿、它的网格。 */
+export interface BuildHullCandidate {
+  actorId: string;
+  x: number;
+  y: number;
+  z: number;
+  yaw: number;
+  grid: HullBuildGrid;
+}
+
+export interface BuildPieceCandidate {
+  actorId: string;
+  label: string;
+  x: number;
+  y: number;
+  z: number;
 }
 
 export interface ActorInteractionCandidate {

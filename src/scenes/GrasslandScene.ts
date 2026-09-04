@@ -16,6 +16,8 @@ import {
 } from '../input/index';
 import { SceneControlRouter } from '../controllers/SceneControlRouter';
 import { ActorInteractionController } from '../controllers/ActorInteractionController';
+import { BuildController } from '../controllers/BuildController';
+import { PointerRayTracker } from '../controllers/PointerRayTracker';
 import { InventoryController } from '../controllers/InventoryController';
 import { HotbarController } from '../controllers/HotbarController';
 import { ContainerController } from '../controllers/ContainerController';
@@ -52,8 +54,11 @@ import {
   PICKUP_DROP_COMPONENT,
   type PickupDropComponent,
 } from '../../shared/actor/index.mjs';
+import { createHullBuildGrid, footprintBlocked } from '../../shared/build/index.mjs';
+import { PLAYER_COLLISION_RADIUS } from '../../shared/playerMovement.mjs';
 import { HudController } from '../ui/HudController';
 import { TerrainEditorPanel } from '../ui/TerrainEditorPanel';
+import { BuildPanel } from '../ui/BuildPanel';
 import { CreateRoomPage, type CreateRoomFormValue } from '../ui/pages/CreateRoomPage';
 import { DebugMenuPage } from '../ui/pages/DebugMenuPage';
 import { GameMenuPage } from '../ui/pages/GameMenuPage';
@@ -88,6 +93,10 @@ export class GrasslandScene extends Scene {
   private readonly actorInteractions: ActorInteractionController;
   private readonly terrainEdits: TerrainEditController;
   private readonly terrainEditorPanel = new TerrainEditorPanel();
+  private readonly builds: BuildController;
+  private readonly buildPanel = new BuildPanel();
+  /** 指针在画布上的最后位置；建造幽灵跟着它走，没有指针时退回准星。 */
+  private readonly pointerRay: PointerRayTracker;
   private readonly gameInteractions = new GameInteractionLayer();
   private readonly hud = new HudController();
   private readonly roomClient = new RoomClient();
@@ -280,6 +289,53 @@ export class GrasslandScene extends Scene {
       isBiting: () => this.localPlayerBiting,
       sendBite: () => { this.roomClient.toggleBite(); },
     });
+    // 建造：指针射线打到的点吸附成格位、按共享规则给幽灵判红绿，交互键把**格坐标**
+    // 发给服务端。放不放得下由服务端按同一份规则裁决，这里只负责预期。
+    this.pointerRay = new PointerRayTracker(options.canvas);
+    this.builds = new BuildController(this.input, {
+      getPlayerPosition: () => this.player?.controller.position,
+      pointerRay: () => this.pointerRay.resolve(this.renderer.getCameraView()),
+      pickPoint: (origin, direction) => this.world.pickBuildPoint(origin, direction),
+      listHulls: () => this.world.listBuildHulls(),
+      hullGridOf: (hullArchetypeId) => {
+        const hull = this.joinedRoom?.scene.actorArchetypes.find(
+          (definition) => definition.id === hullArchetypeId,
+        );
+        return hull?.components.buildGrid ? createHullBuildGrid(hull.components.buildGrid) : undefined;
+      },
+      getSites: () => this.world.getBuildSites(),
+      foundationTop: (surfaceKey, cellX, cellZ) => this.world.buildFoundationTop(surfaceKey, cellX, cellZ),
+      hasLand: () => this.world.hasLand(),
+      cellStatus: (cellX, cellZ) => this.world.buildCellStatus(cellX, cellZ),
+      groundTop: (cellX, cellZ) => this.world.groundTopHeight(cellX, cellZ),
+      seaLevel: () => this.world.seaLevel(),
+      // 本地玩家不在碰撞世界里（它是预测实体），所以单独按脚下的圆柱判一次。
+      isBlocked: (footprint, surfaceKey) => {
+        const position = this.player?.controller.position;
+        const player = position
+          ? [{
+            x: position.x,
+            y: this.player?.controller.verticalPosition ?? 0,
+            z: position.z,
+            radius: PLAYER_COLLISION_RADIUS,
+            height: PLAYER_COLLISION_RADIUS * 2,
+          }]
+          : [];
+        return footprintBlocked(footprint, { forEachNear: () => undefined, cylinders: player })
+          || this.world.buildFootprintBlocked(footprint, surfaceKey);
+      },
+      getInventory: () => this.player?.getComponent(INVENTORY_COMPONENT) as
+        InventoryComponent | undefined,
+      findPieceNear: (x, z, radius) => this.world.findBuildPieceNear(x, z, radius),
+      getInputLabel: (tag) => {
+        const control = this.input.getMappedControls(tag)[0];
+        return control ? this.inputScheme.getControlLabel(control) : undefined;
+      },
+      setHoveredActorId: (actorId) => this.world.setHoveredActorId(actorId),
+      setPreview: (state) => this.renderer.setBuildPreview(state),
+      setPrompt: (text) => this.hud.setInteractionPrompt(text),
+      send: (command) => { this.roomClient.sendBuildCommand(command); },
+    });
     this.inventory = new InventoryController(this.inventoryPage, this.input, {
       getInventory: () => this.player?.getComponent(INVENTORY_COMPONENT) as
         InventoryComponent | undefined,
@@ -358,6 +414,12 @@ export class GrasslandScene extends Scene {
     this.roomClient.onRoomUpdate((room) => this.handleRoomUpdate(room));
     this.terrainEditorPanel.onOperationChange((operation) => {
       this.terrainEdits.setOperation(operation);
+      // 两条栏互斥：WorldInteract 同一时刻只能归一边。
+      if (operation) this.buildPanel.setExpanded(false);
+    });
+    this.buildPanel.onSelectionChange((selection) => {
+      this.builds.setSelection(selection);
+      if (selection) this.terrainEditorPanel.setExpanded(false);
     });
     this.roomClient.onSnapshot((snapshot) => this.handleSnapshot(snapshot));
     this.roomClient.onPlayerTransformLogStatus((status) => {
@@ -421,10 +483,18 @@ export class GrasslandScene extends Scene {
     if (this.terrainEdits.active) {
       // 编辑模式独占 WorldInteract：同一次点击不能既改地形又去交互 Actor。
       this.terrainEdits.update(this.controls.frame);
+      this.builds.reset();
       this.actorInteractions.reset();
-    this.hotbar.reset();
+      this.hotbar.reset();
+    } else if (this.builds.active) {
+      // 建造模式同样独占：放件那一下不能顺手捡起脚边的东西或换手上的物品。
+      this.terrainEdits.update(this.controls.frame);
+      this.builds.update(this.controls.frame);
+      this.actorInteractions.reset();
+      this.hotbar.reset();
     } else {
       this.terrainEdits.update(this.controls.frame);
+      this.builds.update(this.controls.frame);
       this.actorInteractions.update(this.controls.frame, deltaSeconds);
       this.hotbar.update();
     }
@@ -537,10 +607,15 @@ export class GrasslandScene extends Scene {
     this.joinedRoom = joined;
     // 只有带 renderer.world 的流式地图才有可编辑地形。
     this.terrainEditorPanel.setAvailable(Boolean(joined.scene.renderer.world));
+    // 建造栏只列这张地图声明的建造件；一件都没有的图连标签都不出现。
+    this.buildPanel.setPieces(joined.scene.actorArchetypes.filter(
+      (definition) => definition.components.buildPiece !== undefined,
+    ));
     this.sceneComponents.clear();
     this.snapshots.clear();
     this.vesselControls.reset();
     this.actorInteractions.reset();
+    this.builds.reset();
     this.hotbar.reset();
     // 装配归 SceneCompositionHost；渲染器只接住渲染那一半。
     this.renderer.resetEnvironment(joined.scene);
@@ -636,6 +711,7 @@ export class GrasslandScene extends Scene {
     this.roomClient.leaveRoom();
     this.joinedRoom = undefined;
     this.terrainEditorPanel.setAvailable(false);
+    this.buildPanel.setPieces([]);
     this.destroyPlayer();
     this.hud.setDisconnected();
     this.commonUI.clear();
@@ -680,6 +756,7 @@ export class GrasslandScene extends Scene {
     )) {
       this.inventory.sync();
       this.hotbarBar.setSlots(buildInventoryView(inventory).hotbar);
+      this.buildPanel.setInventory((itemType) => inventory.quantityOf(itemType));
     }
     // 容器界面跟随服务端的开合：走远、箱子被拆、掉线都由服务端把人移出，客户端
     // 不各自判一遍距离，也就不会出现「服务端已经关了但界面还开着」。
@@ -752,6 +829,7 @@ export class GrasslandScene extends Scene {
     if (!this.joinedRoom) return;
     this.joinedRoom = undefined;
     this.terrainEditorPanel.setAvailable(false);
+    this.buildPanel.setPieces([]);
     this.destroyPlayer();
     this.hud.setDisconnected();
     if (this.isActive && this.commonUI.size === 0) {
@@ -810,6 +888,8 @@ export class GrasslandScene extends Scene {
     this.snapshots.clear();
     this.vesselControls.reset();
     this.actorInteractions.reset();
+    this.builds.reset();
+    this.buildPanel.setInventory(undefined);
     this.hotbar.reset();
     this.remotePlayers.setRenderWorld(undefined);
     this.slimeSurfaceDrag?.dispose();

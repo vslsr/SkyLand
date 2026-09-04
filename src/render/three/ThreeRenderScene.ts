@@ -19,6 +19,7 @@ import {
 import { createPlayerSlimeModel, createSlimePalette } from '../../models/playerSlime';
 import {
   NULL_PROXY_ID,
+  type BuildPreviewState,
   type GuidePathState,
   type GuidePathStyle,
   type MeshProxyDesc,
@@ -60,6 +61,7 @@ import { ThreeFruitBatchVisual } from './ThreeFruitBatchVisual';
 import { ThreeHighCountBatchVisual } from './ThreeHighCountBatchVisual';
 import { ThreeSlimeLegVisual } from './ThreeSlimeLegVisual';
 import { ThreeAttachmentVisual } from './ThreeAttachmentVisual';
+import { ThreeBuildPreviewVisual } from './ThreeBuildPreviewVisual';
 import { ThreeContainerLidVisual } from './ThreeContainerLidVisual';
 import { ThreeDropRollVisual } from './ThreeDropRollVisual';
 import { ThreeElasticTetherVisual } from './ThreeElasticTetherVisual';
@@ -166,6 +168,8 @@ export class ThreeRenderScene implements RenderScene {
   private readonly dropRolls = new Map<ProxyId, ThreeDropRollVisual>();
   private readonly containerLids = new Map<ProxyId, ThreeContainerLidVisual>();
   private readonly attachmentVisual = new ThreeAttachmentVisual();
+  /** 建造幽灵。不是 proxy：没有槽位，只是一个跟着指针走的半透明模型。 */
+  private readonly buildPreview = new ThreeBuildPreviewVisual();
   /**
    * 能力实验室的表现（引擎迁移路线图 第 3 步）。
    *
@@ -368,6 +372,19 @@ export class ThreeRenderScene implements RenderScene {
     this.containerLids.delete(id);
     this.attachmentVisual.forget(id);
     proxy.dispose();
+  }
+
+  /**
+   * 建造幽灵。每帧一条命令；模型按 `pieceId` 缓存，换件才重建。
+   * 挂在渲染世界的根下，不挂在任何 proxy 下——它谁的孩子都不是。
+   */
+  public setBuildPreview(state: BuildPreviewState | undefined): void {
+    this.buildPreview.apply(state, this.environment, this.root);
+  }
+
+  /** 幽灵此刻画没画出来（测试与调试用）。 */
+  public get isBuildPreviewVisible(): boolean {
+    return this.buildPreview.visible;
   }
 
   /** 渲染侧查找引导路径表现。 */
@@ -758,6 +775,7 @@ export class ThreeRenderScene implements RenderScene {
 
   public dispose(): void {
     this.#disposeHoverHelper();
+    this.buildPreview.dispose();
     this.highCountBatches.dispose();
     this.fruitBatches.dispose();
     this.propInstances = undefined;
