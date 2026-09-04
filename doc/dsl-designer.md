@@ -37,3 +37,203 @@
 ## 实体
 * 正在设计中
 
+---
+
+# 这套记法是什么
+
+上面那几段是 SkyLand 设计稿里的一套**领域特定语言（DSL）**。它不是给程序读的格式，
+是给**人和 AI 一起读**的格式：策划在 Markdown 里用它写下一件东西**是什么**，
+实现方照着它把这件东西落成仓库里的配置与代码。
+
+它解决的是设计稿的老问题：同一件物品，在一段散文里写着「果子能吃，最多叠 10 个」，
+落地时要拆成图标、模型、堆叠上限、使用方式四处配置，散文里少写一条就少配一处，
+而且看不出少了哪条。`@i` 这样的条目把「一件东西需要交代清楚的字段」固定下来——
+**字段缺了是看得见的**，缺的那条就是要么补设计、要么标 `#design`。
+
+用它的文档目前是：
+
+| 文档 | 用到的定义 |
+| --- | --- |
+| [`doc/designer-inventory.md`](designer-inventory.md) | `@i` 物品表 |
+| [`doc/designer-toolandweapon.md`](designer-toolandweapon.md) | `@i` / `@b` / `@w`——重炮就是三条合起来的一件重型工具 |
+| [`doc/desinger-buildsys.md`](desinger-buildsys.md) | 建造件的散文设计，`@b` 的取值来源 |
+
+**这份文档只定义记法本身。** 某一类东西**当前有哪些**，看上面那几份设计稿；
+某一件东西**最终长什么样**，看 `config/` 里的 JSON。三者不重复：记法在这里，
+内容在设计稿，事实在配置。
+
+# 通用语法
+
+```text
+* @<类型字母> <名称>: <一句话说明>
+    * <字段键>: <值>
+    * <字段键>: <值>
+        * <子字段键>: <值>
+```
+
+规则：
+
+* **条目头**是 `@` 紧跟一个类型字母，然后是名称。名称用中文，就是玩家看到的显示名。
+  冒号后面是一句话说明；一件东西如果名字已经说清楚了（比如 `@i 木头`），说明可以省掉。
+* **字段行**是条目下一级的列表项，`键: 值`。键是上面各节规定的单字母或短词，
+  **大小写敏感**。
+* `<>` 里写的是**这个位置该填什么**，不是要照抄的字面量。上面各节的 `<>` 是字段释义，
+  下面写实际条目时把它换成具体内容。
+* 字段**没有顺序要求**，但按各节列出的顺序写，读的人扫得快。
+* **写 `0` 或整行不写 = 没有这一项。** 这条对 `R`（耐久）、`B`（关联建筑）都成立。
+* 引用另一条定义时**写它的名称**，不写 id。`@w 石斧` 的 `I: 石斧物品` 指的是
+  某个 `@i 石斧物品`。被引用的条目要在同一份或另一份设计稿里真的存在。
+* `#design` 放在值的位置，意思是**这一条故意留白，由实现方提出一个合适的设计**。
+  它不是 TODO：填上 `#design` 表示「这条我知道它需要存在，但我不指定」，
+  实现时要给出答案并把答案写回条目里。整行缺失和 `#design` 不一样——前者是漏了。
+* 中英文冒号在设计稿里都出现过（`F：` 和 `F:`），读的时候两个都认。**新写的用半角 `:`。**
+
+## 类型字母
+
+| 字母 | 类型 | 定义节 | 落地去处 |
+| --- | --- | --- | --- |
+| `@i` | 物品：进得了背包、算得清数量的东西 | [物品定义](#物品定义) | `config/items/item-catalog.json` + 一个掉落物 Actor 原型 |
+| `@b` | 建筑件：按网格放到世界里的东西 | [建筑定义](#建筑定义) | `config/actors/<id>.actor.json` 的 `buildPiece` Component |
+| `@w` | 工具 / 武器：拿来对别的东西产生效果的东西 | [武器、工具定义](#武器工具定义) | 尚无专属配置，见下文「落地映射」 |
+| `@e` | 实体：怪物、NPC 这类自己会动的东西 | 正在设计中 | — |
+
+一件东西可能同时需要两条定义：篝火既是背包里的一摞 `@i 篝火物品`，
+又是放出去之后的那个 `@b 篝火`。这时候写两条，用 `I:` 互相指过去，不要合成一条。
+
+# 落地映射
+
+每个字段最终写进仓库的哪里。**表里的「现状」一栏是实话**：这套 DSL 比实现跑得快，
+有些字段今天还没有承接它的系统。
+
+## `@i` → 物品目录
+
+物品是**两份配置合起来**的：账上那一条在 `config/items/item-catalog.json`
+（受 `item-catalog.schema.json` 约束），世界里那个看得见的实体在
+`config/actors/<name>-pile.actor.json`。手持时挂在角色身上的那个是掉落物原型被
+`heldItemArchetype()` 现场裁掉碰撞、掉落物理、生命期与可交互之后的纯表现体——
+所以 `M` 只写一套模型说明，落地也只有一份模型。
+
+| 字段 | 落到哪 | 现状 |
+| --- | --- | --- |
+| 名称 | `displayName`；同时取一个 kebab-case 英文 `id`（`木头` → `wood`） | ✅ |
+| 说明 | `summary`（≤ 64 字） | ✅ |
+| `M` | 掉落物原型的 `components.render`（`model` + 颜色 + 尺寸） | ✅ |
+| `I` | `iconId` + `tint`；SVG 画进 `src/ui/icons/ItemIconSprite.ts` | ✅ |
+| `F` | `use: { action, input, mode, holdSeconds, value }`；**「不能使用」= 整个 `use` 不写** | ✅ 动词限 `eat` / `tool` / `throw` |
+| `G` | `category` | ✅ 见下表 |
+| `N` | `stackLimit`；另配 `slotCost`（占几个货位，`0` 走独立池） | ✅ |
+| `R` | `durability`，`0` 或不写就不写这个字段 | ⚠️ 字段可配，还没有系统消耗它 |
+
+`G` 的取值对照 `category` 枚举：
+
+| 设计稿写法 | `category` |
+| --- | --- |
+| 材料 | `material` |
+| 补给 | `supply` |
+| 投掷物 | `throwable` |
+| 弹药 | `ammunition` |
+| 价值货物 | `valuable` |
+| 工具 / 轻型工具 / 重型工具 | `tool` |
+
+`F` 写的是「按下去发生什么」，落地时拆成四件事：做什么（`action`）、
+走哪个输入槽（`input`，目前只有 `primary`）、点按还是长按（`mode` = `tap` / `hold`，
+长按补 `holdSeconds`）、力度或个数（`value`）。兑现路径固定是
+**授予玩家一条 Ability → 按 `mode` 激活 → 完成后收回**，见
+[`shared/items/ItemAbility.mjs`](../shared/items/ItemAbility.mjs)。
+长按那圈倒计时画满的那一刻就是服务端判定激活的那一刻，两端读同一份 `holdSeconds`。
+
+## `@b` → 建造件 Component
+
+| 字段 | 落到哪 | 现状 |
+| --- | --- | --- |
+| 名称 | `buildPiece.label`（≤ 32 字）；文件名与 `id` 用 kebab-case | ✅ |
+| `T` | `buildPiece.kind`：地基 → `foundation`（占一格）、墙壁 → `wall`（占一条格边）、物件 → `fixture`（占格中心一个槽） | ✅ |
+| `M` | `components.render`。地基必须用 `line-art-build-foundation`，墙必须用 `line-art-build-wall`，物件**不能**用这两个；墙宽必须等于建造格宽 | ✅ 由 `ActorCatalog` 强制 |
+| `L` | `buildPiece.slot`：**同槽互斥，异槽共存**。一格里篝火和棚子各占一个槽所以能同在，两个篝火不行 | ⚠️ `slot` 只有「有/没有」两态，`L` 表里 `数量 > 1` 目前落不了地 |
+| `I` | 用某件物品进入建造模式 | ❌ 未兑现。现在建造栏列的是场景 `gameplay.runtimeActorArchetypes` 声明的件，与手持物品无关 |
+
+`@b` 没写、但落地**必填**的字段——写新条目时按 `#design` 明确给出，别让实现方猜：
+
+* `surface`：`floating`（水上建筑，吸附到船体的 `buildGrid`，件成为船的子 Actor）/
+  `static`（静态建筑，吸附世界对齐的地形格）/ `any`（只有物件能用）。
+* `reach`：角色到放置位的最大水平距离，米。
+* `cost`：放一件扣多少材料，`[{ itemType, quantity }]`。拆除全额退回。
+* `mass`：水上件进浮力结算的质量（静态件不写）；`buoyancy`：只有水上地基写；
+  `hull`：水上地基放在开阔水面上时立起来的船体根节点原型 id。
+
+规则本身（哪一格合法、吸附到哪、红绿怎么判）只有 `shared/build/` 一份，
+客户端拿它画幽灵、服务端拿它做最终裁决。散文版设计在
+[`doc/desinger-buildsys.md`](desinger-buildsys.md)。
+
+## `@w` → 还没有专属配置
+
+**今天仓库里没有任何一件东西是从 `@w` 落下来的。** 写 `@w` 的时候要知道它落到哪：
+
+* **轻型工具**（`B` 为空或 `0`）：玩家拿在手上。今天最接近的兑现是物品目录里
+  `category: "tool"` + `use.action: "tool"`，`use.value` 是采集力度——够表达
+  「敲一下多少」，不够表达 `D` 里的其余四项。
+* **重型工具**（`B` 指向一条 `@b`）：玩家拿不住，放出来才能用。落地是**一条 `@i` 加一条 `@b`**：
+  背包里那一摞是物品，放出去那个是 `fixture` 建造件。`@i 篝火物品` + 篝火建造件就是这个形状。
+
+`D` 之下五项对应的目标层是能力内核 [`src/abilities/`](../src/abilities/README.md)，
+它已经有冷却、效果、标签、属性聚合，但**还没有一条把工具数据接进去的通路**：
+
+| 字段 | 目标 | 现状 |
+| --- | --- | --- |
+| `Attack` | 一条 `EffectDefinition` 的伤害量 | ❌ |
+| `Attack.Tag` | 按目标标签改判的倍率（斧子砍树更快、喷火器点燃可燃物） | ❌ 标签系统 `src/tags/` 已有；物品与 Actor 身上都还没有挂标签 |
+| `CD` | `AbilityDefinition.cooldown.seconds` | ❌ 物品 `use` 目前只有 `holdSeconds`，没有冷却 |
+| `Effect` | 命中后施加的 `EffectDefinition` | ❌ |
+| `EQS` | 选目标的方式（单体 / 范围 / 射线） | ❌ 目前只有 `findHarvestablePropNear` 一种硬编码取法 |
+
+标签用 `src/tags/` 的点分层级写法（`Item.Material.Wood`、`State.Item.Using`），
+只能由字母数字下划线和点组成，区分大小写，`A.B` 匹配 `A.B.C`。
+
+# 从一条定义到一次改动
+
+1. **在设计稿里写条目。** `@i` 写进 `doc/designer-inventory.md` 的物品表，
+   `@b` / `@w` 写进对应设计稿。记法本身的改动才写这里。
+2. **对着上面的映射表逐字段落地。** 每个字段都要有去处；没有去处的字段
+   （`@b` 的 `I`、`@w` 的 `D`）说明这次改动带的是**新系统**，不是新数据——
+   先把系统的边界说清楚再动手。
+3. **补齐 DSL 没写但 schema 必填的字段**，按上面各节的清单。
+4. **改 schema 才算扩了 DSL。** 往 `category`、`use.action`、`buildPiece.kind`
+   里加一个值，是往这门语言里加一个词：JSON Schema、服务端校验、客户端类型、
+   渲染工厂、测试要一起改，缺一处就是运行期才炸。
+5. **验证**：`npm run test:server`（目录与建造校验）、`npm run test:client`、
+   `npm run build`。
+
+# 完整示例
+
+一件轻型工具，从设计稿到配置。设计稿里写：
+
+```markdown
+* @i 石斧: 敲得动树的一把粗糙斧头
+    * M: 一根木柄顶端绑一块削尖的扁石头，手持时略小
+    * I: 用斧头的侧影绘制 SVG
+    * F: 点按敲击面前的可采集物件，采集力度 3
+    * G: 工具
+    * N: 1
+    * R: 0
+```
+
+落成 `config/items/item-catalog.json` 里的一条：
+
+```json
+{
+  "id": "stone-axe",
+  "displayName": "石斧",
+  "category": "tool",
+  "stackLimit": 1,
+  "slotCost": 0,
+  "iconId": "item-stone-axe",
+  "tint": "#B9B4A8",
+  "summary": "敲得动树的一把粗糙斧头。",
+  "holdable": true,
+  "use": { "action": "tool", "input": "primary", "mode": "tap", "value": 3 }
+}
+```
+
+`R: 0` 所以不写 `durability`；`G: 工具` 落到 `category: "tool"`，它走独立池所以
+`slotCost` 是 `0`；`M` 落到 `config/actors/stone-axe-pile.actor.json` 的
+`components.render`；`I` 的 SVG 补进 `src/ui/icons/ItemIconSprite.ts`。
