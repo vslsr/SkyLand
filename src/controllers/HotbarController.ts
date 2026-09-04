@@ -22,7 +22,7 @@ export interface HeldItemProgress {
    * 界面按它挑表现：`eat` 那一段是角色在嚼，模型要抖起来。表现读的是**同一次
    * 按住**，所以抖动的起止和圈的起止是同一件事，不需要另一条状态。
    */
-  readonly action: 'eat' | 'tool' | 'throw';
+  readonly action: 'eat' | 'tool' | 'throw' | 'weapon';
   /** [0, 1]。到 1 表示服务端也认为倒计时走完了。 */
   readonly ratio: number;
   readonly label: string;
@@ -77,7 +77,9 @@ export interface HotbarPort {
 
 /** 一次还没结束的按住（长按使用）。 */
 interface PendingHold {
-  readonly action: 'eat' | 'tool' | 'throw';
+  /** 蓄力：圈满不结算，松手才打出去。 */
+  readonly charge: boolean;
+  readonly action: HeldItemProgress['action'];
   /** 用的是哪件东西。它变了这次按住就作废。 */
   readonly itemType: string;
   readonly startedAt: number;
@@ -169,7 +171,7 @@ export class HotbarController {
     }
     const elapsed = (this.now() - this.pending.startedAt) / 1000;
     const ratio = holdRatio(elapsed, this.pending.durationSeconds);
-    if (ratio >= 1) {
+    if (ratio >= 1 && !this.pending.charge) {
       // 圈满即激活：服务端在同一刻自己动手，客户端不再发任何东西，也不再画圈。
       this.pending.completed = true;
       this.port.setProgress(undefined);
@@ -247,8 +249,10 @@ export class HotbarController {
       this.begin({
         action: use.action as HeldItemProgress['action'],
         startedAt: this.now(),
-        // 点按没有倒计时；长按的圈满那一刻就是服务端激活那一刻。
-        durationSeconds: use.mode === 'hold' ? use.holdSeconds : 0,
+        // 点按没有倒计时；长按的圈满那一刻就是服务端激活那一刻；蓄力的圈满只是
+        // 「攒到头了」，要等松手，所以圈留在画面上不撤。
+        charge: use.mode === 'charge',
+        durationSeconds: use.mode === 'tap' ? 0 : use.holdSeconds,
         label: use.verb,
         itemType: use.itemType,
         // 从背包点出来的那条没有格子，圈只能画在准星下方。

@@ -28,6 +28,22 @@ const USE_VERBS = Object.freeze({
   weapon: '拉满',
 });
 
+/**
+ * 武器数据的形状（`@w` 的 `D`，校验在 `ItemCatalog.mjs`）。
+ *
+ * 写成 typedef 而不是只在 JSON Schema 里描述，是因为客户端那一侧用 TypeScript
+ * 读它：瞄准与抛物线预览要按这几个字段算落点，类型缺了就只能到处 `as`。
+ *
+ * @typedef {{
+ *   attack: number,
+ *   cooldownSeconds: number,
+ *   radius: number,
+ *   range: { minimum: number, maximum: number },
+ *   charge: { minimumRatio: number, damageScale: { minimum: number, maximum: number } },
+ *   tagMultipliers: ReadonlyArray<{ tag: string, multiplier: number }>,
+ * }} WeaponDefinition
+ */
+
 /** 能力 id 按物品种类展开，快照里一眼看得出正握着哪件东西的用法。 */
 export function itemAbilityId(itemType) {
   return `Ability.Item.${itemType}`;
@@ -41,7 +57,7 @@ export function itemAbilityId(itemType) {
  *
  * @returns {{ id: string, action: string, itemType: string, displayName: string,
  *   verb: string, input: string, mode: 'tap' | 'hold' | 'charge', holdSeconds: number,
- *   value: number, weapon?: object } | undefined}
+ *   value: number, weapon?: WeaponDefinition } | undefined}
  */
 export function resolveItemUse(itemType, catalog = itemCatalog) {
   const definition = itemType ? catalog.get(itemType) : undefined;

@@ -3,6 +3,7 @@ import type {
   AbilityLabViewState,
 } from '../../abilities/lab/AbilityLabSimulation';
 import type {
+  BallisticPreviewState,
   BuildPreviewState,
   GuidePathState,
   MeshProxyDesc,
@@ -55,6 +56,10 @@ export type RenderCommand =
     }
   | { readonly kind: 'setHoveredProxy'; readonly id: ProxyId }
   | { readonly kind: 'setBuildPreview'; readonly state: BuildPreviewState | undefined }
+  | {
+      readonly kind: 'setBallisticPreview';
+      readonly state: BallisticPreviewState | undefined;
+    }
   | { readonly kind: 'setAbilityLabTarget'; readonly id: ProxyId }
   | {
       readonly kind: 'setAbilityLabState';
@@ -252,6 +257,10 @@ export class RenderCommandQueue implements RenderScene, ChunkViewSink, RenderWor
       casterZ,
       succeeded,
     });
+  }
+
+  public setBallisticPreview(state: BallisticPreviewState | undefined): void {
+    this.#commands.push({ kind: 'setBallisticPreview', state });
   }
 
   public spawnHealthPopup(x: number, y: number, z: number, amount: number): void {
@@ -545,6 +554,9 @@ export function applyRenderCommand(
         command.casterZ,
         command.succeeded,
       );
+      return;
+    case 'setBallisticPreview':
+      target.scene.setBallisticPreview(command.state);
       return;
     case 'spawnHealthPopup':
       target.scene.spawnHealthPopup(command.x, command.y, command.z, command.amount);

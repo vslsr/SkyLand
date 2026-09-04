@@ -74,7 +74,7 @@ Read this reference only when the task touches gameplay entries (`@i`, `@b`, `@w
 | 说明 | `summary`（≤ 64 字） | ✅ |
 | `M` | 掉落物原型的 `components.render`（`model` + 颜色 + 尺寸） | ✅ |
 | `I` | `iconId` + `tint`；SVG 画进 `src/ui/icons/ItemIconSprite.ts` | ✅ |
-| `F` | `use: { action, input, mode, holdSeconds, value }`；**「不能使用」= 整个 `use` 不写** | ✅ 动词限 `eat` / `tool` / `throw` |
+| `F` | `use: { action, input, mode, holdSeconds, value }`；**「不能使用」= 整个 `use` 不写** | ✅ 动词限 `eat` / `tool` / `throw` / `weapon` |
 | `G` | `category` | ✅ 见下表 |
 | `N` | `stackLimit`；另配 `slotCost`（占几个货位，`0` 走独立池） | ✅ |
 | `R` | `durability`，`0` 或不写就不写这个字段 | ⚠️ 字段可配，还没有系统消耗它 |
@@ -92,8 +92,9 @@ Read this reference only when the task touches gameplay entries (`@i`, `@b`, `@w
 | 工具 / 轻型工具 / 重型工具 | `tool` |
 
 `F` 写的是「按下去发生什么」，落地时拆成四件事：做什么（`action`）、
-走哪个输入槽（`input`，目前只有 `primary`）、点按还是长按（`mode` = `tap` / `hold`，
-长按补 `holdSeconds`）、力度或个数（`value`）。兑现路径固定是
+走哪个输入槽（`input`，目前只有 `primary`）、怎么触发（`mode` = `tap` / `hold` / `charge`，
+后两种补 `holdSeconds`）、力度或个数（`value`）。`hold` 的圈满是结算，`charge` 的圈满
+只是「攒到头了」，松手才打出去。兑现路径固定是
 **授予玩家一条 Ability → 按 `mode` 激活 → 完成后收回**，见
 [`shared/items/ItemAbility.mjs`](../../../../shared/items/ItemAbility.mjs)。
 长按那圈倒计时画满的那一刻就是服务端判定激活的那一刻，两端读同一份 `holdSeconds`。
@@ -122,26 +123,31 @@ Read this reference only when the task touches gameplay entries (`@i`, `@b`, `@w
 客户端拿它画幽灵、服务端拿它做最终裁决。散文版设计在
 [`doc/desinger-buildsys.md`](../../../../doc/desinger-buildsys.md)。
 
-## `@w` → 还没有专属配置
+## `@w` → 物品目录里的 `weapon` 块
 
-**今天仓库里没有任何一件东西是从 `@w` 落下来的。** 写 `@w` 的时候要知道它落到哪：
+`@w` 落在**它 `I:` 指着的那件物品**上，不另开一份武器表：一件东西只有一条账。
 
-* **轻型工具**（`B` 为空或 `0`）：玩家拿在手上。今天最接近的兑现是物品目录里
-  `category: "tool"` + `use.action: "tool"`，`use.value` 是采集力度——够表达
-  「敲一下多少」，不够表达 `D` 里的其余四项。
+* **轻型工具**（`B` 为空或 `0`）：玩家拿在手上。采集类走 `use.action: "tool"`
+  （`use.value` 是采集力度）；打人的走 `use.action: "weapon"` + 同一条物品上的
+  `weapon` 块，`use.mode` 必须是 `charge`（长按蓄力，松手开火）。
 * **重型工具**（`B` 指向一条 `@b`）：玩家拿不住，放出来才能用。落地是**一条 `@i` 加一条 `@b`**：
   背包里那一摞是物品，放出去那个是 `fixture` 建造件。`@i 篝火物品` + 篝火建造件就是这个形状。
 
-`D` 之下五项对应的目标层是能力内核 [`src/abilities/`](../../../../src/abilities/README.md)，
-它已经有冷却、效果、标签、属性聚合，但**还没有一条把工具数据接进去的通路**：
+`D` 之下五项现在都有承接，判定内核在
+[`server/actors/WeaponRuntime.mjs`](../../../../server/actors/WeaponRuntime.mjs)，
+两端共用的换算在
+[`shared/items/weaponStrike.mjs`](../../../../shared/items/weaponStrike.mjs)：
 
-| 字段 | 目标 | 现状 |
+| 字段 | 落到哪 | 现状 |
 | --- | --- | --- |
-| `Attack` | 一条 `EffectDefinition` 的伤害量 | ❌ |
-| `Attack.Tag` | 按目标标签改判的倍率（斧子砍树更快、喷火器点燃可燃物） | ❌ 标签系统 `src/tags/` 已有；物品与 Actor 身上都还没有挂标签 |
-| `CD` | `AbilityDefinition.cooldown.seconds` | ❌ 物品 `use` 目前只有 `holdSeconds`，没有冷却 |
-| `Effect` | 命中后施加的 `EffectDefinition` | ❌ |
-| `EQS` | 选目标的方式（单体 / 范围 / 射线） | ❌ 目前只有 `findHarvestablePropNear` 一种硬编码取法 |
+| `Attack` | `weapon.attack`，乘上蓄力倍率之后走 `applyDamage` | ✅ |
+| `Attack.Tag` | `weapon.tagMultipliers`，标签由 Component 推导（`shared/actor/actorTags.mjs`） | ✅ 按声明顺序取第一条命中的；建造件还没有生命值，所以打不到 |
+| `CD` | `weapon.cooldownSeconds` → `AbilityDefinition.cooldown`，分组按物品取 | ✅ |
+| `Effect` | 命中即扣血；附加状态（点燃、减速）还要各自的 `EffectDefinition` | ⚠️ 伤害已通，别的效果一事一议 |
+| `EQS` | `weapon.radius` + `weapon.range`：权威朝向 × 蓄力比例反解落点，落点半径内全中 | ✅ 只有这一种取法；单体与射线还没有 |
+
+**抛物线不属于 `EQS`。** 它是 `A` 里的表现：判定只认落点与半径，客户端那条白线读
+的是同一份 `weaponStrike` 换算，所以瞄的地方和打中的地方是同一处。
 
 `A` 在工具上尤其要写全：蓄力那一段是 `比例` 驱动（跟长按圈同一个量），开火那一下是
 `一次性`，冷却是 `持续` 或 `比例`。重炮的蓄力抛物线细线也归 `A`——它是表现，不是判定，
@@ -200,7 +206,7 @@ revision 变了就是变了。蘑菇松手回弹走的就是这条（`PARAM_ELAS
 1. **在设计稿里写条目。** `@i` 写进 `doc/designer-inventory.md` 的物品表，
    `@b` / `@w` 写进对应设计稿。记法本身的改动才写这里。
 2. **对着上面的映射表逐字段落地。** 每个字段都要有去处；没有去处的字段
-   （`@b` 的 `I`、`@w` 的 `D`）说明这次改动带的是**新系统**，不是新数据——
+   （今天是 `@b` 的 `I`）说明这次改动带的是**新系统**，不是新数据——
    先把系统的边界说清楚再动手。
 3. **补齐 DSL 没写但 schema 必填的字段**，按上面各节的清单。
 4. **改 schema 才算扩了 DSL。** 往 `category`、`use.action`、`buildPiece.kind`

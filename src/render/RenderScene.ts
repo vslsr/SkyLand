@@ -212,6 +212,24 @@ export interface GuidePathState {
 }
 
 /**
+ * 蓄力时那条白色抛物线（设计稿 `@w` 的 `A`）。
+ *
+ * **它是表现，不是判定**：判定只认落点与半径（`D.EQS`），这条线画的是同一个落点
+ * 的一段抛物弧，好让玩家在松手之前看得见这一箭会落到哪儿。弧顶抬多高由蓄力比例
+ * 决定，那段插值在渲染侧算——玩法侧只给两个端点和一个比例。
+ */
+export interface BallisticPreviewState {
+  readonly originX: number;
+  readonly originY: number;
+  readonly originZ: number;
+  readonly impactX: number;
+  readonly impactY: number;
+  readonly impactZ: number;
+  /** 蓄力比例 [0, 1]。弧顶按它抬，所以拉得越满线越平、越远。 */
+  readonly ratio: number;
+}
+
+/**
  * Game World 往 Render World 发的命令。
  *
  * 单线程下它是一次直接调用；上 worker 之后同一个方法变成「往环形缓冲写一条
@@ -267,6 +285,8 @@ export interface RenderScene extends RenderCommandSink {
   setHoveredProxy(id: ProxyId): void;
   /** 建造幽灵。传 undefined 收起。见 `BuildPreviewState`。 */
   setBuildPreview(state: BuildPreviewState | undefined): void;
+  /** 蓄力时那条白色抛物线。传 undefined 收起。见 `BallisticPreviewState`。 */
+  setBallisticPreview(state: BallisticPreviewState | undefined): void;
   /**
    * 能力实验室的三条命令（只有开发用的实验室地图会发）。
    *

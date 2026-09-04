@@ -21,7 +21,11 @@ import type {
   SceneUpdateContext,
   SceneFrameSystem,
 } from '../scene/SceneVisualSystem';
-import type { BuildPreviewState, ProxyId } from '../render/RenderScene';
+import type {
+  BallisticPreviewState,
+  BuildPreviewState,
+  ProxyId,
+} from '../render/RenderScene';
 import type { RenderWorldHandle } from '../render/RenderProxyTable';
 import type { SceneDefinition } from '../scenes/data/SceneDefinition';
 import type { SceneWorld } from '../scene/SceneWorld';
@@ -219,6 +223,11 @@ export class SceneRenderer {
   /** 建造幽灵：玩家正要放的那一件，吸附到网格上、按能不能放染色。传 undefined 收起。 */
   public setBuildPreview(state: BuildPreviewState | undefined): void {
     this.renderWorldHandle?.scene.setBuildPreview(state);
+  }
+
+  /** 蓄力时那条白色抛物线。和建造幽灵一样是一条每帧的状态命令。 */
+  public setBallisticPreview(state: BallisticPreviewState | undefined): void {
+    this.renderWorldHandle?.scene.setBallisticPreview(state);
   }
 
   public setSimpleCollisionVisible(visible: boolean): void {

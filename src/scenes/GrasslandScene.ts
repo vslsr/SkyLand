@@ -35,6 +35,10 @@ import {
   HealthPopupEmitter,
   healthPopupAnchorY,
 } from '../health/HealthPopupEmitter';
+import {
+  WEAPON_AIM_SHARPNESS,
+  WeaponAimController,
+} from '../controllers/WeaponAimController';
 import { frameTimeline } from '../platform/index';
 import { PlayerEntity } from '../player/PlayerEntity';
 import { SlimeSurfaceDragController } from '../controllers/SlimeSurfaceDragController';
@@ -57,6 +61,7 @@ import {
   type InventoryComponent,
   PICKUP_DROP_COMPONENT,
   type PickupDropComponent,
+  resolveHeldItemAction,
 } from '../../shared/actor/index.mjs';
 import { createHullBuildGrid, footprintBlocked } from '../../shared/build/index.mjs';
 import { PLAYER_COLLISION_RADIUS } from '../../shared/playerMovement.mjs';
@@ -98,6 +103,8 @@ export class GrasslandScene extends Scene {
   private readonly terrainEdits: TerrainEditController;
   private readonly terrainEditorPanel = new TerrainEditorPanel();
   private readonly builds: BuildController;
+  /** 手持武器时的瞄准与蓄力抛物线。见 `WeaponAimController`。 */
+  private readonly weaponAim: WeaponAimController;
   private readonly buildPanel = new BuildPanel();
   /** 指针在画布上的最后位置；建造幽灵跟着它走，没有指针时退回准星。 */
   private readonly pointerRay: PointerRayTracker;
@@ -398,10 +405,39 @@ export class GrasslandScene extends Scene {
         this.holdProgress.setProgress(progress?.onHotbar ? undefined : progress);
         // 吃东西那一段跟着这次按住走：圈满那一刻服务端扣账，抖动与食物同时停。
         // 玩家模型和手上那件食物读同一个比例，所以它们嚼在同一拍上。
+        // 蓄力那条白线和物品栏那圈读同一个比例：线的长度就是圈的进度。
+        this.weaponAim.setChargeRatio(progress?.action === 'weapon' ? progress.ratio : undefined);
         const chewing = progress?.action === 'eat' ? progress.ratio : undefined;
         this.player?.setChewing(chewing);
         this.world.setChewingItem(chewing === undefined ? undefined : this.heldActorId(), chewing ?? 0);
       },
+    });
+    this.weaponAim = new WeaponAimController({
+      // 建造模式独占主键，界面盖着时也不该继续瞄准。
+      isActive: () => Boolean(this.joinedRoom && this.player)
+        && this.commonUI.allowsGameInteraction
+        && !this.builds.active
+        && !this.localPlayerDead,
+      getHeldWeapon: () => {
+        const use = resolveHeldItemAction(
+          (this.player?.getComponent(INVENTORY_COMPONENT) as InventoryComponent | undefined)
+            ?.heldItemType,
+        );
+        return use?.weapon ? { weapon: use.weapon } : undefined;
+      },
+      getPlayer: () => {
+        const render = this.player?.renderPosition;
+        if (!render) return undefined;
+        return { x: render.x, y: render.y, z: render.z, yaw: this.player!.controller.facing.yaw };
+      },
+      pointerRay: () => this.pointerRay.resolve(this.renderer.getCameraView()),
+      sampleGroundHeight: (x, z) => this.world.sampleGroundHeight(x, z),
+      setFacingTarget: (target) => {
+        this.player?.controller.setFacingRequest(
+          target ? { target, sharpness: WEAPON_AIM_SHARPNESS } : undefined,
+        );
+      },
+      setPreview: (state) => this.renderer.setBallisticPreview(state),
     });
     this.container = new ContainerController(this.containerPage, {
       getInventory: () => this.player?.getComponent(INVENTORY_COMPONENT) as
@@ -522,12 +558,14 @@ export class GrasslandScene extends Scene {
       this.builds.reset();
       this.actorInteractions.reset();
       this.hotbar.reset();
+      this.weaponAim.reset();
     } else if (this.builds.active) {
       // 建造模式同样独占：放件那一下不能顺手捡起脚边的东西或换手上的物品。
       // 两个 reset 要排在 builds.update 之前——它们会清掉交互提示与悬停，
       // 排在后面就会把建造刚写上去的那条提示连同拆除的高亮一起擦掉。
       this.actorInteractions.reset();
       this.hotbar.reset();
+      this.weaponAim.reset();
       this.terrainEdits.update(this.controls.frame);
       this.builds.update(this.controls.frame);
     } else {
@@ -536,6 +574,9 @@ export class GrasslandScene extends Scene {
       this.actorInteractions.update(this.controls.frame, deltaSeconds);
       this.hotbar.update();
     }
+    // 瞄准排在 hotbar 之后：这一帧的蓄力比例刚由它写进来。建造与地形编辑那两条
+    // 分支里 hotbar 已经被 reset，所以那时武器也自然收起。
+    this.weaponAim.update();
     const playerId = this.joinedRoom?.player.id;
     this.hud.setVesselStatus(playerId ? this.world.getVesselHudState(playerId) : undefined);
     this.sceneComponents.update(deltaSeconds, elapsedSeconds);

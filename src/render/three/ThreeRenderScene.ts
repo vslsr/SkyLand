@@ -19,6 +19,7 @@ import {
 import { createPlayerSlimeModel, createSlimePalette } from '../../models/playerSlime';
 import {
   NULL_PROXY_ID,
+  type BallisticPreviewState,
   type BuildPreviewState,
   type GuidePathState,
   type GuidePathStyle,
@@ -60,6 +61,7 @@ import {
 import { ThreeFireVisual } from './ThreeFireVisual';
 import { ThreePointLightVisual } from './ThreePointLightVisual';
 import { ThreeGuidePathVisual } from './ThreeGuidePathVisual';
+import { ThreeBallisticPreviewVisual } from './ThreeBallisticPreviewVisual';
 import { ThreeHealthPopupVisual } from './ThreeHealthPopupVisual';
 import { ThreeHybridSlimeVisual } from './ThreeHybridSlimeVisual';
 import { ThreeAbilityLabVisual } from './ThreeAbilityLabVisual';
@@ -198,6 +200,8 @@ export class ThreeRenderScene implements RenderScene {
    * （大厅背后那一片、纯观察用的地图）一条飘字都不会有。
    */
   private healthPopups?: ThreeHealthPopupVisual;
+  /** 蓄力时那条白色抛物线。同样按需建，见 `setBallisticPreview`。 */
+  private ballisticPreview?: ThreeBallisticPreviewVisual;
   /**
    * 能力实验室的表现（引擎迁移路线图 第 3 步）。
    *
@@ -241,6 +245,19 @@ export class ThreeRenderScene implements RenderScene {
     this.highCountBatches = new ThreeHighCountBatchVisual(environment, archetypes.byId);
     this.fruitBatches = new ThreeFruitBatchVisual(environment);
     this.waterMotionVisual = ocean ? new ThreeWaterMotionVisual(ocean) : undefined;
+  }
+
+  /**
+   * 蓄力时那条白色抛物线。和飘字一样第一次要用的时候才建：绝大多数场景
+   * 一辈子也不会有人在里面拉弓。
+   */
+  public setBallisticPreview(state: BallisticPreviewState | undefined): void {
+    if (!state && !this.ballisticPreview) return;
+    if (!this.ballisticPreview) {
+      this.ballisticPreview = new ThreeBallisticPreviewVisual();
+      this.root.add(this.ballisticPreview.root);
+    }
+    this.ballisticPreview.setState(state);
   }
 
   public spawnHealthPopup(x: number, y: number, z: number, amount: number): void {
@@ -833,6 +850,8 @@ export class ThreeRenderScene implements RenderScene {
     this.#disposeHoverHelper();
     this.healthPopups?.dispose();
     this.healthPopups = undefined;
+    this.ballisticPreview?.dispose();
+    this.ballisticPreview = undefined;
     this.pointLights.dispose();
     this.buildPreview.dispose();
     this.highCountBatches.dispose();
