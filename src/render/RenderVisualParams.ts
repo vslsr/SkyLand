@@ -142,5 +142,16 @@ export const PARAM_SLIME_GROUND_PROBE_RADIUS = 45;
  */
 export const PARAM_CONTAINER_OPEN_TARGET = 46;
 
+/**
+ * 点光源这一帧该不该亮：0 或 1。
+ *
+ * 和火焰强度分开而不是复用它，是因为两者回答的是不同的问题：火焰强度说的是
+ * 「这堆火的形状该多高」，光强说的是「这盏灯亮不亮」。会发光的东西不一定有火
+ * （提灯、结晶），有火的东西也不一定配了 `pointLight`。
+ *
+ * 平滑同样留在渲染侧（见 `ThreePointLightVisual`）：那是逐渲染帧的动画状态。
+ */
+export const PARAM_POINT_LIGHT_INTENSITY = 47;
+
 /** 每个 proxy 槽位的参数个数。新增参数就在上面加常量并把这里加一。 */
-export const RENDER_VISUAL_PARAM_COUNT = 47;
+export const RENDER_VISUAL_PARAM_COUNT = 48;

@@ -30,6 +30,7 @@ import {
   PARAM_ELASTIC_TARGET_Z,
   PARAM_CONTAINER_OPEN_TARGET,
   PARAM_FIRE_TARGET_INTENSITY,
+  PARAM_POINT_LIGHT_INTENSITY,
   PARAM_TEMPERATURE,
   RENDER_VISUAL_PARAM_COUNT,
 } from '../../render/RenderVisualParams';
@@ -45,6 +46,10 @@ import {
   FIRE_VISUAL_COMPONENT,
   type FireVisualComponent,
 } from '../components/FireVisualComponent';
+import {
+  POINT_LIGHT_COMPONENT,
+  type PointLightComponent,
+} from '../components/PointLightComponent';
 import {
   BUOYANCY_COMPONENT,
   type BuoyancyComponent,
@@ -84,6 +89,14 @@ export class ActorVisualParamSystem {
         proxy.proxyId,
         PARAM_FIRE_TARGET_INTENSITY,
         fire ? fire.targetIntensity : 0,
+      );
+      // 点亮周围的那一份和火焰分开写：会发光的不一定有火（灯），
+      // 有火的也不一定配了 pointLight。
+      const light = actor.getComponent(POINT_LIGHT_COMPONENT) as PointLightComponent | undefined;
+      this.transforms.writeParam(
+        proxy.proxyId,
+        PARAM_POINT_LIGHT_INTENSITY,
+        light ? light.targetIntensity : 0,
       );
       const temperature = actor.getComponent(
         TEMPERATURE_COMPONENT,

@@ -183,6 +183,7 @@ AOI 或跟随焦点的固定窗口，并在组件停用/销毁时释放监听、
 - `temperature`：当前/环境温度、热容量和散热速率，由服务端温度 System 结算。
 - `combustible`：燃点、熄灭阈值、燃料、燃烧速率以及着火后的热输出；必须与 `temperature` 组合。
 - `heatEmitter`：篝火等稳定热源的功率、半径和启用状态。
+- `pointLight`：把周围点亮的一盏灯——颜色、边缘色、半径、强度、抬高与闪烁幅度，外加没有火焰可跟随时的静态开关。纯表现，不进温度结算也不进快照；需要与 `render` 同时存在（没有 proxy 就挂不上灯）。会烧的物件亮不亮跟着权威燃烧状态走，光的半径通常比`heatEmitter.radius` 大：烤不到的地方仍然看得见火光。
 - `render`：客户端线稿模型类型和视觉参数；支持玩家史莱姆、木筏、货箱、礁石、弹性蘑菇、训练假人、焦点碑、地面牌、篝火和干草堆。
 
 `cargo-crate` 使用 `interactable + cargo + render`，`reef` 使用 `hazard + render`，`raft`

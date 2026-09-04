@@ -2,6 +2,8 @@ import {
   CLOUD_SHADOW_GLSL,
   ENVIRONMENT_LIGHT_UNIFORMS_GLSL,
   HEMISPHERE_TINT_GLSL,
+  POINT_LIGHT_GLSL,
+  POINT_LIGHT_UNIFORMS_GLSL,
 } from './environmentLighting';
 
 const GRASS_VERTEX_DEFORMATION = /* glsl */ `
@@ -108,6 +110,7 @@ export const GRASS_FILL_VERTEX_SHADER = /* glsl */ `
 export const GRASS_FILL_FRAGMENT_SHADER = /* glsl */ `
   uniform vec3 uFillColor;
   ${ENVIRONMENT_LIGHT_UNIFORMS_GLSL}
+  ${POINT_LIGHT_UNIFORMS_GLSL}
 
   varying vec3 vWorldPosition;
   varying vec3 vWorldNormal;
@@ -117,6 +120,7 @@ export const GRASS_FILL_FRAGMENT_SHADER = /* glsl */ `
 
   ${HEMISPHERE_TINT_GLSL}
   ${CLOUD_SHADOW_GLSL}
+  ${POINT_LIGHT_GLSL}
 
   void main() {
     vec3 normal = normalize(vWorldNormal);
@@ -131,6 +135,10 @@ export const GRASS_FILL_FRAGMENT_SHADER = /* glsl */ `
       * cloudShadowAt(vWorldPosition.xz);
     vec3 color = uFillColor * ambient * paperVariation * softLight
       + ambient * touchHighlight;
+
+    // 草是篝火最能说明问题的受光面：一圈草叶被火染暖、随距离化开，
+    // 比地面上一块静止的光斑更能读出「这里有一堆火」。
+    color += pointLightRadiance(vWorldPosition, normal);
 
     // 地面草叶保持参考项目的纸面颜色，不叠加天气距离雾。
     gl_FragColor = vec4(color, 1.0);

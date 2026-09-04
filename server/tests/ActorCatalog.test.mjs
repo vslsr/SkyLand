@@ -118,6 +118,15 @@ test('ActorCatalog 加载并净化木筏原型', async () => {
   const campfire = catalog.require('campfire');
   assert.equal(campfire.components.heatEmitter.power, 520);
   assert.equal(campfire.components.render.model, 'line-art-campfire');
+  // 篝火点亮周围的那一份配置：纯表现，不进温度结算，光比热走得远。
+  assert.equal(campfire.components.pointLight.color, '#ffb469');
+  assert.equal(campfire.components.pointLight.edgeColor, '#c2551c');
+  assert.equal(campfire.components.pointLight.radius, 7.5);
+  assert.equal(campfire.components.pointLight.enabled, true);
+  assert.ok(
+    campfire.components.pointLight.radius > campfire.components.heatEmitter.radius,
+    '烤不到的地方仍然该看得见火光',
+  );
 
   const hay = catalog.require('dry-hay');
   assert.equal(hay.components.temperature.initialTemperature, 20);
@@ -283,6 +292,63 @@ test('ActorCatalog 保留软体形变与咬合参数，并拒绝越界值', asyn
   deepGrip.id = 'probe-grip';
   deepGrip.components.bite.gripDepth = 5;
   await assert.rejects(loadSingleActor(deepGrip), /gripDepth 数值范围无效/);
+});
+
+test('ActorCatalog 净化点光源配置并拒绝挂不上 proxy 的灯', async () => {
+  const base = {
+    schemaVersion: 1,
+    id: 'probe-lantern',
+    components: {
+      pointLight: { color: '#ffd8a0', radius: 6, intensity: 1.2, enabled: true },
+      render: {
+        model: 'line-art-campfire',
+        stoneColor: '#c8c0b2',
+        woodColor: '#79513a',
+        emberColor: '#c95d32',
+        radius: 0.65,
+        height: 0.45,
+      },
+      heatEmitter: { power: 100, radius: 2, enabled: true },
+    },
+  };
+  const catalog = await loadSingleActor(base);
+  const lantern = catalog.require('probe-lantern');
+  // 选填项不写就不出现在净化结果里；默认值由通道那一侧统一补（resolvePointLightDesc）。
+  assert.deepEqual(lantern.components.pointLight, {
+    color: '#ffd8a0',
+    radius: 6,
+    intensity: 1.2,
+    enabled: true,
+  });
+
+  const tooBright = structuredClone(base);
+  tooBright.components.pointLight.intensity = 9;
+  await assert.rejects(loadSingleActor(tooBright), /intensity 数值范围无效/);
+
+  const badFlicker = structuredClone(base);
+  badFlicker.components.pointLight.flicker = 1.4;
+  await assert.rejects(loadSingleActor(badFlicker), /flicker 数值范围无效/);
+
+  // 没有 render 就没有 proxy，这份配置会一声不响地什么都不做——死配置要当场拒绝。
+  const invisible = structuredClone(base);
+  delete invisible.components.render;
+  delete invisible.components.heatEmitter;
+  invisible.components.guidePath = {
+    points: [[0, 0.45, 0], [-5, 0.45, -4]],
+    curve: 'linear',
+    lineColor: '#fffdf4',
+    markerColor: '#fff8d6',
+    lineWidth: 5,
+    dashLength: 0.8,
+    gapLength: 0.55,
+    dashSpeed: 0.5,
+    markerSize: 0.6,
+    hitRadius: 1.25,
+    autoAdvance: true,
+    loop: true,
+    enabled: true,
+  };
+  await assert.rejects(loadSingleActor(invisible), /pointLight 需要 render/);
 });
 
 test('ActorCatalog 拒绝未知原型', async () => {
