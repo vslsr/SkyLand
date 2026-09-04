@@ -1,4 +1,5 @@
 import {
+  ACTION_STATE_COMPONENT,
   INVENTORY_COMPONENT,
   ITEM_USE_ABILITY_SLOT,
   createItemUseAbility,
@@ -6,6 +7,7 @@ import {
   itemCooldownGroup,
   resolveItemUse,
 } from '../../shared/actor/index.mjs';
+import { actionStateId, fireSeconds } from '../../shared/animation/actionStates.mjs';
 import { GAME_ABILITY_COMPONENT } from '../../shared/abilities/index.mjs';
 import { createItemUseContext, runItemUseAction } from './ItemUseActions.mjs';
 
@@ -89,6 +91,9 @@ export function revokeItemAbility(player) {
   const had = player.itemAbility !== undefined;
   player.itemAbility = undefined;
   player.itemUseStartedAt = undefined;
+  // 按住到一半被换手 / 用光：那段动作不再成立，状态跟着回到没在做什么。
+  // 结算那一下（`fire`）不走这里——它由 `activateItemAbility` 在收回之后重新写上。
+  clearActionState(player);
   // 槽位一律释放，不看本地记录：记录和 GAS 万一漂移，下一次 grant 会因为
   // 「槽位已存在」直接抛，那时玩家身上的能力就永远换不掉了。
   player.getComponent(GAME_ABILITY_COMPONENT)?.revoke(ITEM_USE_ABILITY_SLOT);
@@ -107,7 +112,51 @@ export function revokeItemAbility(player) {
 export function beginItemUse(player, now) {
   if (!player?.itemAbility || itemUseCooldownRemaining(player) > 0) return false;
   player.itemUseStartedAt = now;
+  // 按住的那一段是所有人都看得见的动作：进状态，让别人也演得出来。点按没有这一段。
+  const use = player.itemAbility.use;
+  enterActionState(player, use.action, use.mode, {
+    itemType: use.itemType,
+    startedAt: now,
+    duration: use.holdSeconds,
+  });
   return true;
+}
+
+/**
+ * 把这次使用写进**动作状态**那条复制通道。
+ *
+ * 使用能力那三个时刻（按下 / 激活 / 收回）就是状态机的三次转移，所以状态在这里
+ * 写、也只在这里写——它是这台状态机的投影，不是第二份真相。
+ *
+ * @returns 状态是否真的变了
+ */
+function enterActionState(player, verb, phase, options) {
+  const action = player?.getComponent(ACTION_STATE_COMPONENT);
+  const state = actionStateId(verb, phase);
+  // 点按没有按住那一段（`tap` 不是相位），拼不出 id 时就不进状态。
+  return Boolean(action && state) && action.enter(state, options);
+}
+
+/** 回到「没在做什么」。打断、切走手持物、用完收回都走这一条。 */
+function clearActionState(player) {
+  return player?.getComponent(ACTION_STATE_COMPONENT)?.clear() === true;
+}
+
+/**
+ * 让有确定长度的那些状态自己走完。
+ *
+ * 只管 `fire`：它是一段有头有尾的表现，演完就该回到「没在做什么」，否则快照会一直
+ * 说这个人在咽同一口东西。按住那两段（`hold` / `charge`）不在这里收——它们的结束
+ * 由玩家松手或激活决定，圈满了也可能还按着。
+ *
+ * @returns 这一 tick 有没有收掉一条
+ */
+export function updateActionState(player, now) {
+  const action = player?.getComponent(ACTION_STATE_COMPONENT);
+  if (!action?.isActive || !action.state.endsWith('.fire')) return false;
+  if (action.duration <= 0) return false;
+  if (now - action.startedAt < action.duration * 1000) return false;
+  return action.clear();
 }
 
 /**
@@ -147,6 +196,8 @@ export function releaseItemUse(scene, player, now) {
 export function cancelItemUse(player) {
   if (!player || player.itemUseStartedAt === undefined) return false;
   player.itemUseStartedAt = undefined;
+  // 打断也是一次转移：状态回到没在做什么，下一帧快照自然收敛，不需要一条 stop 事件。
+  clearActionState(player);
   return true;
 }
 
@@ -193,5 +244,14 @@ function activateItemAbility(scene, player, heldSeconds) {
   const succeeded = result.ok === true && armed.succeeded;
   revokeItemAbility(player);
   syncItemAbility(scene, player);
+  // 结算那一下自己是一段动作（咽下去、弹一下）。写在收回之后：收回会把按住那一段
+  // 的状态清掉，顺序反了这一下就会被自己清没。做成了才演——空转的一次不该有动作。
+  if (succeeded) {
+    enterActionState(player, armed.use.action, 'fire', {
+      itemType: armed.use.itemType,
+      startedAt: scene?.now?.() ?? 0,
+      duration: fireSeconds(armed.use.action),
+    });
+  }
   return succeeded;
 }

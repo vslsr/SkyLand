@@ -48,6 +48,26 @@ export interface SnapshotLeash {
 }
 
 /** 房间快照里的单名玩家，坐标由服务端权威计算。 */
+/**
+ * 一个 Actor 正在做的那件事。没在做什么时整条字段不下发。
+ *
+ * 这是**动作表现的复制通道**：过网的是状态（谁、在做什么、用哪件东西、从什么时候
+ * 开始、多长），不是每一帧的姿态——姿态由两端按同一份曲线推出来，见
+ * `src/animation/ActionStateSampler.ts`。
+ */
+export interface SnapshotActionState {
+  /** `<动词>.<相位>`，例如 `eat.hold`、`shoot.charge`、`shoot.fire`。 */
+  state: string;
+  /** 这次动作用的是哪件物品；手上那件按它挑自己的曲线。 */
+  itemType?: string;
+  /** 权威开始时刻，毫秒，和 `RoomSnapshot.serverTime` 同一条时间轴。 */
+  startedAt: number;
+  /** 走完一整轮多久，秒。0 = 没有确定长度（拉满了等松手那一段）。 */
+  duration: number;
+  /** 每进入一次新状态 +1；一次性动作靠它触发，也靠它区分连着做的两次。 */
+  revision: number;
+}
+
 export interface SnapshotPlayer {
   id: string;
   name: string;
@@ -78,6 +98,8 @@ export interface SnapshotPlayer {
     slots: Array<{ itemType: string; quantity: number } | null>;
     activeIndex: number;
   };
+  /** 正在做的那个动作，**发给所有人**：别人在做什么本来就是看得见的事。 */
+  action?: SnapshotActionState;
   /** PickupDrop Component 的运行态；口部挂点来自玩家 Actor 原型。 */
   heldActorId?: string | null;
   pickupDropRevision?: number;
@@ -271,4 +293,6 @@ export interface InterpolatedPlayerState {
   slimeDrag?: SnapshotSlimeDrag;
   bitingPlayerId?: string;
   leash?: SnapshotLeash;
+  /** 正在做的那个动作；和位置一样按插值后的那一份走，不混合。 */
+  action?: SnapshotActionState;
 }

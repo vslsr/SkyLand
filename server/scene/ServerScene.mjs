@@ -17,6 +17,7 @@ import {
   SIMULATION_STEP_SECONDS,
 } from '../../shared/networkTuning.mjs';
 import {
+  ACTION_STATE_COMPONENT,
   ACTOR_CONTROL_COMPONENT,
   BUILD_PIECE_COMPONENT,
   BUOYANCY_COMPONENT,
@@ -76,6 +77,7 @@ import {
   cancelItemUse,
   releaseItemUse,
   revokeItemAbility,
+  updateActionState,
   updateItemUse,
 } from '../actors/ItemAbilityRuntime.mjs';
 import { PlayerIdleSimulation } from './PlayerIdleSimulation.mjs';
@@ -1571,6 +1573,9 @@ export class ServerScene {
     // 最后一个），所以做成了事就重新对齐一次手上那件。
     for (const player of this.players.values()) {
       if (updateItemUse(this, player, now)) syncHeldItemActor(this, player);
+      // 结算那一下的表现有确定长度，演完就回到「没在做什么」——否则快照会一直说
+      // 这个人在咽同一口东西。
+      updateActionState(player, now);
     }
     // 输入包是权威模拟的主驱动，但它可能整段消失。补步只覆盖「静默超时且仍在
     // 运动」的玩家，站着不动的一步都不跑，成本上界是房间人数而非世界面积。
@@ -1705,6 +1710,7 @@ export class ServerScene {
         const slimeDrag = this.activeSlimeDrag(player);
         const bitingPlayerId = player.getComponent(BITE_COMPONENT)?.targetActorId;
         const leash = this.activeLeash(player);
+        const action = player.getComponent(ACTION_STATE_COMPONENT)?.snapshot();
         return {
           id: player.id,
           name: player.name,
@@ -1726,6 +1732,9 @@ export class ServerScene {
             inventoryRevision: player.requireComponent(INVENTORY_COMPONENT).revision,
             hotbar: player.requireComponent(INVENTORY_COMPONENT).hotbarSnapshot(),
           } : {}),
+          // 动作状态发给**所有人**：别人在做什么本来就是看得见的事，而背包不是。
+          // 没在做什么时整条不下发。
+          ...(action ? { action } : {}),
           heldActorId: player.getComponent(PICKUP_DROP_COMPONENT)?.heldActorId ?? null,
           pickupDropRevision: player.getComponent(PICKUP_DROP_COMPONENT)?.revision ?? 0,
           ...(slimeDrag ? { slimeDrag } : {}),

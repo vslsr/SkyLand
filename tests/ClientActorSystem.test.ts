@@ -51,7 +51,8 @@ import {
   POINT_LIGHT_COMPONENT,
   type PointLightComponent,
 } from '../src/actors/components/PointLightComponent';
-import type { SnapshotActor } from '../src/network/protocol';
+import type { SnapshotActor, SnapshotPlayer } from '../src/network/protocol';
+import type { ActionPhase } from '../src/animation/ActionStateSampler';
 import { RenderTransformBuffer } from '../src/render/RenderTransformBuffer';
 import { PARAM_POINT_LIGHT_INTENSITY } from '../src/render/RenderVisualParams';
 import { SLIME_DRAG_AT_REST, writeSlimeDragParams } from '../src/render/RenderSlimeDrag';
@@ -2317,26 +2318,42 @@ const orchardDefinition = {
   },
 } satisfies SceneDefinition;
 
-test('正在被吃的那件食物一口口变小，并跟着嘴一起抖', () => {
+test('手上那件跟着持有者的动作演：一口口变小，并跟着嘴一起抖', () => {
   // 手上那件食物的世界坐标是权威给的，嚼的那一段是纯表现：它只改这一帧写进实例
   // 通道的位置与缩放，不碰 Transform，也不过网。
+  //
+  // 它读的是**持有者**那一拍：动作状态记在玩家身上，手上那件是挂在他身上的表现体。
+  // 给它单独记一份的话，两份在丢帧时会错开，表现就是人在嚼、食物不动。
   const system = createTestActorSystem({
     definition: orchardDefinition,
     environment: { fogColor: '#ffffff', fogNear: 20, fogFar: 60 },
     now: () => 1_000,
     spawnBudgetMilliseconds: Number.POSITIVE_INFINITY,
   });
+  const holder: SnapshotPlayer = {
+    id: 'p1', name: '吃果子的人', x: 2, y: 0, z: 1, yaw: 0, speed: 0, ackTick: 0, sequence: 0,
+  };
   const fruit: SnapshotActor = {
     id: 'held-fruit',
     archetypeId: 'fruit-pile',
     revision: 0,
-    transform: { x: 2, y: 0.3, z: 1, yaw: 0 },
-    interactable: { action: 'pickup-stack', label: '果子', enabled: true, revision: 0 },
+    // 挂在玩家身上：世界坐标由挂点合成，这正是「手持表现体」的形状。
+    parentActorId: 'p1',
+    localTransform: { x: 0, y: 0.3, z: 0.36, yaw: 0 },
+    // 手持表现体没有可交互：`heldItemArchetype` 把物理、生命期、可交互都摘掉了。
     itemStack: {
       itemType: 'fruit', displayName: '果子', quantity: 1, maximumQuantity: 999, revision: 0,
     },
-    residency: { state: 'active', revision: 0 },
   };
+  const chewPhase = (ratio: number): ActionPhase => ({
+    state: 'eat.hold',
+    verb: 'eat',
+    phase: 'hold',
+    itemType: 'fruit',
+    ratio,
+    elapsed: ratio * 1.2,
+    revision: 1,
+  });
   const readInstance = (): { position: THREE.Vector3; scale: THREE.Vector3 } => {
     const fill = renderRootOf(system).getObjectByName(
       'fruit-pile:active:normal:single-fill',
@@ -2351,12 +2368,12 @@ test('正在被吃的那件食物一口口变小，并跟着嘴一起抖', () =>
     return { position, scale };
   };
 
-  system.syncSnapshots([fruit], 1_000, 1_000);
+  system.syncSnapshots([fruit], 1_000, 1_000, [holder]);
   stepActorFrame(system, 0, 0);
   const before = readInstance();
 
   // 嚼到一半：小了一圈，位置也被抬起来一点——和玩家模型读的是同一份曲线。
-  system.setChewingItem('held-fruit', 0.5);
+  system.setActionPhases(new Map([['p1', chewPhase(0.5)]]));
   stepActorFrame(system, 1 / 60, 1 / 60);
   const chewing = readInstance();
   assert.ok(chewing.scale.x < before.scale.x * 0.9, `没有变小：${chewing.scale.x}`);
@@ -2366,11 +2383,12 @@ test('正在被吃的那件食物一口口变小，并跟着嘴一起抖', () =>
   );
 
   // 咽下去之前更小；停下之后立刻回到原样（下一个果子不该一出手就是残缺的）。
-  system.setChewingItem('held-fruit', 0.95);
+  system.setActionPhases(new Map([['p1', chewPhase(0.95)]]));
   stepActorFrame(system, 2 / 60, 2 / 60);
   assert.ok(readInstance().scale.x < chewing.scale.x, '越嚼应该越小');
 
-  system.setChewingItem(undefined, 0);
+  // 别人在做动作不影响这一件：这张表按持有者查。
+  system.setActionPhases(new Map([['someone-else', chewPhase(0.5)]]));
   stepActorFrame(system, 3 / 60, 3 / 60);
   const after = readInstance();
   assert.ok(Math.abs(after.scale.x - before.scale.x) < 1e-6);

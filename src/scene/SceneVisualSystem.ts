@@ -1,4 +1,5 @@
 import type { ContainerModelLike } from '../inventory/index';
+import type { ActionPhase } from '../animation/ActionStateSampler';
 import type * as THREE from 'three';
 import type { Actor } from '../../shared/actor/Actor.mjs';
 import type { CollisionWorld } from '../../shared/collision/index.mjs';
@@ -91,7 +92,7 @@ export interface ActorSnapshotTarget {
    *
    * 纯表现：手上那件食物据此一口口变小、跟着嘴一起抖，不改任何权威状态。
    */
-  setChewingItem?(actorId: string | undefined, ratio: number): void;
+  setActionPhases?(phases: ReadonlyMap<string, ActionPhase>): void;
   setInteractionMarkerActorId(actorId?: string, inputLabel?: string, opacity?: number): void;
   getVesselHudState(playerId: string): VesselHudState | undefined;
   /** 把 Actor 当前的碰撞盒登记进场景碰撞世界。查询前调用，每帧最多兑现一次。 */

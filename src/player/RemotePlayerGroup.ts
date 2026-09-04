@@ -6,6 +6,8 @@ import type { RenderWorldHandle } from '../render/RenderProxyTable';
 import { RemotePlayer } from './RemotePlayer';
 import { collectBiters, resolveBiteTips } from './slimeBiteTip';
 import { createSlimeBiteParams, type SlimeBiteParams } from '../render/RenderSlimeBite';
+import { sampleActionPose } from '../animation/ActionClipRegistry';
+import type { ActionPhase } from '../animation/ActionStateSampler';
 import {
   RemotePlayerColliders,
   type RemotePlayerColliderState,
@@ -56,6 +58,8 @@ export class RemotePlayerGroup {
     states: InterpolatedPlayerState[],
     localPlayerId?: string,
     biters?: ReadonlyMap<string, InterpolatedPlayerState[]>,
+    /** 这一帧每个玩家演到哪一拍；场景算好一份，远端玩家和手上那件读的是同一份。 */
+    actionPhases?: ReadonlyMap<string, ActionPhase>,
   ): void {
     const archetype = this.archetype;
     const renderWorld = this.renderWorld;
@@ -77,6 +81,7 @@ export class RemotePlayerGroup {
       if (this.players.has(state.id)) existing.applyState(state);
       else this.players.set(state.id, existing);
       existing.setBiteTips(resolveBiteTips(state, biterOf.get(state.id), archetype, this.biteTips));
+      existing.setActionPose(sampleActionPose(actionPhases?.get(state.id), 'actor'));
     }
 
     for (const [id, player] of this.players) {

@@ -121,6 +121,8 @@ import {
   PROP_INT_STRIDE,
 } from '../render/propInstanceLayout';
 import { FRUIT_FLOAT_STRIDE, FRUIT_INT_STRIDE } from '../render/fruitInstanceLayout';
+import { sampleActionPose } from '../animation/ActionClipRegistry';
+import type { ActionPhase } from '../animation/ActionStateSampler';
 import { ActorFruitInstanceSystem } from './systems/ActorFruitInstanceSystem';
 
 /**
@@ -284,8 +286,13 @@ export class ClientActorSystem implements SceneFrameSystem {
   private readonly physics?: PhysicsWorld;
   /** 合批内容的实例通道，以及渲染侧反查原型用的那张顺序表。 */
   private readonly instances = new RenderInstanceBuffer(PROP_INT_STRIDE, PROP_FLOAT_STRIDE);
-  /** 正被吃的那件食物（手持表现体）和它吃到哪一步；没人在吃时是 undefined。 */
-  private chewingItem?: { actorId: string; ratio: number };
+  /**
+   * 每个玩家这一帧演到哪一拍；手上那件跟着**持有者**动。
+   *
+   * 按玩家 id 记，不按手持物 id 记：手上那件是挂在玩家身上的纯表现体，动作是玩家的
+   * 动作。给它单独记一份，两份在丢帧时会错开，表现就是人在嚼、食物不动。
+   */
+  private readonly actionPhases = new Map<string, ActionPhase>();
   /** 树上果子走另一条通道：它的记录里没有原型、没有驻留态，形状不一样。 */
   private readonly fruitInstances = new RenderInstanceBuffer(FRUIT_INT_STRIDE, FRUIT_FLOAT_STRIDE);
   private readonly archetypeOrder: readonly string[];
@@ -904,13 +911,14 @@ export class ClientActorSystem implements SceneFrameSystem {
    * 判据就是原型有没有 `itemStack`——`createReplica` 正是照它提前返回、不建 proxy 的。
    */
   /**
-   * 谁正被吃、吃到哪一步。
+   * 这一帧每个玩家演到哪一拍。
    *
-   * 由场景在按住使用键的那一段每帧推进（和圈画到哪里是同一个比例）。手上那件
-   * 食物据此一口口变小、跟着嘴一起抖——两样都是纯表现，不过网。
+   * 由场景每帧从**动作状态**（快照里那一条）算出来，本地玩家还叠了一层不等快照的
+   * 预测。手上那件据此抖动、变小——两样都是纯表现，姿态不过网，过网的只有状态。
    */
-  public setChewingItem(actorId: string | undefined, ratio: number): void {
-    this.chewingItem = actorId === undefined ? undefined : { actorId, ratio };
+  public setActionPhases(phases: ReadonlyMap<string, ActionPhase>): void {
+    this.actionPhases.clear();
+    for (const [playerId, phase] of phases) this.actionPhases.set(playerId, phase);
   }
 
   private createInstanceCatalog(): ActorInstanceCatalog {
@@ -934,9 +942,15 @@ export class ClientActorSystem implements SceneFrameSystem {
         const model = this.archetypes.get(archetypeId)?.components.render?.model;
         return model !== undefined && singleModels.has(model);
       },
-      chewRatioOf: (actorId) => (
-        this.chewingItem?.actorId === actorId ? this.chewingItem.ratio : undefined
-      ),
+      // 手上那件读的是**持有者**那一拍：它挂在谁身上，就跟着谁的动作动。
+      // 玩家不在这个 Actor 世界里（它是外部父节点），所以从那张外部父子表反查。
+      actionPoseOf: (actorId) => {
+        const holderId = this.externalParentActorIds.get(actorId)
+          ?? this.world.getActor(actorId)?.parent?.id;
+        return holderId === undefined
+          ? undefined
+          : sampleActionPose(this.actionPhases.get(holderId), 'held');
+      },
     };
   }
 

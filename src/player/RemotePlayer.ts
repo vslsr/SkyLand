@@ -56,6 +56,8 @@ export class RemotePlayer extends Actor {
   private speed = 0;
   private verticalVelocity = 0;
   private grounded = true;
+  /** 动作那一下把身体挪了多少；和本地玩家一样，只加在写出去的这一帧上。 */
+  private actionOffset?: { x: number; y: number; z: number };
 
   private readonly grassDisplacement: GrassDisplacementComponent;
   /** 只有长腿外壳才有；和本地玩家同一套采样窗口。 */
@@ -154,6 +156,16 @@ export class RemotePlayer extends Actor {
     this.biteTips.set(tips);
   }
 
+  /**
+   * 这一帧的动作姿态偏移；没在做什么时是 undefined。
+   *
+   * **别人在做什么是看得见的事**：这一份来自快照里那条动作状态，和本地玩家读的是
+   * 同一条曲线、同一个相位公式。它只改写出去的渲染坐标，不碰插值出来的玩法位置。
+   */
+  public setActionPose(pose: { offset?: { x: number; y: number; z: number } } | undefined): void {
+    this.actionOffset = pose?.offset;
+  }
+
   public update(deltaSeconds: number): void {
     // 远端玩家没有本地预测的速度向量，方向由插值出来的朝向推出来——
     // 和搬迁前那条 sin/cos 一样。
@@ -167,11 +179,12 @@ export class RemotePlayer extends Actor {
   }
 
   private publishRenderState(): void {
+    const action = this.actionOffset;
     this.transforms.write(
       this.proxyId,
-      this.transform.x,
-      this.transform.y,
-      this.transform.z,
+      this.transform.x + (action?.x ?? 0),
+      this.transform.y + (action?.y ?? 0),
+      this.transform.z + (action?.z ?? 0),
       this.transform.yaw,
     );
     writeSlimeMotionParams(this.transforms, this.proxyId, this.motion);

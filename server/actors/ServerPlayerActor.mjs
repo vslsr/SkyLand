@@ -1,4 +1,5 @@
 import {
+  ActionStateComponent,
   Actor,
   BiteComponent,
   BuoyancyComponent,
@@ -54,6 +55,9 @@ export class ServerPlayerActor extends Actor {
       maximumStepHeight: movement.maximumStepHeight,
     };
     this.addComponent(new InventoryComponent(archetype.components.inventory));
+    // 动作表现的复制通道：谁在做什么、从什么时候开始。写它的是 ItemAbilityRuntime，
+    // 读它的是两端的表现层——它不参与任何玩法判定。
+    this.addComponent(new ActionStateComponent());
     if (archetype.components.pickupDrop) {
       this.addComponent(new PickupDropComponent(archetype.components.pickupDrop));
     }

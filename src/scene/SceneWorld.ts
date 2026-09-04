@@ -6,6 +6,7 @@ import type { PhysicsWorld } from '../../shared/physics/PhysicsWorld.mjs';
 import { TERRAIN_CELL_SIZE } from '../../shared/world/terrainConfig.mjs';
 import { intersectRayWithHorizontalPlane } from '../camera/cameraRay';
 import type { ContainerModelLike } from '../inventory/index';
+import type { ActionPhase } from '../animation/ActionStateSampler';
 import type { GrassBendImpulse, GrassInteractionTarget } from '../grass';
 import type { RenderWorldCommands } from '../render/RenderWorldRuntime';
 import type { SnapshotActor, SnapshotPlayer } from '../network/protocol';
@@ -328,9 +329,9 @@ export class SceneWorld implements GrassInteractionTarget {
     this.actorSnapshotTarget?.setHoveredActorId(actorId);
   }
 
-  /** 吃东西那一段：手上那件食物一口口变小，见 `chewAnimation`。 */
-  public setChewingItem(actorId: string | undefined, ratio: number): void {
-    this.actorSnapshotTarget?.setChewingItem?.(actorId, ratio);
+  /** 这一帧每个玩家演到哪一拍；手上那件跟着持有者动。 */
+  public setActionPhases(phases: ReadonlyMap<string, ActionPhase>): void {
+    this.actorSnapshotTarget?.setActionPhases?.(phases);
   }
 
   public setInteractionMarkerActorId(

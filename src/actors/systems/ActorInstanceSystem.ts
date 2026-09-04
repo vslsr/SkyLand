@@ -20,11 +20,11 @@ import {
   PROP_SINGLE,
   residencyCode,
 } from '../../render/propInstanceLayout';
-import { chewBodyOffset, chewFoodScale } from '../../player/chewAnimation';
 import {
   InstanceIdTable,
   type RenderInstanceBuffer,
 } from '../../render/RenderInstanceBuffer';
+import type { ActionPose } from '../../animation/ActionClipRegistry';
 
 /**
  * 合批内容的实例表由哪些原型、按什么规则产出（实现路径文档 §3）。
@@ -47,7 +47,7 @@ export interface ActorInstanceCatalog {
    * 缩放倍率。手上那件食物因此和嘴一起抖、一口口变小——两样都读
    * `chewAnimation` 那一份曲线，所以嚼在同一拍上。
    */
-  chewRatioOf?(actorId: string): number | undefined;
+  actionPoseOf?(actorId: string): ActionPose | undefined;
 }
 
 /**
@@ -81,12 +81,9 @@ export class ActorInstanceSystem {
       ) as CombustibleComponent | undefined;
       const motion = actor.getComponent(DROP_MOTION_COMPONENT) as DropMotionComponent | undefined;
       const single = this.catalog.supportsSingle(actor.archetypeId) && stack.quantity === 1;
-      const chewRatio = this.catalog.chewRatioOf?.(actor.id);
-      // 嘴上那件食物的世界坐标是权威给的，抖动是纯表现——所以抖动只加在写出去的
-      // 这一帧上，不回写 Transform。
-      const chew = chewRatio === undefined
-        ? undefined
-        : { offset: chewBodyOffset(chewRatio), scale: chewFoodScale(chewRatio) };
+      // 手上那件跟着**持有者的动作状态**动（嚼、拉弓）。它的世界坐标是权威给的，
+      // 这一份姿态是纯表现——所以只加在写出去的这一帧上，不回写 Transform。
+      const pose = this.catalog.actionPoseOf?.(actor.id);
       this.live.add(actor.id);
       const integers = [0, 0, 0, 0, 0];
       integers[PROP_ARCHETYPE] = archetypeIndex;
@@ -95,14 +92,14 @@ export class ActorInstanceSystem {
       integers[PROP_SINGLE] = single ? 1 : 0;
       integers[PROP_ID] = this.ids.acquire(actor.id);
       this.instances.push(integers, [
-        transform.x + (chew?.offset.x ?? 0),
-        transform.y + (chew?.offset.y ?? 0),
-        transform.z + (chew?.offset.z ?? 0),
+        transform.x + (pose?.offset?.x ?? 0),
+        transform.y + (pose?.offset?.y ?? 0),
+        transform.z + (pose?.offset?.z ?? 0),
         transform.yaw,
         stack.quantity,
         // 只有「单个」形态才滚：一堆果子没有刚体姿态可言。
         single ? (motion?.radius ?? 0) : 0,
-        chew?.scale ?? 1,
+        pose?.scale ?? 1,
       ]);
     }
     // 离开视野的把号码还回去，下一个 Actor 复用——渲染侧的滚动状态按号码记账，

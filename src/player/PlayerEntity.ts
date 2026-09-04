@@ -50,7 +50,7 @@ import {
   resolvePlayerVisualShape,
   type PlayerVisualShape,
 } from './playerVisualShape';
-import { chewBodyOffset } from './chewAnimation';
+
 import { PlayerReconciler } from './PlayerReconciler';
 import { GameAbilityComponent } from '../abilities/index';
 import {
@@ -140,13 +140,13 @@ export class PlayerEntity extends Actor {
   private readonly unsubscribeTerrainChanges?: () => void;
   private readonly pendingInputSteps: PlayerInputStep[] = [];
   /**
-   * 这次吃走到 [0, 1] 的哪里；没在吃时是 undefined。
+   * 这一帧动作把身体挪了多少；没在做什么时是 undefined。
    *
    * 它**只改这一帧写出去的渲染坐标**，不碰玩法 transform：抖动是表现，不是位移。
    * 写进玩法坐标的话，预测与和解会把这几厘米当成真的走了几厘米，然后每一帧都
    * 被服务端拉回来。
    */
-  private chewingRatio?: number;
+  private actionOffset?: { x: number; y: number; z: number };
 
   public constructor(
     playerId: string,
@@ -391,14 +391,14 @@ export class PlayerEntity extends Actor {
   }
 
   /**
-   * 吃东西那段抖动，由 `HotbarController` 那次按住驱动；传 undefined 是没在吃。
+   * 这一帧的动作姿态偏移；传 undefined 是没在做什么。
    *
-   * 参数是**比例**而不是秒数：「抖着嚼 → 咽下去」和「圈在走 → 圈满激活」是同一段
-   * 时间，读同一个比例，长按多久都自动对齐。手上那件食物读的也是它（经由
-   * `ClientActorSystem.setChewingItem`），所以两边嚼在同一拍上。
+   * 姿态由**动作状态**推出来（`ActionStateSampler` + `ActionClipRegistry`），而状态
+   * 是过网的——所以别人眼里的这个人也在做同一个动作、在同一拍上。手上那件读的是
+   * 同一份状态、同一条曲线（见 `ClientActorSystem.actionPoseOf`），两边因此不会分家。
    */
-  public setChewing(ratio: number | undefined): void {
-    this.chewingRatio = ratio;
+  public setActionPose(pose: { offset?: { x: number; y: number; z: number } } | undefined): void {
+    this.actionOffset = pose?.offset;
   }
 
   public update(deltaSeconds: number): void {
@@ -431,15 +431,13 @@ export class PlayerEntity extends Actor {
    * 所以软体读到的速度和它被摆到的位置永远是同一帧的。
    */
   private publishRenderState(): void {
-    // 嚼的那一下只加在写出去的这一帧上：玩法坐标不动，预测与和解看不见它。
-    const chew = this.chewingRatio === undefined
-      ? undefined
-      : chewBodyOffset(this.chewingRatio);
+    // 动作那一下只加在写出去的这一帧上：玩法坐标不动，预测与和解看不见它。
+    const action = this.actionOffset;
     this.transforms.write(
       this.proxyId,
-      this.transform.position.x + (chew?.x ?? 0),
-      this.transform.position.y + (chew?.y ?? 0),
-      this.transform.position.z + (chew?.z ?? 0),
+      this.transform.position.x + (action?.x ?? 0),
+      this.transform.position.y + (action?.y ?? 0),
+      this.transform.position.z + (action?.z ?? 0),
       this.transform.rotation.y,
     );
     writeSlimeMotionParams(this.transforms, this.proxyId, this.motion);

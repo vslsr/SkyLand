@@ -4,6 +4,10 @@ export { ActorWorld } from './ActorWorld.mjs';
 export { AttachmentSystem } from './systems/AttachmentSystem.mjs';
 export { HierarchyTransformSystem } from './systems/HierarchyTransformSystem.mjs';
 export {
+  ACTION_STATE_COMPONENT,
+  ActionStateComponent,
+} from './components/ActionStateComponent.mjs';
+export {
   ACTOR_CONTROL_COMPONENT,
   ActorControlComponent,
 } from './components/ActorControlComponent.mjs';

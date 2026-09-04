@@ -45,6 +45,7 @@ function toState(player: SnapshotPlayer): InterpolatedPlayerState {
     ...(player.slimeDrag ? { slimeDrag: player.slimeDrag } : {}),
     ...(player.bitingPlayerId ? { bitingPlayerId: player.bitingPlayerId } : {}),
     ...(player.leash ? { leash: player.leash } : {}),
+    ...(player.action ? { action: player.action } : {}),
   };
 }
 
@@ -76,6 +77,9 @@ function blend(from: SnapshotPlayer, to: SnapshotPlayer, amount: number): Interp
     // 缰绳同样取最新的那一份：它进的是本地预测，插值出来的中间锚点不对应
     // 服务端重放时用过的任何一个值。
     ...(to.leash ? { leash: to.leash } : {}),
+    // 动作状态不插值：它是离散的「在做什么」，中间值没有含义。相位由开始时刻推导，
+    // 所以取哪一份都指向同一条时间轴上的同一拍。
+    ...(to.action ? { action: to.action } : {}),
   };
 }
 
@@ -109,6 +113,17 @@ export class SnapshotBuffer {
   public clear(): void {
     this.snapshots.length = 0;
     this.clockOffset = undefined;
+  }
+
+  /**
+   * 把本地时钟换算成服务端时钟。
+   *
+   * 动作状态给的是**权威开始时刻**，相位要拿服务端时间轴上的「现在」去减它——
+   * 直接拿本地 `Date.now()` 比会被两端时钟差整个偏掉。还没收到任何快照时是
+   * undefined。
+   */
+  public serverTimeAt(nowMs = Date.now()): number | undefined {
+    return this.clockOffset === undefined ? undefined : nowMs - this.clockOffset;
   }
 
   public sample(nowMs = Date.now()): InterpolatedPlayerState[] {

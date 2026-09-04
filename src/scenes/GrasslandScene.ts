@@ -46,8 +46,15 @@ import type { SceneUpdateContext } from '../scene/SceneVisualSystem';
 import { createSceneRuntimeComponent, SceneComponentHost } from '../scene/components';
 import {
   INPUT_SEND_INTERVAL_SECONDS,
+  INTERPOLATION_DELAY_MS,
   SLIME_DRAG_SEND_INTERVAL_SECONDS,
 } from '../../shared/networkTuning.mjs';
+import { sampleActionPose } from '../animation/ActionClipRegistry';
+import {
+  sampleLocalAction,
+  sampleRemoteAction,
+  type ActionPhase,
+} from '../animation/ActionStateSampler';
 import {
   INVENTORY_COMPONENT,
   type InventoryComponent,
@@ -113,6 +120,50 @@ export class GrasslandScene extends Scene {
    * 交互提示那条文字、世界里的按键牌和按住进度环读的是同一份，重绑定之后三处
    * 一起变；分头各写一遍就会出现「提示说 E、圈上写着别的」。
    */
+  /**
+   * 这一帧每个玩家演到哪一拍。
+   *
+   * 一份状态、一条曲线：玩家模型、他手上那件、远端玩家读的都是这张表，所以
+   * 「人在嚼、食物不动」这种分家不会发生。每帧重算，不缓存跨帧的相位。
+   */
+  private readonly actionPhases = new Map<string, ActionPhase>();
+  /**
+   * 本地那次按住的预测相位；快照里那一条到了就作废。
+   *
+   * 快照 10Hz，等服务端说「你在吃」自己才动的话，按下去到动起来要一百毫秒。
+   * 这是一次**表现层**的本地预测——它不改任何账，服务端拒了（比如冷却中）也只是
+   * 演了半下就停。
+   */
+  private predictedAction?: ActionPhase;
+
+  /**
+   * 这一帧的动作相位表。
+   *
+   * 本地玩家：权威那一份优先，没有才用预测——两份算出来的比例本来就一样（同一个
+   * `holdSeconds`、几乎同一个起点），所以切换不会跳。
+   *
+   * 远端玩家：**必须减掉和位置采样同一条插值延迟**。他们的位置是按 renderTime 取的，
+   * 动作不减这一项的话，手上那件会在模型还没走到位时就先动起来。
+   */
+  private syncActionPhases(
+    states: readonly InterpolatedPlayerState[],
+    localPlayerId: string | undefined,
+    own: InterpolatedPlayerState | undefined,
+  ): void {
+    const serverNow = this.snapshots.serverTimeAt();
+    this.actionPhases.clear();
+    for (const state of states) {
+      if (state.id === localPlayerId) continue;
+      const phase = sampleRemoteAction(state.action, serverNow, INTERPOLATION_DELAY_MS);
+      if (phase) this.actionPhases.set(state.id, phase);
+    }
+    const local = sampleLocalAction(own?.action, serverNow) ?? this.predictedAction;
+    if (localPlayerId && local) this.actionPhases.set(localPlayerId, local);
+    this.player?.setActionPose(sampleActionPose(local, 'actor'));
+    // 手上那件按持有者查这张表，所以本地和远端走的是同一条路。
+    this.world.setActionPhases(this.actionPhases);
+  }
+
   /** 嘴上那件的 Actor id；空手时是 undefined。吃东西的表现要认得出是哪一件。 */
   private heldActorId(): string | undefined {
     const pickupDrop = this.player?.getComponent(PICKUP_DROP_COMPONENT) as
@@ -385,11 +436,19 @@ export class GrasslandScene extends Scene {
       setProgress: (progress) => {
         this.hotbarBar.setProgress(progress);
         this.holdProgress.setProgress(progress?.onHotbar ? undefined : progress);
-        // 吃东西那一段跟着这次按住走：圈满那一刻服务端扣账，抖动与食物同时停。
-        // 玩家模型和手上那件食物读同一个比例，所以它们嚼在同一拍上。
-        const chewing = progress?.action === 'eat' ? progress.ratio : undefined;
-        this.player?.setChewing(chewing);
-        this.world.setChewingItem(chewing === undefined ? undefined : this.heldActorId(), chewing ?? 0);
+        // 按住那一段的表现不在这里驱动，只在这里**记一份预测**：动作现在走的是
+        // 复制通道（快照里那条动作状态），别人也看得见。但快照 10Hz，等它回来
+        // 自己才动的话，按下去到动起来要一百毫秒——所以本地先按这次按住演，
+        // 服务端那一份到了就以它为准。
+        this.predictedAction = progress === undefined ? undefined : {
+          state: `${progress.action}.${progress.mode}`,
+          verb: progress.action,
+          phase: progress.mode,
+          itemType: undefined,
+          ratio: progress.ratio,
+          elapsed: progress.ratio * 0,
+          revision: 0,
+        };
       },
     });
     this.container = new ContainerController(this.containerPage, {
@@ -486,9 +545,12 @@ export class GrasslandScene extends Scene {
       }
       // 缰绳要在这一帧的预测步之前落到 characterParams 上，重放才和权威一致。
       this.player?.setLeash(own?.leash);
+      // 谁在做什么：这一份由快照里那条动作状态推出来，本地玩家再叠一层不等快照的
+      // 预测。玩家模型、手上那件、远端玩家读的都是它——一份状态、一条曲线。
+      this.syncActionPhases(states, localPlayerId, own);
       this.player?.update(deltaSeconds);
       if (localPlayerId && this.joinedRoom?.scene.camera.mode === 'topdown') {
-        this.remotePlayers.sync(states, localPlayerId, this.biters);
+        this.remotePlayers.sync(states, localPlayerId, this.biters, this.actionPhases);
         this.remotePlayers.update(deltaSeconds);
       } else {
         this.remotePlayers.clear();
