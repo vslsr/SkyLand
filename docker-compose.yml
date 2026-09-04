@@ -70,6 +70,20 @@ services:
     depends_on:
       - skyland
 
+  # 第三条路：Cloudflare 快速隧道。只建立出站连接，不监听任何入站端口，
+  # 所以不受未备案域名拦截和安全组的影响，拿到的是 Cloudflare 的正式证书。
+  #   docker compose --profile quicktunnel up -d
+  #   docker compose logs cloudflared | grep trycloudflare.com
+  # 地址是随机的，每次重启都会变，且带宽有限——用来试玩和分享，不是正式形态。
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: skyland-tunnel
+    profiles: ["quicktunnel"]
+    restart: unless-stopped
+    command: tunnel --no-autoupdate --url http://skyland:3090
+    depends_on:
+      - skyland
+
 volumes:
   skyland-logs:
   caddy-data:

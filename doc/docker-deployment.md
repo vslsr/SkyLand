@@ -181,50 +181,76 @@ COOP/COEP 头发得再对，`crossOriginIsolated` 仍然是 `false`。
 
 ### 4.2 没有域名时怎么拿到安全上下文
 
-**注意：光加一层反代是修不好的。** 根因是协议不是 HTTPS，跟前面有没有 nginx 无关。
-反代必须**终止 TLS**，也就是它得有证书。仓库里备了两个可选 profile，二选一
-（都占 80/443，不能同时起）：
+**先说清楚：光加一层反代是修不好的。** 根因是协议不是 HTTPS，跟前面有没有 nginx 无关。
+反代必须**终止 TLS**，也就是它得有证书。仓库里备了三个可选 profile：
 
-| 方案 | 证书 | 浏览器警告 | 适合 |
-| --- | --- | --- | --- |
-| `--profile tls`（Caddy） | Let's Encrypt 自动签发续期 | 无 | 有域名，或用 `<IP>.sslip.io` |
-| `--profile nginx-tls` | 自己准备（自签或已有的） | 自签会弹一次 | 内网、离线、已有证书 |
+| 方案 | 证书 | 浏览器警告 | 需要入站端口 | 适合 |
+| --- | --- | --- | --- | --- |
+| `--profile quicktunnel` | Cloudflare 签发 | 无 | 不需要 | 境内服务器、没备案、想马上试玩 |
+| `--profile nginx-tls` | 自己准备（自签或已有的） | 自签会弹一次 | 443 | 纯 IP 访问、内网、离线、已有证书 |
+| `--profile tls`（Caddy） | Let's Encrypt 自动签发续期 | 无 | 80 + 443 | 已备案域名，或服务器在境外 |
 
-启用 profile 时 skyland 自己不要再占 80，保持默认的只发布到回环即可。
+启用任一 profile 时 skyland 自己不要再占 80，保持默认的只发布到回环即可。
+`nginx-tls` 和 `tls` 都占 80/443，不能同时起；`quicktunnel` 不占任何端口，可以并存。
 
-#### 方案 A：Caddy + sslip.io，没有域名也能拿到真证书
+> **境内服务器的坑：`<IP>.sslip.io` + Let's Encrypt 走不通。** 云厂商会在入口拦截
+> 未备案域名走 80/443 的请求，返回一个 webblock 页。Let's Encrypt 是多视角校验，
+> 只要有一个节点拿到拦截页整单就失败，日志长这样：
+>
+> ```
+> Invalid response from https://dnspod.qcloud.com/static/webblock.html?d=<域名>: 566
+> ```
+>
+> 这跟配置无关，改不好。境内没备案就走 `quicktunnel` 或 `nginx-tls`。别让它一直重试
+> ——Let's Encrypt 对失败校验有频率限制（同一域名每小时 5 次），确认是这个错就
+> `docker compose --profile tls down`。
 
-`sslip.io` 是泛解析服务，`111.229.172.59.sslip.io` 直接解析回这个 IP，
-Let's Encrypt 能正常签发，所以浏览器不会有任何警告。
+#### 方案 A：Cloudflare 快速隧道，不需要任何入站端口
+
+`cloudflared` 只建立**出站**连接到 Cloudflare，再由 Cloudflare 把流量送回来。
+所以它同时绕开了未备案拦截、安全组和端口占用，而且拿到的是正式证书，没有警告。
 
 ```bash
-echo 'SKYLAND_SITE=111.229.172.59.sslip.io' > .env   # 换成你自己的公网 IP
-docker compose --profile tls up -d
-docker compose logs -f caddy                          # 看签发过程
+docker compose --profile quicktunnel up -d
+docker compose logs cloudflared | grep trycloudflare.com
+# https://<随机字符>.trycloudflare.com
 ```
 
-签发走 HTTP-01 挑战，所以 **80 和 443 都必须能从公网访问**。签完 80 会 301 到 443。
-证书存在 `caddy-data` 卷里，别删——Let's Encrypt 有频率限制。
+地址是随机的，**容器一重启就换一个**，带宽也有限制。适合自己试玩和临时分享给几个人，
+不适合当正式入口。流量会经过 Cloudflare，内容敏感时要考虑这一点。
 
-有域名之后把 `SKYLAND_SITE` 换成域名再 `up -d` 就行，其余不用动。
+#### 方案 B：nginx + 自签证书，纯 IP 访问
 
-#### 方案 B：nginx + 自签证书
-
-不依赖外部 CA，断网也能用，代价是浏览器每次首访要点一次「继续访问」。
-点过之后就是安全上下文，`crossOriginIsolated` 为 `true`，功能完整。
+不依赖外部 CA，也不涉及域名，所以不受备案拦截影响。代价是浏览器首访要点一次
+「继续访问」。点过之后就是安全上下文，`crossOriginIsolated` 为 `true`，功能完整。
 
 ```bash
-./deploy/generate-self-signed-cert.sh 111.229.172.59   # 生成到 deploy/tls/
+./deploy/generate-self-signed-cert.sh 111.229.172.59   # 换成你的公网 IP
 docker compose --profile nginx-tls up -d
+# 浏览器开 https://111.229.172.59/
 ```
 
-证书写在 `deploy/tls/`（已在 `.gitignore` 里）。已经有正式证书时，把
-`cert.pem` / `key.pem` 放进这个目录即可，不用跑脚本。
+证书写在 `deploy/tls/`（已在 `.gitignore` 里）。已经有正式证书时，把 `cert.pem` /
+`key.pem` 放进这个目录即可，不用跑脚本。需要放行安全组的 443 入站。
 
 `deploy/nginx-tls.conf` 里刻意没有任何 `add_header` / `proxy_hide_header`：
 COOP/COEP/CORP 由 Node 服务端统一发，nginx 默认透传，一旦覆盖就前功尽弃。
 
-#### 方案 C：只有自己试玩，SSH 隧道
+#### 方案 C：Caddy + Let's Encrypt（需要已备案域名，或服务器在境外）
+
+```bash
+echo 'SKYLAND_SITE=skyland.example.com' > .env
+docker compose --profile tls up -d
+docker compose logs -f caddy                # 等 certificate obtained
+```
+
+没有域名但服务器在境外时，可以用 `<公网IP>.sslip.io` —— 这个泛解析服务把该名字
+解析回同一个 IP，Let's Encrypt 能正常签发。境内服务器见上面那条警告。
+
+签发走 HTTP-01 挑战，**80 和 443 都必须能从公网访问**，签完 80 会 301 到 443。
+证书存在 `caddy-data` 卷里，别删。
+
+#### 方案 D：只有自己试玩，SSH 隧道
 
 服务器什么都不用改，容器保持只监听回环。`http://localhost` 是安全上下文，
 性能和正式部署完全一致。
@@ -236,8 +262,6 @@ ssh -N -L 3090:127.0.0.1:3090 root@<服务器IP>
 ```
 
 必须用 `localhost` 或 `127.0.0.1`——局域网 IP 同样不算安全上下文。
-
-> 境内服务器用域名走 80/443 需要先完成 ICP 备案；纯 IP 访问不受此限。
 
 ### 4.3 Nginx
 

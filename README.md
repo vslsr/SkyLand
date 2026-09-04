@@ -94,12 +94,14 @@ npm start
 docker compose up -d --build           # 构建并启动，默认只监听 127.0.0.1:3090
 curl http://127.0.0.1:3090/api/health  # {"ok":true,...,"webReady":true}
 
-# 加一层终止 TLS 的反代对外提供服务，二选一：
-echo 'SKYLAND_SITE=<公网IP>.sslip.io' > .env
-docker compose --profile tls up -d           # Caddy + Let's Encrypt，无警告
+# 对外提供服务需要 HTTPS，三选一：
+docker compose --profile quicktunnel up -d   # Cloudflare 隧道，不占端口，无警告
 
 ./deploy/generate-self-signed-cert.sh <公网IP>
 docker compose --profile nginx-tls up -d     # nginx + 自签证书，有一次警告
+
+echo 'SKYLAND_SITE=<已备案域名>' > .env
+docker compose --profile tls up -d           # Caddy + Let's Encrypt，无警告
 ```
 
 不用 Compose 时：
