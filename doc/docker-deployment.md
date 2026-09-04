@@ -123,8 +123,9 @@ docker compose down              # 停止并删除容器（保留 skyland-logs �
 docker compose down -v           # 连日志卷一起删
 ```
 
-默认把宿主机 80 直接映射到容器的 3090，前面不放反代——还没有域名时最省事。
-代价见 4.1：没有 HTTPS 就没有跨源隔离，渲染会走降级路径。
+默认把宿主机 80 直接映射到容器的 3090，前面不放反代。注意这个默认值只够验证
+`/api/health` 和静态资源是否正常——**浏览器里游戏起不来**，因为纯 HTTP 没有跨源隔离，
+见 4.1。真要能玩，按 4.2 拿到安全上下文。
 
 要换发布方式，用 `SKYLAND_PUBLISH` 覆盖，不用改文件（改了会和 `git pull` 冲突）：
 
@@ -167,13 +168,48 @@ docker run -d --name skyland --init \
 `https://` 或 `http://localhost`。用 `http://<公网 IP>:3090` 访问，
 COOP/COEP 头发得再对，`crossOriginIsolated` 仍然是 `false`。
 
-`src/platform/threading.ts` 拿不到 SAB 时会**静默**回落成普通 `ArrayBuffer`——
-不报错，只是主线程和渲染线程之间从共享内存变成逐帧拷贝。所以这个坑不会以异常的形式
-暴露出来，只会表现为线上比本地卡。
+**拿不到跨源隔离，客户端直接起不来**，页面上会是这一行：
+
+> 客户端初始化失败：拿不到 SharedArrayBuffer（页面没有跨源隔离？），渲染循环搬不进线程
+
+`src/platform/threading.ts` 里的 `allocateSharedBytes` 确实会回落成普通 `ArrayBuffer`，
+但根本走不到那一步：`src/render/worker/connectRenderWorldInWorker.ts` 在装配渲染线程时
+就抛了异常，而 `GrasslandScene` 只有这一条渲染路径，没有主线程回退分支。
+
+所以「先用 HTTP 跑起来，以后再上 HTTPS」是行不通的——安全上下文是能不能玩的前提，
+不是性能优化。下一节是没有域名时怎么拿到它。
+
+### 4.2 没有域名时怎么拿到安全上下文
+
+按适用范围从窄到宽：
+
+**只有自己要试玩：SSH 隧道。** 服务器上什么都不用改，容器保持只监听回环即可。
+`http://localhost` 是安全上下文，性能和线上完全一致。
+
+```bash
+# 在你自己的电脑上执行，把服务器的 3090 映射到本地 3090
+ssh -N -L 3090:127.0.0.1:3090 root@<服务器IP>
+# 然后浏览器开 http://localhost:3090/
+```
+
+**要分享给几个人：自签证书。** 浏览器会弹一次「不安全」警告，点进去之后就是安全上下文，
+`crossOriginIsolated` 为 `true`，功能完整。适合内测，不适合给不认识的人。
+
+```bash
+# 服务器上生成自签证书（IP 直连要写进 subjectAltName，否则部分浏览器不认）
+mkdir -p /etc/skyland-tls && cd /etc/skyland-tls
+openssl req -x509 -nodes -newkey rsa:2048 -days 825   -keyout key.pem -out cert.pem   -subj "/CN=<服务器IP>"   -addext "subjectAltName=IP:<服务器IP>"
+```
+
+再用一个 Nginx 容器终止 TLS，反代到 skyland（配置见 4.3，把 `ssl_certificate`
+指向上面两个文件，`server_name _;`）。
+
+**要正式对外：域名 + Let's Encrypt。** 见 4.3、4.4。这是唯一的长期方案。
+境内服务器用 80/443 提供域名服务需要先完成 ICP 备案。
 
 所以公网部署请务必配好域名和 TLS。局域网内自测可以走 IP，但那时的能力集和线上不一样。
 
-### 4.2 Nginx
+### 4.3 Nginx
 
 Node 服务端自己会发 `Cross-Origin-Opener-Policy: same-origin` 和
 `Cross-Origin-Embedder-Policy: require-corp`，反代**不要**覆盖或删掉它们。
@@ -219,7 +255,7 @@ server {
 
 改完 `nginx -t && systemctl reload nginx`。
 
-### 4.3 Caddy（自动签证书，配置更短）
+### 4.4 Caddy（自动签证书，配置更短）
 
 ```caddy
 skyland.example.com {
@@ -229,7 +265,7 @@ skyland.example.com {
 
 Caddy 默认就转发 WebSocket 升级，也不会动上游的 COOP/COEP 头。
 
-### 4.4 防火墙
+### 4.5 防火墙
 
 容器端口只绑到回环时，对外只需要放行 80/443：
 
@@ -268,7 +304,7 @@ docker run -d --name skyland --init -p 127.0.0.1:3090:3090 skyland:0.1.0
 | `/api/health` 返回 `"webReady": false`，页面 503 | 镜像里没有 `dist/`。看 `docker build` 输出里 `vite build` 是否失败 |
 | 容器 STATUS 一直 `(unhealthy)` | `docker logs skyland` 看启动报错；或 `SKYLAND_SERVER_PORT` 改了但健康检查还打 3090 |
 | 页面能开，进房间就断线 | 反代没转发 WebSocket 升级，或 `proxy_read_timeout` 太短 |
-| 帧率明显低于本地，但没有任何报错 | 跨源隔离没打开。`src/platform/threading.ts` 会静默回落到普通 `ArrayBuffer`，不抛异常。在控制台查 `crossOriginIsolated`，`false` 就是这条。原因见 4.1 |
+| 页面报「客户端初始化失败：拿不到 SharedArrayBuffer」 | 不是安全上下文（走了 http），或反代删掉了 COOP/COEP。控制台查 `crossOriginIsolated`，`false` 就是这条。见 4.1、4.2 |
 | 加载卡在 wasm，控制台报跨源资源被拒 | 引入了不带 `Cross-Origin-Resource-Policy` 的跨源资源（CDN 字体/图片），COEP 会静默拦掉 |
 | 构建时 OOM 被杀 | 构建机内存不足。加 swap，或在别处构建好推镜像 |
 | 日志目录写入报 EACCES | `/app/logs` 没挂卷或属主不对。用 `-v skyland-logs:/app/logs` |

@@ -109,10 +109,13 @@ docker run -d --name skyland --restart unless-stopped --init \
 
 `--init` 不能省——房间 DS 是 `node` 的子进程，PID 1 不是 init 时会留下僵尸进程。
 
-公网部署必须配 HTTPS：`SharedArrayBuffer` 只在安全上下文里可用，走
-`http://<公网 IP>:3090` 时 COOP/COEP 发得再对，`crossOriginIsolated` 也是 `false`，
-渲染 Worker 与物理会掉到降级路径。反代要转发 WebSocket 升级、放长读超时，并且不要
-覆盖服务端发的 COOP/COEP 头。
+**必须是安全上下文，否则游戏根本起不来。** `SharedArrayBuffer` 只在
+`https://` 或 `http://localhost` 下可用，走 `http://<公网 IP>/` 时 COOP/COEP 发得再对，
+`crossOriginIsolated` 也是 `false`，`connectRenderWorldInWorker` 会直接抛
+「拿不到 SharedArrayBuffer」——没有主线程回退分支。没有域名时的三条替代路径
+（SSH 隧道 / 自签证书 / 域名签证书）见 `doc/docker-deployment.md` 4.2。
+
+反代要转发 WebSocket 升级、放长读超时，并且不要覆盖服务端发的 COOP/COEP 头。
 
 完整的构建参数、跨架构构建、Nginx/Caddy 配置、更新回滚和排查表见
 [`doc/docker-deployment.md`](doc/docker-deployment.md)。
