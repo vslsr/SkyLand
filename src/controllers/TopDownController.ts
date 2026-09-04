@@ -1,6 +1,9 @@
 import { CameraBoom, type CameraProbe } from '../camera/CameraBoom';
 import { CameraFollow } from '../camera/CameraFollow';
-import { TopDownCameraOrbit } from '../camera/TopDownCameraOrbit';
+import {
+  TopDownCameraOrbit,
+  type TopDownCameraOrbitAxes,
+} from '../camera/TopDownCameraOrbit';
 import type { CameraFrame } from '../camera/CameraTransform';
 import type { CameraAxes } from '../camera/cameraMath';
 import { createCameraViewMatrix } from '../camera/cameraMath';
@@ -60,19 +63,6 @@ export interface PlayerCollisionMotion {
 }
 
 /**
- * 控制器允许写入角色的旋转轴。
- *
- * TopDown 的角色只在地面上转身，所以默认只放开 Yaw；Pitch / Roll 是留给俯冲、
- * 翻滚一类玩法的配置位，打开之后也只有外部朝向请求会写它们——移动永远只驱动
- * Yaw 这一根轴。
- */
-export interface TopDownRotationAxes {
-  yaw?: boolean;
-  pitch?: boolean;
-  roll?: boolean;
-}
-
-/**
  * 一次朝向对准请求。
  *
  * 控制器保留「让角色对准某个方向」的能力，但不再自带驱动方：技能、AI、之后
@@ -83,10 +73,6 @@ export interface TopDownFacingRequest {
   target?: { x: number; z: number };
   /** 直接给定的朝向角；`target` 存在时以 `target` 为准。 */
   yaw?: number;
-  /** 仅在 `rotationAxes.pitch` 打开时生效。 */
-  pitch?: number;
-  /** 仅在 `rotationAxes.roll` 打开时生效。 */
-  roll?: number;
   /** 收敛速度（每秒）；默认与过去的鼠标朝向一致。 */
   sharpness?: number;
   /** 直接对齐，不做插值。 */
@@ -102,10 +88,10 @@ export interface TopDownControllerOptions {
   /** 是否允许在画面上拖动旋转 TopDown 镜头。默认开启。 */
   cameraDragEnabled?: boolean;
   /**
-   * 控制器允许写入角色的旋转轴，默认 `{ yaw: true, pitch: false, roll: false }`：
-   * 只有 Yaw 会跟着移动转，Pitch / Roll 要显式打开并由外部朝向请求驱动。
+   * 拖拽可以转动的镜头轴，默认 `{ yaw: true, pitch: false }`：只能绕角色转圈，
+   * Scene 配置的俯角保持不变。需要拖动俯仰的场景显式打开 pitch。
    */
-  rotationAxes?: TopDownRotationAxes;
+  cameraOrbitAxes?: TopDownCameraOrbitAxes;
   fieldOfViewDegrees?: number;
   bounds?: SceneBounds;
   collisionRadius?: number;
@@ -153,12 +139,6 @@ const CAMERA_PIVOT_HEIGHT = 0.25;
 const MOVEMENT_FACING_SHARPNESS = 10;
 /** 外部朝向请求没写 sharpness 时的收敛速度。 */
 const FACING_REQUEST_SHARPNESS = 14;
-/** 默认旋转轴开关：只允许运动 Yaw 轴。 */
-const DEFAULT_ROTATION_AXES: Required<TopDownRotationAxes> = {
-  yaw: true,
-  pitch: false,
-  roll: false,
-};
 export const DEFAULT_TOP_DOWN_CAMERA_OFFSET: Vec3 = [5.5, 7.5, 8.5];
 
 /**
@@ -168,13 +148,10 @@ export const DEFAULT_TOP_DOWN_CAMERA_OFFSET: Vec3 = [5.5, 7.5, 8.5];
  * `.rotation.y`。写成结构类型之后，`Object3D` 仍然满足它（现有调用方不受影响），
  * 同时也允许把玩家的位置换成一条普通记录、由 transform SoA 过边界。
  * 这是本地玩家接到渲染边界上的前置（实现路径文档 §1.5 的第 1 条注意）。
- *
- * `rotation.x` / `rotation.z` 是可选的：默认只有 Yaw 会被写入，打开 Pitch / Roll
- * 的场景才需要 transform 带上对应分量。
  */
 export interface PlayerTransformTarget {
   readonly position: { x: number; y: number; z: number };
-  readonly rotation: { y: number; x?: number; z?: number };
+  readonly rotation: { y: number };
 }
 
 export class TopDownController {
@@ -184,7 +161,6 @@ export class TopDownController {
   private readonly cameraOffset: Vec3;
   private readonly cameraDragEnabled: boolean;
   private readonly fieldOfViewRadians: number;
-  private readonly rotationAxes: Required<TopDownRotationAxes>;
   private readonly movementInput = { x: 0, y: 0 };
   private readonly bounds: SceneBounds;
   private readonly collisionRadius: number;
@@ -224,8 +200,6 @@ export class TopDownController {
   private cameraDistanceRatio = 1;
   private enabled: boolean;
   private facingYaw = Math.PI;
-  private facingPitch = 0;
-  private facingRoll = 0;
   /** 外部送进来的朝向对准请求；没有就由移动方向驱动 Yaw。 */
   private facingRequest?: TopDownFacingRequest;
   private currentSpeed = 0;
@@ -249,8 +223,9 @@ export class TopDownController {
     this.enabled = options.enabled ?? true;
     this.cameraOffset = [...(options.cameraOffset ?? DEFAULT_TOP_DOWN_CAMERA_OFFSET)];
     this.cameraDragEnabled = options.cameraDragEnabled ?? true;
-    this.rotationAxes = { ...DEFAULT_ROTATION_AXES, ...options.rotationAxes };
-    this.cameraOrbit = new TopDownCameraOrbit(this.cameraOffset);
+    this.cameraOrbit = new TopDownCameraOrbit(this.cameraOffset, {
+      axes: options.cameraOrbitAxes,
+    });
     this.bounds = options.bounds ?? PLAYER_BOUNDS;
     this.collisionRadius = Math.max(0, options.collisionRadius ?? 0);
     this.movement = options.movement ?? {
@@ -661,8 +636,7 @@ export class TopDownController {
    *
    * 「让角色对准某个方向」这件事仍归控制器做，但它不再自带驱动方——鼠标点击
    * 不会再转动角色。技能、AI、之后重新接回来的鼠标瞄准都从外面调这个接口；传
-   * `undefined` 就把朝向交回移动方向。请求里的 Pitch / Roll 只在 `rotationAxes`
-   * 放开了对应轴时才会被写进 transform。
+   * `undefined` 就把朝向交回移动方向。
    */
   public setFacingRequest(request: TopDownFacingRequest | undefined): void {
     this.facingRequest = request ? { ...request } : undefined;
@@ -673,9 +647,9 @@ export class TopDownController {
     return this.facingRequest ? { ...this.facingRequest } : undefined;
   }
 
-  /** 控制器当前的朝向。只有 `rotationAxes` 放开的轴会被写进玩家 transform。 */
-  public get facing(): { yaw: number; pitch: number; roll: number } {
-    return { yaw: this.facingYaw, pitch: this.facingPitch, roll: this.facingRoll };
+  /** 控制器当前的朝向。TopDown 的角色只在地面上转身，所以它只有 Yaw。 */
+  public get facing(): { yaw: number } {
+    return { yaw: this.facingYaw };
   }
 
   /**
@@ -765,55 +739,27 @@ export class TopDownController {
   /**
    * 朝向解算。
    *
-   * 控制器内置的驱动方只有一个：移动方向，而且它只写 Yaw——这就是「默认只允许
-   * 运动 Yaw 轴」。外部朝向请求可以接管 Yaw，并在 `rotationAxes` 放开时补上
-   * Pitch / Roll；被 `rotationAxes` 关掉的轴，控制器一个字都不往 transform 里写。
+   * 控制器内置的驱动方只有一个：移动方向。外部朝向请求可以接管它，鼠标不再参与。
    */
   private updateFacing(deltaSeconds: number, moving: boolean): void {
     const request = this.facingRequest;
     const requestedYaw = this.resolveRequestedYaw(request);
-    // 请求一旦提到 Yaw 就整根轴归它：对准点贴到脚下这一帧解不出角度时保持当前
+    // 请求一旦提到朝向就整根轴归它：对准点贴到脚下这一帧解不出角度时保持当前
     // 朝向，不能中途把角色甩回移动方向。
     const yawRequested = request?.target !== undefined || request?.yaw !== undefined;
-    if (this.rotationAxes.yaw) {
-      const movementYaw = moving && !yawRequested
-        ? Math.atan2(this.moveX, this.moveZ)
-        : undefined;
-      const targetYaw = requestedYaw ?? movementYaw;
-      if (targetYaw !== undefined) {
-        this.facingYaw = requestedYaw === undefined
-          ? lerpAngle(
-            this.facingYaw,
-            targetYaw,
-            Math.min(1, deltaSeconds * MOVEMENT_FACING_SHARPNESS),
-          )
-          : this.approachAngle(this.facingYaw, targetYaw, deltaSeconds, request);
-      }
-      this.facingYaw = normalizeAngle(this.facingYaw);
-      this.player.rotation.y = this.facingYaw;
+    const movementYaw = moving && !yawRequested ? Math.atan2(this.moveX, this.moveZ) : undefined;
+    const targetYaw = requestedYaw ?? movementYaw;
+    if (targetYaw !== undefined) {
+      this.facingYaw = requestedYaw === undefined
+        ? lerpAngle(
+          this.facingYaw,
+          targetYaw,
+          Math.min(1, deltaSeconds * MOVEMENT_FACING_SHARPNESS),
+        )
+        : this.approachAngle(this.facingYaw, targetYaw, deltaSeconds, request);
     }
-    if (this.rotationAxes.pitch) {
-      if (request?.pitch !== undefined) {
-        this.facingPitch = this.approachAngle(
-          this.facingPitch,
-          request.pitch,
-          deltaSeconds,
-          request,
-        );
-      }
-      if ('x' in this.player.rotation) this.player.rotation.x = this.facingPitch;
-    }
-    if (this.rotationAxes.roll) {
-      if (request?.roll !== undefined) {
-        this.facingRoll = this.approachAngle(
-          this.facingRoll,
-          request.roll,
-          deltaSeconds,
-          request,
-        );
-      }
-      if ('z' in this.player.rotation) this.player.rotation.z = this.facingRoll;
-    }
+    this.facingYaw = normalizeAngle(this.facingYaw);
+    this.player.rotation.y = this.facingYaw;
   }
 
   /** 对准点每帧按角色当前位置重算；贴得太近时保持上一帧朝向，免得原地抖。 */

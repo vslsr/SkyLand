@@ -94,10 +94,25 @@ function assertAngleClose(actual: number, expected: number, message: string): vo
   assert.ok(difference < 1e-9, `${message}：相差 ${difference}`);
 }
 
-test('TopDown 垂直拖动保持距离并把俯仰限制在可移动范围', () => {
+test('TopDown 镜头默认只控制 Yaw 轴：垂直拖动不改俯角', () => {
+  const initial: [number, number, number] = [0, 7.5, 10];
+  const orbit = new TopDownCameraOrbit(initial);
+
+  orbit.addPointerDelta(0, 400);
+  orbit.update(1 / 60);
+  assert.deepEqual([...orbit.currentOffset], initial, '默认配置下垂直拖动不该抬高镜头');
+
+  orbit.addPointerDelta(200, 0);
+  orbit.update(1 / 60);
+  const turned = orbit.currentOffset;
+  assert.notEqual(turned[0], initial[0], 'Yaw 轴仍然可以拖动');
+  assert.ok(Math.abs(turned[1] - initial[1]) < 1e-9, '转圈不该改变镜头高度');
+});
+
+test('打开 pitch 轴后垂直拖动保持距离并把俯仰限制在可移动范围', () => {
   const initial: [number, number, number] = [0, 7.5, 10];
   const distance = Math.hypot(...initial);
-  const orbit = new TopDownCameraOrbit(initial);
+  const orbit = new TopDownCameraOrbit(initial, { axes: { pitch: true } });
 
   orbit.addPointerDelta(0, 100_000);
   orbit.update(1 / 60);
@@ -166,8 +181,8 @@ test('TopDown 朝向只由移动的 Yaw 轴驱动，鼠标按键不再改写它'
   now = 64;
   input.update();
   controller.update(0.1);
-  assert.equal(player.rotation.x, 0, '默认只放开 Yaw 轴，Pitch 不应被写入');
-  assert.equal(player.rotation.z, 0, '默认只放开 Yaw 轴，Roll 不应被写入');
+  frame = controller.inputFrame;
+  assertAngleClose(frame.yaw, player.rotation.y, '松开鼠标后朝向仍只跟着移动方向');
 
   controller.dispose();
   input.dispose();
@@ -226,7 +241,7 @@ test('TopDown 保留对准接口：外部朝向请求接管 Yaw，撤销后交�
   input.dispose();
 });
 
-test('TopDown 旋转轴配置可以放开 Pitch/Roll，并且只由对准请求驱动', () => {
+test('TopDown 控制器默认只让拖拽转动镜头 Yaw 轴，配置可以放开俯仰', () => {
   let now = 0;
   const device = new TestKeyboardMouseDevice(() => now);
   const scheme = createPlayerInputScheme({ storage: null });
@@ -237,25 +252,44 @@ test('TopDown 旋转轴配置可以放开 Pitch/Roll，并且只由对准请求�
     devices: [device],
     now: () => now,
   });
-  const { canvas } = createCanvas();
-  const player = new Object3D();
-  const controller = new TopDownController(canvas, player, input, {
-    rotationAxes: { yaw: false, pitch: true, roll: true },
+  const { canvas, dispatchPointer } = createCanvas();
+  const controller = new TopDownController(canvas, new Object3D(), input, {
+    cameraOffset: [0, 7.5, 10],
   });
+  const initialHeight = controller.frame.position[1];
 
-  device.emit('Keyboard.KeyW', true);
-  now = 16;
-  input.update();
-  controller.update(0.1);
-  assert.equal(player.rotation.y, 0, '关掉 Yaw 之后移动不应再写转身');
+  dispatchPointer('pointerdown', 500, 500);
+  dispatchPointer('pointermove', 500, 800);
+  dispatchPointer('pointerup', 500, 800);
+  controller.update(1 / 60);
+  assert.ok(
+    Math.abs(controller.frame.position[1] - initialHeight) < 1e-9,
+    '默认只控制 Yaw 轴：垂直拖动不该抬高镜头',
+  );
 
-  controller.setFacingRequest({ pitch: 0.4, roll: -0.2, immediate: true });
-  controller.update(0.1);
-  assert.ok(Math.abs(player.rotation.x - 0.4) < 1e-9, '放开的 Pitch 应写进 transform');
-  assert.ok(Math.abs(player.rotation.z + 0.2) < 1e-9, '放开的 Roll 应写进 transform');
-  assert.equal(player.rotation.y, 0, '关掉的 Yaw 轴不应被对准请求写入');
-
+  const horizontalBefore = controller.frame.position[0];
+  dispatchPointer('pointerdown', 500, 500, { pointerId: 2 });
+  dispatchPointer('pointermove', 800, 500, { pointerId: 2 });
+  dispatchPointer('pointerup', 800, 500, { pointerId: 2 });
+  controller.update(1 / 60);
+  assert.notEqual(controller.frame.position[0], horizontalBefore, 'Yaw 轴仍然可以拖动');
   controller.dispose();
+
+  const pitchable = new TopDownController(canvas, new Object3D(), input, {
+    cameraOffset: [0, 7.5, 10],
+    cameraOrbitAxes: { pitch: true },
+  });
+  dispatchPointer('pointerdown', 500, 500, { pointerId: 3 });
+  dispatchPointer('pointermove', 500, 800, { pointerId: 3 });
+  dispatchPointer('pointerup', 500, 800, { pointerId: 3 });
+  pitchable.update(1 / 60);
+  assert.notEqual(
+    pitchable.frame.position[1],
+    initialHeight,
+    '显式打开 pitch 之后垂直拖动应重新生效',
+  );
+
+  pitchable.dispose();
   input.dispose();
 });
 

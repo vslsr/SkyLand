@@ -1,6 +1,19 @@
 import type { Vec3 } from '../math/vec3';
 
+/**
+ * 拖拽可以转动的镜头轴。
+ *
+ * TopDown 的构图由 Scene 决定，俯角一动画面比例就跟着变，所以默认只放开 Yaw：
+ * 拖拽只能绕角色转圈，抬不动镜头。需要自由俯仰的场景显式打开 pitch。
+ */
+export interface TopDownCameraOrbitAxes {
+  yaw?: boolean;
+  pitch?: boolean;
+}
+
 export interface TopDownCameraOrbitOptions {
+  /** 拖拽可以转动的镜头轴，默认 `{ yaw: true, pitch: false }`。 */
+  axes?: TopDownCameraOrbitAxes;
   /** 水平拖拽灵敏度（弧度/像素），与参考项目保持一致。 */
   yawSensitivity?: number;
   /** 垂直拖拽灵敏度（弧度/像素）。 */
@@ -13,6 +26,8 @@ export interface TopDownCameraOrbitOptions {
   sharpness?: number;
 }
 
+/** 默认镜头轴开关：只控制 Yaw。 */
+const DEFAULT_ORBIT_AXES: Required<TopDownCameraOrbitAxes> = { yaw: true, pitch: false };
 const DEFAULT_YAW_SENSITIVITY = 0.0055;
 const DEFAULT_PITCH_SENSITIVITY = 0.0045;
 const DEFAULT_MINIMUM_PITCH = 0.05;
@@ -37,6 +52,7 @@ function clamp(value: number, minimum: number, maximum: number): number {
  * update 再按参考项目的惯性手感平滑应用。
  */
 export class TopDownCameraOrbit {
+  private readonly axes: Required<TopDownCameraOrbitAxes>;
   private readonly distance: number;
   private readonly offset: Vec3;
   private readonly yawSensitivity: number;
@@ -53,6 +69,7 @@ export class TopDownCameraOrbit {
     const x = finiteOr(initialOffset[0], 0);
     const y = finiteOr(initialOffset[1], 0);
     const z = finiteOr(initialOffset[2], 0);
+    this.axes = { ...DEFAULT_ORBIT_AXES, ...options.axes };
     this.offset = [x, y, z];
     this.distance = Math.hypot(x, y, z);
     this.yaw = Math.atan2(x, z);
@@ -90,10 +107,19 @@ export class TopDownCameraOrbit {
     return this.offset;
   }
 
-  /** 右拖向右旋转画面，下拖抬高镜头，与参考项目的操作方向一致。 */
+  /**
+   * 右拖向右旋转画面，下拖抬高镜头，与参考项目的操作方向一致。
+   *
+   * 关掉的轴在这里就被丢弃，不进余量：既不会攒下惯性，也不会在 update 里把
+   * Scene 配置的俯角改掉。
+   */
   public addPointerDelta(deltaX: number, deltaY: number): void {
-    if (Number.isFinite(deltaX)) this.pendingYaw -= deltaX * this.yawSensitivity;
-    if (Number.isFinite(deltaY)) this.pendingPitch += deltaY * this.pitchSensitivity;
+    if (this.axes.yaw && Number.isFinite(deltaX)) {
+      this.pendingYaw -= deltaX * this.yawSensitivity;
+    }
+    if (this.axes.pitch && Number.isFinite(deltaY)) {
+      this.pendingPitch += deltaY * this.pitchSensitivity;
+    }
   }
 
   /** 中断手势或传送时丢掉尚未应用的惯性，保留用户已选定的视角。 */
