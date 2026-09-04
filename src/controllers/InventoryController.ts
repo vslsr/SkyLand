@@ -157,6 +157,9 @@ export class InventoryController {
     // 和「装配」同一个理由：动过物品栏，背包里点出来的那条能力就不再指向玩家想的
     // 那件东西了。
     this.port.armItem(undefined);
+    // 背包界面里没有箱子那本账：`container` 那种格子只出现在容器界面上，
+    // 它的拖拽由 `ContainerController` 兑现。
+    if (source.kind === 'container') return;
     // 装填这一条优先：拖的是弹药、落点又收这种弹药时，玩家想的是「装进去」，
     // 不是「这两格对调」。其余情况仍然是搬。
     const loadTarget = this.resolveAmmoTarget(source, target);
@@ -195,7 +198,7 @@ export class InventoryController {
    * 石头，而石头是材料，不是弹药分类。
    */
   private resolveAmmoTarget(
-    source: InventoryDragSource,
+    source: InventorySlotAddress,
     target: InventoryDragTarget,
   ): InventorySlotAddress | undefined {
     const ammoType = this.itemTypeAt(source);

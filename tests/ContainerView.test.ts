@@ -16,36 +16,42 @@ function backpackWith(entries: [string, number][]): InventoryComponent {
   return inventory;
 }
 
-test('一行同时给出身上和箱内，两边都能看见才谈得上决定搬哪边', () => {
+test('上半屏是箱内的每一摞，下半屏就是背包界面那一份', () => {
   const view = buildContainerView(
     'chest-1',
     chestWith([['stone', 12]]),
     backpackWith([['stone', 3], ['wood', 5]]),
   );
 
-  const stone = view.rows.find((row) => row.itemType === 'stone');
-  assert.ok(stone);
-  assert.equal(stone.carried, 3);
-  assert.equal(stone.stored, 12);
+  // 箱内一摞一格：石头堆叠上限 10，12 个就是两格（10 + 2）。
+  assert.deepEqual(
+    view.stored.map((stack) => [stack.itemType, stack.quantity]),
+    [['stone', 10], ['stone', 2]],
+  );
+  assert.equal(view.usedSlots, 2);
+  assert.equal(view.freeSlots, 22, '空格子画的是「箱子还能装多少」');
 
-  // 只在背包里的东西也要有一行，否则它没有「存」的入口。
-  const wood = view.rows.find((row) => row.itemType === 'wood');
-  assert.ok(wood);
-  assert.equal(wood.carried, 5);
-  assert.equal(wood.stored, 0);
+  // 身上那一份原封不动就是背包界面画的那一份：同一个背包不该在两个界面里长得
+  // 不一样。
+  assert.deepEqual(
+    view.carried?.slots.map((stack) => [stack.itemType, stack.quantity]),
+    [['stone', 3], ['wood', 5]],
+  );
+  assert.ok(view.carried?.hotbar.length, '物品栏那一条也在，往上拖就能存进去');
 });
 
-test('行序和背包界面同一套：分类序在前，目录序在后', () => {
+test('箱内的顺序和背包界面同一套：分类序在前，目录序在后', () => {
   const view = buildContainerView(
     'chest-1',
-    chestWith([['mushroom', 3], ['stone', 1]]),
-    backpackWith([['fruit', 2], ['wood', 1]]),
+    chestWith([['mushroom', 3], ['stone', 1], ['fruit', 2], ['wood', 1]]),
+    undefined,
   );
   assert.deepEqual(
-    view.rows.map((row) => row.itemType),
+    view.stored.map((stack) => stack.itemType),
     ['wood', 'stone', 'fruit', 'mushroom'],
     '材料（目录序 wood → stone）→ 补给（目录序 fruit → mushroom）',
   );
+  assert.equal(view.carried, undefined, '没有角色时下半屏什么都不画');
 });
 
 test('自己不算在「另有几个人」里', () => {

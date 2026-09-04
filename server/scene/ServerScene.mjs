@@ -900,11 +900,17 @@ export class ServerScene {
     if (command.kind === 'container:close') return container.closeFor(player.id);
     if (distance > container.reach) return false;
     if (command.kind === 'container:open') return container.openFor(player.id);
-    return transferItems(player, actor, {
+    const moved = transferItems(player, actor, {
       itemType: sanitizeItemType(command.itemType),
       quantity: toFiniteNumber(command.quantity, 0),
       direction: command.direction === 'withdraw' ? 'withdraw' : 'store',
-    }) > 0;
+      // 从物品栏那一格存进去时手上那件可能刚好被搬空，模型要跟着消失——
+      // 所以这条命令也要走一次手持同步（`applyInventoryCommand` 末尾统一做）。
+      slotIndex: command.slotIndex === undefined
+        ? undefined
+        : Math.trunc(toFiniteNumber(command.slotIndex, -1)),
+    });
+    return moved > 0;
   }
 
   /** 走远的人自动退出容器；不依赖客户端自觉发关闭。 */

@@ -13,10 +13,16 @@ import type { AmmoLoadView, HotbarSlotView, InventoryStackView } from '../invent
  * 序号、拿在手上的那一格描粗；这些由 `variant` 决定，不是另一套实现。
  */
 
-/** 这一格指的是哪本账上的哪一格。菜单和拖拽说的都是它。 */
+/**
+ * 这一格指的是哪本账上的哪一格。菜单和拖拽说的都是它。
+ *
+ * 三本账用两种寻址方式，因为它们本来就是两种东西：物品栏有固定的第几格，背包和
+ * 箱子里是一摞摞按种类排的货（顺序自动推导，没有「第几格」这回事）。
+ */
 export type InventorySlotRef =
   | { readonly kind: 'backpack'; readonly itemType: string }
-  | { readonly kind: 'hotbar'; readonly slotIndex: number };
+  | { readonly kind: 'hotbar'; readonly slotIndex: number }
+  | { readonly kind: 'container'; readonly itemType: string };
 
 /** 画一格要知道的全部。两本账各自把自己的视图摊成这一份。 */
 export interface InventorySlotView {
@@ -57,6 +63,11 @@ export interface InventorySlotCellHandlers {
   readonly dropOn?: (slot: InventorySlotView) => void;
   /** 现在有没有东西正被拖着；没有就不接。 */
   readonly isDragging?: () => boolean;
+}
+
+/** 箱子里的一摞摊成一格。和背包那一格长得一样，因为它本来就是同一种东西。 */
+export function containerSlotView(stack: InventoryStackView): InventorySlotView {
+  return { ...backpackSlotView(stack), ref: { kind: 'container', itemType: stack.itemType } };
 }
 
 /** 背包里的一摞摊成一格。 */

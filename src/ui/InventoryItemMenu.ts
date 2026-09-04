@@ -10,7 +10,15 @@ import type { InventorySlotRef } from './InventorySlotCell';
  * `unload`（卸下弹药）只出现在**吃弹药**的那些格子上：别的东西身上没有这回事，
  * 列一条永远点不动的出来只会让菜单变长。
  */
-export type InventoryItemAction = 'use' | 'equip' | 'unequip' | 'drop' | 'unload';
+export type InventoryItemAction =
+  | 'use'
+  | 'equip'
+  | 'unequip'
+  | 'drop'
+  | 'unload'
+  /** 箱子界面：把这一格搬进箱子 / 从箱子搬回身上。搬的是整摞，和拖拽同一个含义。 */
+  | 'store'
+  | 'withdraw';
 
 export interface InventoryItemMenuEntry {
   readonly action: InventoryItemAction;
