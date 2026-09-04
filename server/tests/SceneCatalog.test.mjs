@@ -135,7 +135,7 @@ test('loads every selectable map from an independent scene JSON', async () => {
   for (const id of [
     'generated-tree',
     'fruit-tree',
-    'wood-log',
+    'wood-pile',
     'fruit-pile',
     'large-rock',
     'stone-pile',

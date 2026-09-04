@@ -38,13 +38,13 @@ test('一行同时给出身上和箱内，两边都能看见才谈得上决定�
 test('行序和背包界面同一套：分类序在前，目录序在后', () => {
   const view = buildContainerView(
     'chest-1',
-    chestWith([['light-ammo', 30], ['stone', 1]]),
+    chestWith([['mushroom', 3], ['stone', 1]]),
     backpackWith([['fruit', 2], ['wood', 1]]),
   );
   assert.deepEqual(
     view.rows.map((row) => row.itemType),
-    ['wood', 'stone', 'fruit', 'light-ammo'],
-    '材料（目录序 wood → stone）→ 补给品 → 弹药',
+    ['wood', 'stone', 'fruit', 'mushroom'],
+    '材料（目录序 wood → stone）→ 补给（目录序 fruit → mushroom）',
   );
 });
 

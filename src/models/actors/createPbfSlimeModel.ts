@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { createCharacterInkMaterial } from '../../materials/createCharacterInkMaterial';
 import { createContactShadowMaterial } from '../../materials/createContactShadowMaterial';
 import { createSimpleCollisionFromRender } from '../../../shared/actor/simpleCollision.mjs';
 import type { ActorRenderDefinition } from '../../scenes/data/SceneDefinition';
@@ -68,13 +69,11 @@ function createShadowBoundaryVertices(
 
 function createEyes(radius: number, eyeColor: string): THREE.Group {
   const face = new THREE.Group();
-  // 眼睛最后单独叠加，不参与昼夜灯光、远景雾或色调映射。
-  const eyeMaterial = new THREE.MeshBasicMaterial({
-    color: eyeColor,
+  // 眼睛最后单独叠加，属于角色墨记层：不参与昼夜灯光、远景雾或色调映射。
+  // 见 createCharacterInkMaterial。
+  const eyeMaterial = createCharacterInkMaterial(eyeColor, {
     depthTest: false,
     depthWrite: false,
-    fog: false,
-    toneMapped: false,
   });
   const eyeGeometry = new THREE.SphereGeometry(radius * 0.075, 10, 7);
   for (const [index, x] of [-radius * 0.23, radius * 0.23].entries()) {

@@ -21,7 +21,7 @@ const FLOAT_FOUNDATION = {
   components: {
     buildPiece: {
       kind: 'foundation', surface: 'floating', label: '水上地基', reach: 6,
-      cost: [{ itemType: 'wood-log', quantity: 2 }], mass: 8, buoyancy: 30, hull: 'float-hull',
+      cost: [{ itemType: 'wood', quantity: 2 }], mass: 8, buoyancy: 30, hull: 'float-hull',
     },
     render: {
       model: 'line-art-build-foundation', size: 2, thickness: 0.16,
@@ -36,7 +36,7 @@ const WOOD_WALL = {
   components: {
     buildPiece: {
       kind: 'wall', surface: 'static', label: '木墙', reach: 6,
-      cost: [{ itemType: 'wood-log', quantity: 2 }], mass: 0, buoyancy: 0,
+      cost: [{ itemType: 'wood', quantity: 2 }], mass: 0, buoyancy: 0,
     },
     render: {
       model: 'line-art-build-wall', width: 2, height: 1.5, thickness: 0.18,

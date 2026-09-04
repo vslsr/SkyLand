@@ -163,9 +163,9 @@ export function createSimpleCollisionFromRender(render, dropMotion) {
   if (
     model === 'line-art-campfire'
     || model === 'line-art-dry-hay'
-    || model === 'line-art-wood-pile'
     || model === 'line-art-stone-pile'
     || model === 'line-art-fruit-pile'
+    || model === 'line-art-mushroom-pile'
   ) {
     const radius = positiveNumber(render.radius, 0.5);
     return createSimpleCollisionDefinition({
@@ -175,7 +175,8 @@ export function createSimpleCollisionFromRender(render, dropMotion) {
       maximumY: positiveNumber(render.height, 0.6),
     });
   }
-  if (model === 'line-art-wood-log') {
+  // 木头是一根躺着的六棱柱：长轴沿 X，所以盒子是「长 × 直径」，不是一个方墩。
+  if (model === 'line-art-wood-pile') {
     const radius = positiveNumber(render.radius, 0.1);
     return createSimpleCollisionDefinition({
       halfWidth: positiveNumber(render.length, 0.8) * 0.5,

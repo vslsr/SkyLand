@@ -8,7 +8,7 @@
       "surface": "floating",
       "label": "水上地基",
       "reach": 6,
-      "cost": [{ "itemType": "wood-log", "quantity": 2 }],
+      "cost": [{ "itemType": "wood", "quantity": 2 }],
       "mass": 8,
       "buoyancy": 30,
       "hull": "float-hull"

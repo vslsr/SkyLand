@@ -8,7 +8,7 @@
       "surface": "static",
       "label": "静态地基",
       "reach": 6,
-      "cost": [{ "itemType": "wood-log", "quantity": 2 }]
+      "cost": [{ "itemType": "wood", "quantity": 2 }]
     },
     "replicationPolicy": { "mode": "aoi", "radiusChunks": 2 },
     "render": {

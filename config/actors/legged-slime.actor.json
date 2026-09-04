@@ -44,9 +44,9 @@
       "middleColor": "#b6e9f4",
       "coreColor": "#3ea9c6",
       "bubbleColor": "#eafaff",
-      "inkColor": "#152c36",
+      "inkColor": "#000000",
       "shadowColor": "#1e4a5a",
-      "legColor": "#141210",
+      "legColor": "#000000",
       "footShadowColor": "#6f6f6f"
     }
   }

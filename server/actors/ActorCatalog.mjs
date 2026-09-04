@@ -20,9 +20,9 @@ const ID_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 /** 走高数量合批绘制的堆叠模型。新增一种堆叠物就在这里登记。 */
 const PILE_RENDER_MODELS = new Set([
   'line-art-wood-pile',
-  'line-art-wood-log',
   'line-art-stone-pile',
   'line-art-fruit-pile',
+  'line-art-mushroom-pile',
 ]);
 const COLOR_PATTERN = /^#[0-9a-f]{6}$/i;
 /**
@@ -964,18 +964,18 @@ function validateRender(raw, filename) {
       woodColor: requireColor(render.woodColor, `${path}.woodColor`),
       cutColor: requireColor(render.cutColor, `${path}.cutColor`),
       inkColor: requireColor(render.inkColor, `${path}.inkColor`),
-      radius: requireNumber(render.radius, `${path}.radius`, Number.EPSILON, 3),
-      height: requireNumber(render.height, `${path}.height`, Number.EPSILON, 3),
-    };
-  }
-  if (render.model === 'line-art-wood-log') {
-    return {
-      model: render.model,
-      woodColor: requireColor(render.woodColor, `${path}.woodColor`),
-      cutColor: requireColor(render.cutColor, `${path}.cutColor`),
-      inkColor: requireColor(render.inkColor, `${path}.inkColor`),
       radius: requireNumber(render.radius, `${path}.radius`, Number.EPSILON, 1),
       length: requireNumber(render.length, `${path}.length`, Number.EPSILON, 3),
+    };
+  }
+  if (render.model === 'line-art-mushroom-pile') {
+    return {
+      model: render.model,
+      capColor: requireColor(render.capColor, `${path}.capColor`),
+      stemColor: requireColor(render.stemColor, `${path}.stemColor`),
+      inkColor: requireColor(render.inkColor, `${path}.inkColor`),
+      radius: requireNumber(render.radius, `${path}.radius`, Number.EPSILON, 3),
+      height: requireNumber(render.height, `${path}.height`, Number.EPSILON, 3),
     };
   }
   if (render.model === 'line-art-fruit-pile') {

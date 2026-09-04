@@ -72,10 +72,6 @@ const RENDER_DEFINITIONS: ActorRenderDefinition[] = [
   },
   {
     model: 'line-art-wood-pile',
-    woodColor: '#a07850', cutColor: '#d8c199', inkColor: '#5c4630', radius: 0.42, height: 0.36,
-  },
-  {
-    model: 'line-art-wood-log',
     woodColor: '#a07850', cutColor: '#d8c199', inkColor: '#5c4630', radius: 0.18, length: 1.1,
   },
   {
@@ -85,6 +81,10 @@ const RENDER_DEFINITIONS: ActorRenderDefinition[] = [
   {
     model: 'line-art-fruit-pile',
     fruitColor: '#d4694f', accentColor: '#b3543d', inkColor: '#5c2f26', radius: 0.22, height: 0.2,
+  },
+  {
+    model: 'line-art-mushroom-pile',
+    capColor: '#c97868', stemColor: '#eadfc5', inkColor: '#51463e', radius: 0.2, height: 0.34,
   },
   {
     model: 'line-art-build-foundation',

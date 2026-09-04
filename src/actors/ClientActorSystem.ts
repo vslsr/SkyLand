@@ -899,7 +899,14 @@ export class ClientActorSystem implements SceneFrameSystem {
   private createInstanceCatalog(): ActorInstanceCatalog {
     const archetypeIndex = new Map<string, number>();
     this.archetypeOrder.forEach((id, index) => archetypeIndex.set(id, index));
-    const singleModels = new Set(['line-art-fruit-pile', 'line-art-wood-log']);
+    // 四件物品的模型都是「一件东西」而不是「一小堆」：只有一个的时候画一个，
+    // 多个合并时才摆成一小堆。
+    const singleModels = new Set([
+      'line-art-wood-pile',
+      'line-art-stone-pile',
+      'line-art-fruit-pile',
+      'line-art-mushroom-pile',
+    ]);
     return {
       archetypeIndex,
       isBatched: (archetypeId) => (

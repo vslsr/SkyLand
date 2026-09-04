@@ -139,9 +139,9 @@ test('一格只写一种状态：空 / 有货，拿在手上的只有一格', ()
     const bar = new HotbarBar();
     bar.setSlots([
       slot(0),
-      slot(1, { itemType: 'wood', displayName: '木材', quantity: 4 }),
+      slot(1, { itemType: 'wood', displayName: '木头', quantity: 4 }),
       // 物品栏自己持有那一摞，用光的格子直接空出来，没有「配置还在货没了」这一态。
-      slot(2, { itemType: 'bandage', displayName: '绷带', quantity: 0 }),
+      slot(2, { itemType: 'stone', displayName: '石头', quantity: 0 }),
       slot(3, { itemType: 'torch', displayName: '火把', quantity: 2, active: true }),
     ]);
 
@@ -165,7 +165,7 @@ test('一格只写一种状态：空 / 有货，拿在手上的只有一格', ()
 test('鼠标按下不留焦点：焦点圈和「拿在手上」不会同时亮在两格上', () => {
   withFakeDocument(() => {
     const bar = new HotbarBar();
-    bar.setSlots([slot(0, { itemType: 'wood', displayName: '木材', quantity: 1 })]);
+    bar.setSlots([slot(0, { itemType: 'wood', displayName: '木头', quantity: 1 })]);
     const button = slotsOf(bar)[0];
 
     const pointerDown = new Event('pointerdown', { cancelable: true });
@@ -186,7 +186,7 @@ test('牌子平时写手上拿的是什么，按住时改写这次按住', () =>
     assert.equal(plate.hidden, true, '什么都没拿的时候整块收起来');
 
     bar.setSlots([
-      slot(0, { itemType: 'wood', displayName: '木材', quantity: 4 }),
+      slot(0, { itemType: 'wood', displayName: '木头', quantity: 4 }),
       slot(1, { itemType: 'torch', displayName: '火把', quantity: 2, active: true }),
     ]);
     assert.equal(plate.hidden, false);
@@ -206,7 +206,7 @@ test('圆形倒计时盖在手持那一格上，换手时旧格子上的圈被�
   withFakeDocument(() => {
     const bar = new HotbarBar();
     bar.setSlots([
-      slot(0, { itemType: 'wood', displayName: '木材', quantity: 4, active: true }),
+      slot(0, { itemType: 'wood', displayName: '木头', quantity: 4, active: true }),
       slot(1, { itemType: 'torch', displayName: '火把', quantity: 2 }),
     ]);
     bar.setProgress({ kind: 'stow', ratio: 0.25, label: '收回背包', onHotbar: true });
@@ -220,7 +220,7 @@ test('圆形倒计时盖在手持那一格上，换手时旧格子上的圈被�
     assert.equal(buttons[1].dataset.progress, undefined);
 
     bar.setSlots([
-      slot(0, { itemType: 'wood', displayName: '木材', quantity: 4 }),
+      slot(0, { itemType: 'wood', displayName: '木头', quantity: 4 }),
       slot(1, { itemType: 'torch', displayName: '火把', quantity: 2, active: true }),
     ]);
     assert.equal(buttons[0].dataset.progress, undefined, '换手后旧格子上不能留着半圈');
@@ -233,21 +233,21 @@ test('圆形倒计时盖在手持那一格上，换手时旧格子上的圈被�
 test('不属于物品栏的那次按住不在格子上画圈：同一件事不画两遍', () => {
   withFakeDocument(() => {
     const bar = new HotbarBar();
-    bar.setSlots([slot(0, { itemType: 'wood', displayName: '木材', quantity: 4, active: true })]);
+    bar.setSlots([slot(0, { itemType: 'wood', displayName: '木头', quantity: 4, active: true })]);
     // 叼着的蘑菇、背包里点出来的用法都没有格子，它们的圈在准星下方那块牌子上。
     bar.setProgress({ kind: 'stow', ratio: 0.9, label: '收进背包', onHotbar: false });
 
     assert.equal(slotsOf(bar)[0].dataset.progress, undefined);
     assert.equal(dialsOf(bar)[0].hidden, true);
-    assert.equal(plateOf(bar).textContent, '木材', '牌子仍然只说手上拿的是什么');
+    assert.equal(plateOf(bar).textContent, '木头', '牌子仍然只说手上拿的是什么');
   });
 });
 
 test('空格拿不到手上，没有圈也没有牌子', () => {
   withFakeDocument(() => {
     const bar = new HotbarBar();
-    bar.setSlots([slot(0, { itemType: 'bandage', displayName: '绷带', quantity: 0, active: true })]);
-    bar.setProgress({ kind: 'use', ratio: 0.9, label: '投掷「绷带」', onHotbar: true });
+    bar.setSlots([slot(0, { itemType: 'stone', displayName: '石头', quantity: 0, active: true })]);
+    bar.setProgress({ kind: 'use', ratio: 0.9, label: '吃下「果子」', onHotbar: true });
 
     const button = slotsOf(bar)[0];
     assert.equal(button.dataset.state, 'empty');
@@ -260,12 +260,12 @@ test('空格拿不到手上，没有圈也没有牌子', () => {
 test('换了图标就要重画：签名把画出来的每一样都算进去', () => {
   withFakeDocument(() => {
     const bar = new HotbarBar();
-    bar.setSlots([slot(0, { itemType: 'wood', displayName: '木材', iconId: 'item-wood', quantity: 1 })]);
+    bar.setSlots([slot(0, { itemType: 'wood', displayName: '木头', iconId: 'item-wood', quantity: 1 })]);
     const figure = (bar.element as unknown as FakeElement)
       .collect((element) => element.className === 'hotbar__figure')[0];
     const before = figure.children[0];
 
-    bar.setSlots([slot(0, { itemType: 'wood', displayName: '原木', iconId: 'item-wood-log', quantity: 1 })]);
+    bar.setSlots([slot(0, { itemType: 'wood', displayName: '木头', iconId: 'item-stone', quantity: 1 })]);
     assert.notEqual(figure.children[0], before, '图标换了却没重画');
   });
 });

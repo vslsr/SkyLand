@@ -789,7 +789,7 @@ function validateSceneDefinition(raw, filename, actorCatalog) {
   // 背包里的一件东西要拿到手上、或者从包里直接丢到地上，两条路都得先按 itemType
   // 找到它掉在地上时用的那个原型；找不到就**静悄悄地什么都不做**——菜单点了没反应、
   // 手上不出模型，玩家只会以为界面坏了。而「这张地图的 worldProps 掉不掉它」根本
-  // 决定不了背包里有没有它：弹弹菇是玩家自己揣进包的，储物箱里的东西可以是任何
+  // 决定不了背包里有没有它：蘑菇是玩家自己拔进物品栏的，储物箱里的东西可以是任何
   // 一种，换个场景带着背包过来更是常事。
   for (const archetype of actorCatalog.archetypes()) {
     if (archetype.components.itemStack) includeArchetype(archetype);

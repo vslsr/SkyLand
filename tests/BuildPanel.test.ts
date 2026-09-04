@@ -122,14 +122,14 @@ test('建造栏：列出这张图的件与拆除，点一行选中、再点一�
     const panel = new BuildPanel();
     const changes: Array<BuildSelection | undefined> = [];
     panel.onSelectionChange((selection) => changes.push(selection));
-    const foundation = piece('ground-foundation', 'foundation', [{ itemType: 'wood-log', quantity: 2 }]);
-    panel.setPieces([foundation, piece('wood-wall', 'wall', [{ itemType: 'wood-log', quantity: 2 }])]);
+    const foundation = piece('ground-foundation', 'foundation', [{ itemType: 'wood', quantity: 2 }]);
+    panel.setPieces([foundation, piece('wood-wall', 'wall', [{ itemType: 'wood', quantity: 2 }])]);
     panel.setExpanded(true);
 
     const root = document.getElementById('build-editor') as unknown as FakeElement;
     assert.equal(root.hidden, false, '有件可建，整条栏出现');
     const button = toolButton(document, 'ground-foundation');
-    assert.match(button.title, /圆木 ×2/, '每一行写着材料价');
+    assert.match(button.title, /木头 ×2/, '每一行写着材料价');
     button.dispatchEvent(new Event('click'));
     assert.deepEqual(panel.selection, { kind: 'piece', archetype: foundation });
     assert.equal(button.classList.contains('is-active'), true);
@@ -167,7 +167,7 @@ test('收起栏目就退出建造，没有件的地图整条栏不出现', () =>
   withFakeDocument((document) => {
     const panel = new BuildPanel();
     const changes: Array<BuildSelection | undefined> = [];
-    panel.setPieces([piece('campfire', 'fixture', [{ itemType: 'wood-log', quantity: 3 }])]);
+    panel.setPieces([piece('campfire', 'fixture', [{ itemType: 'wood', quantity: 3 }])]);
     panel.setExpanded(true);
     toolButton(document, 'campfire').dispatchEvent(new Event('click'));
     panel.onSelectionChange((selection) => changes.push(selection));

@@ -1472,50 +1472,49 @@ body.is-topdown .virtual-controls.is-desktop-debug {
   list-style: none;
 }
 
-.inventory-hotbar__slot {
-  position: relative;
-  display: grid;
-  place-items: center;
+/*
+ * 物品栏那一条用的是和背包一样的格子（`createInventorySlotCell`），只是小一号：
+ * 46 像素见方塞进页脚，名字挪到 title 与读屏标签上，左上角补一个数字键序号。
+ * 行为完全一样——点开菜单、拖得动、接得住。
+ */
+.inventory__cell--hotbar {
+  min-height: 0;
   width: 46px;
   height: 46px;
+  padding: 0;
+  gap: 0;
+  place-content: center;
   background: rgba(253, 251, 246, 0.72);
-  border: 1px solid rgba(138, 98, 56, 0.42);
+  border-color: rgba(138, 98, 56, 0.42);
   cursor: grab;
 }
 
-.inventory-hotbar__slot[data-state='empty'] {
+.inventory__cell--hotbar.inventory__cell--empty {
   background: rgba(253, 251, 246, 0.32);
-  border-style: dashed;
   cursor: default;
 }
 
 /* 拿在手上的那一格：和屏幕底部那条用同一套记号，两处说的是同一格。 */
-.inventory-hotbar__slot[data-active='true'] {
+.inventory__cell--hotbar[data-active='true'] {
   border-color: rgba(138, 98, 56, 0.95);
   border-width: 2px;
   box-shadow: inset 0 0 0 1px rgba(214, 158, 74, 0.35);
 }
 
-.inventory-hotbar__shortcut {
-  position: absolute;
-  top: 2px;
-  left: 4px;
-  font-size: 9px;
-  font-weight: 700;
-  color: rgba(28, 26, 23, 0.45);
+.inventory__cell--hotbar .inventory__swatch {
+  width: 30px;
+  height: 30px;
+  background: none;
+  border: 0;
 }
 
-.inventory-hotbar__figure {
-  display: grid;
-  place-items: center;
-}
-
-.inventory-hotbar__icon {
+.inventory__cell--hotbar .inventory__icon {
   width: 24px;
   height: 24px;
+  color: var(--item-tint, #35281f);
 }
 
-.inventory-hotbar__quantity {
+.inventory__cell--hotbar .inventory__count {
   position: absolute;
   right: 3px;
   bottom: 2px;
@@ -1523,8 +1522,13 @@ body.is-topdown .virtual-controls.is-desktop-debug {
   font-weight: 700;
 }
 
-.inventory-hotbar__quantity[hidden] {
-  display: none;
+.inventory__shortcut {
+  position: absolute;
+  top: 2px;
+  left: 4px;
+  font-size: 9px;
+  font-weight: 700;
+  color: rgba(28, 26, 23, 0.45);
 }
 
 /* ---- 容器界面 ------------------------------------------------------------ */

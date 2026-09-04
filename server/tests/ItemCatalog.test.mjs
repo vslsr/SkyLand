@@ -23,26 +23,50 @@ const VALID_MATERIAL = {
   summary: '测试用材料。',
 };
 
-test('默认物品目录按分类给出携带规则', () => {
-  assert.equal(itemCatalog.require('wood').category, 'material');
-  assert.equal(itemCatalog.require('wood').slotCost, 1);
-  assert.equal(itemCatalog.require('wood').pooled, false);
+test('目录就是设计稿上那张物品表：木头、石头、果子、蘑菇', () => {
+  assert.deepEqual(
+    itemCatalog.list().map((item) => item.id),
+    ['wood', 'stone', 'fruit', 'mushroom'],
+  );
 
-  // 弹药与基础工具不吃货位，对应设计稿 §9.5.5。
-  for (const itemType of ['light-ammo', 'special-ammo', 'harvest-hammer']) {
+  // 材料只是材料：占一格、能堆、没有用法。
+  for (const itemType of ['wood', 'stone']) {
     const definition = itemCatalog.require(itemType);
-    assert.equal(definition.slotCost, 0, `${itemType} 不应该占货位`);
-    assert.equal(definition.pooled, true);
+    assert.equal(definition.category, 'material');
+    assert.equal(definition.slotCost, 1);
+    assert.equal(definition.pooled, false);
+    assert.equal(definition.stackLimit, 10);
+    assert.equal(definition.use, undefined, `${itemType} 不能使用`);
   }
 
-  // 价值货物是可抢夺实体：不堆叠、标价、大件多占货位。
-  for (const definition of itemCatalog.listByCategory('valuable')) {
-    assert.equal(definition.stackLimit, 1, `${definition.id} 不该堆叠`);
-    assert.ok(definition.coinValue > 0, `${definition.id} 必须标价`);
-    assert.ok(definition.slotCost >= 1);
+  // 补给能吃：按住嚼完那一段，一次吃掉一个。
+  for (const [itemType, stackLimit] of [['fruit', 10], ['mushroom', 3]]) {
+    const definition = itemCatalog.require(itemType);
+    assert.equal(definition.category, 'supply');
+    assert.equal(definition.stackLimit, stackLimit);
+    assert.equal(definition.use.action, 'eat');
+    assert.equal(definition.use.mode, 'hold');
+    assert.ok(definition.use.holdSeconds > 0);
+    assert.equal(definition.use.value, 1);
   }
-  assert.equal(itemCatalog.require('crown-relic').slotCost, 3);
-  assert.equal(itemCatalog.require('crown-relic').contraband, true);
+
+  // 耐久现在全是 0：没有「用一次掉一点」的系统，写成别的数只会是一个空承诺。
+  for (const definition of itemCatalog.list()) {
+    assert.equal(definition.durability, 0, `${definition.id} 不该有耐久`);
+  }
+});
+
+test('耐久是可选字段，写了就按 0-1000 的整数校验', () => {
+  assert.equal(new ItemCatalog(catalogWith(VALID_MATERIAL)).require('test-plank').durability, 0);
+  assert.equal(
+    new ItemCatalog(catalogWith({ ...VALID_MATERIAL, durability: 120 }))
+      .require('test-plank').durability,
+    120,
+  );
+  assert.throws(
+    () => new ItemCatalog(catalogWith({ ...VALID_MATERIAL, durability: -1 })),
+    /durability 必须是 0-1000 的整数/,
+  );
 });
 
 test('目录里每种物品都画了图标，分类枚举没有漏项', async () => {

@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { createCharacterInkMaterial } from '../../materials/createCharacterInkMaterial';
 import { createContactShadowMaterial } from '../../materials/createContactShadowMaterial';
 import { createSimpleCollisionFromRender } from '../../../shared/actor/simpleCollision.mjs';
 import {
@@ -86,10 +87,10 @@ export function createLeggedSlimeModel(
   legRoot.name = 'legged-slime-legs';
   root.add(legRoot);
 
-  const boneMaterial = new THREE.MeshBasicMaterial({
-    color: definition.legColor,
-    toneMapped: false,
-  });
+  // 腿和眼睛一样属于角色墨记层：不受昼夜光照、距离雾与色调映射影响，任何时刻
+  // 都是同一道纯黑的剪影。之前它只关了色调映射，雾天与入夜时腿会被混向雾色，
+  // 在沉下去的纸面上淡成几道看不清的浅痕。见 createCharacterInkMaterial。
+  const boneMaterial = createCharacterInkMaterial(definition.legColor);
   const boneGeometry = createBoneGeometry(definition.legThickness);
   const shadowGeometry = new THREE.CircleGeometry(definition.footLength * 1.6, 16);
 

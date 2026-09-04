@@ -10,7 +10,7 @@
       "label": "篝火",
       "reach": 6,
       "cost": [
-        { "itemType": "wood-log", "quantity": 3 },
+        { "itemType": "wood", "quantity": 3 },
         { "itemType": "stone", "quantity": 2 }
       ],
       "mass": 20

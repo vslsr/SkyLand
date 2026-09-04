@@ -805,7 +805,7 @@ Actor id 是自描述的：`prop:<种类>:<chunkX>:<chunkZ>:<放置下标>`。�
 这不会让客户端说了算：权威 Actor 只能由服务端从同一世界种子推导。
 
 掉什么、掉多少写在原型的 `generatedProp.drop` 里，不写在代码分支里；数量按生成
-时的缩放取整，所以大树掉的木材比小树多，两端算出的结果一致。
+时的缩放取整，所以大树掉的木头比小树多，两端算出的结果一致。
 
 `SceneCatalog` 在启动时校验这几条：
 
@@ -853,7 +853,7 @@ Actor id 是自描述的：`prop:<种类>:<chunkX>:<chunkZ>:<放置下标>`。�
 
 | 场景 | `tree` | `rock` | `mushroom` |
 | --- | --- | --- | --- |
-| `open-world` 无边草原 | `generated-tree` 权重 5（生命 3 → 木材）+ `fruit-tree` 权重 1（冷却 120 秒 → 果实） | `large-rock`（生命 5 → 石料） | `elastic-mushroom`（按 E 拖拽） |
+| `open-world` 无边草原 | `generated-tree` 权重 5（生命 3 → 木头）+ `fruit-tree` 权重 1（冷却 120 秒 → 果子） | `large-rock`（生命 5 → 石头） | `elastic-mushroom`（按 E 拖拽） |
 | `orchard` 果林 | `fruit-tree` 权重 1（全是果树） | `generated-rock`（生命 4 → 石料） | 未配置 |
 
 两张地图上树与石头的位置、朝向、缩放完全一致；变体只决定每条记录承载哪一个玩法
@@ -886,7 +886,7 @@ Actor id 是自描述的：`prop:<种类>:<chunkX>:<chunkZ>:<放置下标>`。�
 `ServerScene` 里没有任何一处提到树或石头。
 
 掉落物的绘制同样按渲染模型分派：`HighCountActorBatchSystem` 认 `PILE_RENDER_MODELS`
-里登记的堆叠模型，每种模型给出自己的模板分块（圆木是三根交错的圆柱，石堆是三块
+里登记的堆叠模型，每种模型给出自己的模板分块（一个木头是一根六棱柱，一堆是三根，石头是一颗压扁的
 压扁的低多边形石头），后面的合批、实例化与轮廓线合并两种共用。同一个批次仍然固定
 两次绘制。
 

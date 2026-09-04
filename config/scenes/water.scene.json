@@ -71,7 +71,7 @@
     "playerActor": { "archetype": "player-slime" },
     "runtimeActorArchetypes": ["float-foundation", "float-wall", "campfire"],
     "startingInventory": [
-      { "itemType": "wood-log", "quantity": 24 },
+      { "itemType": "wood", "quantity": 24 },
       { "itemType": "stone", "quantity": 6 }
     ],
     "bounds": { "minimumX": -48, "maximumX": 48, "minimumZ": -48, "maximumZ": 48 },

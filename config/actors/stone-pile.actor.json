@@ -5,12 +5,12 @@
   "components": {
     "interactable": {
       "action": "pickup-stack",
-      "label": "石料",
+      "label": "石头",
       "maximumDistance": 2.4
     },
     "itemStack": {
       "itemType": "stone",
-      "displayName": "石料",
+      "displayName": "石头",
       "defaultQuantity": 1,
       "maximumQuantity": 999,
       "compatibilityKey": "stone-standard"
@@ -25,8 +25,13 @@
       "drag": 6.5,
       "settleSpeed": 0.08
     },
-    "lifetime": { "lifetimeSeconds": 900 },
-    "replicationPolicy": { "mode": "aoi", "radiusChunks": 2 },
+    "lifetime": {
+      "lifetimeSeconds": 900
+    },
+    "replicationPolicy": {
+      "mode": "aoi",
+      "radiusChunks": 2
+    },
     "temperature": {
       "initialTemperature": 20,
       "ambientTemperature": 20,

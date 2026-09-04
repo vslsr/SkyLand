@@ -88,6 +88,12 @@
           "minLength": 1,
           "maxLength": 64
         },
+        "durability": {
+          "description": "耐久度。0 或不写表示这件东西没有耐久，用不坏也修不了。",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1000
+        },
         "coinValue": {
           "description": "运到贸易点的出售价；只有价值货物有。",
           "type": "integer",
@@ -116,6 +122,7 @@
             "action": {
               "description": "用起来做什么。只登记已经有系统兑现的效果。",
               "enum": [
+                "eat",
                 "tool",
                 "throw"
               ]
@@ -140,7 +147,7 @@
               "maximum": 10
             },
             "value": {
-              "description": "tool 是额外采集伤害；throw 是投掷初速度的十倍（80 即 8 m/s）。",
+              "description": "eat 是一次吃掉几个；tool 是额外采集伤害；throw 是投掷初速度的十倍（80 即 8 m/s）。",
               "type": "integer",
               "minimum": 1,
               "maximum": 1000

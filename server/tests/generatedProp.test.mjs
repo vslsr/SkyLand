@@ -168,7 +168,7 @@ test('空房间不建任何物件，玩家到场才装载他周围的那一片',
   assert.equal(resident.length + mushrooms.length, scene.generatedProps.residentActorCount);
 });
 
-test('默认树倒下时从树中心逐根生成带物理效果的圆木', async () => {
+test('默认树倒下时从树中心逐根生成带物理效果的木头', async () => {
   const scene = await createOpenWorldScene();
   scene.addPlayer({ id: 'woodcutter', name: '樵夫', slot: 0 });
   const player = scene.players.get('woodcutter');
@@ -202,10 +202,10 @@ test('默认树倒下时从树中心逐根生成带物理效果的圆木', async
   const removed = snapshot.actors.find((actor) => actor.id === treeActor.id);
   assert.deepEqual(removed.propState, { health: 0, removed: true });
   const logs = scene.actorWorld.query(ITEM_STACK_COMPONENT, TRANSFORM_COMPONENT).filter((actor) => (
-    actor.archetypeId === 'wood-log'
-    && actor.requireComponent(ITEM_STACK_COMPONENT).itemType === 'wood-log'
+    actor.archetypeId === 'wood-pile'
+    && actor.requireComponent(ITEM_STACK_COMPONENT).itemType === 'wood'
   ));
-  assert.equal(logs.length, tree.dropQuantity, '默认掉落数量应拆成等量的独立圆木 Actor');
+  assert.equal(logs.length, tree.dropQuantity, '默认掉落数量应拆成等量的独立木头 Actor');
   assert.equal(
     logs.reduce((total, actor) => (
       total + actor.requireComponent(ITEM_STACK_COMPONENT).quantity
@@ -215,9 +215,9 @@ test('默认树倒下时从树中心逐根生成带物理效果的圆木', async
   const expectedOriginY = transform.y + tree.scale * 1.95;
   for (const log of logs) {
     const logTransform = log.requireComponent(TRANSFORM_COMPONENT);
-    assert.equal(logTransform.x, transform.x, '圆木应从树中心出生');
+    assert.equal(logTransform.x, transform.x, '木头应从树中心出生');
     assert.equal(logTransform.y, expectedOriginY);
-    assert.equal(logTransform.z, transform.z, '圆木应从树中心出生');
+    assert.equal(logTransform.z, transform.z, '木头应从树中心出生');
     assert.equal(log.requireComponent(ITEM_STACK_COMPONENT).quantity, 1);
   }
   assert.equal(scene.interactWithActor('woodcutter', { actorId: treeActor.id, sequence }), false);
@@ -291,12 +291,12 @@ test('倒下的树重新装载后仍然是倒下的，不会原地长回来', as
   // 快照必须继续带着 removed，否则客户端会把它画回来。
   const snapshot = scene.createSnapshot('woodcutter').actors.find((actor) => actor.id === treeId);
   assert.deepEqual(snapshot.propState, { health: 0, removed: true });
-  // 已经倒下的树不能再砍出第二份圆木。
+  // 已经倒下的树不能再砍出第二份木头。
   assert.equal(scene.interactWithActor('woodcutter', { actorId: treeId, sequence }), false);
 });
 
 
-test('石头走的是同一条采集链路，掉的是石料而不是圆木', async () => {
+test('石头走的是同一条采集链路，掉的是石料而不是木头', async () => {
   const scene = await createOpenWorldScene();
   scene.addPlayer({ id: 'miner', name: '矿工', slot: 0 });
   const player = scene.players.get('miner');
@@ -324,10 +324,10 @@ test('石头走的是同一条采集链路，掉的是石料而不是圆木', as
   assert.ok(stone, '应该掉出石料');
   assert.equal(stone.archetypeId, 'stone-pile');
   assert.equal(stone.requireComponent(ITEM_STACK_COMPONENT).quantity, rock.dropQuantity);
-  // 采石头不应该顺带掉圆木。
+  // 采石头不应该顺带掉木头。
   assert.equal(
     scene.actorWorld.query(ITEM_STACK_COMPONENT).some((actor) => (
-      actor.requireComponent(ITEM_STACK_COMPONENT).itemType === 'wood-log'
+      actor.requireComponent(ITEM_STACK_COMPONENT).itemType === 'wood'
     )),
     false,
   );
@@ -364,10 +364,10 @@ test('同一个玩家采树和采石得到两种不同的物品', async () => {
   }
 
   // 快照按货位顺序发，不排序：格子位置本身是玩家记得住的信息。
-  // 这里先采树后采石，所以圆木在前。
+  // 这里先采树后采石，所以木头在前。
   assert.deepEqual(
     inventory.snapshot().map((entry) => entry.itemType),
-    ['wood-log', 'stone'],
+    ['wood', 'stone'],
     '两种物品分别入账，没有被当成同一种堆叠',
   );
 });

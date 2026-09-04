@@ -50,7 +50,7 @@ function buildActors(scene) {
 
 test('纯海域图：起始材料到位，第一块水上地基立起一艘船，后面的板与墙挂上去', async () => {
   const { scene, player, send, inventory } = await createScene('water');
-  assert.equal(inventory.quantityOf('wood-log'), 24, 'startingInventory 发到背包里');
+  assert.equal(inventory.quantityOf('wood'), 24, 'startingInventory 发到背包里');
   // 站在格 (5,5) 旁边：站在格里会把自己挡住。
   moveTo(player, 9, 9);
 
@@ -59,7 +59,7 @@ test('纯海域图：起始材料到位，第一块水上地基立起一艘船�
   assert.ok(root, '地基 Actor 已生成');
   const hull = hullOf(scene, root);
   assert.equal(hull.archetypeId, 'float-hull');
-  assert.equal(inventory.quantityOf('wood-log'), 22, '扣掉两根木头');
+  assert.equal(inventory.quantityOf('wood'), 22, '扣掉两根木头');
   const hullTransform = hull.getComponent(TRANSFORM_COMPONENT);
   assert.deepEqual([hullTransform.x, hullTransform.y, hullTransform.z], [11, 0, 11], '船立在格中心、水面高度');
   const piece = root.getComponent(BUILD_PIECE_COMPONENT);
@@ -77,13 +77,13 @@ test('纯海域图：起始材料到位，第一块水上地基立起一艘船�
   const wallTransform = wall.getComponent(TRANSFORM_COMPONENT);
   assert.ok(Math.abs(wallTransform.x - 11) < 1e-9 && Math.abs(wallTransform.z - 12) < 1e-9, '墙在格 (0,0) 的北边中点');
   assert.ok(Math.abs(wallTransform.y - 0.16) < 1e-9, '墙脚落在甲板面上');
-  assert.equal(inventory.quantityOf('wood-log'), 19);
+  assert.equal(inventory.quantityOf('wood'), 19);
 
   // 不挨着甲板的板、没有甲板撑着的墙、同一格再来一块，都不行。
   assert.equal(send({ kind: 'place', archetypeId: 'float-foundation', surface: 'floating', hullActorId: hull.id, cellX: 3, cellZ: 3 }), false);
   assert.equal(send({ kind: 'place', archetypeId: 'float-wall', surface: 'floating', hullActorId: hull.id, cellX: 2, cellZ: 2, edge: 'east' }), false);
   assert.equal(send({ kind: 'place', archetypeId: 'float-foundation', surface: 'floating', hullActorId: hull.id, cellX: 1, cellZ: 0 }), false);
-  assert.equal(inventory.quantityOf('wood-log'), 19, '被拒的放置不扣材料');
+  assert.equal(inventory.quantityOf('wood'), 19, '被拒的放置不扣材料');
 
   // 篝火是物件：放在甲板上，跟着船走，同槽互斥。
   assert.equal(send({ kind: 'place', archetypeId: 'campfire', surface: 'floating', hullActorId: hull.id, cellX: 1, cellZ: 0 }), true);
@@ -111,15 +111,15 @@ test('拆除：材料退回，撑着东西的地基拆不掉，船上最后一�
   send({ kind: 'place', archetypeId: 'float-wall', surface: 'floating', hullActorId: hull.id, cellX: 1, cellZ: 0, edge: 'east' });
   const second = buildActors(scene).find((actor) => actor.archetypeId === 'float-foundation' && actor !== root);
   const wall = buildActors(scene).find((actor) => actor.archetypeId === 'float-wall');
-  assert.equal(inventory.quantityOf('wood-log'), 19);
+  assert.equal(inventory.quantityOf('wood'), 19);
 
   assert.equal(send({ kind: 'remove', actorId: second.id }), false, '东边的墙只靠这块板撑着');
   assert.equal(send({ kind: 'remove', actorId: wall.id }), true);
-  assert.equal(inventory.quantityOf('wood-log'), 20, '拆墙退一根');
+  assert.equal(inventory.quantityOf('wood'), 20, '拆墙退一根');
   assert.equal(scene.actorWorld.getActor(wall.id), undefined);
   assert.equal(send({ kind: 'remove', actorId: second.id }), true);
   assert.equal(send({ kind: 'remove', actorId: root.id }), true);
-  assert.equal(inventory.quantityOf('wood-log'), 24, '全部退回');
+  assert.equal(inventory.quantityOf('wood'), 24, '全部退回');
   assert.equal(scene.actorWorld.getActor(hull.id), undefined, '空船跟着拆掉');
   assert.equal(scene.buildSites.size, 0);
 
@@ -157,7 +157,7 @@ test('实体碰撞与预算：站在放置位上放不下，每艘船的件数�
 
 test('流式地图：静态地基落在地形上，墙能直接立在地形格边上，篝火放在陆地格中心', async () => {
   const { scene, player, send, inventory } = await createScene('open-world');
-  inventory.add('wood-log', 30);
+  inventory.add('wood', 30);
   inventory.add('stone', 10);
 
   // 在出生点附近找一个没被树石挡住的陆地格。
@@ -211,7 +211,7 @@ test('流式地图：静态地基落在地形上，墙能直接立在地形格�
 
 test('水域格上的静态地基是一座码头：板面浮在水面上；开阔水面上也能立船', async () => {
   const { scene, player, send, inventory } = await createScene('open-world');
-  inventory.add('wood-log', 30);
+  inventory.add('wood', 30);
   let water;
   for (let radius = 2; radius <= 120 && !water; radius += 1) {
     for (let cellX = -radius; cellX <= radius && !water; cellX += 1) {

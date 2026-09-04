@@ -5,7 +5,7 @@
   "components": {
     "interactable": {
       "action": "mushroom-bite",
-      "label": "弹弹菇",
+      "label": "蘑菇",
       "maximumDistance": 1.35
     },
     "elasticTether": {

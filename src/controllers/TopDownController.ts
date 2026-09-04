@@ -1,6 +1,9 @@
 import { CameraBoom, type CameraProbe } from '../camera/CameraBoom';
 import { CameraFollow } from '../camera/CameraFollow';
-import { TopDownCameraOrbit } from '../camera/TopDownCameraOrbit';
+import {
+  TopDownCameraOrbit,
+  type TopDownCameraOrbitAxes,
+} from '../camera/TopDownCameraOrbit';
 import type { CameraFrame } from '../camera/CameraTransform';
 import type { CameraAxes } from '../camera/cameraMath';
 import { createCameraViewMatrix } from '../camera/cameraMath';
@@ -59,6 +62,23 @@ export interface PlayerCollisionMotion {
   airborne: boolean;
 }
 
+/**
+ * 一次朝向对准请求。
+ *
+ * 控制器保留「让角色对准某个方向」的能力，但不再自带驱动方：技能、AI、之后
+ * 重新接回来的鼠标瞄准都从外面把请求送进来，传 `undefined` 交回移动朝向。
+ */
+export interface TopDownFacingRequest {
+  /** 世界坐标里的对准点；给了它就每帧按角色当前位置重算 Yaw，锁定目标可以移动。 */
+  target?: { x: number; z: number };
+  /** 直接给定的朝向角；`target` 存在时以 `target` 为准。 */
+  yaw?: number;
+  /** 收敛速度（每秒）；默认与过去的鼠标朝向一致。 */
+  sharpness?: number;
+  /** 直接对齐，不做插值。 */
+  immediate?: boolean;
+}
+
 export interface TopDownControllerOptions {
   enabled?: boolean;
   /** 相对于阻尼焦点的完整 Scene 相机偏移。 */
@@ -67,6 +87,11 @@ export interface TopDownControllerOptions {
   cameraFollowSharpness?: number;
   /** 是否允许在画面上拖动旋转 TopDown 镜头。默认开启。 */
   cameraDragEnabled?: boolean;
+  /**
+   * 拖拽可以转动的镜头轴，默认 `{ yaw: true, pitch: false }`：只能绕角色转圈，
+   * Scene 配置的俯角保持不变。需要拖动俯仰的场景显式打开 pitch。
+   */
+  cameraOrbitAxes?: TopDownCameraOrbitAxes;
   fieldOfViewDegrees?: number;
   bounds?: SceneBounds;
   collisionRadius?: number;
@@ -110,6 +135,10 @@ export interface TopDownControllerOptions {
 
 /** 悬臂支点的离地高度：史莱姆胸口附近，不是脚下，免得镜头贴地。 */
 const CAMERA_PIVOT_HEIGHT = 0.25;
+/** 移动方向驱动 Yaw 的收敛速度。 */
+const MOVEMENT_FACING_SHARPNESS = 10;
+/** 外部朝向请求没写 sharpness 时的收敛速度。 */
+const FACING_REQUEST_SHARPNESS = 14;
 export const DEFAULT_TOP_DOWN_CAMERA_OFFSET: Vec3 = [5.5, 7.5, 8.5];
 
 /**
@@ -132,7 +161,6 @@ export class TopDownController {
   private readonly cameraOffset: Vec3;
   private readonly cameraDragEnabled: boolean;
   private readonly fieldOfViewRadians: number;
-  private readonly pointer = { x: 0, y: 0, available: false, dirty: false };
   private readonly movementInput = { x: 0, y: 0 };
   private readonly bounds: SceneBounds;
   private readonly collisionRadius: number;
@@ -172,6 +200,8 @@ export class TopDownController {
   private cameraDistanceRatio = 1;
   private enabled: boolean;
   private facingYaw = Math.PI;
+  /** 外部送进来的朝向对准请求；没有就由移动方向驱动 Yaw。 */
+  private facingRequest?: TopDownFacingRequest;
   private currentSpeed = 0;
   private moveX = 0;
   private moveZ = 0;
@@ -180,8 +210,7 @@ export class TopDownController {
   private sprinting = false;
   private jumpHeld = false;
   private jumpRequestPending = false;
-  private mouseFacingActive = false;
-  private mouseFacingSuppressed = false;
+  private cameraDragSuppressed = false;
 
   public constructor(
     canvas: HTMLCanvasElement,
@@ -194,7 +223,9 @@ export class TopDownController {
     this.enabled = options.enabled ?? true;
     this.cameraOffset = [...(options.cameraOffset ?? DEFAULT_TOP_DOWN_CAMERA_OFFSET)];
     this.cameraDragEnabled = options.cameraDragEnabled ?? true;
-    this.cameraOrbit = new TopDownCameraOrbit(this.cameraOffset);
+    this.cameraOrbit = new TopDownCameraOrbit(this.cameraOffset, {
+      axes: options.cameraOrbitAxes,
+    });
     this.bounds = options.bounds ?? PLAYER_BOUNDS;
     this.collisionRadius = Math.max(0, options.collisionRadius ?? 0);
     this.movement = options.movement ?? {
@@ -505,7 +536,6 @@ export class TopDownController {
       this.jumpHeld = false;
       this.jumpRequestPending = false;
       this.jumpAbility?.setPressed(false);
-      this.mouseFacingActive = false;
       this.cancelCameraDrag();
       this.cameraOrbit.cancelPending();
     }
@@ -592,14 +622,47 @@ export class TopDownController {
     if (Number.isFinite(deltaY)) this.setVerticalPosition(this.verticalPosition + deltaY);
   }
 
-  /** 表面拖拽命中玩家自身时暂停左键朝向，避免同一次手势同时旋转 Actor。 */
-  public setMouseFacingSuppressed(suppressed: boolean): void {
-    this.mouseFacingSuppressed = suppressed;
+  /** 表面拖拽命中玩家自身时暂停镜头拖拽，避免同一次手势同时转动镜头。 */
+  public setCameraDragSuppressed(suppressed: boolean): void {
+    this.cameraDragSuppressed = suppressed;
     if (suppressed) {
-      this.mouseFacingActive = false;
       this.cancelCameraDrag();
       this.cameraOrbit.cancelPending();
     }
+  }
+
+  /**
+   * 朝向对准接口。
+   *
+   * 「让角色对准某个方向」这件事仍归控制器做，但它不再自带驱动方——鼠标点击
+   * 不会再转动角色。技能、AI、之后重新接回来的鼠标瞄准都从外面调这个接口；传
+   * `undefined` 就把朝向交回移动方向。
+   */
+  public setFacingRequest(request: TopDownFacingRequest | undefined): void {
+    this.facingRequest = request ? { ...request } : undefined;
+  }
+
+  /** 当前生效的朝向请求；没有外部驱动方时是 undefined。 */
+  public get facingRequestState(): TopDownFacingRequest | undefined {
+    return this.facingRequest ? { ...this.facingRequest } : undefined;
+  }
+
+  /** 控制器当前的朝向。TopDown 的角色只在地面上转身，所以它只有 Yaw。 */
+  public get facing(): { yaw: number } {
+    return { yaw: this.facingYaw };
+  }
+
+  /**
+   * 屏幕点 → 地面点，供外部驱动方算对准目标。
+   *
+   * 鼠标驱动被拆掉之后控制器内部不再调它，但这条射线要用控制器自己的相机机位与
+   * 场景地形查询，所以能力留在这里，只是改成显式接口。
+   */
+  public projectScreenPointToGround(
+    clientX: number,
+    clientY: number,
+  ): { x: number; z: number } | undefined {
+    return this.projectScreenPointToGameplayPlane(clientX, clientY);
   }
 
   public translate(deltaX: number, deltaZ: number): void {
@@ -669,26 +732,56 @@ export class TopDownController {
       this.currentSpeed += (0 - this.currentSpeed) * Math.min(1, deltaSeconds * 10);
     }
 
-    if (this.mouseFacingActive) {
-      if (this.pointer.dirty) {
-        const groundPoint = this.projectPointerToGameplayPlane();
-        if (groundPoint) {
-          const deltaX = groundPoint.x - this.player.position.x;
-          const deltaY = groundPoint.y - this.player.position.z;
-          if (Math.hypot(deltaX, deltaY) > 0.08) {
-            const targetYaw = Math.atan2(deltaX, deltaY);
-            this.facingYaw = lerpAngle(this.facingYaw, targetYaw, Math.min(1, deltaSeconds * 14));
-          }
-        }
-        this.pointer.dirty = false;
-      }
-    } else if (inputLength > 0) {
-      const targetYaw = Math.atan2(this.moveX, this.moveZ);
-      this.facingYaw = lerpAngle(this.facingYaw, targetYaw, Math.min(1, deltaSeconds * 10));
+    this.updateFacing(deltaSeconds, inputLength > 0);
+    if (!this.characterState) this.resolveLanding();
+  }
+
+  /**
+   * 朝向解算。
+   *
+   * 控制器内置的驱动方只有一个：移动方向。外部朝向请求可以接管它，鼠标不再参与。
+   */
+  private updateFacing(deltaSeconds: number, moving: boolean): void {
+    const request = this.facingRequest;
+    const requestedYaw = this.resolveRequestedYaw(request);
+    // 请求一旦提到朝向就整根轴归它：对准点贴到脚下这一帧解不出角度时保持当前
+    // 朝向，不能中途把角色甩回移动方向。
+    const yawRequested = request?.target !== undefined || request?.yaw !== undefined;
+    const movementYaw = moving && !yawRequested ? Math.atan2(this.moveX, this.moveZ) : undefined;
+    const targetYaw = requestedYaw ?? movementYaw;
+    if (targetYaw !== undefined) {
+      this.facingYaw = requestedYaw === undefined
+        ? lerpAngle(
+          this.facingYaw,
+          targetYaw,
+          Math.min(1, deltaSeconds * MOVEMENT_FACING_SHARPNESS),
+        )
+        : this.approachAngle(this.facingYaw, targetYaw, deltaSeconds, request);
     }
     this.facingYaw = normalizeAngle(this.facingYaw);
     this.player.rotation.y = this.facingYaw;
-    if (!this.characterState) this.resolveLanding();
+  }
+
+  /** 对准点每帧按角色当前位置重算；贴得太近时保持上一帧朝向，免得原地抖。 */
+  private resolveRequestedYaw(request: TopDownFacingRequest | undefined): number | undefined {
+    if (!request) return undefined;
+    const target = request.target;
+    if (!target) return request.yaw;
+    const deltaX = target.x - this.player.position.x;
+    const deltaZ = target.z - this.player.position.z;
+    if (Math.hypot(deltaX, deltaZ) <= 0.08) return undefined;
+    return Math.atan2(deltaX, deltaZ);
+  }
+
+  private approachAngle(
+    current: number,
+    target: number,
+    deltaSeconds: number,
+    request: TopDownFacingRequest | undefined,
+  ): number {
+    const sharpness = request?.sharpness ?? FACING_REQUEST_SHARPNESS;
+    if (request?.immediate || !(sharpness > 0)) return normalizeAngle(target);
+    return normalizeAngle(lerpAngle(current, target, Math.min(1, deltaSeconds * sharpness)));
   }
 
   /**
@@ -821,20 +914,20 @@ export class TopDownController {
     this.cancelCameraDrag();
     this.canvas.removeEventListener('pointerdown', this.handlePointerDown);
     this.canvas.removeEventListener('pointermove', this.handlePointerMove);
-    this.canvas.removeEventListener('pointerenter', this.handlePointerMove);
-    this.canvas.removeEventListener('pointerleave', this.handlePointerLeave);
     this.canvas.removeEventListener('pointerup', this.handlePointerEnd);
     this.canvas.removeEventListener('pointercancel', this.handlePointerEnd);
     this.canvas.removeEventListener('lostpointercapture', this.handlePointerCaptureLost);
   }
 
-  private projectPointerToGameplayPlane(): { x: number; y: number } | undefined {
-    if (!this.pointer.available) return undefined;
+  private projectScreenPointToGameplayPlane(
+    clientX: number,
+    clientY: number,
+  ): { x: number; z: number } | undefined {
     const rect = this.canvas.getBoundingClientRect();
     if (rect.width <= 0 || rect.height <= 0) return undefined;
 
-    const ndcX = ((this.pointer.x - rect.left) / rect.width) * 2 - 1;
-    const ndcY = 1 - ((this.pointer.y - rect.top) / rect.height) * 2;
+    const ndcX = ((clientX - rect.left) / rect.width) * 2 - 1;
+    const ndcY = 1 - ((clientY - rect.top) / rect.height) * 2;
     const frame = this.frame;
     const tangent = Math.tan(this.fieldOfViewRadians / 2);
     const aspect = rect.width / rect.height;
@@ -844,30 +937,22 @@ export class TopDownController {
       frame.axes.forward[2] + frame.axes.right[2] * ndcX * tangent * aspect + frame.axes.up[2] * ndcY * tangent,
     ]);
     const terrainHit = this.raycastGround?.(frame.position, rayDirection);
-    if (terrainHit) return { x: terrainHit.x, y: terrainHit.z };
+    if (terrainHit) return { x: terrainHit.x, z: terrainHit.z };
     if (rayDirection[1] >= -0.0001) return undefined;
 
     const distance = -frame.position[1] / rayDirection[1];
     if (distance <= 0) return undefined;
     return {
       x: frame.position[0] + rayDirection[0] * distance,
-      y: frame.position[2] + rayDirection[2] * distance,
+      z: frame.position[2] + rayDirection[2] * distance,
     };
-  }
-
-  private syncPointer(event: PointerEvent): void {
-    this.pointer.x = event.clientX;
-    this.pointer.y = event.clientY;
-    this.pointer.available = true;
-    this.pointer.dirty = true;
   }
 
   private readonly handlePointerDown = (event: PointerEvent): void => {
     if (!this.enabled) return;
-    this.syncPointer(event);
     if (
       !this.cameraDragEnabled
-      || this.mouseFacingSuppressed
+      || this.cameraDragSuppressed
       || event.button !== 0
       || this.cameraDrag.pointerId >= 0
     ) return;
@@ -887,9 +972,8 @@ export class TopDownController {
 
   private readonly handlePointerMove = (event: PointerEvent): void => {
     if (!this.enabled) return;
-    this.syncPointer(event);
-    if (event.type !== 'pointermove' || event.pointerId !== this.cameraDrag.pointerId) return;
-    if (this.mouseFacingSuppressed) {
+    if (event.pointerId !== this.cameraDrag.pointerId) return;
+    if (this.cameraDragSuppressed) {
       this.cancelCameraDrag();
       return;
     }
@@ -900,8 +984,6 @@ export class TopDownController {
     this.cameraDrag.moved += Math.abs(deltaX) + Math.abs(deltaY);
     if (!this.cameraDrag.active && this.cameraDrag.moved >= 6) {
       this.cameraDrag.active = true;
-      this.mouseFacingActive = false;
-      this.pointer.dirty = false;
       this.cameraOrbit.addPointerDelta(
         event.clientX - this.cameraDrag.pressX,
         event.clientY - this.cameraDrag.pressY,
@@ -912,15 +994,8 @@ export class TopDownController {
     if (this.cameraDrag.active && event.cancelable) event.preventDefault();
   };
 
-  private readonly handlePointerLeave = (): void => {
-    if (this.cameraDrag.pointerId >= 0) return;
-    this.pointer.available = false;
-    this.pointer.dirty = false;
-  };
-
   private readonly handlePointerEnd = (event: PointerEvent): void => {
     if (event.pointerId !== this.cameraDrag.pointerId) return;
-    this.syncPointer(event);
     this.cancelCameraDrag();
   };
 
@@ -953,16 +1028,14 @@ export class TopDownController {
       input.bind(PlayerInputTags.Move, (event) => this.handleMoveInput(event)),
       input.bind(PlayerInputTags.Sprint, (event) => this.handleSprintInput(event)),
       input.bind(PlayerInputTags.Jump, (event) => this.handleJumpInput(event)),
-      input.bind(PlayerInputTags.Primary, (event) => this.handlePrimaryInput(event)),
     );
   }
 
   private bindPointerEvents(): void {
-    // 点击语义仍由 Input.Player.Primary 决定；DOM 层只识别连续拖拽和同步光标。
+    // 控制器在 DOM 层只认镜头拖拽：点击语义归 Input.Player.Primary 的订阅方，
+    // 角色朝向归 setFacingRequest，两者都不再由这里的指针事件驱动。
     this.canvas.addEventListener('pointerdown', this.handlePointerDown);
     this.canvas.addEventListener('pointermove', this.handlePointerMove);
-    this.canvas.addEventListener('pointerenter', this.handlePointerMove);
-    this.canvas.addEventListener('pointerleave', this.handlePointerLeave);
     this.canvas.addEventListener('pointerup', this.handlePointerEnd);
     this.canvas.addEventListener('pointercancel', this.handlePointerEnd);
     this.canvas.addEventListener('lostpointercapture', this.handlePointerCaptureLost);
@@ -994,23 +1067,5 @@ export class TopDownController {
     if (active && !this.jumpHeld) this.jumpRequestPending = true;
     this.jumpHeld = active;
     this.jumpAbility?.setPressed(active);
-  }
-
-  private handlePrimaryInput(event: InputActionEvent): void {
-    if (event.phase === 'completed' || event.phase === 'canceled') {
-      this.mouseFacingActive = false;
-      return;
-    }
-    if (
-      event.deviceKind === 'keyboardMouse'
-      && event.sourceControl?.startsWith('Mouse.')
-    ) {
-      this.mouseFacingActive = (
-        this.enabled
-        && !this.mouseFacingSuppressed
-        && !this.cameraDrag.active
-        && event.value === true
-      );
-    }
   }
 }

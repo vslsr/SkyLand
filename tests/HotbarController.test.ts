@@ -116,24 +116,25 @@ test('按住期间把要按着的那个键交给界面：提示这时正在淡�
 });
 
 test('长按物品：圈满那一刻就结束，松手不再发第二条命令', () => {
-  // 燃烧瓶是 hold / 1.1 秒。激活发生在倒计时走完那一刻，服务端自己动手，
+  // 果子是 hold / 1.2 秒。激活发生在倒计时走完那一刻，服务端自己动手，
   // 客户端只负责画圈——所以松手时不该再补一条 use:release。
   const bar = harness('held-1');
-  bar.inventory.add('firebomb', 2);
-  bar.inventory.assignHotbarSlot(0, 'firebomb');
+  bar.inventory.add('fruit', 2);
+  bar.inventory.assignHotbarSlot(0, 'fruit');
   bar.inventory.setActiveHotbarSlot(0);
 
   bar.use('started');
   assert.deepEqual(bar.sent, [{ kind: 'use:begin' }]);
 
-  bar.advance(550);
+  bar.advance(600);
   bar.controller.update();
   const halfway = bar.progress.at(-1);
   assert.equal(halfway?.kind, 'use');
+  assert.equal(halfway?.action, 'eat', '这一段是在嚼，界面据此让模型抖起来');
   assert.equal(halfway?.onHotbar, true, '手持物品的圈画在物品栏那一格上');
   assert.ok(halfway!.ratio > 0.4 && halfway!.ratio < 0.6, `圈应当在中途，实际 ${halfway?.ratio}`);
 
-  bar.advance(600);
+  bar.advance(700);
   bar.controller.update();
   assert.equal(bar.progress.at(-1), undefined, '圈满就结束，不停在满圈上');
 
@@ -143,8 +144,8 @@ test('长按物品：圈满那一刻就结束，松手不再发第二条命令',
 
 test('长按物品中途松手是取消：没走完的那次由服务端按自己的计时判定', () => {
   const bar = harness('held-1');
-  bar.inventory.add('firebomb', 2);
-  bar.inventory.assignHotbarSlot(0, 'firebomb');
+  bar.inventory.add('fruit', 2);
+  bar.inventory.assignHotbarSlot(0, 'fruit');
   bar.inventory.setActiveHotbarSlot(0);
 
   bar.use('started');
@@ -153,27 +154,29 @@ test('长按物品中途松手是取消：没走完的那次由服务端按自�
   assert.deepEqual(bar.sent, [{ kind: 'use:begin' }, { kind: 'use:release' }]);
 });
 
-test('点按物品没有圈：按下开始、松手结算', () => {
-  // 采集锤是 tap。点一下就是一下，没有倒计时可画。
+test('没有用法的东西按使用键毫无反应', () => {
+  // 木头的目录里没有 use。按键在它身上就该什么都不发生，而不是发一条服务端
+  // 随后拒绝的命令，也不该画一个按下去没结果的圈。
   const bar = harness('held-1');
-  bar.inventory.add('harvest-hammer', 1);
-  bar.inventory.assignHotbarSlot(0, 'harvest-hammer');
+  bar.inventory.add('wood', 3);
+  bar.inventory.assignHotbarSlot(0, 'wood');
   bar.inventory.setActiveHotbarSlot(0);
 
   bar.use('started');
   bar.advance(2000);
   bar.controller.update();
-  assert.equal(bar.progress.at(-1), undefined, '点按不画圈');
+  assert.deepEqual(bar.sent, [], '没有用法就不发命令');
+  assert.equal(bar.progress.at(-1), undefined, '也不画圈');
 
   bar.use('completed');
-  assert.deepEqual(bar.sent, [{ kind: 'use:begin' }, { kind: 'use:release' }]);
+  assert.deepEqual(bar.sent, []);
 });
 
 test('背包里点出来的那件优先，而且它的圈不画在物品栏上', () => {
   const bar = harness(undefined);
-  bar.inventory.add('firebomb', 1);
+  bar.inventory.add('fruit', 1);
   // 手上什么都没有，但玩家刚在背包里点了「使用」。
-  bar.controller.armItem('firebomb');
+  bar.controller.armItem('fruit');
 
   bar.use('started');
   bar.advance(300);

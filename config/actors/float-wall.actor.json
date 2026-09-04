@@ -8,7 +8,7 @@
       "surface": "floating",
       "label": "水上墙体",
       "reach": 6,
-      "cost": [{ "itemType": "wood-log", "quantity": 1 }],
+      "cost": [{ "itemType": "wood", "quantity": 1 }],
       "mass": 4
     },
     "replicationPolicy": { "mode": "aoi", "radiusChunks": 2 },

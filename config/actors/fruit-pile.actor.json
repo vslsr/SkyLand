@@ -5,12 +5,12 @@
   "components": {
     "interactable": {
       "action": "pickup-stack",
-      "label": "果实",
+      "label": "果子",
       "maximumDistance": 2.4
     },
     "itemStack": {
       "itemType": "fruit",
-      "displayName": "果实",
+      "displayName": "果子",
       "defaultQuantity": 1,
       "maximumQuantity": 999,
       "compatibilityKey": "fruit-standard"
@@ -28,8 +28,13 @@
       "radius": 0.14,
       "settleSpeed": 0.08
     },
-    "lifetime": { "lifetimeSeconds": 300 },
-    "replicationPolicy": { "mode": "aoi", "radiusChunks": 2 },
+    "lifetime": {
+      "lifetimeSeconds": 300
+    },
+    "replicationPolicy": {
+      "mode": "aoi",
+      "radiusChunks": 2
+    },
     "temperature": {
       "initialTemperature": 20,
       "ambientTemperature": 20,

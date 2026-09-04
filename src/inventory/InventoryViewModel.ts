@@ -39,7 +39,7 @@ export interface ItemDefinitionLike {
    * `mode` 决定按一下还是按住 `holdSeconds` 秒。
    */
   readonly use?: {
-    readonly action: 'tool' | 'throw';
+    readonly action: 'eat' | 'tool' | 'throw';
     readonly input: 'primary';
     readonly mode: 'tap' | 'hold';
     readonly holdSeconds: number;
@@ -117,14 +117,19 @@ export interface HotbarSlotView {
   readonly index: number;
   readonly itemType?: string;
   readonly displayName?: string;
+  readonly summary?: string;
   readonly iconId?: string;
   readonly tint?: string;
   readonly quantity: number;
+  /** 这一格最多堆几个；空格是 0。物品栏和背包画同一种格子，两边都要说得出上限。 */
+  readonly stackLimit: number;
   readonly active: boolean;
   /** 有没有使用方式；界面据此决定要不要提示按一下还是按住。 */
   readonly usable: boolean;
   /** `hold` 的那些要画圆形倒计时，`tap` 点一下就结算。没有用法时是 undefined。 */
   readonly useMode?: 'tap' | 'hold';
+  /** 长按倒计时多长，秒。`tap` 与没有用法时是 0。 */
+  readonly holdSeconds: number;
 }
 
 export interface InventoryView {
@@ -281,12 +286,15 @@ function buildHotbar(
       index,
       itemType: definition?.id,
       displayName: definition?.displayName,
+      summary: definition?.summary,
       iconId: definition?.iconId,
       tint: definition?.tint,
       quantity: definition ? slot?.quantity ?? 0 : 0,
+      stackLimit: definition?.stackLimit ?? 0,
       active: index === activeIndex,
       usable: Boolean(definition?.use),
       useMode: definition?.use?.mode,
+      holdSeconds: definition?.use?.holdSeconds ?? 0,
     };
   });
 }

@@ -13,9 +13,9 @@ import { createPlayerSlimeModel } from '../playerSlime';
 import { createCampfireModel } from './createCampfireModel';
 import { createDryHayModel } from './createDryHayModel';
 import { createFruitPileModel } from './createFruitPileModel';
+import { createMushroomPileModel } from './createMushroomPileModel';
 import { createStonePileModel } from './createStonePileModel';
 import { createWoodPileModel } from './createWoodPileModel';
-import { createWoodLogModel } from './createWoodLogModel';
 import { createPbfSlimeModel } from './createPbfSlimeModel';
 import { createLeggedSlimeModel } from './createLeggedSlimeModel';
 import { createBuildFoundationModel } from './createBuildFoundationModel';
@@ -64,8 +64,8 @@ export function createActorVisualModel(
   if (definition.model === 'line-art-wood-pile') {
     return createWoodPileModel(environment, definition);
   }
-  if (definition.model === 'line-art-wood-log') {
-    return createWoodLogModel(environment, definition);
+  if (definition.model === 'line-art-mushroom-pile') {
+    return createMushroomPileModel(environment, definition);
   }
   if (definition.model === 'line-art-stone-pile') {
     return createStonePileModel(environment, definition);

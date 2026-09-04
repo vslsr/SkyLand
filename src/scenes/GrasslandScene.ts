@@ -369,6 +369,8 @@ export class GrasslandScene extends Scene {
       setProgress: (progress) => {
         this.hotbarBar.setProgress(progress);
         this.holdProgress.setProgress(progress?.onHotbar ? undefined : progress);
+        // 吃东西那一段抖动跟着这次按住走：圈满那一刻服务端扣账，抖动同时停。
+        this.player?.setChewing(progress?.action === 'eat');
       },
     });
     this.container = new ContainerController(this.containerPage, {
@@ -865,7 +867,7 @@ export class GrasslandScene extends Scene {
       topDownCameraOffset,
     );
     // 蒙皮拖拽是两侧之间的适配器：指针与相机在这一边，外壳在渲染世界，
-    // 玩家实体只经由 setMouseFacingSuppressed 收到「一次手势归谁」那一个布尔。
+    // 玩家实体只经由 setCameraDragSuppressed 收到「一次手势归谁」那一个布尔。
     // 四个拖拽方法现在都在 `RenderScene` 上，所以它收的就是边界接口本身。
     this.slimeSurfaceDrag = new SlimeSurfaceDragController(
       this.canvas,
@@ -873,7 +875,7 @@ export class GrasslandScene extends Scene {
       renderWorld.scene,
       this.player.renderProxyId,
       () => this.controls.frame,
-      (active) => this.player?.controller.setMouseFacingSuppressed(active),
+      (active) => this.player?.controller.setCameraDragSuppressed(active),
     );
     this.controls.setPlayerController(this.player.controller);
     this.timeSinceInputSent = 0;
