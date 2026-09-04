@@ -32,6 +32,12 @@ COPY --from=build --chown=node:node /app/server ./server
 COPY --from=build --chown=node:node /app/shared ./shared
 COPY --from=build --chown=node:node /app/config ./config
 
+# PlayerTransformLogStore 会往 /app/logs 写调试日志。镜像里以 node 用户运行，
+# /app 归 root，所以目录必须提前建好并交给 node，否则调试落盘会 EACCES。
+# 不声明 VOLUME：那会让每次 docker run 都留下一个匿名卷。要持久化就在
+# docker run / compose 里显式挂 /app/logs。
+RUN mkdir -p /app/logs && chown node:node /app/logs
+
 USER node
 
 EXPOSE 3090

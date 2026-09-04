@@ -1,0 +1,29 @@
+# 生产形态：一个容器里的 Node.js 同时提供 dist、/api 和 /ws，
+# 每个房间再 fork 一个 room-worker.mjs 子进程。
+services:
+  skyland:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: skyland:latest
+    container_name: skyland
+    restart: unless-stopped
+    # 房间 DS 是子进程。PID 1 是 node 而不是 init 时，被回收的子进程会留成僵尸，
+    # 所以交给 docker-init 来收养。
+    init: true
+    ports:
+      # 只发布到回环，由宿主机上的 Nginx 反代并终止 TLS；
+      # 想直接对外暴露就改成 "3090:3090"。
+      - "127.0.0.1:3090:3090"
+    environment:
+      SKYLAND_SERVER_HOST: 0.0.0.0
+      SKYLAND_SERVER_PORT: "3090"
+      SKYLAND_WEB_ROOT: /app/dist
+    volumes:
+      # 调试用的 PlayerTransform 日志，容器重建后仍然留着。
+      - skyland-logs:/app/logs
+    # 健康检查沿用镜像里的 HEALTHCHECK：它按 SKYLAND_SERVER_PORT 取端口，
+    # 在这里重写一份就会把端口写死。
+
+volumes:
+  skyland-logs:
