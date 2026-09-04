@@ -23,6 +23,25 @@
   box-sizing: border-box;
 }
 
+/*
+ * 移动端拖拽（摇杆、物品栏拖动）会顺带触发浏览器的文字选择与长按放大镜，
+ * 所以整站默认禁掉文字选择和长按回调，只在真正需要输入/复制的地方放行。
+ */
+html,
+body {
+  -webkit-touch-callout: none;
+  -webkit-tap-highlight-color: transparent;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+input,
+textarea,
+[contenteditable="true"] {
+  user-select: text;
+  -webkit-user-select: text;
+}
+
 html,
 body,
 .app-shell,
