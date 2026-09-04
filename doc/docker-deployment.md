@@ -123,16 +123,21 @@ docker compose down              # 停止并删除容器（保留 skyland-logs �
 docker compose down -v           # 连日志卷一起删
 ```
 
-默认只把端口发布到 `127.0.0.1:3090`，也就是前面要放一层反代。没有反代、想让容器直接
-占用某个对外端口时，用 `SKYLAND_PUBLISH` 覆盖，不用改文件：
+默认把宿主机 80 直接映射到容器的 3090，前面不放反代——还没有域名时最省事。
+代价见 4.1：没有 HTTPS 就没有跨源隔离，渲染会走降级路径。
+
+要换发布方式，用 `SKYLAND_PUBLISH` 覆盖，不用改文件（改了会和 `git pull` 冲突）：
 
 ```bash
-SKYLAND_PUBLISH=0.0.0.0:80 docker compose up -d   # 宿主机 80 → 容器 3090
-SKYLAND_PUBLISH=0.0.0.0:3090 docker compose up -d # 直接对外开 3090
+SKYLAND_PUBLISH=127.0.0.1:3090 docker compose up -d  # 配好反代后回到这个形态
+SKYLAND_PUBLISH=0.0.0.0:8080 docker compose up -d    # 换个对外端口
 ```
 
-这条路等于放弃 HTTPS，代价见 4.1：`crossOriginIsolated` 会是 `false`。适合还没有域名时
-先跑起来，别当成长期形态。
+想固定下来就在仓库根目录写个 `.env`（不在 git 里，`docker compose` 会自动读）：
+
+```bash
+echo 'SKYLAND_PUBLISH=127.0.0.1:3090' > .env
+```
 
 ### 3.3 环境变量
 

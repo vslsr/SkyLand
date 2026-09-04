@@ -91,10 +91,13 @@ npm start
 `server/`、`shared/`、`config/` 和运行时依赖，以非 root 的 `node` 用户监听 3090。
 
 ```bash
-docker compose up -d --build          # 构建并启动
-curl http://127.0.0.1:3090/api/health # {"ok":true,...,"webReady":true}
+docker compose up -d --build       # 构建并启动，默认占宿主机 80
+curl http://127.0.0.1/api/health   # {"ok":true,...,"webReady":true}
 docker compose logs -f skyland
 ```
+
+前面有 Nginx 反代时，用 `SKYLAND_PUBLISH=127.0.0.1:3090 docker compose up -d`
+把端口收回回环。
 
 不用 Compose 时：
 
