@@ -33,6 +33,7 @@ Use this reference when writing a new entry into a design note, or when reviewin
 | `G` | One of 材料 / 补给 / 投掷物 / 弹药 / 价值货物 / 工具 | Inventing a category; the enum is closed |
 | `N` | Stack limit | Forgetting that a `slotCost: 0` item does not consume backpack slots |
 | `R` | Durability, or `0` | Expecting durability to be consumed — no system does yet |
+| `AM` | Which ammo it takes and how many rounds, or absent | Putting `AM` on a stackable item — only `N: 1` may carry ammo, and no system reads it yet |
 | `A` | Which states move, which part, driven by what | Naming an action or asset; there is no skeletal animation. The state list is open — reject a state only if it is unclear, not because it is unlisted |
 
 Also decide, though the notation does not ask: the kebab-case `id`, the `tint`, `slotCost`, and whether it is `holdable`.

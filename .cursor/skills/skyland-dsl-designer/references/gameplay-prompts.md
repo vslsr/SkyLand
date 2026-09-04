@@ -12,6 +12,7 @@ Read this reference only when the task touches gameplay entries (`@i`, `@b`, `@w
     * G: <分类>
     * N: <堆叠上限>
     * R: <是否有耐久，有的话耐久度，0或不写为无>
+    * AM: <弹药位：吃哪几种弹药、装几发，不写为不吃弹药>
     * A: <动画说明，见「动画定义」>
 
 ## 建筑定义
@@ -78,6 +79,7 @@ Read this reference only when the task touches gameplay entries (`@i`, `@b`, `@w
 | `G` | `category` | ✅ 见下表 |
 | `N` | `stackLimit`；另配 `slotCost`（占几个货位，`0` 走独立池） | ✅ |
 | `R` | `durability`，`0` 或不写就不写这个字段 | ⚠️ 字段可配，还没有系统消耗它 |
+| `AM` | 目录里一个 `ammo: { accepts, capacity }`，加上格子上的一段弹药状态 | ❌ 还没有系统承接；设计见 [`doc/designer-inventory.md`](../../../../doc/designer-inventory.md) 的「物品的弹药配置」 |
 | `A` | 渲染侧代码，不是 JSON。见[动画字段 A 落到哪](#动画字段-a-落到哪) | ⚠️ 吃东西那段已落地，其余靠一事一议 |
 
 `G` 的取值对照 `category` 枚举：
