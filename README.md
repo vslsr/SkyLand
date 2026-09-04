@@ -91,13 +91,16 @@ npm start
 `server/`、`shared/`、`config/` 和运行时依赖，以非 root 的 `node` 用户监听 3090。
 
 ```bash
-docker compose up -d --build       # 构建并启动，默认占宿主机 80
-curl http://127.0.0.1/api/health   # {"ok":true,...,"webReady":true}
-docker compose logs -f skyland
-```
+docker compose up -d --build           # 构建并启动，默认只监听 127.0.0.1:3090
+curl http://127.0.0.1:3090/api/health  # {"ok":true,...,"webReady":true}
 
-前面有 Nginx 反代时，用 `SKYLAND_PUBLISH=127.0.0.1:3090 docker compose up -d`
-把端口收回回环。
+# 加一层终止 TLS 的反代对外提供服务，二选一：
+echo 'SKYLAND_SITE=<公网IP>.sslip.io' > .env
+docker compose --profile tls up -d           # Caddy + Let's Encrypt，无警告
+
+./deploy/generate-self-signed-cert.sh <公网IP>
+docker compose --profile nginx-tls up -d     # nginx + 自签证书，有一次警告
+```
 
 不用 Compose 时：
 

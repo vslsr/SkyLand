@@ -181,33 +181,63 @@ COOP/COEP 头发得再对，`crossOriginIsolated` 仍然是 `false`。
 
 ### 4.2 没有域名时怎么拿到安全上下文
 
-按适用范围从窄到宽：
+**注意：光加一层反代是修不好的。** 根因是协议不是 HTTPS，跟前面有没有 nginx 无关。
+反代必须**终止 TLS**，也就是它得有证书。仓库里备了两个可选 profile，二选一
+（都占 80/443，不能同时起）：
 
-**只有自己要试玩：SSH 隧道。** 服务器上什么都不用改，容器保持只监听回环即可。
-`http://localhost` 是安全上下文，性能和线上完全一致。
+| 方案 | 证书 | 浏览器警告 | 适合 |
+| --- | --- | --- | --- |
+| `--profile tls`（Caddy） | Let's Encrypt 自动签发续期 | 无 | 有域名，或用 `<IP>.sslip.io` |
+| `--profile nginx-tls` | 自己准备（自签或已有的） | 自签会弹一次 | 内网、离线、已有证书 |
+
+启用 profile 时 skyland 自己不要再占 80，保持默认的只发布到回环即可。
+
+#### 方案 A：Caddy + sslip.io，没有域名也能拿到真证书
+
+`sslip.io` 是泛解析服务，`111.229.172.59.sslip.io` 直接解析回这个 IP，
+Let's Encrypt 能正常签发，所以浏览器不会有任何警告。
 
 ```bash
-# 在你自己的电脑上执行，把服务器的 3090 映射到本地 3090
+echo 'SKYLAND_SITE=111.229.172.59.sslip.io' > .env   # 换成你自己的公网 IP
+docker compose --profile tls up -d
+docker compose logs -f caddy                          # 看签发过程
+```
+
+签发走 HTTP-01 挑战，所以 **80 和 443 都必须能从公网访问**。签完 80 会 301 到 443。
+证书存在 `caddy-data` 卷里，别删——Let's Encrypt 有频率限制。
+
+有域名之后把 `SKYLAND_SITE` 换成域名再 `up -d` 就行，其余不用动。
+
+#### 方案 B：nginx + 自签证书
+
+不依赖外部 CA，断网也能用，代价是浏览器每次首访要点一次「继续访问」。
+点过之后就是安全上下文，`crossOriginIsolated` 为 `true`，功能完整。
+
+```bash
+./deploy/generate-self-signed-cert.sh 111.229.172.59   # 生成到 deploy/tls/
+docker compose --profile nginx-tls up -d
+```
+
+证书写在 `deploy/tls/`（已在 `.gitignore` 里）。已经有正式证书时，把
+`cert.pem` / `key.pem` 放进这个目录即可，不用跑脚本。
+
+`deploy/nginx-tls.conf` 里刻意没有任何 `add_header` / `proxy_hide_header`：
+COOP/COEP/CORP 由 Node 服务端统一发，nginx 默认透传，一旦覆盖就前功尽弃。
+
+#### 方案 C：只有自己试玩，SSH 隧道
+
+服务器什么都不用改，容器保持只监听回环。`http://localhost` 是安全上下文，
+性能和正式部署完全一致。
+
+```bash
+# 在你自己的电脑上执行
 ssh -N -L 3090:127.0.0.1:3090 root@<服务器IP>
-# 然后浏览器开 http://localhost:3090/
+# 浏览器开 http://localhost:3090/
 ```
 
-**要分享给几个人：自签证书。** 浏览器会弹一次「不安全」警告，点进去之后就是安全上下文，
-`crossOriginIsolated` 为 `true`，功能完整。适合内测，不适合给不认识的人。
+必须用 `localhost` 或 `127.0.0.1`——局域网 IP 同样不算安全上下文。
 
-```bash
-# 服务器上生成自签证书（IP 直连要写进 subjectAltName，否则部分浏览器不认）
-mkdir -p /etc/skyland-tls && cd /etc/skyland-tls
-openssl req -x509 -nodes -newkey rsa:2048 -days 825   -keyout key.pem -out cert.pem   -subj "/CN=<服务器IP>"   -addext "subjectAltName=IP:<服务器IP>"
-```
-
-再用一个 Nginx 容器终止 TLS，反代到 skyland（配置见 4.3，把 `ssl_certificate`
-指向上面两个文件，`server_name _;`）。
-
-**要正式对外：域名 + Let's Encrypt。** 见 4.3、4.4。这是唯一的长期方案。
-境内服务器用 80/443 提供域名服务需要先完成 ICP 备案。
-
-所以公网部署请务必配好域名和 TLS。局域网内自测可以走 IP，但那时的能力集和线上不一样。
+> 境内服务器用域名走 80/443 需要先完成 ICP 备案；纯 IP 访问不受此限。
 
 ### 4.3 Nginx
 
