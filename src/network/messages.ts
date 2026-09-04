@@ -166,6 +166,14 @@ export type ClientMessage =
   | { type: 'room:join'; roomId: string; name: string }
   | { type: 'room:leave' }
   | { type: 'weather:set'; weather: WeatherType }
+  /**
+   * 调试：直接给自己一个某种物品（F8 菜单里的那一栏）。
+   *
+   * 和 `weather:set` 同一个性质——它是**开发期的一条请求**，不是玩法：产品构建
+   * 里 F8 那套开发 Context 整个被移除，谁都发不出这条。落点走拾取那条规矩
+   * （先手上、再物品栏、最后背包），因为「拿到一个东西」在游戏里只有这一种落法。
+   */
+  | { type: 'debug:give-item'; itemType: string }
   | { type: 'daynight:set'; timeOfDay: number }
   | {
       type: 'player:input';

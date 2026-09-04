@@ -175,6 +175,10 @@ process.on('message', (message) => {
       if (!scene) break;
       scene.setTimeOfDay(message.playerId, message.timeOfDay);
       break;
+    case 'debug:give-item':
+      if (!scene) break;
+      scene.giveDebugItem(message.playerId, message.itemType);
+      break;
     case 'actor:claim':
       if (!scene) break;
       scene.claimActorControl(message.playerId, message.actorId);

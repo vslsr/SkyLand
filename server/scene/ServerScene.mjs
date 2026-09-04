@@ -1465,6 +1465,28 @@ export class ServerScene {
     return this.environment.requestTimeOfDay(timeOfDay);
   }
 
+  /**
+   * 调试：直接给某名玩家一个物品（F8 菜单里的那一栏）。
+   *
+   * 走的是**拾取那一条路**（`receive`：先手上、再物品栏、最后背包），不是往背包
+   * 里塞一笔账：在游戏里「拿到一个东西」只有这一种落法，调试给的那一个也该落在
+   * 玩家预期的位置上，否则用它验出来的手感不是真的。
+   *
+   * 目录里没有的 id 直接丢掉；身上一个都收不下时返回 false，什么都不发生。
+   *
+   * @returns 真的给出去了没有
+   */
+  giveDebugItem(playerId, itemType) {
+    const player = this.players.get(playerId);
+    const id = sanitizeItemType(itemType);
+    const inventory = player?.getComponent(INVENTORY_COMPONENT);
+    if (!player || !id || !inventory) return false;
+    if (inventory.receive(id, 1) !== 1) return false;
+    // 落在手上那一格时嘴上要跟着出现模型，和拾取完全一样。
+    syncHeldItemActor(this, player);
+    return true;
+  }
+
   isWaterAt(x, z) {
     if (this.fixedWaterWorld) return true;
     return this.terrainEnabled

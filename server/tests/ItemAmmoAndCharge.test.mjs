@@ -234,3 +234,18 @@ test('丢下一把装着石头的弹弓：石头回到身上，不跟着蒸发',
   ));
   assert.equal(dropped.length, 1, '地上正好一把');
 });
+
+test('F8 里点一件就给一个：落点和拾取一样，先手上', async () => {
+  const clock = createClock();
+  const { scene, player, inventory } = await createScene(clock);
+
+  assert.equal(scene.giveDebugItem('p1', 'slingshot'), true);
+  assert.equal(inventory.totalQuantityOf('slingshot'), 1);
+  // 空手时第一去处是手上那一格，嘴上跟着出现模型——和捡起来完全一样。
+  assert.equal(inventory.heldItemType, 'slingshot');
+  assert.ok(player.getComponent(PICKUP_DROP_COMPONENT).heldActorId);
+
+  // 目录里没有的 id 什么都不发生，不会凭空造出一件东西。
+  assert.equal(scene.giveDebugItem('p1', 'not-a-real-item'), false);
+  assert.equal(scene.giveDebugItem('nobody', 'stone'), false);
+});
