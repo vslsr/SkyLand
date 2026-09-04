@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import * as THREE from 'three';
 import { InventoryComponent } from '../shared/actor/index.mjs';
 import { itemCatalog, resolveWeaponStrike, weaponImpactPoint } from '../shared/items/index.mjs';
 import { HotbarController } from '../src/controllers/HotbarController.ts';
@@ -7,6 +8,7 @@ import { WeaponAimController } from '../src/controllers/WeaponAimController.ts';
 import type { HeldItemProgress } from '../src/controllers/HotbarController.ts';
 import type { InventoryCommand } from '../src/network/messages.ts';
 import type { BallisticPreviewState } from '../src/render/RenderScene.ts';
+import { ThreeRenderScene } from '../src/render/three/ThreeRenderScene.ts';
 import { ItemUseInputTags } from '../src/input/config/playerInput.ts';
 
 const BOW = itemCatalog.require('wood-bow').weapon!;
@@ -175,4 +177,74 @@ test('蓄力的圈满了也不结算：线和圈都留着，松手才打出去',
     '松手那一下才是开火',
   );
   assert.equal(bar.progress.at(-1), undefined, '松手之后圈收起来');
+});
+
+// --- 渲染侧：那条白色抛物线 -------------------------------------------------
+
+test('抛物线画在两个端点之间，中间抬起来；收起时整条线不可见', () => {
+  const scene = new ThreeRenderScene(new THREE.Group(), {
+    fogColor: '#ffffff',
+    fogNear: 20,
+    fogFar: 60,
+  });
+  assert.equal(scene.root.children.length, 0, '没人拉弓时不该先建一条线出来');
+
+  scene.setBallisticPreview({
+    originX: 0,
+    originY: 0.6,
+    originZ: 0,
+    impactX: 0,
+    impactY: 0,
+    impactZ: 12,
+    ratio: 0.5,
+  });
+  const preview = scene.root.children.find((child) => child.name === 'ballistic-preview')!;
+  assert.ok(preview, '第一条命令到了才建，建了就挂在渲染世界根下');
+  const line = preview.children.find(
+    (child) => child.name === 'ballistic-preview-line',
+  ) as THREE.Line;
+  const shadow = preview.children.find(
+    (child) => child.name === 'ballistic-preview-shadow',
+  ) as THREE.Line;
+  assert.equal(line.visible, true);
+  assert.equal(shadow.visible, true, '纸面色的地上，白线要靠这条暗边才看得见');
+
+  const points = line.geometry.getAttribute('position') as THREE.BufferAttribute;
+  assert.ok(points.count >= 8, '弧要够平滑');
+  // 两端就是玩法侧给的那两点。
+  assert.ok(Math.abs(points.getX(0) - 0) < 1e-6);
+  assert.ok(Math.abs(points.getY(0) - 0.6) < 1e-6);
+  assert.ok(Math.abs(points.getZ(points.count - 1) - 12) < 1e-6);
+  assert.ok(Math.abs(points.getY(points.count - 1) - 0) < 1e-6);
+  // 中间抬起来：它是一条抛物线，不是两点之间的直线。
+  const middle = Math.floor(points.count / 2);
+  assert.ok(points.getY(middle) > 0.6, `弧顶应当高过出手点，实际 ${points.getY(middle)}`);
+  // 暗边压在白线下面，两条线的水平位置一致。
+  const shadowPoints = shadow.geometry.getAttribute('position') as THREE.BufferAttribute;
+  assert.ok(shadowPoints.getY(middle) < points.getY(middle));
+  assert.ok(Math.abs(shadowPoints.getX(middle) - points.getX(middle)) < 1e-9);
+
+  scene.setBallisticPreview(undefined);
+  assert.equal(line.visible, false);
+  assert.equal(shadow.visible, false);
+});
+
+test('拉得越满弧越平：同样的落点，满蓄力的弧顶更低', () => {
+  const scene = new ThreeRenderScene(new THREE.Group(), {
+    fogColor: '#ffffff',
+    fogNear: 20,
+    fogFar: 60,
+  });
+  const apexOf = (ratio: number): number => {
+    scene.setBallisticPreview({
+      originX: 0, originY: 0.6, originZ: 0, impactX: 0, impactY: 0, impactZ: 12, ratio,
+    });
+    const preview = scene.root.children.find((child) => child.name === 'ballistic-preview')!;
+    const line = preview.children.find(
+      (child) => child.name === 'ballistic-preview-line',
+    ) as THREE.Line;
+    const points = line.geometry.getAttribute('position') as THREE.BufferAttribute;
+    return points.getY(Math.floor(points.count / 2));
+  };
+  assert.ok(apexOf(1) < apexOf(0.2), '拉满是一条平射，轻放是一条吊射');
 });

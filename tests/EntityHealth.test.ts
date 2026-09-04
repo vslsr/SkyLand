@@ -396,3 +396,48 @@ test('Replica 承接血量：伤害弹一条飘字，死亡写进参数段', () 
 test('摊开与倒下的时长是两条独立的曲线，不共用一个常数', () => {
   assert.notEqual(PBF_DEATH_COLLAPSE_SECONDS, LEGGED_DEATH_COLLAPSE_SECONDS);
 });
+
+// --- 渲染侧：飘字这块牌子 ---------------------------------------------------
+
+test('飘字按需要才建，飘完自己收起来', () => {
+  const scene = new ThreeRenderScene(new THREE.Group(), ENVIRONMENT);
+  assert.equal(
+    scene.root.children.find((child) => child.name === 'health-popups'),
+    undefined,
+    '没人挨打的地图不该先建一池牌子',
+  );
+
+  scene.spawnHealthPopup(2, 1.5, -3, -30);
+  const popups = scene.root.children.find((child) => child.name === 'health-popups')!;
+  assert.ok(popups);
+  const visible = popups.children.filter((child) => child.visible);
+  assert.equal(visible.length, 1, '一次伤害一块牌子');
+  assert.deepEqual(
+    [visible[0].position.x, visible[0].position.y, visible[0].position.z],
+    [2, 1.5, -3],
+    '牌子从玩法侧给的那一点起飞',
+  );
+
+  // 飘的那一段：往上走、淡出，走完自己藏起来。单帧推进有上限（卡顿一下不该
+  // 让飘字瞬移到头），所以这里按帧走。
+  const transforms = new RenderTransformBuffer(4);
+  let elapsed = 0;
+  for (let frame = 0; frame < 12; frame += 1) {
+    elapsed += 1 / 60;
+    scene.updateVisuals(transforms, 1 / 60, elapsed);
+  }
+  assert.ok(visible[0].position.y > 1.5, '它是往上飞的');
+  for (let frame = 0; frame < 60; frame += 1) {
+    elapsed += 1 / 60;
+    scene.updateVisuals(transforms, 1 / 60, elapsed);
+  }
+  assert.equal(visible[0].visible, false, '飘完就还回池子里');
+});
+
+test('同屏伤害再密，牌子的数量也有上界', () => {
+  const scene = new ThreeRenderScene(new THREE.Group(), ENVIRONMENT);
+  for (let index = 0; index < 40; index += 1) scene.spawnHealthPopup(index, 1, 0, -1);
+  const popups = scene.root.children.find((child) => child.name === 'health-popups')!;
+  assert.ok(popups.children.length <= 12, `池子应当有上界，实际 ${popups.children.length}`);
+  assert.ok(popups.children.every((child) => child.visible), '池子满了就顶掉最老的那一条');
+});

@@ -29,6 +29,11 @@ import {
   mushroomStemHeight,
 } from '../../models/actors/createMushroomPileModel';
 import {
+  createWoodBowLimbGeometry,
+  createWoodBowStringGeometry,
+  woodBowStringOffsetX,
+} from '../../models/actors/createWoodBowModel';
+import {
   STONE_PILE_PIECES,
   createStonePieceGeometry,
 } from '../../models/actors/createStonePileModel';
@@ -44,11 +49,13 @@ type WoodPileRender = Extract<ActorRender, { model: 'line-art-wood-pile' }>;
 type StonePileRender = Extract<ActorRender, { model: 'line-art-stone-pile' }>;
 type FruitPileRender = Extract<ActorRender, { model: 'line-art-fruit-pile' }>;
 type MushroomPileRender = Extract<ActorRender, { model: 'line-art-mushroom-pile' }>;
+type WoodBowRender = Extract<ActorRender, { model: 'line-art-wood-bow' }>;
 type PileRender =
   | WoodPileRender
   | StonePileRender
   | FruitPileRender
-  | MushroomPileRender;
+  | MushroomPileRender
+  | WoodBowRender;
 
 /** 走合批绘制的堆叠模型。新增一种堆叠物就在这里登记，并补一个 pieces 构造。 */
 const PILE_RENDER_MODELS = new Set<PileRender['model']>([
@@ -56,6 +63,7 @@ const PILE_RENDER_MODELS = new Set<PileRender['model']>([
   'line-art-stone-pile',
   'line-art-fruit-pile',
   'line-art-mushroom-pile',
+  'line-art-wood-bow',
 ]);
 
 /**
@@ -261,6 +269,42 @@ function createMushroomPilePieces(
   return pieces;
 }
 
+/**
+ * 掉在地上的一把弓：**只有一件，不堆**（`maximumQuantity` 是 1）。
+ *
+ * 几何和手持那把是同一对函数，所以地上那把和手上那把是同一副样子——两处各画一套
+ * 迟早会分家。躺下来那一下靠绕 Z 转 90°：弓立着的长轴是 Y，倒在地上就该沿地面躺着。
+ */
+function createWoodBowPieces(definition: WoodBowRender, burning: boolean): PilePiece[] {
+  const wood = new THREE.Color(burning ? '#d66b38' : definition.woodColor);
+  const string = new THREE.Color(burning ? '#f2a04f' : definition.stringColor);
+  const lying = new THREE.Quaternion().setFromAxisAngle(
+    new THREE.Vector3(0, 0, 1),
+    Math.PI / 2,
+  );
+  const lift = new THREE.Vector3(0, definition.thickness, 0);
+  const stringOffset = woodBowStringOffsetX(definition);
+  return [
+    {
+      geometry: createWoodBowLimbGeometry(definition),
+      matrix: new THREE.Matrix4().compose(lift, lying, new THREE.Vector3(1, 1, 1)),
+      tint: wood,
+      edgeThreshold: 1.2,
+    },
+    {
+      geometry: createWoodBowStringGeometry(definition),
+      // 弦在弓的局部 +X 上；整把弓躺下之后那一段变成世界的 -Y，所以先转再平移。
+      matrix: new THREE.Matrix4().compose(
+        new THREE.Vector3(lift.x, lift.y - stringOffset, lift.z),
+        lying,
+        new THREE.Vector3(1, 1, 1),
+      ),
+      tint: string,
+      edgeThreshold: 1.2,
+    },
+  ];
+}
+
 function createPilePieces(
   definition: PileRender,
   burning: boolean,
@@ -275,6 +319,9 @@ function createPilePieces(
   }
   if (definition.model === 'line-art-mushroom-pile') {
     return createMushroomPilePieces(definition, burning, single);
+  }
+  if (definition.model === 'line-art-wood-bow') {
+    return createWoodBowPieces(definition, burning);
   }
   return createFruitPilePieces(definition, burning, single, groundOffset);
 }
