@@ -113,6 +113,13 @@ export class GrasslandScene extends Scene {
    * 交互提示那条文字、世界里的按键牌和按住进度环读的是同一份，重绑定之后三处
    * 一起变；分头各写一遍就会出现「提示说 E、圈上写着别的」。
    */
+  /** 嘴上那件的 Actor id；空手时是 undefined。吃东西的表现要认得出是哪一件。 */
+  private heldActorId(): string | undefined {
+    const pickupDrop = this.player?.getComponent(PICKUP_DROP_COMPONENT) as
+      PickupDropComponent | undefined;
+    return pickupDrop?.heldActorId ?? undefined;
+  }
+
   private readonly resolveInputLabel = (tag: TagLike): string | undefined => {
     const control = this.input.getMappedControls(tag)[0];
     return control ? this.inputScheme.getControlLabel(control) : undefined;
@@ -356,8 +363,7 @@ export class GrasslandScene extends Scene {
         InventoryComponent | undefined,
       // 嘴上那个 Actor：叼着的蘑菇和快捷栏拿出来的手持物都在这里，
       // 所以两种手持物走同一条按住计时。
-      getHeldActorId: () => (this.player?.getComponent(PICKUP_DROP_COMPONENT) as
-        PickupDropComponent | undefined)?.heldActorId ?? undefined,
+      getHeldActorId: () => this.heldActorId(),
       // 界面盖着时不响应：背包开着按 1 应该翻页而不是换手。
       isActive: () => Boolean(this.joinedRoom && this.player) && this.commonUI.allowsGameInteraction,
       send: (command) => { this.roomClient.sendInventoryCommand(command); },
@@ -369,8 +375,11 @@ export class GrasslandScene extends Scene {
       setProgress: (progress) => {
         this.hotbarBar.setProgress(progress);
         this.holdProgress.setProgress(progress?.onHotbar ? undefined : progress);
-        // 吃东西那一段抖动跟着这次按住走：圈满那一刻服务端扣账，抖动同时停。
-        this.player?.setChewing(progress?.action === 'eat');
+        // 吃东西那一段跟着这次按住走：圈满那一刻服务端扣账，抖动与食物同时停。
+        // 玩家模型和手上那件食物读同一个比例，所以它们嚼在同一拍上。
+        const chewing = progress?.action === 'eat' ? progress.ratio : undefined;
+        this.player?.setChewing(chewing);
+        this.world.setChewingItem(chewing === undefined ? undefined : this.heldActorId(), chewing ?? 0);
       },
     });
     this.container = new ContainerController(this.containerPage, {

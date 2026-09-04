@@ -25,7 +25,7 @@ async function createFixture() {
   return { scene, advance };
 }
 
-test('附近的休眠物品堆自动合并，并通过通用 Actor 交互进入玩家背包', async () => {
+test('附近的休眠物品堆自动合并，捡起来直接到空着的手上', async () => {
   const { scene, advance } = await createFixture();
   scene.addPlayer({ id: 'player-1', name: '收集者', slot: 0 });
   const player = scene.players.get('player-1');
@@ -45,13 +45,18 @@ test('附近的休眠物品堆自动合并，并通过通用 Actor 交互进入�
   assert.equal(piles[0].requireComponent(ACTOR_RESIDENCY_COMPONENT).state, 'sleeping');
 
   assert.equal(scene.interactWithActor('player-1', { actorId: piles[0].id, sequence: 1 }), true);
-  assert.equal(scene.actorWorld.query(ITEM_STACK_COMPONENT).length, 0);
-  assert.deepEqual(scene.createSnapshot('player-1').players[0].inventory, [
-    { itemType: 'wood', quantity: 10 },
-  ]);
+  // 地上那一堆没了；世界里还剩的那个 itemStack 是嘴上的手持表现体。
+  const remaining = scene.actorWorld.query(ITEM_STACK_COMPONENT);
+  assert.equal(remaining.length, 1);
+  assert.equal(remaining[0].parent?.id, 'player-1');
+  // 捡起来的东西先上手：空手时它落进物品栏第一格，并且当场就握着。
+  const own = scene.createSnapshot('player-1').players[0];
+  assert.deepEqual(own.hotbar.slots[0], { itemType: 'wood', quantity: 10 });
+  assert.equal(own.hotbar.activeIndex, 0);
+  assert.deepEqual(own.inventory, [], '物品栏装得下就轮不到背包');
 });
 
-test('背包货位占满之后，掉落堆留在世界里而不是被吞掉', async () => {
+test('物品栏和背包都满了之后，掉落堆留在世界里而不是被吞掉', async () => {
   const { scene, advance } = await createFixture();
   scene.addPlayer({ id: 'player-1', name: '收集者', slot: 0 });
   const player = scene.players.get('player-1');
@@ -62,6 +67,10 @@ test('背包货位占满之后，掉落堆留在世界里而不是被吞掉', as
   inventory.add('stone', stackLimit * inventory.slotCapacity);
   assert.equal(inventory.isFull, true);
   assert.equal(inventory.slots.length, inventory.slotCapacity);
+  // 物品栏是拾取的第一去处，所以它也得占满，才轮得到「一个都收不下」。
+  for (let index = 0; index < inventory.hotbarCapacity; index += 1) {
+    inventory.hotbar[index] = { itemType: 'stone', quantity: stackLimit };
+  }
 
   scene.spawnItemStack('wood-pile', {
     quantity: 3,
@@ -77,7 +86,7 @@ test('背包货位占满之后，掉落堆留在世界里而不是被吞掉', as
     '拿不下就不该判定交互成功',
   );
   assert.equal(pile.requireComponent(ITEM_STACK_COMPONENT).quantity, 3, '数量一个都不该少');
-  assert.equal(inventory.quantityOf('wood'), 0);
+  assert.equal(inventory.totalQuantityOf('wood'), 0);
 
   const snapshot = scene.createSnapshot('player-1').players[0];
   assert.equal(snapshot.inventory.length, inventory.slotCapacity);

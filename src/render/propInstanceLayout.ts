@@ -14,7 +14,7 @@ import type {
 /** 每条记录的离散字段个数，见 `PROP_*` 下标。 */
 export const PROP_INT_STRIDE = 5;
 /** 每条记录的连续字段个数。 */
-export const PROP_FLOAT_STRIDE = 6;
+export const PROP_FLOAT_STRIDE = 7;
 
 /**
  * 原型在场景原型表里的下标。渲染侧据此找到 render 定义、建材质与模板。
@@ -43,6 +43,14 @@ export const PROP_YAW = 3;
 export const PROP_QUANTITY = 4;
 /** 刚体半径；> 0 才有滚动姿态。 */
 export const PROP_ROLL_RADIUS = 5;
+/**
+ * 表现缩放倍率，1 = 原样。
+ *
+ * 玩法侧写、渲染侧乘上去。它承载的是**一次性的表现**，不是玩法状态：正被吃掉的
+ * 那件食物一口一口地小下去，用的就是它。做成一个倍率而不是「吃到第几口」，是
+ * 因为渲染侧不该认识「吃」这件事——它只需要知道这一帧画多大。
+ */
+export const PROP_SCALE = 6;
 
 /**
  * 驻留态的两侧共用编号。字符串过不了字节边界，所以定一份顺序。

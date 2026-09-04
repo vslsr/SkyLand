@@ -19,7 +19,7 @@ export interface InventoryPort {
    * 背包里点「使用」授予的是一条能力，激活要按使用键——两边说的必须是同一件东西，
    * 所以这条和 `use:arm` 在同一刻发出。传 undefined 是撤销。
    */
-  armItem(itemType: string | undefined): void;
+  armItem(itemType: string | undefined, options?: { onHotbar?: boolean }): void;
   /** 背包界面现在是不是 CommonUI 栈顶。 */
   isOpen(): boolean;
   /** 把界面推入或弹出 CommonUI 栈。 */
@@ -110,12 +110,19 @@ export class InventoryController {
    * 接下来按使用键激活的正是它——再发一条 arm 只会让两条能力抢同一个槽位。
    */
   private applyHotbarAction(action: InventoryItemAction, slotIndex: number): void {
-    // 动了物品栏就作废「刚刚在背包里点出来的那件」，理由同 `applyItemAction`。
+    // 动了物品栏就作废「刚刚在菜单里点出来的那件」，理由同 `applyItemAction`；
+    // 「使用」那一条随后自己重新指一件。
     this.port.armItem(undefined);
     if (action === 'use') {
+      const inventory = this.port.getInventory();
+      // 输入层现在就得知道接下来那一下说的是哪件东西：快照 10Hz，等它回来才认的话，
+      // 玩家在这 100 毫秒里按下的那一下会因为「手上还是空的」被整条忽略——表现就是
+      // 「点了使用，按下去没反应」。
+      const itemType = inventory?.hotbar?.[slotIndex]?.itemType;
+      this.port.armItem(itemType, { onHotbar: true });
       // 已经握在手上的那一格不用再切：`select` 把「切到当前格」当成收手，
       // 再发一次会把它从手上放下。
-      if (this.port.getInventory()?.activeHotbarIndex !== slotIndex) {
+      if (inventory?.activeHotbarIndex !== slotIndex) {
         this.port.send({ kind: 'select', slotIndex });
       }
       this.close();

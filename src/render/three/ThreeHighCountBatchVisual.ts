@@ -6,6 +6,7 @@ import {
   PROP_QUANTITY,
   PROP_RESIDENCY,
   PROP_ROLL_RADIUS,
+  PROP_SCALE,
   PROP_SINGLE,
   PROP_X,
   PROP_Y,
@@ -474,7 +475,8 @@ export class ThreeHighCountBatchVisual {
         + `,${instances.readFloat(index, PROP_Y).toFixed(3)}`
         + `,${instances.readFloat(index, PROP_Z).toFixed(3)}`
         + `,${instances.readFloat(index, PROP_YAW).toFixed(3)}`
-        + `,${instances.readFloat(index, PROP_QUANTITY)}${rotation}`;
+        + `,${instances.readFloat(index, PROP_QUANTITY)}`
+        + `,${instances.readFloat(index, PROP_SCALE).toFixed(3)}${rotation}`;
     }).join('|');
     if (signature === batch.signature) return;
     batch.signature = signature;
@@ -486,9 +488,12 @@ export class ThreeHighCountBatchVisual {
       const index = members[slot];
       const quantity = instances.readFloat(index, PROP_QUANTITY);
       const roll = rollingQuaternions[slot];
-      const visualScale = roll
+      // 数量带来的那点大小是这一堆的形状；玩法侧那个倍率是一次性的表现（正被吃掉
+      // 的食物一口口变小），两者相乘——渲染侧不需要知道后者为什么会变。
+      const visualScale = (roll
         ? 1
-        : 0.74 + Math.min(0.34, Math.log2(quantity + 1) * 0.065);
+        : 0.74 + Math.min(0.34, Math.log2(quantity + 1) * 0.065))
+        * instances.readFloat(index, PROP_SCALE);
       this.position.set(
         instances.readFloat(index, PROP_X),
         instances.readFloat(index, PROP_Y),

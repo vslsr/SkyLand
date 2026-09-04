@@ -279,6 +279,8 @@ export class ClientActorSystem implements SceneFrameSystem {
   private readonly physics?: PhysicsWorld;
   /** 合批内容的实例通道，以及渲染侧反查原型用的那张顺序表。 */
   private readonly instances = new RenderInstanceBuffer(PROP_INT_STRIDE, PROP_FLOAT_STRIDE);
+  /** 正被吃的那件食物（手持表现体）和它吃到哪一步；没人在吃时是 undefined。 */
+  private chewingItem?: { actorId: string; ratio: number };
   /** 树上果子走另一条通道：它的记录里没有原型、没有驻留态，形状不一样。 */
   private readonly fruitInstances = new RenderInstanceBuffer(FRUIT_INT_STRIDE, FRUIT_FLOAT_STRIDE);
   private readonly archetypeOrder: readonly string[];
@@ -896,6 +898,16 @@ export class ClientActorSystem implements SceneFrameSystem {
    * 「哪些原型走合批、什么时候换单个模板」是玩法事实，所以由这一侧给出。
    * 判据就是原型有没有 `itemStack`——`createReplica` 正是照它提前返回、不建 proxy 的。
    */
+  /**
+   * 谁正被吃、吃到哪一步。
+   *
+   * 由场景在按住使用键的那一段每帧推进（和圈画到哪里是同一个比例）。手上那件
+   * 食物据此一口口变小、跟着嘴一起抖——两样都是纯表现，不过网。
+   */
+  public setChewingItem(actorId: string | undefined, ratio: number): void {
+    this.chewingItem = actorId === undefined ? undefined : { actorId, ratio };
+  }
+
   private createInstanceCatalog(): ActorInstanceCatalog {
     const archetypeIndex = new Map<string, number>();
     this.archetypeOrder.forEach((id, index) => archetypeIndex.set(id, index));
@@ -916,6 +928,9 @@ export class ClientActorSystem implements SceneFrameSystem {
         const model = this.archetypes.get(archetypeId)?.components.render?.model;
         return model !== undefined && singleModels.has(model);
       },
+      chewRatioOf: (actorId) => (
+        this.chewingItem?.actorId === actorId ? this.chewingItem.ratio : undefined
+      ),
     };
   }
 
