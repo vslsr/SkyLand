@@ -12,9 +12,11 @@ services:
     # 所以交给 docker-init 来收养。
     init: true
     ports:
-      # 只发布到回环，由宿主机上的 Nginx 反代并终止 TLS；
-      # 想直接对外暴露就改成 "3090:3090"。
-      - "127.0.0.1:3090:3090"
+      # 默认只发布到回环，由宿主机上的 Nginx 反代并终止 TLS。
+      # 没有反代、想直接对外时用 SKYLAND_PUBLISH 覆盖，不必改这个文件：
+      #   SKYLAND_PUBLISH=0.0.0.0:80 docker compose up -d
+      # 注意非 HTTPS 下 crossOriginIsolated 是 false，见 doc/docker-deployment.md 4.1。
+      - "${SKYLAND_PUBLISH:-127.0.0.1:3090}:3090"
     environment:
       SKYLAND_SERVER_HOST: 0.0.0.0
       SKYLAND_SERVER_PORT: "3090"

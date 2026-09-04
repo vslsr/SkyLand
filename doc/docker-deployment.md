@@ -123,8 +123,16 @@ docker compose down              # 停止并删除容器（保留 skyland-logs �
 docker compose down -v           # 连日志卷一起删
 ```
 
-默认只把端口发布到 `127.0.0.1:3090`，也就是**必须**在前面放一层反代。想让容器直接
-对外，把 `ports` 改成 `"3090:3090"`。
+默认只把端口发布到 `127.0.0.1:3090`，也就是前面要放一层反代。没有反代、想让容器直接
+占用某个对外端口时，用 `SKYLAND_PUBLISH` 覆盖，不用改文件：
+
+```bash
+SKYLAND_PUBLISH=0.0.0.0:80 docker compose up -d   # 宿主机 80 → 容器 3090
+SKYLAND_PUBLISH=0.0.0.0:3090 docker compose up -d # 直接对外开 3090
+```
+
+这条路等于放弃 HTTPS，代价见 4.1：`crossOriginIsolated` 会是 `false`。适合还没有域名时
+先跑起来，别当成长期形态。
 
 ### 3.3 环境变量
 
