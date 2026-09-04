@@ -2,6 +2,9 @@ import * as THREE from 'three';
 import {
   ENVIRONMENT_LIGHTING_GLSL,
   ENVIRONMENT_UNIFORMS_GLSL,
+  MAX_ENVIRONMENT_POINT_LIGHTS,
+  POINT_LIGHT_GLSL,
+  POINT_LIGHT_UNIFORMS_GLSL,
 } from '../shaders/environmentLighting';
 
 export interface FillMaterialEnvironment {
@@ -36,6 +39,24 @@ export interface SceneEnvironmentRuntime {
   readonly cloudShadowOffset: THREE.IUniform<THREE.Vector2>;
   /** 墨线染色，已归一化到平均 1：夜里偏冷、黄昏偏暖，浓度不变。 */
   readonly inkTint: THREE.IUniform<THREE.Color>;
+  /**
+   * 这一帧参与照明的点光源（篝火、灯）。定长 `MAX_ENVIRONMENT_POINT_LIGHTS` 格，
+   * 由渲染侧的 `ThreePointLightVisual` 每帧写满——挑的是离视点最近的那几盏，
+   * 空格与熄灭的火强度写 0。
+   *
+   * 数组对象**逐场景一份、就地改写**：所有填充材质与草叶材质共用同一批
+   * `Vector3` / `Color` / `Vector2`，所以写一次当帧全场生效，也不每帧分配。
+   */
+  readonly pointLightPositions: THREE.IUniform<THREE.Vector3[]>;
+  readonly pointLightColors: THREE.IUniform<THREE.Color[]>;
+  readonly pointLightEdgeColors: THREE.IUniform<THREE.Color[]>;
+  /** x = 半径，y = 强度（已含闪烁与白昼衰减）。 */
+  readonly pointLightFalloff: THREE.IUniform<THREE.Vector2[]>;
+}
+
+/** 定长的点光源 uniform 槽位。没有光源的那几格靠强度 0 表示「空」。 */
+function createPointLightSlots<T>(create: () => T): T[] {
+  return Array.from({ length: MAX_ENVIRONMENT_POINT_LIGHTS }, create);
 }
 
 /** 默认主光方向：没有昼夜系统时的固定斜上方来光。 */
@@ -66,6 +87,12 @@ export function createSceneEnvironment(
       cloudShadowStrength: { value: 0 },
       cloudShadowOffset: { value: new THREE.Vector2() },
       inkTint: { value: new THREE.Color(0xffffff) },
+      pointLightPositions: { value: createPointLightSlots(() => new THREE.Vector3()) },
+      pointLightColors: { value: createPointLightSlots(() => new THREE.Color(0xffffff)) },
+      pointLightEdgeColors: { value: createPointLightSlots(() => new THREE.Color(0xffffff)) },
+      // 半径给 1 而不是 0：强度为 0 时着色器根本不会读它，但除以 0 的半径
+      // 在某些驱动上仍会算出 NaN 再被后面的 clamp 传染。
+      pointLightFalloff: { value: createPointLightSlots(() => new THREE.Vector2(1, 0)) },
     },
   };
 }
@@ -94,6 +121,16 @@ export function createEnvironmentUniforms(
     uFogColor: runtime?.fogColor ?? { value: new THREE.Color(environment.fogColor) },
     uFogNear: runtime?.fogNear ?? { value: environment.fogNear },
     uFogFar: runtime?.fogFar ?? { value: environment.fogFar },
+    // 没有 runtime（单测、离线预览）时是一批本地的空槽位：强度恒为 0，
+    // 着色器一格都不会算，画面与没有点光源时完全一致。
+    uPointLightPosition: runtime?.pointLightPositions
+      ?? { value: createPointLightSlots(() => new THREE.Vector3()) },
+    uPointLightColor: runtime?.pointLightColors
+      ?? { value: createPointLightSlots(() => new THREE.Color(0xffffff)) },
+    uPointLightEdgeColor: runtime?.pointLightEdgeColors
+      ?? { value: createPointLightSlots(() => new THREE.Color(0xffffff)) },
+    uPointLightFalloff: runtime?.pointLightFalloff
+      ?? { value: createPointLightSlots(() => new THREE.Vector2(1, 0)) },
   };
 }
 
@@ -134,6 +171,7 @@ const FRAGMENT_SHADER = /* glsl */ `
 
   uniform vec3 uColor;
   ${ENVIRONMENT_UNIFORMS_GLSL}
+  ${POINT_LIGHT_UNIFORMS_GLSL}
 
   varying vec3 vWorldNormal;
   varying vec3 vWorldPosition;
@@ -143,6 +181,7 @@ const FRAGMENT_SHADER = /* glsl */ `
   #endif
 
   ${ENVIRONMENT_LIGHTING_GLSL}
+  ${POINT_LIGHT_GLSL}
 
   void main() {
     vec3 normal = normalize(vWorldNormal);
@@ -168,7 +207,11 @@ const FRAGMENT_SHADER = /* glsl */ `
     vec3 shadedColor = baseColor * ambient * softLight
       + ambient * 0.025 * (normal.y * 0.5 + 0.5);
 
-    vec3 finalColor = shadedColor;
+    // 篝火那类点光源叠在环境光之上，排在雾之前：火光该被远处的雾一起吃掉，
+    // 否则隔着半张地图还看得见一团发光的橙色斑点。
+    vec3 litColor = shadedColor + pointLightRadiance(vWorldPosition, normal);
+
+    vec3 finalColor = litColor;
     #ifdef USE_DISTANCE_FOG
       float cameraDistance = distance(cameraPosition, vWorldPosition);
       // 参考项目的主体填充不混入天气雾。只有流式世界会显式打开这里，
@@ -176,7 +219,7 @@ const FRAGMENT_SHADER = /* glsl */ `
       float clearFogNear = max(uFogNear, uFogFar - 12.0);
       float fogFactor = smoothstep(clearFogNear, uFogFar, cameraDistance);
       // 雾色仍走方向性散射：朝着太阳的那一侧被日光染暖。
-      finalColor = mix(shadedColor, scatteredFogColor(vWorldPosition), fogFactor);
+      finalColor = mix(litColor, scatteredFogColor(vWorldPosition), fogFactor);
     #endif
 
     gl_FragColor = vec4(finalColor, 1.0);

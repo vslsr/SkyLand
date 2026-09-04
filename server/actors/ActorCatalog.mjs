@@ -261,6 +261,34 @@ function validateHeatEmitter(raw, filename) {
   };
 }
 
+/**
+ * 点亮周围的一盏灯（篝火、提灯）。**纯表现**：不进温度结算、不进快照，
+ * 服务端只把这份配置净化后随场景发下去，亮不亮由客户端按火焰状态决定。
+ *
+ * 半径比 `heatEmitter.radius` 宽是正常的——烤不到的地方仍然看得见火光。
+ */
+function validatePointLight(raw, filename) {
+  const path = `${filename}.components.pointLight`;
+  const definition = requireObject(raw, path);
+  if (typeof definition.enabled !== 'boolean') throw new TypeError(`${path}.enabled 必须是布尔值`);
+  const validated = {
+    color: requireColor(definition.color, `${path}.color`),
+    radius: requireNumber(definition.radius, `${path}.radius`, Number.EPSILON, 48),
+    intensity: requireNumber(definition.intensity, `${path}.intensity`, Number.EPSILON, 4),
+    enabled: definition.enabled,
+  };
+  if (definition.edgeColor !== undefined) {
+    validated.edgeColor = requireColor(definition.edgeColor, `${path}.edgeColor`);
+  }
+  if (definition.heightOffset !== undefined) {
+    validated.heightOffset = requireNumber(definition.heightOffset, `${path}.heightOffset`, 0, 8);
+  }
+  if (definition.flicker !== undefined) {
+    validated.flicker = requireNumber(definition.flicker, `${path}.flicker`, 0, 1);
+  }
+  return validated;
+}
+
 function validateInventory(raw, filename) {
   const path = `${filename}.components.inventory`;
   const definition = requireObject(raw, path);
@@ -1038,6 +1066,7 @@ function validateActorArchetype(raw, filename) {
     'temperature',
     'combustible',
     'heatEmitter',
+    'pointLight',
     'inventory',
     'container',
     'stowable',
@@ -1138,6 +1167,9 @@ function validateActorArchetype(raw, filename) {
   const heatEmitter = components.heatEmitter
     ? validateHeatEmitter(components.heatEmitter, filename)
     : undefined;
+  const pointLight = components.pointLight
+    ? validatePointLight(components.pointLight, filename)
+    : undefined;
   const inventory = components.inventory ? validateInventory(components.inventory, filename) : undefined;
   const container = components.container ? validateContainer(components.container, filename) : undefined;
   const stowable = components.stowable ? validateStowable(components.stowable, filename) : undefined;
@@ -1188,6 +1220,11 @@ function validateActorArchetype(raw, filename) {
   }
   if (combustible && !temperature) {
     throw new TypeError(`${filename}.components.combustible 需要 temperature`);
+  }
+  // 灯挂在 proxy 上，而 proxy 只有可视 Actor 才有：没有 render 的话这份配置
+  // 会一声不响地什么都不做，那是死配置。
+  if (pointLight && !render) {
+    throw new TypeError(`${filename}.components.pointLight 需要 render`);
   }
   if (render?.model === 'line-art-campfire' && !heatEmitter) {
     throw new TypeError(`${filename}.components.render line-art-campfire 需要 heatEmitter`);
@@ -1247,6 +1284,7 @@ function validateActorArchetype(raw, filename) {
       ...(temperature ? { temperature } : {}),
       ...(combustible ? { combustible } : {}),
       ...(heatEmitter ? { heatEmitter } : {}),
+      ...(pointLight ? { pointLight } : {}),
       ...(inventory ? { inventory } : {}),
       ...(container ? { container } : {}),
       ...(stowable ? { stowable } : {}),

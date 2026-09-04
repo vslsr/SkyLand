@@ -422,6 +422,28 @@ export interface ActorArchetypeDefinition {
       radius: number;
       enabled: boolean;
     };
+    /**
+     * 点亮周围的一盏灯（篝火、提灯）。**纯表现**：不进温度结算，也不复制——
+     * 服务端只负责把这份配置发下来，亮不亮由客户端按火焰状态或 `enabled` 决定。
+     *
+     * 半径与热源的 `heatEmitter.radius` 是两回事：光比热走得远。
+     */
+    pointLight?: {
+      /** 光源附近的颜色。 */
+      color: string;
+      /** 光晕边缘的颜色。不写就和 `color` 相同。 */
+      edgeColor?: string;
+      /** 照明半径（米）。 */
+      radius: number;
+      /** 强度倍率。1 是参考项目壁炉那一档。 */
+      intensity: number;
+      /** 光心相对 Actor 原点抬高多少米。不写按 0。 */
+      heightOffset?: number;
+      /** 闪烁幅度 [0, 1]。不写按 0（稳定的灯）。 */
+      flicker?: number;
+      /** 没有火焰状态可跟随时的静态开关。 */
+      enabled: boolean;
+    };
     itemStack?: {
       itemType: string;
       displayName: string;

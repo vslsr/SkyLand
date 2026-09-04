@@ -701,6 +701,47 @@
             }
           }
         },
+        "pointLight": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "color",
+            "radius",
+            "intensity",
+            "enabled"
+          ],
+          "properties": {
+            "color": {
+              "$ref": "#/$defs/color"
+            },
+            "edgeColor": {
+              "$ref": "#/$defs/color"
+            },
+            "radius": {
+              "type": "number",
+              "exclusiveMinimum": 0,
+              "maximum": 48
+            },
+            "intensity": {
+              "type": "number",
+              "exclusiveMinimum": 0,
+              "maximum": 4
+            },
+            "heightOffset": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 8
+            },
+            "flicker": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "enabled": {
+              "type": "boolean"
+            }
+          }
+        },
         "inventory": {
           "type": "object",
           "additionalProperties": false,

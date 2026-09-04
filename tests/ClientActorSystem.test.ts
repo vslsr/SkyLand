@@ -41,13 +41,19 @@ import {
 } from './renderProxyProbe';
 import {
   RENDER_PROXY_COMPONENT,
+  type RenderProxyComponent,
 } from '../src/actors/components/RenderProxyComponent';
 import {
   FIRE_VISUAL_COMPONENT,
   type FireVisualComponent,
 } from '../src/actors/components/FireVisualComponent';
+import {
+  POINT_LIGHT_COMPONENT,
+  type PointLightComponent,
+} from '../src/actors/components/PointLightComponent';
 import type { SnapshotActor } from '../src/network/protocol';
 import { RenderTransformBuffer } from '../src/render/RenderTransformBuffer';
+import { PARAM_POINT_LIGHT_INTENSITY } from '../src/render/RenderVisualParams';
 import { SLIME_DRAG_AT_REST, writeSlimeDragParams } from '../src/render/RenderSlimeDrag';
 import { createSlimeBiteParams, writeSlimeBiteParams } from '../src/render/RenderSlimeBite';
 import { resolvePlayerVisualShape } from '../src/player/playerVisualShape';
@@ -202,6 +208,15 @@ const campfireArchetype: SceneDefinition['actorArchetypes'][number] = {
   id: 'campfire',
   components: {
     heatEmitter: { power: 520, radius: 3.2, enabled: true },
+    pointLight: {
+      color: '#ffb469',
+      edgeColor: '#c2551c',
+      radius: 7.5,
+      intensity: 1.05,
+      heightOffset: 0.42,
+      flicker: 0.22,
+      enabled: true,
+    },
     render: {
       model: 'line-art-campfire',
       stoneColor: '#c8c0b2',
@@ -230,6 +245,15 @@ const dryHayArchetype: SceneDefinition['actorArchetypes'][number] = {
       burnRate: 0.5,
       heatOutput: 340,
       heatRadius: 2.2,
+    },
+    pointLight: {
+      color: '#ffcf8a',
+      radius: 6,
+      intensity: 0.9,
+      heightOffset: 0.5,
+      flicker: 0.24,
+      // 会烧的东西这个开关不作数：亮不亮跟着 thermal.burning 走。
+      enabled: true,
     },
     render: {
       model: 'line-art-dry-hay',
@@ -858,6 +882,60 @@ test('客户端按权威燃烧状态显示参考 LineLoop 火焰，稳定篝火�
   assert.ok(positions.some((value) => Math.abs(value) > 1e-5));
   system.setTemperatureVisible(false);
   assert.equal(temperatureMarker.temperatureVisible, false);
+  system.dispose();
+});
+
+test('会烧的东西点亮周围：光跟着权威燃烧状态走，配置随 spawn 过边界', () => {
+  let now = 1_000;
+  const transforms = new RenderTransformBuffer(8);
+  const system = createTestActorSystem({
+    definition,
+    environment: { fogColor: '#ffffff', fogNear: 20, fogFar: 60 },
+    now: () => now,
+    transforms,
+    spawnBudgetMilliseconds: Number.POSITIVE_INFINITY,
+  });
+  const campfire: SnapshotActor = {
+    id: 'campfire-01',
+    archetypeId: 'campfire',
+    revision: 0,
+    transform: { x: 0, y: 0, z: -1.5, yaw: 0 },
+  };
+  const coldHay: SnapshotActor = {
+    id: 'dry-hay-01',
+    archetypeId: 'dry-hay',
+    revision: 0,
+    transform: { x: 1.4, y: 0, z: -1.5, yaw: 0 },
+    thermal: { temperature: 20, burning: false, fuelRatio: 1, revision: 0 },
+  };
+  system.syncSnapshots([campfire, coldHay], 1_000, 1_000);
+  stepActorFrame(system, 1 / 60, 0.5);
+
+  // Actor 身上只剩一个「亮不亮」；颜色与半径在渲染世界里。
+  const campfireLight = system.getActor(campfire.id)!
+    .requireComponent(POINT_LIGHT_COMPONENT) as PointLightComponent;
+  const hayActor = system.getActor(coldHay.id)!;
+  const hayLight = hayActor.requireComponent(POINT_LIGHT_COMPONENT) as PointLightComponent;
+  assert.equal(campfireLight.targetIntensity, 1, '静态热源出生就亮着');
+  assert.equal(hayLight.targetIntensity, 0, '没烧起来的干草堆不该发光');
+
+  // 玩法侧只写字节：参数段里那一个标量就是过边界的全部。
+  const hayProxyId = (hayActor.requireComponent(RENDER_PROXY_COMPONENT) as RenderProxyComponent)
+    .proxyId;
+  assert.equal(transforms.readParam(hayProxyId, PARAM_POINT_LIGHT_INTENSITY), 0);
+
+  const burningHay: SnapshotActor = {
+    ...coldHay,
+    revision: 4,
+    thermal: { temperature: 78.4, burning: true, fuelRatio: 0.99, revision: 4 },
+  };
+  now = 1_100;
+  system.syncSnapshots([campfire, burningHay], 1_100, 1_100);
+  now = 1_230;
+  stepActorFrame(system, 0.1, 0.6);
+
+  assert.equal(hayLight.targetIntensity, 1, '烧起来之后光要跟着火一起亮');
+  assert.equal(transforms.readParam(hayProxyId, PARAM_POINT_LIGHT_INTENSITY), 1);
   system.dispose();
 });
 

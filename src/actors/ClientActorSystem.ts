@@ -99,6 +99,10 @@ import {
   FireVisualComponent,
 } from './components/FireVisualComponent';
 import {
+  POINT_LIGHT_COMPONENT,
+  PointLightComponent,
+} from './components/PointLightComponent';
+import {
   LOCAL_DERIVED_ACTOR_COMPONENT,
   LocalDerivedActorComponent,
 } from './components/LocalDerivedActorComponent';
@@ -110,6 +114,7 @@ import {
 import { RenderInstanceBuffer } from '../render/RenderInstanceBuffer';
 import { RenderProxyTable } from '../render/RenderProxyTable';
 import { modelBuildsFireVisual } from '../render/renderModelFacts';
+import { resolvePointLightDesc } from '../render/RenderPointLights';
 import {
   createArchetypeTable,
   PROP_FLOAT_STRIDE,
@@ -1127,6 +1132,11 @@ export class ClientActorSystem implements SceneFrameSystem {
       waterMotion: archetype.components.buoyancy
         ? 'hull'
         : (archetype.components.cargo ? 'cargo' : undefined),
+      // 灯的样子（颜色、半径、闪烁）同样是 spawn 时的一次性事实；每帧过边界的
+      // 只有「亮不亮」。位置渲染侧自己从 transform SoA 读，不必再递一遍。
+      pointLight: archetype.components.pointLight
+        ? resolvePointLightDesc(archetype.components.pointLight)
+        : undefined,
     }));
     // proxy 已经占了一个槽位，但要到 addActor 之后才由 RenderProxyComponent 的
     // 生命周期负责回收。这中间任何一步抛出（例如原型声明了 temperature 却没装上
@@ -1159,6 +1169,14 @@ export class ClientActorSystem implements SceneFrameSystem {
       if (modelBuildsFireVisual(archetype.components.render.model)) {
         const emitter = actor.getComponent(HEAT_EMITTER_COMPONENT) as HeatEmitterComponent | undefined;
         actor.addComponent(new FireVisualComponent(emitter?.enabled ? 1 : 0));
+      }
+      if (archetype.components.pointLight) {
+        // 有火焰的东西由火焰说了算——没点着的篝火不该发光；没有火焰的（提灯、
+        // 结晶）用配置里那个静态开关。之后的开关跟着快照走，见 applySnapshot。
+        const fire = actor.getComponent(FIRE_VISUAL_COMPONENT) as FireVisualComponent | undefined;
+        actor.addComponent(new PointLightComponent(
+          fire ? fire.targetIntensity : (archetype.components.pointLight.enabled ? 1 : 0),
+        ));
       }
       this.world.addActor(actor);
       assembled = true;
@@ -1259,6 +1277,9 @@ export class ClientActorSystem implements SceneFrameSystem {
       }
       const fire = actor.getComponent(FIRE_VISUAL_COMPONENT) as FireVisualComponent | undefined;
       if (fire) fire.targetIntensity = snapshot.thermal.burning ? 1 : 0;
+      // 会烧的发光物件（篝火、干草堆）跟着火走：火灭了，地上的光晕也要跟着灭。
+      const light = actor.getComponent(POINT_LIGHT_COMPONENT) as PointLightComponent | undefined;
+      if (fire && light) light.targetIntensity = fire.targetIntensity;
     }
     if (snapshot.container) {
       // 容器是纯权威状态：内容、谁开着、开了几个，全跟随快照。别人存进去的东西

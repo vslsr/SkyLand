@@ -6,6 +6,7 @@ import type {
   ActorArchetypeDefinition,
   ActorRenderDefinition,
 } from '../scenes/data/SceneDefinition';
+import type { PointLightDesc } from './RenderPointLights';
 import type { RenderInstanceBuffer } from './RenderInstanceBuffer';
 import type { RenderTransformBuffer } from './RenderTransformBuffer';
 
@@ -78,6 +79,17 @@ export interface MeshProxyDesc {
    * 没有海的地图上渲染世界会忽略它。
    */
   readonly waterMotion?: 'hull' | 'cargo';
+  /**
+   * 这个 proxy 要不要点亮周围，以及那盏灯长什么样。
+   *
+   * 颜色、半径、闪烁幅度都是**建立时的一次性事实**（来自 Actor 原型的
+   * `pointLight` 配置），所以照 `render` 的先例走这里；每帧过边界的只有
+   * 「亮不亮」那一个标量（`PARAM_POINT_LIGHT_INTENSITY`）。
+   *
+   * 光心位置也不在这里：它就是这个 proxy 的世界坐标抬高 `heightOffset`，
+   * 而世界坐标每帧本来就在 transform SoA 里，渲染侧自己读得到。
+   */
+  readonly pointLight?: PointLightDesc;
 }
 
 export interface GuidePathStyle {

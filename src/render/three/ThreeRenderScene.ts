@@ -54,6 +54,7 @@ import {
 import type { RenderTransform, RenderTransformBuffer } from '../RenderTransformBuffer';
 import { PARAM_SLIME_SPEED, PARAM_TEMPERATURE } from '../RenderVisualParams';
 import { ThreeFireVisual } from './ThreeFireVisual';
+import { ThreePointLightVisual } from './ThreePointLightVisual';
 import { ThreeGuidePathVisual } from './ThreeGuidePathVisual';
 import { ThreeHybridSlimeVisual } from './ThreeHybridSlimeVisual';
 import { ThreeAbilityLabVisual } from './ThreeAbilityLabVisual';
@@ -133,6 +134,20 @@ export class ThreeRenderScene implements RenderScene {
   private hoverHelper?: THREE.BoxHelper;
   /** 渲染世界自己的表现系统。它们只认识 ProxyId，不认识 Actor。 */
   private readonly fireVisual = new ThreeFireVisual();
+  /**
+   * 篝火与灯把周围点亮的那一半。它写的是**全场共享的环境 uniform**，
+   * 而不是某个 proxy 的 rig——地面、草叶、别的物件都要被同一堆火染暖。
+   */
+  private readonly pointLights = new ThreePointLightVisual();
+  /**
+   * 上一帧的机位，`beforeRender` 抄下来的。
+   *
+   * 点光源要按「离视点多近」挑，而 `updateVisuals` 手上没有相机——相机是
+   * 渲染循环自己的东西，它只在 `beforeRender` 那一步递进来。差的这一帧对
+   * 「最近的四盏是哪四盏」没有可见影响：换选中的那一瞬间，被换掉的那盏本来
+   * 就在半径边缘。
+   */
+  private readonly viewPosition = new THREE.Vector3();
   /** proxyId → 引导路径表现。只有引导 Actor 有，所以用 Map 而不是按槽位的数组。 */
   private readonly guidePaths = new Map<ProxyId, ThreeGuidePathVisual>();
   /** 样式在 spawn 时给定，实体等第一条带路点的命令到了再建——GuidePath 至少要 2 个路点。 */
@@ -241,6 +256,7 @@ export class ThreeRenderScene implements RenderScene {
       proxy.markers.setTemperatureVisible(this.temperatureMarkersVisible);
     }
     if (desc.guidePath) this.guidePathStyles.set(proxy.id, desc.guidePath);
+    if (desc.pointLight) this.pointLights.register(proxy.id, desc.pointLight);
     if (desc.render?.model === 'line-art-pbf-slime' && model.pbfSlimeVisualRig) {
       this.slimeVisuals.set(
         proxy.id,
@@ -352,6 +368,7 @@ export class ThreeRenderScene implements RenderScene {
     if (!proxy) return;
     this.proxies[id] = undefined;
     this.fireVisual.forget(id);
+    this.pointLights.forget(id);
     if (this.selectedInteractionProxy === id) this.selectedInteractionProxy = NULL_PROXY_ID;
     // 引导路径先摘：它的子树挂在 visualRoot 下，要赶在 disposeSubtree 之前
     // 自己收走（GuidePath 还持有一份共享光晕纹理的引用计数）。
@@ -487,6 +504,15 @@ export class ThreeRenderScene implements RenderScene {
     for (const drop of this.dropRolls.values()) drop.update(transforms);
     for (const lid of this.containerLids.values()) lid.update(transforms, deltaSeconds);
     this.fireVisual.update(live, transforms, deltaSeconds, elapsedSeconds);
+    // 光紧跟着火焰：两者读的是同一帧的字节，用的是同一条平滑时间常数，
+    // 所以火苗矮下去的同时地面上的光晕也跟着收。
+    this.pointLights.update(
+      transforms,
+      deltaSeconds,
+      elapsedSeconds,
+      this.viewPosition,
+      this.environment.runtime,
+    );
     for (const proxy of live) {
       proxy.markers.setTemperature(transforms.readParam(proxy.id, PARAM_TEMPERATURE));
     }
@@ -760,6 +786,9 @@ export class ThreeRenderScene implements RenderScene {
   public beforeRender(renderer: THREE.WebGLRenderer, camera: THREE.Camera): void {
     this.setGuidePathResolution(renderer.domElement.width, renderer.domElement.height);
     this.faceCameras(camera);
+    // 下一帧挑点光源要用。相机没有父节点（渲染循环直接摆它的 position），
+    // 所以本地坐标就是世界坐标，不必展开一次世界矩阵。
+    this.viewPosition.copy(camera.position);
   }
 
   /** 让所有世界 UI 正对相机。 */
@@ -775,6 +804,7 @@ export class ThreeRenderScene implements RenderScene {
 
   public dispose(): void {
     this.#disposeHoverHelper();
+    this.pointLights.dispose();
     this.buildPreview.dispose();
     this.highCountBatches.dispose();
     this.fruitBatches.dispose();

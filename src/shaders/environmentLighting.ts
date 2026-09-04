@@ -114,3 +114,69 @@ export const ENVIRONMENT_LIGHTING_GLSL = /* glsl */ `
   ${CLOUD_SHADOW_GLSL}
   ${SCATTERED_FOG_GLSL}
 `;
+
+/**
+ * 同时参与照明的动态点光源上限。
+ *
+ * 这是一条**大世界约束**而不是性能微调：篝火是可建造的固定物件，玩家想放几个
+ * 就有几个，而着色器里的循环次数必须与世界里的火堆数无关。渲染侧每帧只挑离
+ * 视点最近的这几盏写进 uniform（见 `ThreePointLightVisual`），其余的既不占
+ * uniform 也不进循环。
+ */
+export const MAX_ENVIRONMENT_POINT_LIGHTS = 4;
+
+/**
+ * 动态点光源的 uniform。
+ *
+ * 和半球染色、云影一样是**全场景一份**的共享状态：填充材质与草叶各自声明一遍，
+ * 取的是 `SceneEnvironmentRuntime` 里同一批对象，所以渲染侧写一次、当帧全场生效。
+ *
+ * `uPointLightFalloff` 打包成 vec2 而不是两个数组：半径与强度总是一起读，
+ * 一个 vec2 少一次 uniform 上传，也少一处「改了一个忘了改另一个」。
+ */
+export const POINT_LIGHT_UNIFORMS_GLSL = /* glsl */ `
+  uniform vec3 uPointLightPosition[${MAX_ENVIRONMENT_POINT_LIGHTS}];
+  uniform vec3 uPointLightColor[${MAX_ENVIRONMENT_POINT_LIGHTS}];
+  uniform vec3 uPointLightEdgeColor[${MAX_ENVIRONMENT_POINT_LIGHTS}];
+  /** x = 半径（米），y = 这一帧的强度（已含闪烁与白昼衰减）；y 为 0 表示这一格是空的。 */
+  uniform vec2 uPointLightFalloff[${MAX_ENVIRONMENT_POINT_LIGHTS}];
+`;
+
+/**
+ * 点光源照明，照搬参考项目壁炉那一段的方法（`index.html` 的 FILL 片元着色器）。
+ *
+ * 三处照抄不是随手写的，它们一起构成那种「火边一切转暖」的线稿观感：
+ *
+ * - **衰减留一条线性尾巴**（`t*t*0.78 + t*0.22`）。纯平方衰减在半径边缘会切出
+ *   一圈可见的硬边；那条尾巴让光晕在草地上化开。
+ * - **近暖远深的双色**。近处取 `uPointLightColor`、边缘取 `uPointLightEdgeColor`，
+ *   火光因此有炭火的色阶，而不是一团单色的橙。
+ * - **直射之外还有一份漫反射兜底**（`bounce`）。背对火的面不该是纯黑——参考项目
+ *   靠它让屋里背光的家具也浮出轮廓。
+ *
+ * 光色是**加上去的，不乘反照率**：参考项目就是这么做的，纸面本色的地面与物件
+ * 因此会一起被染暖，这正是线稿风格想要的效果，而不是物理正确的漫反射。
+ *
+ * 闪烁与白昼衰减不在这里：它们是**逐光源**而不是逐像素的量，渲染侧折进强度里
+ * 一次算完（见 `ThreePointLightVisual`），着色器少两个 uniform、少一串 sin。
+ */
+export const POINT_LIGHT_GLSL = /* glsl */ `
+  vec3 pointLightRadiance(vec3 worldPosition, vec3 worldNormal) {
+    vec3 radiance = vec3(0.0);
+    for (int index = 0; index < ${MAX_ENVIRONMENT_POINT_LIGHTS}; index += 1) {
+      float strength = uPointLightFalloff[index].y;
+      // 空槽位与熄灭的火每帧都写 0，所以这一句就够，不需要另给一个 count。
+      if (strength <= 0.002) continue;
+      vec3 toLight = uPointLightPosition[index] - worldPosition;
+      float lightDistance = length(toLight);
+      float reach = clamp(1.0 - lightDistance / uPointLightFalloff[index].x, 0.0, 1.0);
+      float attenuation = reach * reach * 0.78 + reach * 0.22;
+      float facing = dot(worldNormal, toLight / max(lightDistance, 0.0001));
+      float direct = attenuation * smoothstep(-0.08, 0.45, facing) * 0.55;
+      float bounce = attenuation * 0.18 * (0.35 + 0.65 * smoothstep(-0.5, 0.3, facing));
+      radiance += mix(uPointLightEdgeColor[index], uPointLightColor[index], reach)
+        * strength * (direct + bounce);
+    }
+    return radiance;
+  }
+`;

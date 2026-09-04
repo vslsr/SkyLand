@@ -21,6 +21,15 @@
       "radius": 3.2,
       "enabled": true
     },
+    "pointLight": {
+      "color": "#ffb469",
+      "edgeColor": "#c2551c",
+      "radius": 7.5,
+      "intensity": 1.05,
+      "heightOffset": 0.42,
+      "flicker": 0.22,
+      "enabled": true
+    },
     "render": {
       "model": "line-art-campfire",
       "stoneColor": "#c8c0b2",
