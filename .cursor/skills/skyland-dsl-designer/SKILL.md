@@ -1,6 +1,6 @@
 ---
 name: skyland-dsl-designer
-description: Read, write, and implement SkyLand's `@` design-note DSL — the `@i` item, `@b` building-piece, `@w` tool/weapon and reserved `@e` entity entries used in doc/designer-*.md, their M/I/F/G/N/R, T/L, B/D fields, the `#design` placeholder, and how each field lands in config/items/item-catalog.json, a config/actors/*.actor.json buildPiece, or an item-use Ability. Use when a request quotes or asks for an `@i` / `@b` / `@w` entry, when adding an item, build piece, tool or weapon from a design note, or when extending the notation itself. For scene placement use skyland-scene-authoring; for new Components, Systems or replication use skyland-actor-component.
+description: Read, write, and implement SkyLand's `@` design-note DSL — the `@i` item, `@b` building-piece, `@w` tool/weapon and reserved `@e` entity entries used in doc/designer-*.md, their M/I/F/G/N/R, T/L, B/D and A (animation) fields, the `#design` placeholder, and how each field lands in config/items/item-catalog.json, a config/actors/*.actor.json buildPiece, an item-use Ability, or — for `A` — a procedural Visual under src/render/three. Use when a request quotes or asks for an `@i` / `@b` / `@w` entry, when adding an item, build piece, tool or weapon from a design note, or when extending the notation itself. For scene placement use skyland-scene-authoring; for new Components, Systems or replication use skyland-actor-component.
 ---
 
 # SkyLand Design-Note DSL
@@ -31,6 +31,7 @@ Work the landing tables in `doc/dsl-designer.md` in order and account for every 
 
 - `@i` → one entry in `config/items/item-catalog.json` (name/summary/`I`/`G`/`N`/`R`) plus one drop archetype `config/actors/<id>-pile.actor.json` carrying `M` as `components.render`. There is only one model: the held item is that drop archetype with collision, drop physics, lifetime and interaction stripped by `heldItemArchetype()`. Do not author a second held model.
 - `@b` → one `config/actors/<id>.actor.json` with a `buildPiece` Component. `T` picks `kind`, `L` becomes `slot`, `M` becomes `render`.
+- `A` → **code, not JSON.** It becomes a Visual under `src/render/three/`, driven by a visual param across the render boundary. Never look for a schema field to put it in.
 - `@w` → **no dedicated config exists.** A light tool (`B` empty or `0`) is today an `@i` with `category: "tool"` and `use.action: "tool"`. A heavy tool (`B` set) is an `@i` plus a `fixture` `@b`, the way 篝火 already is.
 
 Three rules that decide whether a request is data or architecture:
@@ -38,6 +39,19 @@ Three rules that decide whether a request is data or architecture:
 1. A field with a landing cell is **data**: write the JSON and stop.
 2. A field marked ❌ in `doc/dsl-designer.md` (`@b`'s `I`, all of `@w`'s `D`) needs a **new system**. Say so, scope the system, and do not fake it by overloading an existing field — `use.value` is harvest strength, not attack power.
 3. Adding a value to `category`, `use.action`, or `buildPiece.kind` is **extending the language**. Change the JSON Schema, the server validation, the client TypeScript types, the renderer or runtime that consumes it, and tests together.
+
+## Treat animation as procedural
+
+This project loads no art assets: `SkinnedMesh`, `AnimationMixer` and `GLTFLoader` are all zero. Every animation is code moving a part along a curve. So an `A` entry naming an action or an asset ("play the attack clip") cannot land — push it back and get a part, a pivot, a curve and an amount instead.
+
+Three rules decide whether an `A` entry is implementable:
+
+1. **Prefer a ratio to seconds.** Anything following a charge or a hold reads the same `[0, 1]` value the countdown ring reads, the way `src/player/chewAnimation.ts` does. Seconds drift out of sync with the ring; a ratio cannot.
+2. **Share one curve between parts that move together.** The player's chew wobble and the food shrinking read one module. Two copies drift and stop reading as a single event.
+3. **Trigger a one-shot with an incrementing revision, never a bool.** A bool that flips back between two frames is missed; a changed revision is not. The mushroom's snap-back rides `PARAM_ELASTIC_RELEASE_REVISION`.
+4. **Send the gameplay quantity, not the animation.** The chest sends "how many have it open"; the spring-damped lid angle is computed render-side. Replicating the angle itself pipes 10 Hz snapshot jitter straight into the visual.
+
+`纯表现` is the default and means only the acting player sees it — the chew wobble is invisible to everyone else because it is not replicated. An `A` marked `需复制` is asking for a replication channel; make that cost explicit rather than assuming it is free.
 
 ## Fill the gaps the notation leaves
 

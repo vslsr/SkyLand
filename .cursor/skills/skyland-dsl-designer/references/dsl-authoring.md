@@ -31,6 +31,7 @@ Use this reference when writing a new entry into a design note, or when reviewin
 | `G` | One of 材料 / 补给 / 投掷物 / 弹药 / 价值货物 / 工具 | Inventing a category; the enum is closed |
 | `N` | Stack limit | Forgetting that a `slotCost: 0` item does not consume backpack slots |
 | `R` | Durability, or `0` | Expecting durability to be consumed — no system does yet |
+| `A` | Which states move, which part, driven by what | Naming an action or asset; there is no skeletal animation |
 
 Also decide, though the notation does not ask: the kebab-case `id`, the `tint`, `slotCost`, and whether it is `holdable`.
 
@@ -43,6 +44,7 @@ Also decide, though the notation does not ask: the kebab-case `id`, the `tint`, 
 | `M` | Model | Giving a fixture a foundation/wall model — the catalog rejects it |
 | `L` | Which fixtures share a cell | Asking for more than one of the same slot in a cell; `slot` is two-state |
 | `I` | Which item enters build mode | **Not implemented.** The build bar comes from the scene's `gameplay.runtimeActorArchetypes` |
+| `A` | Placement, removal, and any working animation | Forgetting that a fixture with a function (fire, lid, recoil) needs a `工作`/`交互` state |
 
 Also decide: `surface` (`floating` / `static` / `any`), `reach`, `cost`, and for floating pieces `mass`; for a floating foundation also `buoyancy` and `hull`.
 
@@ -58,6 +60,7 @@ Also decide: `surface` (`floating` / `static` / `any`), `reach`, `cost`, and for
 | `D.CD` | Use frequency | No landing; item use has `holdSeconds`, not a cooldown |
 | `D.Effect` | On-hit effect | No landing |
 | `D.EQS` | How targets are selected | No landing; only `findHarvestablePropNear` exists |
+| `A` | Charge (ratio-driven), fire (one-shot), cooldown | Putting the charge arc in `EQS`; the arc is presentation, `EQS` is the hit test |
 
 Writing a `@w` with a populated `D` is a request for new systems. Say that plainly in the implementation plan instead of approximating it with `use.value`, which is harvest strength.
 
@@ -69,4 +72,5 @@ Before implementing an entry, confirm:
 2. Does each cross-reference (`I`, `B`, `cost.itemType`, `L` entries) resolve to something that exists?
 3. Does `F` / `D` ask for a verb, category, or piece kind that the closed enums already contain? If not, this change extends the language, not the data.
 4. Is the entry a heavy tool? Then it needs **two** entries — an `@i` and a `@b` — not one.
-5. Do the numbers fall inside the schema bounds (`stackLimit` 1–100000, `slotCost` 0–3, `durability` 0–1000, `reach` 1–16, `holdSeconds` 0–10, `cost.quantity` 1–99)?
+5. Does every `A` state name a part, a pivot, a curve and an amount — and one of `比例` / `一次性` / `持续` / `目标值` as its driver? A ratio-driven entry must say who supplies the ratio.
+6. Do the numbers fall inside the schema bounds (`stackLimit` 1–100000, `slotCost` 0–3, `durability` 0–1000, `reach` 1–16, `holdSeconds` 0–10, `cost.quantity` 1–99)?
