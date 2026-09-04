@@ -99,7 +99,7 @@
   },
   "gameplay": {
     "playerActor": {
-      "archetype": "player-slime"
+      "archetype": "pbf-slime"
     },
     "bounds": {
       "minimumX": -16,
