@@ -6,8 +6,11 @@ export const INVENTORY_COMPONENT = 'inventory';
 
 export { DEFAULT_SLOT_CAPACITY };
 
-/** 快捷栏格数。原型没写时的默认值，界面按这个数画底部那一排圈。 */
-export const DEFAULT_HOTBAR_CAPACITY = 4;
+/** 物品栏格数。原型没写时的默认值；数字键 1-9 一格一个，所以上限是 9。 */
+export const DEFAULT_HOTBAR_CAPACITY = 9;
+
+/** 数字键能寻址的最大格数。再多的格子没有键可以切过去，配置也就没有意义。 */
+export const MAXIMUM_HOTBAR_CAPACITY = 9;
 
 /** 空手。`activeHotbarIndex` 取这个值时嘴上不挂任何手持物。 */
 export const NO_HOTBAR_SLOT = -1;
@@ -20,20 +23,26 @@ function positiveInteger(value, fallback) {
   return Number.isInteger(number) && number > 0 ? number : fallback;
 }
 
+function requestedQuantity(value) {
+  return Math.max(0, Math.floor(Number(value) || 0));
+}
+
 /**
- * 角色背包与快捷栏。
+ * 角色随身携带的两样东西：**背包**和**物品栏**。
  *
- * 内容记在 `ItemLedger` 上（和容器共用同一套堆叠与货位规则）；这里额外owns
- * 一件容器没有的东西——**快捷栏**。
+ * 两者装的是同一种东西、守的是同一套堆叠规则，区别只有「谁拿得出来用」：
  *
- * 快捷栏格子里存的是 `itemType` 而不是某一堆的下标：
+ * - 背包（`ledger`）按货位记账，是收纳；
+ * - 物品栏（`hotbar`）是一条**特殊的背包**：固定格数、一格一摞、数字键直接寻址，
+ *   拿在手上的永远是其中一格。
  *
- * - 界面是自动分类排序的，没有稳定的「第几格」可以引用；
- * - 两个玩家同时掏同一个箱子时，下标会错位，itemType 不会；
- * - 一种物品用光之后配置仍然留在格子上，补货回来就还在原位。
+ * 配置物品栏因此是一次**转移**，不是一个引用：`assignHotbarSlot` 把那一摞从背包
+ * 里搬进物品栏那一格，背包里就不再有它了。做成引用（物品栏只记 itemType、数量
+ * 仍算在背包账上）省一次搬运，代价是两个地方画同一摞货、数量同步变化，玩家没法
+ * 理解那是一件东西；把「装进物品栏」和「放回背包」写成两次真实的转移之后，界面
+ * 上看到几个就是几个。
  *
- * 手上到底有没有东西，由「这一格配置的物品在账本里还有没有」决定，
- * 见 `heldItemType`。权威数据只在房间服务端变化，客户端靠 `applySnapshot` 跟随。
+ * 权威数据只在房间服务端变化，客户端靠 `applySnapshot` 跟随。
  */
 export class InventoryComponent extends ActorComponent {
   constructor(definition = {}, catalog = itemCatalog) {
@@ -43,19 +52,25 @@ export class InventoryComponent extends ActorComponent {
       positiveInteger(definition.slotCapacity, DEFAULT_SLOT_CAPACITY),
       catalog,
     );
-    this.hotbarCapacity = positiveInteger(definition.hotbarCapacity, DEFAULT_HOTBAR_CAPACITY);
+    this.hotbarCapacity = Math.min(
+      MAXIMUM_HOTBAR_CAPACITY,
+      positiveInteger(definition.hotbarCapacity, DEFAULT_HOTBAR_CAPACITY),
+    );
     /**
      * 交互键短按是放下、长按是收回背包，这里是两者的分界。
      *
-     * 它来自原型配置而不是常量：客户端画的那圈进度和服务端判定用的是同一个数，
-     * 转盘转满那一刻就是服务端认定长按那一刻。两端各写一个数就会出现「转盘满了
+     * 它来自原型配置而不是常量：客户端画的那圈倒计时和服务端判定用的是同一个数，
+     * 圈满那一刻就是服务端认定长按那一刻。两端各写一个数就会出现「圈满了
      * 但东西掉在了地上」。
      */
     this.stowHoldSeconds = Number.isFinite(Number(definition.stowHoldSeconds))
       && Number(definition.stowHoldSeconds) > 0
       ? Number(definition.stowHoldSeconds)
       : DEFAULT_STOW_HOLD_SECONDS;
-    /** @type {(string | null)[]} 每格配置的物品种类；null 是没配置过的空格。 */
+    /**
+     * @type {({ itemType: string, quantity: number } | null)[]}
+     * 物品栏每格实际持有的那一摞；null 是空格。
+     */
     this.hotbar = new Array(this.hotbarCapacity).fill(null);
     this.activeHotbarIndex = NO_HOTBAR_SLOT;
     this.revision = 0;
@@ -74,25 +89,43 @@ export class InventoryComponent extends ActorComponent {
   get isFull() { return this.ledger.isFull; }
 
   /**
-   * 当前真正握在手上的物品种类。
+   * 当前握在手上的物品种类；空手时是 undefined。
    *
-   * 配置还在、货已经用光时是 undefined：那一格在界面上仍然记着这件东西，
-   * 但手上是空的，补货回来自动恢复，不需要玩家再配一次。
+   * 手持就是「物品栏选中格里那一摞」——不再需要「配置还在但货用光了」这种中间
+   * 态：一摞用光，那一格就空了，物品栏是账本而不是一张配置表。
    */
   get heldItemType() {
-    const itemType = this.hotbar[this.activeHotbarIndex] ?? null;
-    if (!itemType || this.quantityOf(itemType) === 0) return undefined;
-    return itemType;
+    return this.hotbar[this.activeHotbarIndex]?.itemType;
   }
 
+  /** 手上那一摞还剩几个；空手时是 0。 */
+  get heldQuantity() {
+    return this.hotbar[this.activeHotbarIndex]?.quantity ?? 0;
+  }
+
+  /** 背包里有多少。物品栏里的那些不算在内，它们已经不在背包里了。 */
   quantityOf(itemType) { return this.ledger.quantityOf(itemType); }
 
+  /** 物品栏里有多少（所有格子合计）。 */
+  hotbarQuantityOf(itemType) {
+    let total = 0;
+    for (const slot of this.hotbar) if (slot?.itemType === itemType) total += slot.quantity;
+    return total;
+  }
+
+  /** 身上一共有多少：背包 + 物品栏。界面上「我还有几个」问的是这个数。 */
+  totalQuantityOf(itemType) {
+    return this.quantityOf(itemType) + this.hotbarQuantityOf(itemType);
+  }
+
+  /** 收进背包。拾取、容器取出、物品栏放回都走这条。 */
   add(itemType, quantity) {
     const accepted = this.ledger.add(itemType, quantity);
     if (accepted > 0) this.revision += 1;
     return accepted;
   }
 
+  /** 从背包里取出。物品栏那几格不受影响，见 `consumeHotbarSlot`。 */
   remove(itemType, quantity) {
     const removed = this.ledger.remove(itemType, quantity);
     if (removed > 0) this.revision += 1;
@@ -100,42 +133,122 @@ export class InventoryComponent extends ActorComponent {
   }
 
   clear() {
-    if (!this.ledger.clear()) return false;
+    const hadHotbar = this.hotbar.some((slot) => slot !== null);
+    const cleared = this.ledger.clear();
+    if (!cleared && !hadHotbar) return false;
+    this.hotbar.fill(null);
+    this.activeHotbarIndex = NO_HOTBAR_SLOT;
     this.revision += 1;
     return true;
   }
 
+  /** 序号落在物品栏里才算数；越界的数字键什么都不做，而不是绕回第一格。 */
+  isHotbarSlot(slotIndex) {
+    return Number.isInteger(slotIndex) && slotIndex >= 0 && slotIndex < this.hotbarCapacity;
+  }
+
   /**
-   * 把一种物品配置到快捷栏某格；`itemType` 为 null 时清空该格。
+   * 把背包里的一种物品装配到物品栏某格；`itemType` 为 null 时把那一格收回背包。
    *
-   * 同一种物品只允许占一格：配置到新格时先把旧格清掉，否则两格画的是同一堆货，
-   * 数量还会同步变化，玩家没法理解那是一件东西。
+   * 这是一次真实的转移，所以顺序很重要：**先把目标格原有的那一摞放回背包**，
+   * 放不下就整件事不做——放不下还硬装，那一摞就凭空消失了。
    *
-   * @returns 配置是否真的变了。
+   * 同一种物品只占一格：它已经在别的格子上时，直接把那一格整摞挪过来，而不是
+   * 再从背包里抽一摞出来（背包里可能根本没有了）。
+   *
+   * @returns 物品栏是否真的变了。
    */
   assignHotbarSlot(slotIndex, itemType) {
-    if (!Number.isInteger(slotIndex) || slotIndex < 0 || slotIndex >= this.hotbarCapacity) {
-      return false;
-    }
+    if (!this.isHotbarSlot(slotIndex)) return false;
     const next = typeof itemType === 'string' && this.catalog.has(itemType) ? itemType : null;
-    const previousIndex = next ? this.hotbar.indexOf(next) : -1;
-    if (previousIndex === slotIndex && this.hotbar[slotIndex] === next) return false;
-    if (previousIndex >= 0) this.hotbar[previousIndex] = null;
-    this.hotbar[slotIndex] = next;
+    if (next === null) return this.clearHotbarSlot(slotIndex);
+
+    const sourceIndex = this.hotbar.findIndex((slot) => slot?.itemType === next);
+    if (sourceIndex === slotIndex) return false;
+    if (sourceIndex >= 0) return this.swapHotbarSlots(sourceIndex, slotIndex);
+
+    const definition = this.catalog.get(next);
+    const available = Math.min(this.ledger.quantityOf(next), definition.stackLimit);
+    if (available === 0) return false;
+    // 腾格子：原有那一摞先回背包，回不去就放弃这次装配。
+    if (!this.clearHotbarSlot(slotIndex, { allowEmpty: true })) return false;
+    const moved = this.ledger.remove(next, available);
+    if (moved === 0) return false;
+    this.hotbar[slotIndex] = { itemType: next, quantity: moved };
     this.revision += 1;
     return true;
   }
 
   /**
-   * 切到快捷栏某一格；再按一次当前格，或传 `NO_HOTBAR_SLOT`，都是收手。
+   * 把物品栏某格整摞放回背包。
+   *
+   * 背包收不下就原样留在物品栏：这时把它删掉等于凭空销毁，留着让玩家自己腾地方
+   * 才是能理解的结果。
+   *
+   * @param {{ allowEmpty?: boolean }} [options] `allowEmpty` 时空格也算成功，
+   *   供 `assignHotbarSlot` 用「腾出这一格」这一个语义调用。
+   * @returns 那一格现在是不是空的（或者说这次收回成没成）。
+   */
+  clearHotbarSlot(slotIndex, { allowEmpty = false } = {}) {
+    if (!this.isHotbarSlot(slotIndex)) return false;
+    const slot = this.hotbar[slotIndex];
+    if (!slot) return allowEmpty;
+    const accepted = this.ledger.add(slot.itemType, slot.quantity);
+    if (accepted !== slot.quantity) {
+      // 整摞放不回去就一个都不放：先撤销刚刚塞进去的那些，那一摞原样留在物品栏。
+      this.ledger.remove(slot.itemType, accepted);
+      return false;
+    }
+    this.hotbar[slotIndex] = null;
+    this.revision += 1;
+    return true;
+  }
+
+  /** 两格对调（拖拽时把一格拖到另一格上）。 */
+  swapHotbarSlots(fromIndex, toIndex) {
+    if (!this.isHotbarSlot(fromIndex) || !this.isHotbarSlot(toIndex)) return false;
+    if (fromIndex === toIndex) return false;
+    const from = this.hotbar[fromIndex];
+    const to = this.hotbar[toIndex];
+    if (!from && !to) return false;
+    this.hotbar[fromIndex] = to;
+    this.hotbar[toIndex] = from;
+    this.revision += 1;
+    return true;
+  }
+
+  /**
+   * 从物品栏某格扣掉几个；扣空的格子直接空出来。
+   *
+   * 使用一次投掷物、把手上那件丢到地上，走的都是这条：物品栏是账本，手上那件
+   * 不额外记一份，所以「用掉一个」就是这一格减一。
+   *
+   * @returns 实际扣掉的数量。
+   */
+  consumeHotbarSlot(slotIndex, quantity = 1) {
+    if (!this.isHotbarSlot(slotIndex)) return 0;
+    const slot = this.hotbar[slotIndex];
+    const wanted = requestedQuantity(quantity);
+    if (!slot || wanted === 0) return 0;
+    const taken = Math.min(wanted, slot.quantity);
+    slot.quantity -= taken;
+    if (slot.quantity === 0) this.hotbar[slotIndex] = null;
+    this.revision += 1;
+    return taken;
+  }
+
+  /** 手上那一摞扣掉几个。空手时什么都不做。 */
+  consumeHeldItem(quantity = 1) {
+    return this.consumeHotbarSlot(this.activeHotbarIndex, quantity);
+  }
+
+  /**
+   * 切到物品栏某一格；再按一次当前格，或传 `NO_HOTBAR_SLOT`，都是收手。
    *
    * @returns 手持是否真的变了。
    */
   setActiveHotbarSlot(slotIndex) {
-    const next = Number.isInteger(slotIndex)
-      && slotIndex >= 0
-      && slotIndex < this.hotbarCapacity
-      && slotIndex !== this.activeHotbarIndex
+    const next = this.isHotbarSlot(slotIndex) && slotIndex !== this.activeHotbarIndex
       ? slotIndex
       : NO_HOTBAR_SLOT;
     if (next === this.activeHotbarIndex) return false;
@@ -144,22 +257,7 @@ export class InventoryComponent extends ActorComponent {
     return true;
   }
 
-  /** 把一种物品放上快捷栏并立刻握在手上；界面里点一下格子走的就是这条。 */
-  holdItemType(itemType) {
-    if (!this.catalog.has(itemType)) return false;
-    // 已经在栏上就直接切过去；没有就占用第一个空格，全满时覆盖当前手持那一格。
-    const firstEmpty = this.hotbar.indexOf(null);
-    const slotIndex = this.hotbar.indexOf(itemType) >= 0
-      ? this.hotbar.indexOf(itemType)
-      : (firstEmpty >= 0 ? firstEmpty : Math.max(0, this.activeHotbarIndex));
-    const assigned = this.assignHotbarSlot(slotIndex, itemType);
-    if (this.activeHotbarIndex === slotIndex) return assigned;
-    this.activeHotbarIndex = slotIndex;
-    if (!assigned) this.revision += 1;
-    return true;
-  }
-
-  /** 快捷栏往前/往后挪一格（手柄 LB/RB）。空栏时什么都不做。 */
+  /** 物品栏往前/往后挪一格（手柄 LB/RB）。空栏时什么都不做。 */
   cycleActiveHotbarSlot(direction) {
     const step = direction < 0 ? -1 : 1;
     if (this.hotbarCapacity === 0) return false;
@@ -173,18 +271,26 @@ export class InventoryComponent extends ActorComponent {
 
   snapshot() { return this.ledger.snapshot(); }
 
-  /** 快捷栏配置与选中格；和内容一起下发，只发给物主。 */
+  /**
+   * 物品栏内容与选中格；和背包一起下发，只发给物主。
+   *
+   * 每格带上数量，因为物品栏现在自己持有那一摞——只发 itemType 的话，客户端要
+   * 去背包账上找数量，而那里已经没有它了。
+   */
   hotbarSnapshot() {
-    return { slots: [...this.hotbar], activeIndex: this.activeHotbarIndex };
+    return {
+      slots: this.hotbar.map((slot) => (slot ? { ...slot } : null)),
+      activeIndex: this.activeHotbarIndex,
+    };
   }
 
   /**
-   * 客户端镜像：按快照重建内容与快捷栏。
+   * 客户端镜像：按快照重建背包与物品栏。
    *
-   * @param {Array<{itemType: string, quantity: number}>} entries
+   * @param {Array<{itemType: string, quantity: number}>} entries 背包内容
    * @param {number} [revision]
-   * @param {{slots: Array<string|null>, activeIndex: number}} [hotbar]
-   *   旧快照没有这一段时保持本地快捷栏不动，只更新内容。
+   * @param {{slots: Array<{itemType: string, quantity: number}|null>, activeIndex: number}} [hotbar]
+   *   没有这一段时保持本地物品栏不动，只更新背包。
    * @returns {boolean} 内容或 revision 是否真的变了，供界面决定要不要重画。
    */
   applySnapshot(entries, revision = this.revision, hotbar = undefined) {
@@ -194,17 +300,14 @@ export class InventoryComponent extends ActorComponent {
       const slots = Array.isArray(hotbar.slots) ? hotbar.slots : [];
       const next = new Array(this.hotbarCapacity).fill(null);
       for (let index = 0; index < this.hotbarCapacity; index += 1) {
-        const itemType = slots[index];
-        next[index] = typeof itemType === 'string' && this.catalog.has(itemType) ? itemType : null;
+        next[index] = this.sanitizeHotbarSlot(slots[index]);
       }
-      const activeIndex = Number.isInteger(hotbar.activeIndex)
-        && hotbar.activeIndex >= 0
-        && hotbar.activeIndex < this.hotbarCapacity
+      const activeIndex = this.isHotbarSlot(hotbar.activeIndex)
         ? hotbar.activeIndex
         : NO_HOTBAR_SLOT;
       changed = changed
         || activeIndex !== this.activeHotbarIndex
-        || next.some((itemType, index) => itemType !== this.hotbar[index]);
+        || next.some((slot, index) => !sameHotbarSlot(slot, this.hotbar[index]));
       this.hotbar = next;
       this.activeHotbarIndex = activeIndex;
     }
@@ -212,5 +315,18 @@ export class InventoryComponent extends ActorComponent {
     return changed;
   }
 
+  /** 快照里没登记的物品、数量为 0 的格子一律当成空格，不写坏本地物品栏。 */
+  sanitizeHotbarSlot(raw) {
+    const definition = raw ? this.catalog.get(raw.itemType) : undefined;
+    const quantity = requestedQuantity(raw?.quantity);
+    if (!definition || quantity === 0) return null;
+    return { itemType: definition.id, quantity: Math.min(quantity, definition.stackLimit) };
+  }
+
   matches(slots, pooled) { return this.ledger.matches(slots, pooled); }
+}
+
+function sameHotbarSlot(left, right) {
+  if (!left || !right) return left === right;
+  return left.itemType === right.itemType && left.quantity === right.quantity;
 }

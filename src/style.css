@@ -218,8 +218,8 @@ body.has-interaction-target .crosshair {
 }
 
 /*
- * 进度环。conic-gradient 从 12 点开始顺时针扫，--hold-progress 由控制器每帧写入；
- * 两端跑同一个 chargeRatio，所以扫满那一刻就是服务端判定满的那一刻。
+ * 圆形倒计时环。conic-gradient 从 12 点开始顺时针扫，--hold-progress 由控制器每帧
+ * 写入；两端跑同一个 holdRatio，所以扫满那一刻就是服务端激活那一刻。
  */
 .hold-progress__dial {
   display: grid;
@@ -237,7 +237,7 @@ body.has-interaction-target .crosshair {
   --hold-progress-color: rgba(79, 214, 149, 0.92);
 }
 
-.hold-progress[data-kind='charge'] {
+.hold-progress[data-kind='use'] {
   --hold-progress-color: rgba(201, 120, 104, 0.92);
 }
 
@@ -963,7 +963,6 @@ body.is-topdown .virtual-controls.is-desktop-debug {
 }
 
 .inventory__ledger,
-.inventory__note,
 .inventory__empty-notice,
 .inventory__hint {
   margin: 0;
@@ -974,23 +973,6 @@ body.is-topdown .virtual-controls.is-desktop-debug {
 
 .inventory__ledger:empty {
   display: none;
-}
-
-.inventory__section + .inventory__section {
-  padding-top: 18px;
-  margin-top: 18px;
-  border-top: 1px solid rgba(28, 26, 23, 0.16);
-}
-
-.inventory__section h3 {
-  margin: 0 0 10px;
-  color: #728562;
-  font-size: 9px;
-  letter-spacing: 0.16em;
-}
-
-.inventory__section .inventory__note {
-  margin-bottom: 10px;
 }
 
 .inventory__grid {
@@ -1074,11 +1056,6 @@ body.is-topdown .virtual-controls.is-desktop-debug {
 .inventory__cell[data-contraband="true"] {
   border-color: #8b4058;
   box-shadow: inset 0 0 0 1px rgba(139, 64, 88, 0.28);
-}
-
-.inventory__grid--pooled .inventory__cell {
-  min-height: 92px;
-  background: #f8f4ea;
 }
 
 @media (max-width: 720px) {
@@ -1199,12 +1176,6 @@ body.is-topdown .virtual-controls.is-desktop-debug {
     0 8px 16px rgba(58, 42, 22, 0.24);
 }
 
-/* 配置还在但货用光了：格子留着，画成灰的，补货回来自动亮起。 */
-.hotbar__slot[data-state='depleted'] .hotbar__figure,
-.hotbar__slot[data-state='depleted'] .hotbar__quantity {
-  opacity: 0.35;
-}
-
 .hotbar__figure {
   display: grid;
   place-items: center;
@@ -1241,24 +1212,40 @@ body.is-topdown .virtual-controls.is-desktop-debug {
 }
 
 /*
- * 使用蓄力与交互键长按共用同一圈进度，靠颜色区分。圈画在当前手持那一格上，
- * 因为两种按住说的都是「手上这件东西」。--hotbar-progress 由控制器每帧写入，
- * 两端跑同一个 chargeRatio，所以圈满那一刻就是服务端判定满的那一刻。
+ * 长按时盖在这一格上的圆形倒计时。
+ *
+ * 是一个真正的**环**，不是把方格底色填掉一角：倒计时说的是「还剩多少时间」，
+ * 环的周长天然是一条闭合的时间轴，扫回起点就是走完；一个被填掉一角的方块只说得出
+ * 「填了一些」。物品能力的长按激活与交互键长按共用同一个环，靠颜色区分。
+ *
+ * --hotbar-progress 由控制器每帧写入，两端跑同一个 holdRatio，所以环满那一刻就是
+ * 服务端激活那一刻。中间那个 mask 挖空的圆把它从饼图变成环，同时让底下的图标
+ * 仍然看得见——玩家要一直知道正在用的是哪件东西。
  */
-.hotbar__slot[data-progress='charge'],
-.hotbar__slot[data-progress='stow'] {
-  background-image: conic-gradient(
+.hotbar__dial {
+  position: absolute;
+  inset: 4px;
+  border-radius: 50%;
+  background: conic-gradient(
     var(--hotbar-progress-color) var(--hotbar-progress, 0%),
-    transparent var(--hotbar-progress, 0%)
+    rgba(138, 98, 56, 0.16) var(--hotbar-progress, 0%)
   );
+  /* 环宽 5px：再细在 52px 的格子上看不清，再粗就盖住图标了。 */
+  mask: radial-gradient(circle, transparent 0 calc(50% - 5px), #000 calc(50% - 5px));
+  -webkit-mask: radial-gradient(circle, transparent 0 calc(50% - 5px), #000 calc(50% - 5px));
+  pointer-events: none;
 }
 
-.hotbar__slot[data-progress='charge'] {
-  --hotbar-progress-color: rgba(201, 120, 104, 0.5);
+.hotbar__dial[hidden] {
+  display: none;
+}
+
+.hotbar__slot[data-progress='use'] {
+  --hotbar-progress-color: rgba(201, 120, 104, 0.92);
 }
 
 .hotbar__slot[data-progress='stow'] {
-  --hotbar-progress-color: rgba(79, 214, 149, 0.5);
+  --hotbar-progress-color: rgba(79, 214, 149, 0.92);
 }
 
 /*
@@ -1447,13 +1434,97 @@ body.is-topdown .virtual-controls.is-desktop-debug {
   background: transparent;
 }
 
-.inventory__cell.is-held {
-  border-color: rgba(138, 98, 56, 0.9);
-  box-shadow: inset 0 0 0 1px rgba(138, 98, 56, 0.5);
-}
-
 .inventory__badge--pooled {
   opacity: 0.62;
+}
+
+/* ---- 背包里的那条物品栏 -------------------------------------------------- */
+
+/*
+ * 物品栏在页脚而不是正文里：正文会滚动，而这一条是拖拽的固定落点——滚走了就没法
+ * 把东西拖过来。它画的是物品栏**自己持有**的那一摞，所以「装配之后包里少了、
+ * 这条上多了」在画面上是一次看得见的搬运，而不是一个悄悄生效的设置。
+ */
+.inventory-hotbar {
+  display: grid;
+  gap: 6px;
+  width: 100%;
+  padding-top: 10px;
+  border-top: 1px dashed rgba(138, 98, 56, 0.42);
+}
+
+.inventory-hotbar[hidden] {
+  display: none;
+}
+
+.inventory-hotbar__hint {
+  margin: 0;
+  font-size: 11px;
+  color: rgba(28, 26, 23, 0.62);
+}
+
+.inventory-hotbar__track {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.inventory-hotbar__slot {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 46px;
+  height: 46px;
+  background: rgba(253, 251, 246, 0.72);
+  border: 1px solid rgba(138, 98, 56, 0.42);
+  cursor: grab;
+}
+
+.inventory-hotbar__slot[data-state='empty'] {
+  background: rgba(253, 251, 246, 0.32);
+  border-style: dashed;
+  cursor: default;
+}
+
+/* 拿在手上的那一格：和屏幕底部那条用同一套记号，两处说的是同一格。 */
+.inventory-hotbar__slot[data-active='true'] {
+  border-color: rgba(138, 98, 56, 0.95);
+  border-width: 2px;
+  box-shadow: inset 0 0 0 1px rgba(214, 158, 74, 0.35);
+}
+
+.inventory-hotbar__shortcut {
+  position: absolute;
+  top: 2px;
+  left: 4px;
+  font-size: 9px;
+  font-weight: 700;
+  color: rgba(28, 26, 23, 0.45);
+}
+
+.inventory-hotbar__figure {
+  display: grid;
+  place-items: center;
+}
+
+.inventory-hotbar__icon {
+  width: 24px;
+  height: 24px;
+}
+
+.inventory-hotbar__quantity {
+  position: absolute;
+  right: 3px;
+  bottom: 2px;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.inventory-hotbar__quantity[hidden] {
+  display: none;
 }
 
 /* ---- 容器界面 ------------------------------------------------------------ */

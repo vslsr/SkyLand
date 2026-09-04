@@ -15,8 +15,8 @@
       "use": {
         "action": "throw",
         "input": "primary",
-        "mode": "charge",
-        "chargeSeconds": 0.7,
+        "mode": "hold",
+        "holdSeconds": 0.7,
         "value": 60
       }
     },
@@ -32,8 +32,8 @@
       "use": {
         "action": "throw",
         "input": "primary",
-        "mode": "charge",
-        "chargeSeconds": 0.7,
+        "mode": "hold",
+        "holdSeconds": 0.7,
         "value": 45
       }
     },
@@ -49,8 +49,8 @@
       "use": {
         "action": "throw",
         "input": "primary",
-        "mode": "charge",
-        "chargeSeconds": 0.7,
+        "mode": "hold",
+        "holdSeconds": 0.7,
         "value": 70
       }
     },
@@ -66,8 +66,8 @@
       "use": {
         "action": "throw",
         "input": "primary",
-        "mode": "charge",
-        "chargeSeconds": 0.7,
+        "mode": "hold",
+        "holdSeconds": 0.7,
         "value": 55
       }
     },
@@ -83,8 +83,8 @@
       "use": {
         "action": "throw",
         "input": "primary",
-        "mode": "charge",
-        "chargeSeconds": 0.7,
+        "mode": "hold",
+        "holdSeconds": 0.7,
         "value": 55
       }
     },
@@ -100,8 +100,8 @@
       "use": {
         "action": "throw",
         "input": "primary",
-        "mode": "charge",
-        "chargeSeconds": 0.6,
+        "mode": "hold",
+        "holdSeconds": 0.6,
         "value": 60
       }
     },
@@ -117,8 +117,8 @@
       "use": {
         "action": "throw",
         "input": "primary",
-        "mode": "charge",
-        "chargeSeconds": 0.6,
+        "mode": "hold",
+        "holdSeconds": 0.6,
         "value": 65
       }
     },
@@ -164,8 +164,8 @@
       "use": {
         "action": "throw",
         "input": "primary",
-        "mode": "charge",
-        "chargeSeconds": 1.1,
+        "mode": "hold",
+        "holdSeconds": 1.1,
         "value": 90
       }
     },
@@ -181,8 +181,8 @@
       "use": {
         "action": "throw",
         "input": "primary",
-        "mode": "charge",
-        "chargeSeconds": 0.9,
+        "mode": "hold",
+        "holdSeconds": 0.9,
         "value": 85
       }
     },
@@ -198,8 +198,8 @@
       "use": {
         "action": "throw",
         "input": "primary",
-        "mode": "charge",
-        "chargeSeconds": 0.9,
+        "mode": "hold",
+        "holdSeconds": 0.9,
         "value": 85
       }
     },

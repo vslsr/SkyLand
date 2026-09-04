@@ -81,8 +81,15 @@ export class ServerPlayerActor extends Actor {
     this.sequence = 0;
     this.actorInteractionSequence = 0;
     this.inventoryCommandSequence = 0;
-    /** 手持物按下使用键的权威时刻；蓄力结算只认它，不认客户端上报的时长。 */
-    this.heldItemUseStartedAt = undefined;
+    /**
+     * 当前授予的那条物品使用能力。
+     *
+     * `{ itemType, source, slotIndex, use, succeeded }`；没有可用的东西时是
+     * undefined。授予、激活、收回都由 `ItemAbilityRuntime` 驱动，见那里的说明。
+     */
+    this.itemAbility = undefined;
+    /** 按下使用键的权威时刻；长按倒计时只认它，不认客户端上报的时长。 */
+    this.itemUseStartedAt = undefined;
     /** 交互键按住的权威时刻；短按放下、长按收回背包由它分界。 */
     this.heldItemStowStartedAt = undefined;
     this.terrainEditSequence = 0;

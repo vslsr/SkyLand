@@ -3,33 +3,34 @@ import type { HeldItemProgress } from '../controllers/HotbarController';
 import type { HotbarSlotView } from '../inventory/index';
 
 /**
- * 屏幕底部那一排手持格。
+ * 屏幕底部那条物品栏。
  *
  * View：只把 `HotbarSlotView[]` 画出来，点一下就把序号交出去。它不认识物品目录、
  * 不认识 Component、也不发任何请求——切换成不成由服务端说了算，这里画的是收到的
  * 快照，不是本地预测。
  *
- * 点击/触摸是切换手持的第一入口（数字键和手柄肩键是另外两条），所以每一格都是
- * 一个真正的按钮：手柄能聚焦、读屏能念、触屏点得到。
+ * 点击/触摸是切换手持的第一入口（数字键 1-9 和手柄肩键是另外两条），所以每一格
+ * 都是一个真正的按钮：手柄能聚焦、读屏能念、触屏点得到。
  *
- * **一格只有一种状态可看**：`data-state` 说这一格是空的、有货、还是货用光了，
- * `data-held` 说哪一格拿在手上。之前是三个 `is-*` class 加两个 dataset 混着写，
- * 同一件事有几处写法，改一处就漏一处；现在全部收进这两个属性里。
+ * **一格只有一种状态可看**：`data-state` 说这一格是空的还是有货，`data-held` 说
+ * 哪一格拿在手上。物品栏现在自己持有那一摞，用光的格子直接空出来，所以不再有
+ * 「配置还在、货没了」这种中间态。
  */
 
-/** 一格现在是什么样子。配置着但货用光了要单独算一种，它和空格不是一回事。 */
-type HotbarSlotState = 'empty' | 'ready' | 'depleted';
+/** 一格现在是什么样子。 */
+type HotbarSlotState = 'empty' | 'ready';
 
 interface HotbarSlot {
   readonly button: HTMLButtonElement;
   readonly shortcut: HTMLElement;
   readonly figure: HTMLElement;
   readonly quantity: HTMLElement;
+  /** 长按时盖在这一格上的那圈圆形倒计时。平时是收起来的。 */
+  readonly dial: HTMLElement;
 }
 
 function slotState(slot: HotbarSlotView): HotbarSlotState {
-  if (!slot.itemType) return 'empty';
-  return slot.quantity === 0 ? 'depleted' : 'ready';
+  return slot.itemType && slot.quantity > 0 ? 'ready' : 'empty';
 }
 
 export class HotbarBar {
@@ -100,19 +101,24 @@ export class HotbarBar {
   }
 
   /**
-   * 画那一圈进度：使用蓄力与交互键长按共用同一个圈，靠 `kind` 换颜色。
+   * 画那圈圆形倒计时：物品能力的长按激活与交互键长按共用同一个圈，靠 `kind` 换颜色。
    *
-   * 圈画在当前手持那一格上，因为两种按住说的都是「手上这件东西」。手上空着
-   * （格子配着但货用光了）时没有那一格，圈无处可画，牌子也不写。
+   * 圈盖在当前手持那一格上，是一个真正的环——不是把方格底色填掉一角。倒计时是
+   * 「还剩多少时间」，环的周长天然是一条闭合的时间轴，扫到起点就是结束；方块被
+   * 填掉一角只说得出「填了一些」。
+   *
+   * 只画属于物品栏的那一次（`onHotbar`）。叼着的蘑菇、从背包里点出来的用法都没有
+   * 格子，它们的圈在准星下方那块牌子上，这里不重复。
    */
   public setProgress(progress: HeldItemProgress | undefined): void {
     const held = this.heldSlot;
-    if (!progress || !held) {
+    if (!progress || !progress.onHotbar || !held) {
       this.clearProgress();
       return;
     }
     this.progressLabel = progress.label;
-    held.button.style.setProperty('--hotbar-progress', `${Math.round(progress.ratio * 100)}%`);
+    held.dial.hidden = false;
+    held.dial.style.setProperty('--hotbar-progress', `${Math.round(progress.ratio * 100)}%`);
     held.button.dataset.progress = progress.kind;
     this.syncPlate();
   }
@@ -124,7 +130,8 @@ export class HotbarBar {
   private clearProgress(): void {
     this.progressLabel = undefined;
     for (const slot of this.slots) {
-      slot.button.style.removeProperty('--hotbar-progress');
+      slot.dial.hidden = true;
+      slot.dial.style.removeProperty('--hotbar-progress');
       delete slot.button.dataset.progress;
     }
     this.syncPlate();
@@ -165,9 +172,16 @@ export class HotbarBar {
       quantity.className = 'hotbar__quantity';
       quantity.hidden = true;
 
-      button.append(shortcut, figure, quantity);
+      // 圆形倒计时是一层独立的盖片，不是格子的背景：它要盖住图标、要能单独收起，
+      // 也不该在换手重画时跟着格子内容一起被清掉。
+      const dial = document.createElement('span');
+      dial.className = 'hotbar__dial';
+      dial.hidden = true;
+      dial.setAttribute('aria-hidden', 'true');
+
+      button.append(shortcut, figure, quantity, dial);
       this.track.append(button);
-      this.slots.push({ button, shortcut, figure, quantity });
+      this.slots.push({ button, shortcut, figure, quantity, dial });
     }
   }
 
@@ -177,7 +191,8 @@ export class HotbarBar {
     button.dataset.state = state;
     button.dataset.held = String(view.active);
     button.setAttribute('aria-pressed', String(view.active));
-    button.style.removeProperty('--hotbar-progress');
+    slot.dial.hidden = true;
+    slot.dial.style.removeProperty('--hotbar-progress');
     delete button.dataset.progress;
     slot.shortcut.textContent = String(view.index + 1);
 
@@ -186,7 +201,7 @@ export class HotbarBar {
       this.heldName = view.displayName ?? '';
     }
 
-    if (!view.itemType) {
+    if (state === 'empty') {
       slot.figure.replaceChildren();
       slot.quantity.hidden = true;
       button.setAttribute('aria-label', `第 ${view.index + 1} 格 空`);
@@ -197,13 +212,12 @@ export class HotbarBar {
     if (view.tint) icon.style.color = view.tint;
     slot.figure.replaceChildren(icon);
 
-    slot.quantity.hidden = view.quantity <= 0;
+    slot.quantity.hidden = false;
     slot.quantity.textContent = String(view.quantity);
 
     button.setAttribute(
       'aria-label',
-      `第 ${view.index + 1} 格 ${view.displayName ?? ''}`
-      + (state === 'depleted' ? ' 已用完' : ` ×${view.quantity}`)
+      `第 ${view.index + 1} 格 ${view.displayName ?? ''} ×${view.quantity}`
       + (view.active ? '，正拿在手上' : ''),
     );
   }

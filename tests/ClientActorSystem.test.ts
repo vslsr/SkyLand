@@ -6,6 +6,7 @@ import {
   type BuoyancyComponent,
   COMBUSTIBLE_COMPONENT,
   type CombustibleComponent,
+  DROP_MOTION_COMPONENT,
   GENERATED_PROP_COMPONENT,
   GUIDE_PATH_COMPONENT,
   type GuidePathComponent,
@@ -2046,6 +2047,38 @@ test('高数量物品 Actor 保留交互与碰撞身份，但用批次绘制而�
   assert.equal(fills.length, 1);
   assert.equal(fills[0].count, 1);
   assert.equal(outlines.length, 1);
+  system.dispose();
+});
+
+test('手持表现体只画模型：不挡人、不被准星扫到、不参与就近拾取', () => {
+  // 服务端那边已经把物理、生命期与可交互摘掉了（见 heldItemArchetype），客户端
+  // 照原型重建会把它们又装回来——手上那件于是挡住自己走路、抢走准星、还挡住它
+  // 身后真正想选的东西。出生就带父级的物品堆是这条判断的唯一入口。
+  const system = createTestActorSystem({
+    definition,
+    environment: { fogColor: '#ffffff', fogNear: 20, fogFar: 60 },
+    now: () => 1_000,
+    spawnBudgetMilliseconds: Number.POSITIVE_INFINITY,
+  });
+  const held: SnapshotActor = {
+    id: 'held-player-a-1',
+    archetypeId: 'wood-pile',
+    parentActorId: 'player-a',
+    revision: 1,
+    transform: { x: 0, y: 0.3, z: -3, yaw: 0 },
+    itemStack: { itemType: 'wood', displayName: '木材', quantity: 1, maximumQuantity: 999, revision: 1 },
+  };
+  system.syncSnapshots([held], 1_000, 1_000);
+  stepActorFrame(system, 0, 0);
+
+  const actor = system.getActor(held.id)!;
+  assert.ok(actor, '手上那件仍然要建出来：它是画在嘴上的那个模型');
+  assert.equal((actor.requireComponent(ITEM_STACK_COMPONENT) as ItemStackComponent).quantity, 1);
+  assert.equal(actor.getComponent(SIMPLE_COLLISION_COMPONENT), undefined, '不挡人');
+  assert.equal(actor.getComponent(INTERACTABLE_COMPONENT), undefined, '不参与候选搜索');
+  assert.equal(actor.getComponent(DROP_MOTION_COMPONENT), undefined, '不掉不滚');
+  assert.equal(system.pickInteractableActor([0, 0.3, 2], [0, 0, -1]), undefined, '准星扫不到');
+  assert.equal(system.findNearbyInteractableActor({ x: 0, z: -3 }), undefined);
   system.dispose();
 });
 

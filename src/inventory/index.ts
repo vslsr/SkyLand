@@ -6,6 +6,7 @@ export {
   type ContainerModelLike,
   type ContainerRowView,
   type ContainerView,
+  type HotbarSlotModelLike,
   type HotbarSlotView,
   type InventoryPageView,
   type InventoryStackView,

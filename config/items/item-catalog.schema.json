@@ -99,11 +99,11 @@
           "type": "boolean"
         },
         "holdable": {
-          "description": "能不能拿在手上。手持物是挂在角色手部挂点上的一个真 Actor。",
+          "description": "能不能拿在手上。手持物是挂在角色挂点下的一个纯表现 Actor：没有碰撞、没有掉落物理，坐标由 Actor 嵌套关系解算。",
           "type": "boolean"
         },
         "use": {
-          "description": "手持这件东西时怎么用它。不写表示只能拿着，按键没有反应。",
+          "description": "使用这件东西时做什么。使用的兑现路径是「授予玩家一条 Ability → 按 mode 激活 → 完成后收回」；不写表示这件东西没有用法。",
           "type": "object",
           "additionalProperties": false,
           "required": [
@@ -127,20 +127,20 @@
               ]
             },
             "mode": {
-              "description": "tap 是按下即结算；charge 是按住蓄力、松手结算，蓄力比例作为强度。",
+              "description": "tap 是点一下就激活；hold 是按住 holdSeconds 秒，倒计时走完那一刻激活，中途松手是取消。",
               "enum": [
                 "tap",
-                "charge"
+                "hold"
               ]
             },
-            "chargeSeconds": {
-              "description": "蓄满要多久，单位秒。mode 为 charge 时必填，tap 不能写。",
+            "holdSeconds": {
+              "description": "长按倒计时多长，单位秒。mode 为 hold 时必填，tap 不能写。",
               "type": "number",
               "exclusiveMinimum": 0,
               "maximum": 10
             },
             "value": {
-              "description": "tool 是额外采集伤害；throw 是蓄满时的投掷初速度的十倍（80 即 8 m/s）。",
+              "description": "tool 是额外采集伤害；throw 是投掷初速度的十倍（80 即 8 m/s）。",
               "type": "integer",
               "minimum": 1,
               "maximum": 1000

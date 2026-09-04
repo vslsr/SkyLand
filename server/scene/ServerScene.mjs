@@ -57,13 +57,22 @@ import {
 } from '../actors/ElasticTetherMutations.mjs';
 import { dropPickedActor, pickupActor } from '../actors/PickupDropMutations.mjs';
 import {
+  discardHeldItemActor,
   dropHeldObject,
   dropInventoryItem,
   stowHeldItem,
   syncHeldItemActor,
   transferItems,
-  useHeldItem,
 } from '../actors/InventoryMutations.mjs';
+import { heldItemArchetype } from '../actors/ItemArchetypes.mjs';
+import {
+  armItemAbility,
+  beginItemUse,
+  cancelItemUse,
+  releaseItemUse,
+  revokeItemAbility,
+  updateItemUse,
+} from '../actors/ItemAbilityRuntime.mjs';
 import { PlayerIdleSimulation } from './PlayerIdleSimulation.mjs';
 import { ServerChunkColliders } from './ServerChunkColliders.mjs';
 import { ServerTerrainColliders } from './ServerTerrainColliders.mjs';
@@ -87,6 +96,15 @@ import {
   sanitizeSlimeDragState,
 } from '../../shared/softBodyDeformation.mjs';
 import { terrainMovementHeight } from '../../shared/world/terrainMovement.mjs';
+
+/** 会改动物品栏内容或选中格的命令。它们一律作废「背包里点出来的那条能力」。 */
+const HOTBAR_COMMAND_KINDS = new Set([
+  'select',
+  'cycle',
+  'assign',
+  'hotbar:swap',
+  'hotbar:stow',
+]);
 
 function roundCoordinate(value) {
   return Math.round(value * 1000) / 1000;
@@ -265,6 +283,9 @@ export class ServerScene {
       },
     });
     this.tick = 0;
+    // 手持表现体的 id 计数。它们生生灭灭很频繁（每次换手一次），单调递增的序号
+    // 保证不会撞上还没被客户端清掉的上一个。
+    this.nextHeldItemId = 0;
     this.lastRefillAt = this.now();
   }
 
@@ -341,6 +362,9 @@ export class ServerScene {
 
   removePlayer(playerId) {
     this.#clearBitesOf(playerId);
+    // 手持表现体跟着连接一起消失（货记在账上，跟着玩家走）；嘴里叼着的世界物件
+    // 原地落下。两件事顺序不能反：表现体还挂着时，落下那条会把它当成蘑菇处理。
+    discardHeldItemActor(this, this.players.get(playerId));
     this.dropCarriedActorsOf(playerId);
     for (const actor of this.actorWorld.query(
       ELASTIC_TETHER_COMPONENT,
@@ -584,7 +608,7 @@ export class ServerScene {
   }
 
   /**
-   * 背包、快捷栏与容器的唯一上行入口。
+   * 背包、物品栏与容器的唯一上行入口。
    *
    * 合成一条消息而不是四条，是因为它们共享同一套前置校验（玩家在不在、序号有没有
    * 回退），并且都以「改完权威 Component、让下一帧快照去确认」收尾。传输层因此只
@@ -601,10 +625,6 @@ export class ServerScene {
 
     let changed = false;
     switch (command.kind) {
-      case 'hold':
-        // 界面里点一下某件物品：放上快捷栏并立刻握在手上。
-        changed = inventory.holdItemType(sanitizeItemType(command.itemType));
-        break;
       case 'select':
         changed = inventory.setActiveHotbarSlot(Math.trunc(toFiniteNumber(command.slotIndex, -1)));
         break;
@@ -612,27 +632,41 @@ export class ServerScene {
         changed = inventory.cycleActiveHotbarSlot(toFiniteNumber(command.direction, 1));
         break;
       case 'assign':
+        // 装配 = 把背包里那一摞搬进物品栏那一格。搬得动搬不动由 Component 判定：
+        // 目标格原有的那一摞放不回背包时整件事不做，货不会凭空消失。
         changed = inventory.assignHotbarSlot(
           Math.trunc(toFiniteNumber(command.slotIndex, -1)),
           sanitizeItemType(command.itemType),
         );
         break;
-      case 'use:begin':
-        // 蓄力的起点记在服务端：结算时用的是这个时刻，客户端报多久不作数。
-        player.heldItemUseStartedAt = this.now();
-        changed = true;
+      case 'hotbar:swap':
+        changed = inventory.swapHotbarSlots(
+          Math.trunc(toFiniteNumber(command.fromIndex, -1)),
+          Math.trunc(toFiniteNumber(command.slotIndex, -1)),
+        );
         break;
-      case 'use:cancel':
-        player.heldItemUseStartedAt = undefined;
-        changed = true;
+      case 'hotbar:stow':
+        // 把物品栏那一格整摞收回背包（界面里从物品栏往背包拖）。
+        changed = inventory.clearHotbarSlot(Math.trunc(toFiniteNumber(command.slotIndex, -1)));
         break;
-      case 'use:release': {
-        const startedAt = player.heldItemUseStartedAt;
-        player.heldItemUseStartedAt = undefined;
-        if (startedAt === undefined) return false;
-        changed = useHeldItem(this, player, (this.now() - startedAt) / 1000);
+      case 'use:arm': {
+        // 背包菜单里点「使用」：授予这件东西的能力，随后按它自己的配置激活。
+        // 全程不经过手——「使用」不再是「拿到手上」。
+        const itemType = sanitizeItemType(command.itemType);
+        changed = inventory.quantityOf(itemType) > 0
+          && armItemAbility(this, player, itemType, 'backpack');
         break;
       }
+      case 'use:begin':
+        // 按下的时刻记在服务端：长按倒计时按这个时刻推进，客户端报多久不作数。
+        changed = beginItemUse(player, this.now());
+        break;
+      case 'use:cancel':
+        changed = cancelItemUse(player);
+        break;
+      case 'use:release':
+        changed = releaseItemUse(this, player, this.now());
+        break;
       case 'drop':
         changed = dropHeldObject(this, player);
         break;
@@ -642,7 +676,7 @@ export class ServerScene {
         changed = dropInventoryItem(this, player, sanitizeItemType(command.itemType), 1);
         break;
       case 'stow:begin':
-        // 交互键按住的起点。和蓄力一样记在服务端：客户端那圈转盘转满那一刻，
+        // 交互键按住的起点。和使用一样记在服务端：客户端那圈圆形倒计时转满那一刻，
         // 就是这里判定长按那一刻，但判定用的是自己的计时。
         player.heldItemStowStartedAt = this.now();
         changed = true;
@@ -671,8 +705,13 @@ export class ServerScene {
       default:
         return false;
     }
-    if (!['use:release', 'drop', 'drop:stack', 'stow:release'].includes(command.kind)) {
-      // 换手要跟着快捷栏走；使用与丢下已经在各自的变更里对齐过了。
+    // 动过物品栏就先把背包那条能力撤掉：它是玩家在背包里点出来的，指向包里那一摞，
+    // 而玩家刚刚换了手——留着它，接下来按使用键扣的会是包里那件，画面上却是手上这件。
+    // 客户端在同一批命令上做同一件事，两边说的因此始终是同一件东西。
+    if (HOTBAR_COMMAND_KINDS.has(command.kind)) revokeItemAbility(player);
+    // 换手、装配、收回都要让「嘴上那件」和「身上挂着的物品能力」跟着物品栏走。
+    // 使用与丢下已经在各自的变更里对齐过了，重复调一次也是幂等的。
+    if (!['use:begin', 'use:cancel', 'use:arm'].includes(command.kind)) {
       syncHeldItemActor(this, player);
     }
     player.inventoryCommandSequence = sequence;
@@ -768,8 +807,8 @@ export class ServerScene {
       if (distance > interactable.maximumDistance) return false;
       const pickedUp = this.actorWorld.context.highCountActors?.pickup(this.actorWorld, target.id, player) ?? 0;
       if (pickedUp <= 0) return false;
-      // 捡到的正好是快捷栏配置着的那一种时，手上要立刻出现它——空着手的那一格
-      // 补上货就该自动握住，不需要玩家再点一次。
+      // 捡起来的东西进背包，不进物品栏。这里仍然对齐一次：拾取可能让背包从
+      // 满变成不满，`syncHeldItemActor` 是幂等的，没变化就什么都不做。
       syncHeldItemActor(this, player);
       player.actorInteractionSequence = sequence;
       return true;
@@ -1324,6 +1363,12 @@ export class ServerScene {
     this.generatedProps.sync(this.players.values());
     // 走远的人自动退出容器界面；不依赖客户端自觉发关闭。
     this.updateContainerViewers();
+    // 长按倒计时在**服务端**走完，不等客户端报「我按满了」：玩家看到的圈满和这里
+    // 激活是同一个时刻，松不松手都不改变结果。激活可能把手上那一格用空（投出去
+    // 最后一个），所以做成了事就重新对齐一次手上那件。
+    for (const player of this.players.values()) {
+      if (updateItemUse(this, player, now)) syncHeldItemActor(this, player);
+    }
     // 输入包是权威模拟的主驱动，但它可能整段消失。补步只覆盖「静默超时且仍在
     // 运动」的玩家，站着不动的一步都不跑，成本上界是房间人数而非世界面积。
     this.idleSimulation.advance(this.players.values(), elapsedSeconds, now);
@@ -1332,6 +1377,31 @@ export class ServerScene {
     this.physics.step();
     // Rapier 动态 Actor 在物理步之后立刻回写权威 Transform，当前快照即可看到弹出。
     this.actorWorld.context.syncDetachedPhysics?.();
+  }
+
+  /**
+   * 挂在角色挂点下的手持表现体。
+   *
+   * 它不是掉落物：`heldItemArchetype` 已经把掉落物理、生命期、休眠与可交互摘掉，
+   * 这里再关掉碰撞体，于是它在世界里只剩一个模型，坐标完全由 Actor 嵌套关系解算。
+   * 也因此**不登记进 `HighCountActorSystem`**——那套系统按重力积分坐标、和地上的
+   * 同类堆合并、到点回收，没有一条对拿在手上的东西成立。
+   */
+  spawnHeldItemActor(archetypeId, player) {
+    const archetype = this.actorWorld.context.archetypes?.get(archetypeId);
+    if (!archetype) return undefined;
+    const actor = this.actorWorld.context.createActor({
+      id: `held-${player.id}-${(this.nextHeldItemId += 1).toString(36)}`,
+      archetypeId,
+      localTransform: { position: [player.x, player.y, player.z], yaw: player.yaw },
+    }, heldItemArchetype(archetype), { itemStack: { quantity: 1 }, collision: false });
+    this.actorWorld.addActor(actor);
+    return actor;
+  }
+
+  /** 收掉手持表现体。它只活在玩家挂点上，删掉不影响世界里任何一堆货。 */
+  removeHeldItemActor(actorId) {
+    return this.actorWorld.removeActor(actorId);
   }
 
   /** 树木、矿脉或战利品系统调用这一入口生成一个可自动合并的物品堆。 */

@@ -60,19 +60,33 @@ export type ActorGameplayEvent =
  * 认识一个 case，服务端只需要一个入口。
  */
 export type InventoryCommand =
-  /** 界面里点一下某件物品：放上快捷栏并立刻握在手上。 */
-  | { kind: 'hold'; itemType: string }
-  /** 切到快捷栏第 N 格；再发一次同一格就是收手。 */
+  /** 切到物品栏第 N 格；再发一次同一格就是收手。 */
   | { kind: 'select'; slotIndex: number }
   /** 前后循环一格（手柄 LB / RB）。 */
   | { kind: 'cycle'; direction: 1 | -1 }
-  /** 把某件物品配置到某一格；itemType 为 null 时清空该格。 */
+  /**
+   * 装配：把背包里那一摞搬进物品栏某格。
+   *
+   * 这是一次**转移**而不是配置一个引用——物品栏是一条特殊的背包，装配之后那一摞
+   * 就归它了，背包里不再有。`itemType` 为 null 时反过来，把那一格收回背包。
+   */
   | { kind: 'assign'; slotIndex: number; itemType: string | null }
-  /** 按下使用键：开始蓄力。蓄力时长由服务端自己计时，客户端只报起止。 */
+  /** 物品栏两格对调（在物品栏条上把一格拖到另一格）。 */
+  | { kind: 'hotbar:swap'; fromIndex: number; slotIndex: number }
+  /** 把物品栏某格整摞收回背包（从物品栏条往背包格子里拖）。 */
+  | { kind: 'hotbar:stow'; slotIndex: number }
+  /**
+   * 背包菜单里点「使用」：授予这件东西的能力，等着按使用键激活。
+   *
+   * 「使用」不再是「拿到手上」：物品的用法是一条临时授予玩家的 Ability，点按或
+   * 长按激活，完成后收回，全程不经过手。
+   */
+  | { kind: 'use:arm'; itemType: string }
+  /** 按下使用键。长按倒计时的起点由服务端记，客户端只报起止。 */
   | { kind: 'use:begin' }
-  /** 松开使用键：结算。 */
+  /** 松开使用键。点按的那一下在这里激活；长按没走完倒计时则是取消。 */
   | { kind: 'use:release' }
-  /** 蓄力被打断（界面盖上来、切走手持物）。 */
+  /** 这次按下被打断（界面盖上来、切走手持物）。 */
   | { kind: 'use:cancel' }
   /** 丢下手上那件。 */
   | { kind: 'drop' }
@@ -80,13 +94,12 @@ export type InventoryCommand =
    * 从背包里直接丢一个到身前，不经过手。
    *
    * 和 `drop` 分开是因为它们说的不是同一件东西：`drop` 丢的是手上那件，
-   * 背包菜单里的「丢弃」丢的是被点中的那一堆——走「先拿到手上再丢」会顺手改写
-   * 快捷栏、把原本握着的东西换下去。
+   * 背包菜单里的「丢弃」丢的是被点中的那一堆。
    */
   | { kind: 'drop:stack'; itemType: string }
   /**
    * 交互键按下/松开。短按放下、长按收回背包，分界由服务端按自己的计时判定，
-   * 客户端那圈转盘只负责让玩家看见还要按多久。
+   * 客户端那圈圆形倒计时只负责让玩家看见还要按多久。
    */
   | { kind: 'stow:begin' }
   | { kind: 'stow:release' }

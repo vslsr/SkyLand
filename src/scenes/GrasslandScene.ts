@@ -283,6 +283,9 @@ export class GrasslandScene extends Scene {
     this.inventory = new InventoryController(this.inventoryPage, this.input, {
       getInventory: () => this.player?.getComponent(INVENTORY_COMPONENT) as
         InventoryComponent | undefined,
+      // 背包里点「使用」授予的是一条能力，激活要按使用键——输入层得知道接下来
+      // 那一下说的是哪件东西，两边说的必须是同一件。
+      armItem: (itemType) => this.hotbar.armItem(itemType),
       isOpen: () => this.commonUI.top === this.inventoryPage,
       setOpen: (open) => {
         if (open) this.commonUI.push(this.inventoryPage);
@@ -303,11 +306,13 @@ export class GrasslandScene extends Scene {
       isActive: () => Boolean(this.joinedRoom && this.player) && this.commonUI.allowsGameInteraction,
       send: (command) => { this.roomClient.sendInventoryCommand(command); },
       getInputLabel: (tag) => this.resolveInputLabel(tag),
-      // 两处画同一次按住：格子上那圈说的是「哪件东西」，准星下那圈说的是
-      // 「手该按着什么、还要多久」。叼着的蘑菇没有格子，只剩后者。
+      // 同一次按住只画一处。属于物品栏的那次画在格子上（`onHotbar`），因为那圈
+      // 已经同时说清了「哪一格」和「还要多久」；叼着的蘑菇和从背包里点出来的
+      // 用法没有格子，才轮到准星下方那块牌子。两处一起亮会让玩家的眼睛在画面
+      // 两端来回找同一件事。
       setProgress: (progress) => {
         this.hotbarBar.setProgress(progress);
-        this.holdProgress.setProgress(progress);
+        this.holdProgress.setProgress(progress?.onHotbar ? undefined : progress);
       },
     });
     this.container = new ContainerController(this.containerPage, {

@@ -4,7 +4,7 @@ import { HotbarController } from '../src/controllers/HotbarController.ts';
 import { InventoryComponent } from '../shared/actor/index.mjs';
 import type { HeldItemProgress } from '../src/controllers/HotbarController.ts';
 import type { InventoryCommand } from '../src/network/messages.ts';
-import { PlayerInputTags } from '../src/input/config/playerInput.ts';
+import { ItemUseInputTags, PlayerInputTags } from '../src/input/config/playerInput.ts';
 
 /** 只保留交互键那一条绑定的输入替身：这一层测的是按住时序。 */
 function harness(heldActorId: string | undefined) {
@@ -19,7 +19,7 @@ function harness(heldActorId: string | undefined) {
   const sent: InventoryCommand[] = [];
   const progress: (HeldItemProgress | undefined)[] = [];
   let clock = 0;
-  const inventory = new InventoryComponent({ slotCapacity: 8, hotbarCapacity: 4, stowHoldSeconds: 0.6 });
+  const inventory = new InventoryComponent({ slotCapacity: 8, hotbarCapacity: 9, stowHoldSeconds: 0.6 });
   const controller = new HotbarController(input, {
     getInventory: () => inventory,
     getHeldActorId: () => heldActorId,
@@ -29,7 +29,16 @@ function harness(heldActorId: string | undefined) {
     setProgress: (next) => progress.push(next),
   }, () => clock);
   const press = (phase: string) => handlers.get(PlayerInputTags.WorldInteract)?.({ phase });
-  return { controller, sent, progress, press, advance: (ms: number) => { clock += ms; } };
+  const use = (phase: string) => handlers.get(ItemUseInputTags.primary)?.({ phase });
+  return {
+    controller,
+    inventory,
+    sent,
+    progress,
+    press,
+    use,
+    advance: (ms: number) => { clock += ms; },
+  };
 }
 
 test('叼着世界物件时，交互键也走按住计时——按下不结算，松手才发', () => {
@@ -93,6 +102,7 @@ test('按住期间把要按着的那个键交给界面：提示这时正在淡�
   controller.update();
   const halfway = progress.at(-1);
   assert.equal(halfway?.kind, 'stow');
+  assert.equal(halfway?.onHotbar, false, '叼着的蘑菇没有格子，圈画在准星下方');
   assert.equal(halfway?.inputLabel, 'E');
   assert.equal(halfway?.label, '收进背包');
   assert.ok(halfway!.ratio > 0 && halfway!.ratio < 1, `进度应当在中途，实际 ${halfway?.ratio}`);
@@ -103,4 +113,75 @@ test('按住期间把要按着的那个键交给界面：提示这时正在淡�
 
   press('completed');
   assert.equal(progress.at(-1), undefined, '松手立刻收掉圈');
+});
+
+test('长按物品：圈满那一刻就结束，松手不再发第二条命令', () => {
+  // 燃烧瓶是 hold / 1.1 秒。激活发生在倒计时走完那一刻，服务端自己动手，
+  // 客户端只负责画圈——所以松手时不该再补一条 use:release。
+  const bar = harness('held-1');
+  bar.inventory.add('firebomb', 2);
+  bar.inventory.assignHotbarSlot(0, 'firebomb');
+  bar.inventory.setActiveHotbarSlot(0);
+
+  bar.use('started');
+  assert.deepEqual(bar.sent, [{ kind: 'use:begin' }]);
+
+  bar.advance(550);
+  bar.controller.update();
+  const halfway = bar.progress.at(-1);
+  assert.equal(halfway?.kind, 'use');
+  assert.equal(halfway?.onHotbar, true, '手持物品的圈画在物品栏那一格上');
+  assert.ok(halfway!.ratio > 0.4 && halfway!.ratio < 0.6, `圈应当在中途，实际 ${halfway?.ratio}`);
+
+  bar.advance(600);
+  bar.controller.update();
+  assert.equal(bar.progress.at(-1), undefined, '圈满就结束，不停在满圈上');
+
+  bar.use('completed');
+  assert.deepEqual(bar.sent, [{ kind: 'use:begin' }], '倒计时已经走完，松手没有含义');
+});
+
+test('长按物品中途松手是取消：没走完的那次由服务端按自己的计时判定', () => {
+  const bar = harness('held-1');
+  bar.inventory.add('firebomb', 2);
+  bar.inventory.assignHotbarSlot(0, 'firebomb');
+  bar.inventory.setActiveHotbarSlot(0);
+
+  bar.use('started');
+  bar.advance(300);
+  bar.use('completed');
+  assert.deepEqual(bar.sent, [{ kind: 'use:begin' }, { kind: 'use:release' }]);
+});
+
+test('点按物品没有圈：按下开始、松手结算', () => {
+  // 采集锤是 tap。点一下就是一下，没有倒计时可画。
+  const bar = harness('held-1');
+  bar.inventory.add('harvest-hammer', 1);
+  bar.inventory.assignHotbarSlot(0, 'harvest-hammer');
+  bar.inventory.setActiveHotbarSlot(0);
+
+  bar.use('started');
+  bar.advance(2000);
+  bar.controller.update();
+  assert.equal(bar.progress.at(-1), undefined, '点按不画圈');
+
+  bar.use('completed');
+  assert.deepEqual(bar.sent, [{ kind: 'use:begin' }, { kind: 'use:release' }]);
+});
+
+test('背包里点出来的那件优先，而且它的圈不画在物品栏上', () => {
+  const bar = harness(undefined);
+  bar.inventory.add('firebomb', 1);
+  // 手上什么都没有，但玩家刚在背包里点了「使用」。
+  bar.controller.armItem('firebomb');
+
+  bar.use('started');
+  bar.advance(300);
+  bar.controller.update();
+  assert.equal(bar.progress.at(-1)?.onHotbar, false, '没有格子的那次要画在准星下方');
+
+  // 换手会撤销它：那条能力已经被服务端换掉了，客户端不该继续替它画圈。
+  bar.controller.armItem(undefined);
+  bar.use('canceled');
+  assert.deepEqual(bar.sent.at(-1), { kind: 'use:cancel' });
 });

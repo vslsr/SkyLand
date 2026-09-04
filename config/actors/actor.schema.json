@@ -715,13 +715,13 @@
               "maximum": 64
             },
             "hotbarCapacity": {
-              "description": "快捷栏格数。界面按这个数画底部那一排；不写用默认 4。",
+              "description": "物品栏格数。数字键 1-9 一格一个，界面按这个数画底部那一排；不写用默认 9。",
               "type": "integer",
               "minimum": 1,
               "maximum": 9
             },
             "stowHoldSeconds": {
-              "description": "交互键按住多久算「收回背包」而不是「放下」。客户端的转盘用同一个数。",
+              "description": "交互键按住多久算「收回背包」而不是「放下」。客户端那圈圆形倒计时用同一个数。",
               "type": "number",
               "minimum": 0.1,
               "maximum": 5

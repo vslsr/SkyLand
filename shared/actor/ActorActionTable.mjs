@@ -1,4 +1,4 @@
-import { itemCatalog } from '../items/index.mjs';
+import { itemCatalog, resolveItemUse } from '../items/index.mjs';
 
 /**
  * 交互动作表。
@@ -124,46 +124,20 @@ export function resolveActorAction(target, context = {}) {
   }
 }
 
-/** 使用方式对应的动词。物品目录只说 action，叫什么由这里统一。 */
-const USE_VERBS = Object.freeze({ tool: '使用', throw: '投掷' });
-
 /**
  * 手持物品按下使用键会发生什么。
  *
- * 和上面同一个理由：能不能用、走哪个输入槽、点按还是蓄力，全写在物品目录里，
- * 界面、输入绑定和服务端结算读的是同一份。加一件新道具不改这里的代码。
+ * 保留在动作表里是为了让「看着某个东西按键会怎样」和「手上这件按键会怎样」
+ * 有同一个入口；真正的定义在 `shared/items/ItemAbility.mjs`——能不能用、走哪个
+ * 输入槽、点按还是长按、倒计时多长，全写在物品目录里，界面、输入绑定和服务端
+ * 的能力授予读的是同一份。加一件新道具不改这里的代码。
  *
  * @param {string | undefined} itemType
  * @param {{ get(id: string): object | undefined }} [catalog]
- * @returns {{ id: string, verb: string, input: string, mode: string,
- *   chargeSeconds: number, action: string } | undefined} 不可使用时是 undefined
+ * @returns {ReturnType<typeof resolveItemUse>} 不可使用时是 undefined
  */
 export function resolveHeldItemAction(itemType, catalog = itemCatalog) {
-  const definition = itemType ? catalog.get(itemType) : undefined;
-  const use = definition?.use;
-  const verb = use ? USE_VERBS[use.action] : undefined;
-  if (!use || !verb) return undefined;
-  return {
-    id: `use:${use.action}`,
-    action: use.action,
-    verb: `${verb}「${definition.displayName}」`,
-    input: use.input,
-    mode: use.mode,
-    chargeSeconds: use.chargeSeconds,
-  };
+  return resolveItemUse(itemType, catalog);
 }
 
-/**
- * 把一次按下的持续时长换算成强度比例。
- *
- * 服务端按自己记的按下时刻算，客户端按本地时刻算同一个公式，所以蓄力条画到满
- * 的那一刻和服务端判定蓄满是同一个时刻；客户端上报的时长只用来对齐表现。
- *
- * @returns {number} [0, 1]。`tap` 恒为 1——按下即满，不需要单独一条支路。
- */
-export function chargeRatio(heldSeconds, chargeSeconds) {
-  if (!(chargeSeconds > 0)) return 1;
-  const held = Number(heldSeconds);
-  if (!Number.isFinite(held) || held <= 0) return 0;
-  return Math.min(1, held / chargeSeconds);
-}
+export { holdRatio } from '../items/index.mjs';

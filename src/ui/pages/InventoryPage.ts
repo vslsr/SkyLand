@@ -6,7 +6,17 @@ import {
   type InventoryItemMenuEntry,
 } from '../InventoryItemMenu';
 import type { CommonUICloseReason } from '../common/CommonUIPage';
-import type { InventoryStackView, InventoryView } from '../../inventory/index';
+import type { HotbarSlotView, InventoryStackView, InventoryView } from '../../inventory/index';
+
+/** 一次拖拽从哪本账上拿的。 */
+export type InventoryDragSource =
+  | { readonly kind: 'backpack'; readonly itemType: string }
+  | { readonly kind: 'hotbar'; readonly slotIndex: number };
+
+/** 一次拖拽落到哪本账上。 */
+export type InventoryDragTarget =
+  | { readonly kind: 'backpack' }
+  | { readonly kind: 'hotbar'; readonly slotIndex: number };
 
 /**
  * 背包界面。
@@ -14,14 +24,19 @@ import type { InventoryStackView, InventoryView } from '../../inventory/index';
  * MVC 里的 View：只把 `InventoryView` 画出来。它不认识物品目录、不认识
  * Actor Component、也不发任何请求——拿不到数据就显示空态，拿到就重画。
  * 什么时候画、画哪一份，由 `InventoryController` 决定。
+ *
+ * 界面上是两本账并排：上面是背包，下面那条是**物品栏**。它们看起来是两个区域，
+ * 实质是同一种东西的两个去处，所以中间那道动作是「搬」而不是「设置」——把一格
+ * 拖到另一边，或者在菜单里选「装配」，两条路说的是同一件事。
  */
 export class InventoryPage extends ModalWindow {
   private readonly ledgerText: HTMLElement;
   private readonly slotGrid: HTMLElement;
-  private readonly pooledSection: HTMLElement;
-  private readonly pooledGrid: HTMLElement;
   private readonly emptyNotice: HTMLElement;
   private readonly tabBar: HTMLElement;
+  /** 下方那条物品栏。格数由快照决定，所以整条按 `HotbarSlotView[]` 重画。 */
+  private readonly hotbarTrack: HTMLElement;
+  private readonly hotbarSection: HTMLElement;
   private closeHintText = 'Esc 关闭';
   private readonly closeHint: HTMLElement;
   /** 当前页签。分类空掉时自动落回「全部」，不会停在一个打不开的页上。 */
@@ -29,6 +44,15 @@ export class InventoryPage extends ModalWindow {
   private view?: InventoryView;
   private readonly itemMenu: InventoryItemMenu;
   private actionHandler?: (action: InventoryItemAction, itemType: string) => void;
+  private dragHandler?: (source: InventoryDragSource, target: InventoryDragTarget) => void;
+  /**
+   * 正在拖的是哪一摞。
+   *
+   * 记在这里而不是塞进 `DataTransfer`：拖拽全程都在这一个页面里，读回来的东西
+   * 只有自己写得出来，走一遍字符串序列化没有任何收益，还会把「拖的是第几格」这条
+   * 结构化信息压成一个需要再解析的字符串。
+   */
+  private dragSource?: InventoryDragSource;
 
   public constructor() {
     super({
@@ -59,38 +83,37 @@ export class InventoryPage extends ModalWindow {
     this.tabBar.setAttribute('aria-label', '物品分类');
 
     // 没有小标题：页签就在正上方，它已经说了下面这一格格是什么。
-    const slotSection = document.createElement('section');
-    slotSection.className = 'inventory__section';
     this.slotGrid = document.createElement('ul');
     this.slotGrid.className = 'inventory__grid';
     this.slotGrid.setAttribute('role', 'list');
-    slotSection.append(this.slotGrid);
-
-    this.pooledSection = document.createElement('section');
-    this.pooledSection.className = 'inventory__section';
-    this.pooledSection.hidden = true;
-    const pooledHeading = document.createElement('h3');
-    pooledHeading.textContent = '不占格';
-    const pooledNote = document.createElement('p');
-    pooledNote.className = 'inventory__note';
-    pooledNote.textContent = '弹药与基础工具各有上限，但不挤压随身格子。';
-    this.pooledGrid = document.createElement('ul');
-    this.pooledGrid.className = 'inventory__grid inventory__grid--pooled';
-    this.pooledGrid.setAttribute('role', 'list');
-    this.pooledSection.append(pooledHeading, pooledNote, this.pooledGrid);
+    // 背包这一整片都是落点：从物品栏往回拖时，玩家想的是「放回包里」，
+    // 而不是「放回包里第几格」——包里的顺序本来就是自动排的。
+    this.makeDropZone(this.slotGrid, () => ({ kind: 'backpack' }));
 
     this.bodyElement.append(
       this.emptyNotice,
       this.ledgerText,
       this.tabBar,
-      slotSection,
-      this.pooledSection,
+      this.slotGrid,
     );
+
+    this.hotbarSection = document.createElement('section');
+    this.hotbarSection.className = 'inventory-hotbar';
+    this.hotbarSection.setAttribute('aria-label', '物品栏');
+    const hotbarHint = document.createElement('p');
+    hotbarHint.className = 'inventory-hotbar__hint';
+    hotbarHint.textContent = '拖到这一条，或用菜单里的「装配」，把东西交给物品栏（1-9 切换手持）';
+    this.hotbarTrack = document.createElement('ul');
+    this.hotbarTrack.className = 'inventory-hotbar__track';
+    this.hotbarTrack.setAttribute('role', 'list');
+    this.hotbarSection.append(hotbarHint, this.hotbarTrack);
 
     this.closeHint = document.createElement('p');
     this.closeHint.className = 'inventory__hint';
     this.closeHint.textContent = this.closeHintText;
-    this.footerElement.append(this.closeHint);
+    // 物品栏在页脚而不是正文里：正文会滚动，而这一条是拖拽的固定落点，
+    // 滚走了就没法把东西拖过来。
+    this.footerElement.append(this.hotbarSection, this.closeHint);
 
     // 菜单挂在页面根节点上而不是正文里：正文 `overflow: auto` 会把它裁掉半截。
     this.itemMenu = new InventoryItemMenu(this.element);
@@ -116,6 +139,13 @@ export class InventoryPage extends ModalWindow {
     this.actionHandler = handler;
   }
 
+  /** 一次拖拽落地了：从哪来、到哪去交出去，怎么兑现是 Controller 的事。 */
+  public onDragDrop(
+    handler: (source: InventoryDragSource, target: InventoryDragTarget) => void,
+  ): void {
+    this.dragHandler = handler;
+  }
+
   /**
    * 关掉背包（弹栈、清空、切场景都算）时把菜单收起来。
    *
@@ -124,21 +154,23 @@ export class InventoryPage extends ModalWindow {
    */
   public onClose(_reason: CommonUICloseReason): void {
     this.itemMenu.close();
+    this.dragSource = undefined;
   }
 
   /** 画一份背包；传 undefined 表示还没有权威数据（没进房间或角色已销毁）。 */
   public setInventory(view: InventoryView | undefined): void {
     // 每次重画都会换掉全部格子，菜单挂着的那个锚点随之作废。这同时也是动作的
-    // 收尾：装备完、丢完都会带来一次新快照，菜单跟着自己收起来。
+    // 收尾：装配完、丢完都会带来一次新快照，菜单跟着自己收起来。
     this.itemMenu.close();
+    this.dragSource = undefined;
     this.view = view;
     this.emptyNotice.hidden = view !== undefined;
     if (!view) {
       this.setLedger('');
       this.tabBar.replaceChildren();
       this.slotGrid.replaceChildren();
-      this.pooledSection.hidden = true;
-      this.pooledGrid.replaceChildren();
+      this.hotbarTrack.replaceChildren();
+      this.hotbarSection.hidden = true;
       return;
     }
 
@@ -147,6 +179,7 @@ export class InventoryPage extends ModalWindow {
     if (!view.pages.some((page) => page.id === this.activePageId)) this.activePageId = 'all';
     this.renderTabs(view);
     this.renderPage(view);
+    this.renderHotbar(view);
   }
 
   private renderTabs(view: InventoryView): void {
@@ -181,17 +214,23 @@ export class InventoryPage extends ModalWindow {
   private renderPage(view: InventoryView): void {
     const page = view.pages.find((entry) => entry.id === this.activePageId) ?? view.pages[0];
     const stacks = page?.stacks ?? [];
-    const cells = stacks.map((stack) => this.createStackCell(stack, view.heldItemType === stack.itemType));
+    const cells = stacks.map((stack) => this.createStackCell(stack));
     // 空格只在「全部」页补：分类页补空格会让人以为那个分类有独立容量。
     if (this.activePageId === 'all') {
       for (let index = 0; index < view.freeSlots; index += 1) cells.push(this.createEmptyCell());
     }
     this.slotGrid.replaceChildren(...cells);
-    // 「不占货位」原来是一个独立分区。分类页签接管这件事之后，它会把弹药和工具
-    // 画第二遍——同一堆货出现在两个地方，数量还同步变化，玩家没法理解那是一件东西。
-    // 这条信息改由格子上的「不占格」标记承担，位置就在它自己那一格上。
-    this.pooledSection.hidden = true;
-    this.pooledGrid.replaceChildren();
+  }
+
+  /**
+   * 下方那条物品栏。
+   *
+   * 它画的是**物品栏自己持有的那一摞**，不是背包里某件东西的影子：数量直接读格子，
+   * 所以「装配之后背包里少了、这条上多了」在界面上是看得见的一次搬运。
+   */
+  private renderHotbar(view: InventoryView): void {
+    this.hotbarSection.hidden = view.hotbar.length === 0;
+    this.hotbarTrack.replaceChildren(...view.hotbar.map((slot) => this.createHotbarCell(slot)));
   }
 
   private describeLedger(view: InventoryView): string {
@@ -225,8 +264,8 @@ export class InventoryPage extends ModalWindow {
   /**
    * 这一格现在能做哪几件事。
    *
-   * 「装备」在它已经配在物品栏上时列出来但点不动：直接抹掉会让菜单在不同格子上
-   * 长得不一样，玩家得先数一遍才知道点的是哪一条。
+   * 三条都列出来，做不了的那条列出来但点不动：直接抹掉会让菜单在不同格子上长得
+   * 不一样，玩家得先数一遍才知道点的是哪一条。
    */
   private menuEntries(stack: InventoryStackView): InventoryItemMenuEntry[] {
     const equipped = this.view?.hotbar.some((slot) => slot.itemType === stack.itemType) ?? false;
@@ -234,13 +273,14 @@ export class InventoryPage extends ModalWindow {
       {
         action: 'use',
         label: '使用',
-        hint: '拿到手上，并关掉背包',
+        hint: useHint(stack),
+        disabled: !stack.usable,
       },
       {
         action: 'equip',
-        label: '装备',
-        hint: equipped ? '已经在物品栏上了' : '配到物品栏的空格上，不换手',
-        disabled: equipped,
+        label: '装配',
+        hint: equipped ? '已经在物品栏上了' : '交给物品栏的空格，数字键就能切到手上',
+        disabled: equipped || !stack.holdable,
       },
       {
         action: 'drop',
@@ -257,11 +297,11 @@ export class InventoryPage extends ModalWindow {
     return cell;
   }
 
-  private createStackCell(stack: InventoryStackView, held: boolean): HTMLElement {
+  private createStackCell(stack: InventoryStackView): HTMLElement {
     const cell = document.createElement('li');
     cell.className = 'inventory__cell';
-    // 不做拖拽：一次点击弹出菜单，动作在菜单里选，所以格子本身是按钮。
-    // 拿不到手上的东西（弹药）保持成普通格子，点了没反应比点了没提示好。
+    // 一次点击弹出菜单，动作在菜单里选；按住拖动则是直接搬到物品栏那一条上。
+    // 两条入口指向同一件事，快的那条不用打开菜单，慢的那条不用先学会拖拽。
     if (stack.holdable) {
       cell.classList.add('inventory__cell--actionable');
       cell.tabIndex = 0;
@@ -277,8 +317,8 @@ export class InventoryPage extends ModalWindow {
         event.preventDefault();
         this.openItemMenu(cell, stack);
       });
+      this.makeDraggable(cell, { kind: 'backpack', itemType: stack.itemType });
     }
-    cell.classList.toggle('is-held', held);
     cell.dataset.itemType = stack.itemType;
     cell.dataset.category = stack.category;
     if (stack.contraband) cell.dataset.contraband = 'true';
@@ -286,7 +326,7 @@ export class InventoryPage extends ModalWindow {
     cell.setAttribute(
       'aria-label',
       `${stack.categoryLabel} ${stack.displayName}，${stack.quantity} 个，上限 ${stack.stackLimit}`
-      + (stack.holdable ? (held ? '，正拿在手上' : '，点击打开动作菜单') : ''),
+      + (stack.holdable ? '，点击打开动作菜单，也可以拖到物品栏' : ''),
     );
 
     const swatch = document.createElement('span');
@@ -324,4 +364,91 @@ export class InventoryPage extends ModalWindow {
     }
     return cell;
   }
+
+  private createHotbarCell(slot: HotbarSlotView): HTMLElement {
+    const cell = document.createElement('li');
+    cell.className = 'inventory-hotbar__slot';
+    cell.dataset.state = slot.itemType ? 'ready' : 'empty';
+    cell.dataset.active = String(slot.active);
+    cell.dataset.slotIndex = String(slot.index);
+    this.makeDropZone(cell, () => ({ kind: 'hotbar', slotIndex: slot.index }));
+
+    const shortcut = document.createElement('span');
+    shortcut.className = 'inventory-hotbar__shortcut';
+    shortcut.textContent = String(slot.index + 1);
+    const figure = document.createElement('span');
+    figure.className = 'inventory-hotbar__figure';
+    const quantity = document.createElement('span');
+    quantity.className = 'inventory-hotbar__quantity';
+    quantity.hidden = true;
+
+    if (slot.itemType) {
+      const icon = createItemIcon(slot.iconId ?? '', { className: 'inventory-hotbar__icon' });
+      if (slot.tint) icon.style.color = slot.tint;
+      figure.append(icon);
+      quantity.hidden = false;
+      quantity.textContent = String(slot.quantity);
+      // 装着东西的格子拖得动：往另一格拖是排顺序，往背包里拖是收回。
+      this.makeDraggable(cell, { kind: 'hotbar', slotIndex: slot.index });
+    }
+
+    cell.append(shortcut, figure, quantity);
+    cell.setAttribute(
+      'aria-label',
+      slot.itemType
+        ? `物品栏第 ${slot.index + 1} 格 ${slot.displayName ?? ''} ×${slot.quantity}`
+          + (slot.active ? '，正拿在手上' : '')
+        : `物品栏第 ${slot.index + 1} 格 空`,
+    );
+    return cell;
+  }
+
+  /**
+   * 让一格拖得动。
+   *
+   * `dragend` 无条件清掉来源：拖到界面外面松手不会触发 `drop`，不清的话下一次
+   * 拖拽会带着上一次的来源落地，搬错一摞货。
+   */
+  private makeDraggable(cell: HTMLElement, source: InventoryDragSource): void {
+    cell.draggable = true;
+    cell.dataset.commonUiReceiver = '';
+    cell.addEventListener('dragstart', (event) => {
+      this.dragSource = source;
+      this.itemMenu.close();
+      const transfer = (event as DragEvent).dataTransfer;
+      if (transfer) transfer.effectAllowed = 'move';
+    });
+    cell.addEventListener('dragend', () => { this.dragSource = undefined; });
+  }
+
+  /**
+   * 让一片区域接得住。
+   *
+   * `dragover` 必须 `preventDefault`，否则浏览器根本不会派发 `drop`——这是 HTML
+   * 拖放里最容易漏、漏了之后表现为「拖过去没反应」的一步。
+   */
+  private makeDropZone(zone: HTMLElement, resolve: () => InventoryDragTarget): void {
+    zone.addEventListener('dragover', (event) => {
+      if (!this.dragSource) return;
+      event.preventDefault();
+      const transfer = (event as DragEvent).dataTransfer;
+      if (transfer) transfer.dropEffect = 'move';
+    });
+    zone.addEventListener('drop', (event) => {
+      const source = this.dragSource;
+      this.dragSource = undefined;
+      if (!source) return;
+      event.preventDefault();
+      this.dragHandler?.(source, resolve());
+    });
+  }
+}
+
+/** 「使用」那一条说什么，取决于这件东西按一下还是按住。 */
+function useHint(stack: InventoryStackView): string {
+  if (!stack.usable) return '这件东西没有用法';
+  if (stack.useMode === 'hold') {
+    return `关掉背包，按住使用键 ${stack.holdSeconds} 秒`;
+  }
+  return '关掉背包，按一下使用键';
 }
