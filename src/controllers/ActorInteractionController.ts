@@ -57,10 +57,19 @@ export class ActorInteractionController {
     const playerId = this.port.getPlayerId();
     const playerPosition = this.port.getPlayerPosition?.();
     const usesProximity = playerPosition !== undefined;
-    // 手上已经有一株时，交互键说的是「放下」或「松开」，指向的永远是它自己：
-    // 拉着的那株可能已经被拖出就近搜索半径，叼着的那株 interactable 是关的。
+    const vesselId = playerId ? this.port.findOwnedActorId(playerId) : undefined;
+    // 手上那一株优先，但只在交互键**真的能对它做点什么**的时候：拉着的那株按一下
+    // 是「松开」，而它可能已经被拖出就近搜索半径，只有这条路找得到它。
+    //
+    // 「放下手上那件」不算——它归丢出键（Q）。让它在这里占住候选的话，手上一有
+    // 东西，交互键就再也够不到脚下那堆货了；而两条一起放行又会一次按下做两件事
+    // ——手上那件掉出去、脚下那堆被捡回来。一个键一件事，所以这里直接让开。
     const held = playerId ? this.port.findHeld?.(playerId) : undefined;
-    this.candidate = held ?? (playerPosition
+    const heldAction = held
+      ? resolveActorAction(this.toActionTarget(held), { playerId, controlledActorId: vesselId })
+      : undefined;
+    const heldIsInteractive = heldAction !== undefined && heldAction.id !== 'drop-held';
+    this.candidate = (heldIsInteractive ? held : undefined) ?? (playerPosition
       ? this.port.findNearby?.(playerPosition)
       : this.port.pick(frame));
     this.port.setHoveredActorId(usesProximity ? undefined : this.candidate?.actorId);
@@ -72,7 +81,6 @@ export class ActorInteractionController {
       worldInteractionLabel,
       promptOpacity,
     );
-    const vesselId = playerId ? this.port.findOwnedActorId(playerId) : undefined;
     const prompt = this.resolvePrompt(this.candidate, vesselId, playerId);
     this.port.setPrompt(prompt, promptOpacity);
     // 咬着人的时候交互键先归松口，和「手上已经有一株」同一条规矩：
@@ -88,9 +96,8 @@ export class ActorInteractionController {
         this.toActionTarget(this.candidate),
         { playerId, controlledActorId: vesselId },
       );
-      // 「放下手上那件」不在这里发，由 `HotbarController` 那一条统一发：两种手持物
-      // （物品栏的表现体、叼着的世界物件）它都认得，而这里只看得见有 interactable
-      // 的那一种。两边都发就会放下两次。这里仍然出提示——提示归动作表管。
+      // `drop-held` 在上面就没当成候选，这里再挡一次是兜底：候选换了来源（比如
+      // 有一天准星选中了自己手上那件），它也不该从交互键上掉出去。
       if (action && !action.blocked && action.id !== 'drop-held') {
         this.port.sendInteraction(this.candidate.actorId);
       }

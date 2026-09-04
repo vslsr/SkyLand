@@ -36,6 +36,11 @@
       "trigger": { "type": "pressed" }
     },
     {
+      "id": "IA_Player_Drop",
+      "valueType": "digital",
+      "trigger": { "type": "pressed" }
+    },
+    {
       "id": "IA_World_Interact",
       "valueType": "digital",
       "trigger": { "type": "pressed" }
@@ -144,6 +149,7 @@
       { "tag": "Input.Player.Jump", "actionId": "IA_Player_Jump" },
       { "tag": "Input.Player.Primary", "actionId": "IA_Player_Primary" },
       { "tag": "Input.Player.Interact", "actionId": "IA_Player_Interact" },
+      { "tag": "Input.Player.Drop", "actionId": "IA_Player_Drop" },
       { "tag": "Input.World.Interact", "actionId": "IA_World_Interact" },
       { "tag": "Input.AbilityLab.Arcane", "actionId": "IA_AbilityLab_Arcane" },
       { "tag": "Input.AbilityLab.Burn", "actionId": "IA_AbilityLab_Burn" },
@@ -202,6 +208,10 @@
         { "id": "Interact.Keyboard.Primary", "deviceKind": "keyboardMouse", "control": "Keyboard.KeyF", "actionId": "IA_Player_Interact" },
         { "id": "Interact.Touch.Button", "deviceKind": "touch", "control": "Virtual.InteractButton", "actionId": "IA_Player_Interact" },
         { "id": "Interact.Gamepad.Button", "deviceKind": "gamepad", "control": "Gamepad.ButtonWest", "actionId": "IA_Player_Interact" },
+        { "id": "Drop.Keyboard.Primary", "deviceKind": "keyboardMouse", "control": "Keyboard.KeyQ", "actionId": "IA_Player_Drop" },
+        { "id": "Drop.Touch.Button", "deviceKind": "touch", "control": "Virtual.DropButton", "actionId": "IA_Player_Drop" },
+        { "id": "Drop.Gamepad.Button", "deviceKind": "gamepad", "control": "Gamepad.LeftTrigger", "actionId": "IA_Player_Drop" },
+
         { "id": "WorldInteract.Keyboard.Primary", "deviceKind": "keyboardMouse", "control": "Keyboard.KeyE", "actionId": "IA_World_Interact" },
         { "id": "WorldInteract.Touch.Button", "deviceKind": "touch", "control": "Virtual.WorldInteractButton", "actionId": "IA_World_Interact" },
         { "id": "WorldInteract.Gamepad.Button", "deviceKind": "gamepad", "control": "Gamepad.ButtonNorth", "actionId": "IA_World_Interact" },
@@ -249,6 +259,7 @@
       "Keyboard.ArrowRight": "→",
       "Keyboard.KeyF": "F",
       "Keyboard.KeyE": "E",
+      "Keyboard.KeyQ": "Q",
       "Keyboard.KeyB": "B",
       "Keyboard.Digit0": "0",
       "Keyboard.Digit1": "1",
@@ -263,11 +274,13 @@
       "Virtual.SprintButton": "RUN",
       "Virtual.JumpButton": "JUMP",
       "Virtual.WorldInteractButton": "ACT",
+      "Virtual.DropButton": "DROP",
       "Virtual.InventoryButton": "BAG",
       "Gamepad.LeftStick": "左摇杆",
       "Gamepad.LeftStickButton": "L3",
       "Gamepad.ButtonWest": "X",
       "Gamepad.ButtonNorth": "Y",
+      "Gamepad.LeftTrigger": "LT",
       "Gamepad.Back": "Back"
     },
     "prompts": [
@@ -292,6 +305,7 @@
           { "label": "朝向", "text": "点击地面" },
           { "label": "加速", "mappingIds": ["Sprint.Keyboard.Primary"] },
           { "label": "跳跃", "mappingIds": ["Jump.Keyboard.Primary"] },
+          { "label": "丢出", "mappingIds": ["Drop.Keyboard.Primary"] },
           { "label": "背包", "mappingIds": ["Inventory.Keyboard.Primary"] }
         ]
       },
@@ -303,6 +317,7 @@
           { "label": "镜头", "text": "拖动屏幕" },
           { "label": "加速", "mappingIds": ["Sprint.Touch.Button"] },
           { "label": "跳跃", "mappingIds": ["Jump.Touch.Button"] },
+          { "label": "丢出", "mappingIds": ["Drop.Touch.Button"] },
           { "label": "背包", "mappingIds": ["Inventory.Touch.Button"] }
         ]
       },
@@ -312,6 +327,7 @@
         "entries": [
           { "label": "移动", "mappingIds": ["Move.Gamepad.Stick"] },
           { "label": "加速", "mappingIds": ["Sprint.Gamepad.Button"] },
+          { "label": "丢出", "mappingIds": ["Drop.Gamepad.Button"] },
           { "label": "背包", "mappingIds": ["Inventory.Gamepad.Button"] }
         ]
       }
@@ -386,6 +402,15 @@
         "gridColumn": 3,
         "gridRow": 1,
         "rowSpan": 2
+      },
+      {
+        "id": "drop",
+        "control": "Virtual.DropButton",
+        "label": "DROP",
+        "ariaLabel": "丢出手上那件",
+        "sizePx": 52,
+        "gridColumn": 3,
+        "gridRow": 3
       }
     ],
     "layouts": {

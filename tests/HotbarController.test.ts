@@ -29,7 +29,7 @@ function harness(initialHeldActorId: string | undefined) {
     send: (command) => sent.push(command),
     setProgress: (next) => progress.push(next),
   }, () => clock);
-  const press = (phase: string) => handlers.get(PlayerInputTags.WorldInteract)?.({ phase });
+  const press = (phase: string) => handlers.get(PlayerInputTags.Drop)?.({ phase });
   const use = (phase: string) => handlers.get(ItemUseInputTags.primary)?.({ phase });
   return {
     controller,
@@ -44,10 +44,9 @@ function harness(initialHeldActorId: string | undefined) {
   };
 }
 
-test('手上有东西时，交互键按下即放下——没有第二层含义要靠计时区分', () => {
-  // 这里以前是一条按住计时：短按放下、按住走完一圈是「收进背包」。那把一个常用
-  // 动作压在了不常用动作下面——想放下的人得先学会「别按太久」。收回背包现在只在
-  // 背包界面里那一格上点。
+test('丢出键：手上有东西时按一下就掉，一个键一件事', () => {
+  // 它有自己的一个键（Q），不和交互键挤在一起：挤在一起时一次按下会同时触发两件
+  // 事——手上那件掉出去，脚下那堆又被捡回来。
   const { sent, press } = harness('mushroom-1');
 
   press('triggered');
@@ -57,10 +56,10 @@ test('手上有东西时，交互键按下即放下——没有第二层含义�
   assert.deepEqual(sent, [{ kind: 'drop' }, { kind: 'drop' }], '每按一次放下一件');
 });
 
-test('空手时交互键不进这条路径，让就近拾取按下即触发', () => {
+test('空手按丢出键什么都不做', () => {
   const { sent, press } = harness(undefined);
   press('triggered');
-  assert.deepEqual(sent, [], '空手时这条路径完全不参与');
+  assert.deepEqual(sent, [], '手上没东西，没什么可丢');
 });
 
 test('按住期间把要按着的那个键交给界面：提示这时正在淡出，圈旁边得自己写', () => {
