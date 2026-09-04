@@ -14,7 +14,8 @@ Use this reference when writing a new entry into a design note, or when reviewin
 - The letter picks the type: `i` item, `b` build piece, `w` tool/weapon, `e` entity (reserved, still being designed).
 - Keys are case-sensitive. Fields are unordered but read fastest in the order the definition lists them.
 - `0` or an absent line means "none" (`R`, `B`).
-- `#design` in a value position is a deliberate blank for the implementer to answer, not a TODO. An absent line is an omission.
+- `#design` in a value position is a deliberate blank for the implementer to answer. An absent line is an omission, not a blank.
+- `@todo` marks unbuilt content — above a heading for a whole module, or trailing for one line. The design still binds; implement it rather than redesigning it. It does not excuse missing fields.
 - Cross-references use the **display name** of another entry, never an id. The referenced entry must actually exist somewhere in the design notes.
 - Legacy entries use a full-width `：` on some fields. Read both; write half-width `:`.
 
@@ -68,7 +69,7 @@ Writing a `@w` with a populated `D` is a request for new systems. Say that plain
 
 Before implementing an entry, confirm:
 
-1. Does every key the type defines appear, or is its absence deliberate and stated?
+1. Does every key the type defines appear, or is its absence deliberate and stated? A `@todo` on the entry does **not** excuse a missing key.
 2. Does each cross-reference (`I`, `B`, `cost.itemType`, `L` entries) resolve to something that exists?
 3. Does `F` / `D` ask for a verb, category, or piece kind that the closed enums already contain? If not, this change extends the language, not the data.
 4. Is the entry a heavy tool? Then it needs **two** entries — an `@i` and a `@b` — not one.

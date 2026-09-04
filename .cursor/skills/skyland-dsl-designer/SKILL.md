@@ -1,6 +1,6 @@
 ---
 name: skyland-dsl-designer
-description: Read, write, and implement SkyLand's `@` design-note DSL — the `@i` item, `@b` building-piece, `@w` tool/weapon and reserved `@e` entity entries used in doc/designer-*.md, their M/I/F/G/N/R, T/L, B/D and A (animation) fields, the `#design` placeholder, and how each field lands in config/items/item-catalog.json, a config/actors/*.actor.json buildPiece, an item-use Ability, or — for `A` — a procedural Visual under src/render/three. Use when a request quotes or asks for an `@i` / `@b` / `@w` entry, when adding an item, build piece, tool or weapon from a design note, or when extending the notation itself. For scene placement use skyland-scene-authoring; for new Components, Systems or replication use skyland-actor-component.
+description: Read, write, and implement SkyLand's `@` design-note DSL — the `@i` item, `@b` building-piece, `@w` tool/weapon and reserved `@e` entity entries used in doc/designer-*.md, their M/I/F/G/N/R, T/L, B/D and A (animation) fields, the `@todo` and `#design` markers, and how each field lands in config/items/item-catalog.json, a config/actors/*.actor.json buildPiece, an item-use Ability, or — for `A` — a procedural Visual under src/render/three. Use when a request quotes or asks for an `@i` / `@b` / `@w` entry, when adding an item, build piece, tool or weapon from a design note, or when extending the notation itself. For scene placement use skyland-scene-authoring; for new Components, Systems or replication use skyland-actor-component.
 ---
 
 # SkyLand Design-Note DSL
@@ -16,6 +16,17 @@ description: Read, write, and implement SkyLand's `@` design-note DSL — the `@
    - `config/items/item-catalog.schema.json` and `config/items/item-catalog.json` for `@i`
    - the `buildPiece` definition inside `config/actors/actor.schema.json` and the closest existing piece (`campfire`, `float-wall`, `ground-foundation`) for `@b`
    - `shared/items/ItemAbility.mjs` and `server/actors/ItemAbilityRuntime.mjs` for any `F` that is not "不能使用"
+
+## Read the two markers correctly
+
+They mark different gaps, and confusing them wastes the most time:
+
+- **`#design`** sits in a value position (`T: #design`). The **design** is deliberately blank. Propose one, and write the answer back into the entry.
+- **`@todo`** marks a whole block or a single line — on the line above a heading (or the blank line there) for a whole module, or trailing at end of line for just that line. The design is settled; only the **code** is missing. Implement what is written; do not redesign it.
+
+A `#design` already implies unimplemented, so it needs no `@todo`. The reverse does not hold. A `@todo` block covers everything under it, so entries inside it are not marked again — and an entry carrying `@todo` is still a **complete, binding definition**: the marker says it has not shipped, not that it may be written loosely.
+
+`@todo` tracks whether a **piece of content** is built. The 现状 column in `doc/dsl-designer.md`'s landing tables tracks whether a **notation field** has a system behind it. Different levels — do not copy one into the other.
 
 ## Separate the three places a fact can live
 
