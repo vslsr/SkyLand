@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { InventoryPage } from '../src/ui/pages/InventoryPage.ts';
+import { createInventorySlotCell } from '../src/ui/InventorySlotCell.ts';
 import { buildInventoryView } from '../src/inventory/index.ts';
 import { InventoryComponent } from '../shared/actor/index.mjs';
 import { itemCatalog } from '../shared/items/index.mjs';
@@ -151,6 +152,21 @@ function cellsOf(page: InventoryPage, className: string): FakeElement[] {
   return root.collect((element) => element.className.split(' ').includes(className));
 }
 
+/**
+ * 背包那一片的格子。
+ *
+ * 物品栏那一条用的是同一套格子（同一个 `inventory__cell`），所以按类名取会把
+ * 两边一起取回来——这正是「格子只有一套」的证据，但断言时要分清说的是哪一本账。
+ */
+function gridCells(page: InventoryPage): FakeElement[] {
+  return cellsOf(page, 'inventory__cell')
+    .filter((cell) => !cell.className.split(' ').includes('inventory__cell--hotbar'));
+}
+
+function hotbarCells(page: InventoryPage): FakeElement[] {
+  return cellsOf(page, 'inventory__cell--hotbar');
+}
+
 function inventoryView(slotCapacity: number, entries: [string, number][]) {
   const inventory = new InventoryComponent({ slotCapacity });
   for (const [itemType, quantity] of entries) inventory.add(itemType, quantity);
@@ -160,11 +176,11 @@ function inventoryView(slotCapacity: number, entries: [string, number][]) {
 test('还剩几格靠空格子自己说，不再另画一行读数', () => {
   withFakeDocument(() => {
     const page = new InventoryPage();
-    page.setInventory(inventoryView(6, [['wood', 12], ['spice-bundle', 1]]));
+    page.setInventory(inventoryView(6, [['wood', 4], ['stone', 2]]));
 
-    const cells = cellsOf(page, 'inventory__cell');
+    const cells = gridCells(page);
     assert.equal(cells.length, 6, '两格有货 + 四格空位');
-    const empty = cellsOf(page, 'inventory__cell--empty');
+    const empty = cells.filter((cell) => cell.className.split(' ').includes('inventory__cell--empty'));
     assert.equal(empty.length, 4);
     assert.equal(empty[0].getAttribute('aria-label'), '空格子');
 
@@ -191,58 +207,74 @@ test('装满了才出那一句提醒，而且说的是「满了」不是一个�
   });
 });
 
-test('格子带上物品分类、数量与售价，违禁品单独标记', () => {
+test('格子带上物品分类与数量，堆满了单独标出来', () => {
   withFakeDocument(() => {
     const page = new InventoryPage();
-    page.setInventory(inventoryView(8, [['crown-relic', 1], ['wood', 5]]));
+    const limit = itemCatalog.require('fruit').stackLimit;
+    page.setInventory(inventoryView(8, [['fruit', limit], ['wood', 5]]));
 
-    const cells = cellsOf(page, 'inventory__cell')
-      .filter((cell) => cell.dataset.itemType !== undefined);
-    const crown = cells.find((cell) => cell.dataset.itemType === 'crown-relic');
-    assert.ok(crown);
-    assert.equal(crown.dataset.category, 'valuable');
-    assert.equal(crown.dataset.contraband, 'true');
-    assert.ok(crown.getAttribute('aria-label')?.includes('王冠遗物'));
-    // 大件才画「几格」角标；一格的东西不用占视觉。
-    assert.equal(crown.text.includes('3 格'), true);
-    assert.equal(crown.text.includes(`${itemCatalog.require('crown-relic').coinValue} 金币`), true);
+    const cells = gridCells(page).filter((cell) => cell.dataset.itemType !== undefined);
+    const fruit = cells.find((cell) => cell.dataset.itemType === 'fruit');
+    assert.ok(fruit);
+    assert.equal(fruit.dataset.category, 'supply');
+    assert.equal(fruit.dataset.contraband, undefined);
+    assert.ok(fruit.getAttribute('aria-label')?.includes('果子'));
+    assert.ok(fruit.text.includes(`${limit} / ${limit}`), fruit.text);
+    assert.ok(
+      cellsOf(page, 'inventory__count').some((count) => count.className.includes('is-full')),
+      '堆到上限的那一格要标出来：再拾取只能另开一格',
+    );
 
     const wood = cells.find((cell) => cell.dataset.itemType === 'wood');
     assert.ok(wood);
-    assert.equal(wood.dataset.contraband, undefined);
+    assert.equal(wood.dataset.category, 'material');
+    // 一格的东西不画「几格」角标：那点视觉留给真正占多格的东西。
     assert.equal(wood.text.includes('格'), false);
-
-    const ledger = cellsOf(page, 'inventory__ledger')[0];
-    assert.ok(ledger.textContent.includes('待兑现'));
-    assert.ok(ledger.textContent.includes('违禁品'));
   });
 });
 
-test('不占货位的物品和别的物品排在一起，靠标记区分而不是靠分区', () => {
+test('占多格、能卖钱、不占格这三种角标由格子自己画', () => {
+  // 目录里现在只有四件物品，都是占一格的普通材料与补给。这三种角标仍然是格子
+  // 的能力，所以直接拿一份合成的格子数据钉住——等价值货物、弹药回到目录里时，
+  // 界面这一侧不必再改一行。
   withFakeDocument(() => {
-    const page = new InventoryPage();
-    page.setInventory(inventoryView(4, [['wood', 3], ['light-ammo', 60]]));
+    const relic = createInventorySlotCell({
+      ref: { kind: 'backpack', itemType: 'relic' },
+      itemType: 'relic',
+      displayName: '王冠遗物',
+      quantity: 1,
+      stackLimit: 1,
+      slotCost: 3,
+      coinValue: 200,
+      contraband: true,
+      holdable: true,
+    }) as unknown as FakeElement;
+    assert.equal(relic.dataset.contraband, 'true');
+    assert.ok(relic.text.includes('3 格'), relic.text);
+    assert.ok(relic.text.includes('200 金币'), relic.text);
 
-    // 分类页签接管了分组，所以不再有第二个网格把同一堆货画两遍。
-    assert.equal(cellsOf(page, 'inventory__grid--pooled').length, 0);
-    // 全部页：木材 + 弹药 + 三个空货位。弹药不吃格数，空格仍然是三个。
-    assert.equal(cellsOf(page, 'inventory__cell').length, 2 + 3);
-
-    const ammo = cellsOf(page, 'inventory__cell')
-      .find((cell) => cell.dataset.itemType === 'light-ammo');
-    assert.ok(ammo, '弹药出现在全部页里');
-    assert.ok(ammo.text.includes('不占格'), '靠格子上的标记说明它不吃货位');
+    const ammo = createInventorySlotCell({
+      ref: { kind: 'backpack', itemType: 'ammo' },
+      itemType: 'ammo',
+      displayName: '普通弹药',
+      quantity: 60,
+      stackLimit: 240,
+      slotCost: 0,
+      holdable: false,
+    }) as unknown as FakeElement;
+    assert.ok(ammo.text.includes('不占格'), ammo.text);
+    assert.equal(ammo.dataset.commonUiReceiver, undefined, '拿不到手上的那格本来就不响应');
   });
 });
 
 test('分类页签第一页是全部，空分类不出现', () => {
   withFakeDocument(() => {
     const page = new InventoryPage();
-    page.setInventory(inventoryView(6, [['wood', 3], ['light-ammo', 60]]));
+    page.setInventory(inventoryView(6, [['wood', 3], ['fruit', 2]]));
     const tabs = cellsOf(page, 'inventory__tab');
     assert.deepEqual(
       cellsOf(page, 'inventory__tab-label').map((label) => label.textContent),
-      ['全部', '材料', '弹药'],
+      ['全部', '材料', '补给品'],
       '只有身上真有的分类才给页签',
     );
     // 数量是独立的一个附注元素，不再拼进标签文字里——「全部 0」读起来像一个词。
@@ -259,16 +291,22 @@ function menuEntries(page: InventoryPage): FakeElement[] {
 }
 
 function clickCell(page: InventoryPage, itemType: string): void {
-  const cell = cellsOf(page, 'inventory__cell')
+  const cell = gridCells(page)
     .find((candidate) => candidate.dataset.itemType === itemType);
   assert.ok(cell, `没有 ${itemType} 这一格`);
   cell.dispatchEvent(new Event('click'));
 }
 
-test('可手持的格子点一下弹出动作菜单，拿不到手上的不响应', () => {
+function clickHotbarCell(page: InventoryPage, slotIndex: number): void {
+  const cell = hotbarCells(page)[slotIndex];
+  assert.ok(cell, `没有物品栏第 ${slotIndex} 格`);
+  cell.dispatchEvent(new Event('click'));
+}
+
+test('背包里的格子点一下弹出动作菜单，空格不响应', () => {
   withFakeDocument(() => {
     const page = new InventoryPage();
-    page.setInventory(inventoryView(6, [['wood', 3], ['light-ammo', 60]]));
+    page.setInventory(inventoryView(6, [['wood', 3]]));
     const menu = cellsOf(page, 'inventory-menu')[0];
     assert.equal(menu.hidden, true, '没点之前菜单是收着的');
 
@@ -278,34 +316,69 @@ test('可手持的格子点一下弹出动作菜单，拿不到手上的不响�
       menuEntries(page).map((entry) => entry.textContent),
       ['使用', '装配', '丢弃'],
     );
-    assert.equal(cellsOf(page, 'inventory-menu__title')[0].textContent, '木材');
+    assert.equal(cellsOf(page, 'inventory-menu__title')[0].textContent, '木头');
+    // 木头没有用法，「使用」列出来但点不动。
+    const use = menuEntries(page).find((entry) => entry.dataset.action === 'use');
+    assert.equal(use?.disabled, true);
 
-    // 弹药拿不到手上，那一格根本不是按钮。
-    clickCell(page, 'light-ammo');
-    assert.equal(cellsOf(page, 'inventory-menu__title')[0].textContent, '木材');
+    // 空格里没有东西，点了不该弹出一个说不出主语的菜单。
+    const empty = gridCells(page).find((cell) => cell.dataset.itemType === undefined);
+    assert.ok(empty);
+    empty.dispatchEvent(new Event('click'));
+    assert.equal(cellsOf(page, 'inventory-menu__title')[0].textContent, '木头');
+  });
+});
+
+test('物品栏那一格也点得开菜单：和背包用的是同一套格子', () => {
+  withFakeDocument(() => {
+    const inventory = new InventoryComponent({ slotCapacity: 6, hotbarCapacity: 9 });
+    inventory.add('fruit', 2);
+    inventory.assignHotbarSlot(1, 'fruit');
+    const page = new InventoryPage();
+    const actions: unknown[] = [];
+    page.onItemAction((action, slot) => actions.push([action, slot]));
+    page.setInventory(buildInventoryView(inventory as never));
+
+    clickHotbarCell(page, 1);
+    assert.equal(cellsOf(page, 'inventory-menu')[0].hidden, false);
+    assert.equal(cellsOf(page, 'inventory-menu__title')[0].textContent, '果子');
+    assert.deepEqual(
+      menuEntries(page).map((entry) => entry.textContent),
+      ['使用', '收回背包', '丢弃'],
+      '中间那条方向相反：背包往物品栏搬，物品栏往背包搬',
+    );
+
+    const drop = menuEntries(page).find((entry) => entry.dataset.action === 'drop');
+    assert.ok(drop);
+    drop.dispatchEvent(new Event('click'));
+    assert.deepEqual(actions, [['drop', { kind: 'hotbar', slotIndex: 1 }]]);
+
+    // 空的那一格没有东西可操作。
+    clickHotbarCell(page, 0);
+    assert.equal(cellsOf(page, 'inventory-menu')[0].hidden, true);
   });
 });
 
 test('可点的格子标成 CommonUI 事件接收者，点击不会被栈守卫拦掉', () => {
   withFakeDocument(() => {
     const page = new InventoryPage();
-    page.setInventory(inventoryView(6, [['wood', 3], ['light-ammo', 60]]));
-    const cells = cellsOf(page, 'inventory__cell');
+    page.setInventory(inventoryView(6, [['wood', 3]]));
+    const cells = gridCells(page);
     const wood = cells.find((cell) => cell.dataset.itemType === 'wood');
-    const ammo = cells.find((cell) => cell.dataset.itemType === 'light-ammo');
-    assert.ok(wood && ammo);
+    const empty = cells.find((cell) => cell.dataset.itemType === undefined);
+    assert.ok(wood && empty);
     // 格子是 `<li role="button">`，`CommonUIManager` 只按标签名认接收者，认不出就
     // 会在捕获阶段把这次点击拦掉——玩家点了毫无反应。
     assert.equal(wood.dataset.commonUiReceiver, '');
-    assert.equal(ammo.dataset.commonUiReceiver, undefined, '拿不到手上的那格本来就不响应');
+    assert.equal(empty.dataset.commonUiReceiver, undefined, '空格本来就不响应');
   });
 });
 
 test('选中菜单里的一条就报出意图，并把菜单收起来', () => {
   withFakeDocument(() => {
     const page = new InventoryPage();
-    const actions: [string, string][] = [];
-    page.onItemAction((action, itemType) => actions.push([action, itemType]));
+    const actions: unknown[] = [];
+    page.onItemAction((action, slot) => actions.push([action, slot]));
     page.setInventory(inventoryView(6, [['wood', 3]]));
 
     clickCell(page, 'wood');
@@ -313,7 +386,7 @@ test('选中菜单里的一条就报出意图，并把菜单收起来', () => {
     assert.ok(drop);
     drop.dispatchEvent(new Event('click'));
 
-    assert.deepEqual(actions, [['drop', 'wood']]);
+    assert.deepEqual(actions, [['drop', { kind: 'backpack', itemType: 'wood' }]]);
     // 先收再兑现：动作会改背包，改完这一格会被重画，菜单挂着的锚点就没了。
     assert.equal(cellsOf(page, 'inventory-menu')[0].hidden, true);
   });
@@ -345,7 +418,7 @@ test('已经装配在物品栏上时，「装配」列出来但点不动', () =>
   withFakeDocument(() => {
     const inventory = new InventoryComponent({ slotCapacity: 6, hotbarCapacity: 9 });
     inventory.add('wood', 3);
-    // 装配是一次转移：这之后木材整摞在物品栏上，背包里没有了，所以从物品栏那一格
+    // 装配是一次转移：这之后木头整摞在物品栏上，背包里没有了，所以从物品栏那一格
     // 上点开菜单。
     inventory.assignHotbarSlot(0, 'wood');
     const page = new InventoryPage();
@@ -354,7 +427,7 @@ test('已经装配在物品栏上时，「装配」列出来但点不动', () =>
     page.setInventory(buildInventoryView(inventory as never));
 
     assert.equal(
-      cellsOf(page, 'inventory__cell').some((cell) => cell.dataset.itemType === 'wood'),
+      gridCells(page).some((cell) => cell.dataset.itemType === 'wood'),
       false,
       '装配之后背包里不再有它：物品栏是另一本账，不是一个引用',
     );
@@ -374,21 +447,19 @@ test('已经装配在物品栏上时，「装配」列出来但点不动', () =>
 test('下方那条物品栏画的是它自己持有的那一摞，格子拖得动', () => {
   withFakeDocument(() => {
     const inventory = new InventoryComponent({ slotCapacity: 6, hotbarCapacity: 9 });
-    inventory.add('wood', 120);
+    const limit = itemCatalog.require('wood').stackLimit;
+    inventory.add('wood', limit * 2);
     inventory.assignHotbarSlot(1, 'wood');
     inventory.setActiveHotbarSlot(1);
     const page = new InventoryPage();
     page.setInventory(buildInventoryView(inventory as never));
 
-    const slots = cellsOf(page, 'inventory-hotbar__slot');
+    const slots = hotbarCells(page);
     assert.equal(slots.length, 9, '一格一个数字键，1-9');
     assert.equal(slots[1].dataset.state, 'ready');
     assert.equal(slots[1].dataset.active, 'true', '选中的那一格标出来');
-    // 一摞最多 99：装配搬走 99 个，剩下 21 个留在背包里。
-    assert.equal(
-      cellsOf(page, 'inventory-hotbar__quantity')[1].textContent,
-      String(itemCatalog.require('wood').stackLimit),
-    );
+    // 一摞最多 stackLimit：装配搬走一摞，剩下的留在背包里。
+    assert.ok(slots[1].text.includes(String(limit)), slots[1].text);
     assert.equal(slots[0].dataset.state, 'empty');
     assert.equal(slots[0].draggable, false, '空格没什么可拖的');
     assert.equal(slots[1].draggable, true);
@@ -398,16 +469,16 @@ test('下方那条物品栏画的是它自己持有的那一摞，格子拖得�
 test('拖拽的三个方向：背包 → 物品栏、物品栏之间、物品栏 → 背包', () => {
   withFakeDocument(() => {
     const inventory = new InventoryComponent({ slotCapacity: 6, hotbarCapacity: 9 });
-    inventory.add('wood', 120);
+    inventory.add('wood', itemCatalog.require('wood').stackLimit * 2);
     inventory.assignHotbarSlot(0, 'wood');
     const page = new InventoryPage();
     const drops: [unknown, unknown][] = [];
     page.onDragDrop((source, target) => drops.push([source, target]));
     page.setInventory(buildInventoryView(inventory as never));
 
-    const backpackCell = cellsOf(page, 'inventory__cell')
+    const backpackCell = gridCells(page)
       .find((cell) => cell.dataset.itemType === 'wood');
-    const hotbarSlots = cellsOf(page, 'inventory-hotbar__slot');
+    const hotbarSlots = hotbarCells(page);
     const grid = cellsOf(page, 'inventory__grid')[0];
     assert.ok(backpackCell);
 
@@ -467,7 +538,7 @@ test('没有权威数据时显示空态，关闭提示跟着按键走', () => {
 
     page.setInventory(undefined);
     assert.equal(notice.hidden, false);
-    assert.equal(cellsOf(page, 'inventory__cell').length, 0);
+    assert.equal(gridCells(page).length, 0);
     assert.equal(cellsOf(page, 'inventory__tab').length, 0);
 
     const hint = cellsOf(page, 'inventory__hint')[0];

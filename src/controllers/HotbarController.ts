@@ -13,6 +13,13 @@ import { holdRatio, resolveHeldItemAction } from '../../shared/actor/index.mjs';
 export interface HeldItemProgress {
   /** `use` 是物品能力的长按激活，`stow` 是交互键长按收回背包。 */
   readonly kind: 'use' | 'stow';
+  /**
+   * 这次按住在用哪一种用法（`kind: 'use'` 才有）。
+   *
+   * 界面按它挑表现：`eat` 那一段是角色在嚼，模型要抖起来。表现读的是**同一次
+   * 按住**，所以抖动的起止和圈的起止是同一件事，不需要另一条状态。
+   */
+  readonly action?: 'eat' | 'tool' | 'throw';
   /** [0, 1]。到 1 表示服务端也认为倒计时走完了。 */
   readonly ratio: number;
   readonly label: string;
@@ -57,6 +64,8 @@ export interface HotbarPort {
 /** 一次还没结束的按住。 */
 interface PendingHold {
   readonly kind: 'use' | 'stow';
+  /** 用法动作；`stow` 没有。 */
+  readonly action?: 'eat' | 'tool' | 'throw';
   /**
    * 按住开始那一刻手上是哪个 Actor。
    *
@@ -159,6 +168,7 @@ export class HotbarController {
     }
     this.port.setProgress({
       kind: this.pending.kind,
+      action: this.pending.action,
       ratio,
       label: this.pending.label,
       onHotbar: this.pending.onHotbar,
@@ -247,6 +257,7 @@ export class HotbarController {
     if (phase === 'started') {
       this.begin({
         kind: 'use',
+        action: use.action as HeldItemProgress['action'],
         heldActorId: this.port.getHeldActorId(),
         startedAt: this.now(),
         // 点按没有倒计时；长按的圈满那一刻就是服务端激活那一刻。

@@ -29,7 +29,9 @@ import {
   INTERACTABLE_COMPONENT,
   INVENTORY_COMPONENT,
   ITEM_STACK_COMPONENT,
+  NO_HOTBAR_SLOT,
   PICKUP_DROP_COMPONENT,
+  STOWABLE_COMPONENT,
   BITE_COMPONENT,
   SOFT_BODY_DEFORMATION_COMPONENT,
   sampleBuoyancyBobOffset,
@@ -59,6 +61,7 @@ import { dropPickedActor, pickupActor } from '../actors/PickupDropMutations.mjs'
 import {
   discardHeldItemActor,
   dropHeldObject,
+  dropHotbarItem,
   dropInventoryItem,
   stowHeldItem,
   syncHeldItemActor,
@@ -104,6 +107,7 @@ const HOTBAR_COMMAND_KINDS = new Set([
   'assign',
   'hotbar:swap',
   'hotbar:stow',
+  'drop:hotbar',
 ]);
 
 function roundCoordinate(value) {
@@ -246,6 +250,11 @@ export class ServerScene {
         ? (x, z) => sampleTerrain(this.worldSeed, x, z, {}, this.terrainCellCodeAt).groundY
         : undefined,
     });
+    // 拔出来的世界物件怎么进物品栏，只有场景知道（它要删 Actor、要重挂手持
+    // 表现体）。ElasticDetachSystem 只认识 world，所以这一步从 context 上问。
+    this.actorWorld.context.stowPulledActor = (actor, player) => (
+      this.stowPulledActor(actor, player)
+    );
     // 静态碰撞只有流式场景才有；固定摆放的场景里树是布景，没有碰撞体。
     this.chunkColliders = new ServerChunkColliders({
       world: this.collision,
@@ -283,6 +292,14 @@ export class ServerScene {
       },
     });
     this.tick = 0;
+    /**
+     * 这一轮 System 跑完之后要重新对齐手上那件的玩家。
+     *
+     * System 里改了物品栏却不能当场挂模型：`ActorWorld` 在 update 期间把增删排队，
+     * 当场挂会拿到一个还没进世界的 Actor。
+     * @type {Set<string>}
+     */
+    this.pendingHeldItemSyncs = new Set();
     // 手持表现体的 id 计数。它们生生灭灭很频繁（每次换手一次），单调递增的序号
     // 保证不会撞上还没被客户端清掉的上一个。
     this.nextHeldItemId = 0;
@@ -608,6 +625,38 @@ export class ServerScene {
   }
 
   /**
+   * 刚被拔出来的世界物件直接交到手上。
+   *
+   * 「空手才拔得出来」不在这里判：一株蘑菇要先被拉住才拔得断，而拉住那一步已经
+   * 要求嘴里空着（`interactWithActor` 的 mushroom-bite 分支）。手上握着物品栏那
+   * 一格时嘴里挂着表现体，那条路本来就走不到这里。
+   *
+   * 装进的是**空手对应的那一格**：`equipToHotbar` 先看选中格，所以拔完就握在
+   * 手上，不用再按一次数字键。一格都腾不出来时返回 false，调用方退回原来那条
+   * 「叼在嘴上」——凭空把它删掉等于让玩家白拔一次。
+   *
+   * @returns 是否真的收进了物品栏
+   */
+  stowPulledActor(actor, player) {
+    const stowable = actor?.getComponent(STOWABLE_COMPONENT);
+    const inventory = player?.getComponent(INVENTORY_COMPONENT);
+    const itemType = stowable?.itemType;
+    const quantity = stowable?.quantity ?? 0;
+    if (!inventory || !itemType || quantity <= 0) return false;
+    const slotIndex = inventory.equipToHotbar(itemType, quantity);
+    if (slotIndex === NO_HOTBAR_SLOT) return false;
+    this.actorWorld.removeActor(actor.id);
+    // 已经选中的那一格不用再切：`setActiveHotbarSlot` 把「切到当前格」当成收手，
+    // 再调一次会让刚拔出来的这一朵立刻从手上消失。
+    if (inventory.activeHotbarIndex !== slotIndex) inventory.setActiveHotbarSlot(slotIndex);
+    // 拔断发生在 System 跑的中途，那时 `ActorWorld` 正在迭代，增删都排到本轮之后。
+    // 手持表现体要「先建出来、再挂到玩家身上」，这两步中间不能夹一次排队——所以
+    // 挂手的事排到这一轮 System 跑完再做。
+    this.pendingHeldItemSyncs.add(player.id);
+    return true;
+  }
+
+  /**
    * 背包、物品栏与容器的唯一上行入口。
    *
    * 合成一条消息而不是四条，是因为它们共享同一套前置校验（玩家在不在、序号有没有
@@ -669,6 +718,14 @@ export class ServerScene {
         break;
       case 'drop':
         changed = dropHeldObject(this, player);
+        break;
+      case 'drop:hotbar':
+        // 物品栏那一格丢一个。丢的是那一格，不是背包里同名的那一摞。
+        changed = dropHotbarItem(
+          this,
+          player,
+          Math.trunc(toFiniteNumber(command.slotIndex, -1)),
+        );
         break;
       case 'drop:stack':
         // 背包里那一堆直接丢一个到地上，不经过手：菜单里的「丢弃」指的是包里
@@ -1357,6 +1414,9 @@ export class ServerScene {
     }
     // Actor 的碰撞盒由 ActorColliderIndex 在 tick 内同步，这里不用再管。
     this.actorWorld.update(elapsedSeconds, now / 1000);
+    // System 里改过物品栏的玩家在这里才挂手持模型：世界这时已经把本轮排队的
+    // 增删都落了地，`spawnHeldItemActor` 建出来的那个立刻挂得上去。
+    this.flushHeldItemSyncs();
     // 常驻的静态碰撞与生成物件都跟着玩家走；没人跨过 chunk 边界时直接返回。
     this.chunkColliders.sync(this.players.values());
     this.terrainColliders.sync(this.players.values());
@@ -1399,6 +1459,16 @@ export class ServerScene {
     return actor;
   }
 
+  /** 把 System 里排下的手持对齐补上。世界已经不在迭代中，增删都能当场生效。 */
+  flushHeldItemSyncs() {
+    if (this.pendingHeldItemSyncs.size === 0) return;
+    for (const playerId of this.pendingHeldItemSyncs) {
+      const player = this.players.get(playerId);
+      if (player) syncHeldItemActor(this, player);
+    }
+    this.pendingHeldItemSyncs.clear();
+  }
+
   /** 收掉手持表现体。它只活在玩家挂点上，删掉不影响世界里任何一堆货。 */
   removeHeldItemActor(actorId) {
     return this.actorWorld.removeActor(actorId);
@@ -1415,12 +1485,12 @@ export class ServerScene {
   }
 
   /**
-   * 生成物件的掉落出生方式由原型配置。石头等默认在中心掉一堆；普通树把圆木
+   * 生成物件的掉落出生方式由原型配置。石头等默认在中心掉一堆；普通树把木头
    * 从树中心拆开抛出；果树则从客户端画果实时使用的同一批枝头锚点开始下落。
    */
   spawnGeneratedPropDrop(prop, sourceTransform) {
     if (prop.dropSpawnPattern === 'center-scatter') {
-      // 数量先拆成独立 Actor，使每根圆木都有自己的重力、碰撞、滚动和休眠状态。
+      // 数量先拆成独立 Actor，使每根木头都有自己的重力、碰撞、滚动和休眠状态。
       // 出生点刻意保持为树的同一个中心；只用初速度和朝向让它们随后自然散开。
       const actorCount = Math.max(1, Math.min(prop.dropQuantity, 12));
       const baseQuantity = Math.floor(prop.dropQuantity / actorCount);
@@ -1439,7 +1509,7 @@ export class ServerScene {
             0.96 + (index % 2) * 0.14,
             Math.sin(angle) * horizontalSpeed,
           ],
-          // 圆木的长轴与预期滚动轴对齐；客户端再按权威位移累计滚动四元数。
+          // 木头的长轴与预期滚动轴对齐；客户端再按权威位移累计滚动四元数。
           yaw: Math.PI / 2 - angle,
         });
       });

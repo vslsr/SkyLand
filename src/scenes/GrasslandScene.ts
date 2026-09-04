@@ -313,6 +313,8 @@ export class GrasslandScene extends Scene {
       setProgress: (progress) => {
         this.hotbarBar.setProgress(progress);
         this.holdProgress.setProgress(progress?.onHotbar ? undefined : progress);
+        // 吃东西那一段抖动跟着这次按住走：圈满那一刻服务端扣账，抖动同时停。
+        this.player?.setChewing(progress?.action === 'eat');
       },
     });
     this.container = new ContainerController(this.containerPage, {

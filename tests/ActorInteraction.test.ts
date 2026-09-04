@@ -605,7 +605,7 @@ test('咬人是没有提示的彩蛋：抢不走正经交互，咬着时交互�
 
   // 面前有正经交互时，彩蛋不能抢：它排在所有候选之后。
   candidate = {
-    actorId: 'stack-1', label: '木材', action: 'pickup-stack',
+    actorId: 'stack-1', label: '木头', action: 'pickup-stack',
     carrierActorId: null, holderPlayerId: null, quantity: 3,
   };
   pressInteract();

@@ -18,7 +18,7 @@ test('每张地图都带齐物品堆原型，不看这张地图长不长得出�
     .filter((archetype) => archetype.components.itemStack)
     .map((archetype) => archetype.id)
     .sort();
-  assert.ok(itemArchetypeIds.includes('mushroom-pile'), '弹弹菇揣进包里之后要能再拿出来');
+  assert.ok(itemArchetypeIds.includes('mushroom-pile'), '蘑菇拔进物品栏之后要能再丢出来');
 
   const catalog = await SceneCatalog.load();
   for (const scene of catalog.list()) {
@@ -31,7 +31,7 @@ test('每张地图都带齐物品堆原型，不看这张地图长不长得出�
 });
 
 /**
- * 弹弹菇是这条路最典型的一件：它进包靠玩家自己揣，任何 worldProps 掉落都不产它，
+ * 蘑菇是这条路最典型的一件：它进包靠玩家自己拔，任何 worldProps 掉落都不产它，
  * 所以「只带 worldProps 掉落的原型」时，包里的蘑菇既装配不上物品栏也丢不出去。
  */
 test('包里的蘑菇能装配到物品栏、拿在手上，也能直接丢到地上', async () => {

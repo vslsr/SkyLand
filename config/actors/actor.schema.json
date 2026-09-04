@@ -1641,47 +1641,11 @@
                 "cutColor",
                 "inkColor",
                 "radius",
-                "height"
-              ],
-              "properties": {
-                "model": {
-                  "const": "line-art-wood-pile"
-                },
-                "woodColor": {
-                  "$ref": "#/$defs/color"
-                },
-                "cutColor": {
-                  "$ref": "#/$defs/color"
-                },
-                "inkColor": {
-                  "$ref": "#/$defs/color"
-                },
-                "radius": {
-                  "type": "number",
-                  "exclusiveMinimum": 0,
-                  "maximum": 3
-                },
-                "height": {
-                  "type": "number",
-                  "exclusiveMinimum": 0,
-                  "maximum": 3
-                }
-              }
-            },
-            {
-              "type": "object",
-              "additionalProperties": false,
-              "required": [
-                "model",
-                "woodColor",
-                "cutColor",
-                "inkColor",
-                "radius",
                 "length"
               ],
               "properties": {
                 "model": {
-                  "const": "line-art-wood-log"
+                  "const": "line-art-wood-pile"
                 },
                 "woodColor": {
                   "$ref": "#/$defs/color"
@@ -1759,6 +1723,42 @@
                   "$ref": "#/$defs/color"
                 },
                 "accentColor": {
+                  "$ref": "#/$defs/color"
+                },
+                "inkColor": {
+                  "$ref": "#/$defs/color"
+                },
+                "radius": {
+                  "type": "number",
+                  "exclusiveMinimum": 0,
+                  "maximum": 3
+                },
+                "height": {
+                  "type": "number",
+                  "exclusiveMinimum": 0,
+                  "maximum": 3
+                }
+              }
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "model",
+                "capColor",
+                "stemColor",
+                "inkColor",
+                "radius",
+                "height"
+              ],
+              "properties": {
+                "model": {
+                  "const": "line-art-mushroom-pile"
+                },
+                "capColor": {
+                  "$ref": "#/$defs/color"
+                },
+                "stemColor": {
                   "$ref": "#/$defs/color"
                 },
                 "inkColor": {

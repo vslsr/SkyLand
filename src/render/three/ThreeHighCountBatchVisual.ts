@@ -18,31 +18,43 @@ import { createFillMaterial, type FillMaterialEnvironment } from '../../material
 import {
   FRUIT_PILE_PIECES,
   createFruitGeometry,
+  createFruitStemGeometry,
+  fruitStemOffsetY,
 } from '../../models/actors/createFruitPileModel';
+import {
+  MUSHROOM_PILE_PIECES,
+  createMushroomCapGeometry,
+  createMushroomStemGeometry,
+  mushroomStemHeight,
+} from '../../models/actors/createMushroomPileModel';
 import {
   STONE_PILE_PIECES,
   createStonePieceGeometry,
 } from '../../models/actors/createStonePileModel';
 import {
-  WOOD_LOG_STACK_LAYOUT,
-  createWoodLogBodyGeometry,
-  createWoodLogCutGeometry,
-} from '../../models/actors/createWoodLogModel';
+  WOOD_STACK_LAYOUT,
+  createWoodBodyGeometry,
+  createWoodCutGeometry,
+} from '../../models/actors/createWoodPileModel';
 import type { ActorArchetypeDefinition } from '../../scenes/data/SceneDefinition';
 
 type ActorRender = ActorArchetypeDefinition['components']['render'];
 type WoodPileRender = Extract<ActorRender, { model: 'line-art-wood-pile' }>;
-type WoodLogRender = Extract<ActorRender, { model: 'line-art-wood-log' }>;
 type StonePileRender = Extract<ActorRender, { model: 'line-art-stone-pile' }>;
 type FruitPileRender = Extract<ActorRender, { model: 'line-art-fruit-pile' }>;
-type PileRender = WoodPileRender | WoodLogRender | StonePileRender | FruitPileRender;
+type MushroomPileRender = Extract<ActorRender, { model: 'line-art-mushroom-pile' }>;
+type PileRender =
+  | WoodPileRender
+  | StonePileRender
+  | FruitPileRender
+  | MushroomPileRender;
 
 /** 走合批绘制的堆叠模型。新增一种堆叠物就在这里登记，并补一个 pieces 构造。 */
 const PILE_RENDER_MODELS = new Set<PileRender['model']>([
   'line-art-wood-pile',
-  'line-art-wood-log',
   'line-art-stone-pile',
   'line-art-fruit-pile',
+  'line-art-mushroom-pile',
 ]);
 
 /**
@@ -84,37 +96,9 @@ function nextCapacity(required: number): number {
   return capacity;
 }
 
-/** 三根交错的圆木，与 createWoodPileModel 的摆法一致。 */
-function createWoodPilePieces(definition: WoodPileRender, burning: boolean): PilePiece[] {
-  const wood = new THREE.Color(burning ? '#d66b38' : definition.woodColor);
-  const cut = new THREE.Color(burning ? '#f2a04f' : definition.cutColor);
-  const pieces: PilePiece[] = [];
-  for (let index = 0; index < 3; index += 1) {
-    const matrix = new THREE.Matrix4().compose(
-      new THREE.Vector3((index - 1) * definition.radius * 0.22, definition.height * (0.35 + index * 0.18), 0),
-      new THREE.Quaternion().setFromEuler(
-        new THREE.Euler(0, index === 2 ? Math.PI / 2 : (index - 0.5) * 0.42, Math.PI / 2),
-      ),
-      new THREE.Vector3(1, 1, 1),
-    );
-    pieces.push({
-      geometry: new THREE.CylinderGeometry(
-        definition.radius * 0.15,
-        definition.radius * 0.15,
-        definition.radius * 1.45,
-        8,
-      ),
-      matrix,
-      tint: index === 2 ? cut : wood,
-      edgeThreshold: 6,
-    });
-  }
-  return pieces;
-}
-
-/** 单根时是一根可滚动圆木；相邻 Actor 合并后用三根交错布局表达数量。 */
-function createWoodLogPieces(
-  definition: WoodLogRender,
+/** 单根时是一根六棱柱；相邻 Actor 合并后用三根交错布局表达数量。 */
+function createWoodPilePieces(
+  definition: WoodPileRender,
   burning: boolean,
   single: boolean,
 ): PilePiece[] {
@@ -122,7 +106,7 @@ function createWoodLogPieces(
   const cut = new THREE.Color(burning ? '#f2a04f' : definition.cutColor);
   const layouts = single
     ? [{ offsetX: 0, offsetY: 0, offsetZ: 0, yaw: 0 }] as const
-    : WOOD_LOG_STACK_LAYOUT;
+    : WOOD_STACK_LAYOUT;
   const pieces: PilePiece[] = [];
   for (const layout of layouts) {
     const x = layout.offsetX * definition.length;
@@ -133,7 +117,7 @@ function createWoodLogPieces(
       layout.yaw,
     );
     pieces.push({
-      geometry: createWoodLogBodyGeometry(definition.radius, definition.length),
+      geometry: createWoodBodyGeometry(definition.radius, definition.length),
       matrix: new THREE.Matrix4().compose(
         new THREE.Vector3(x, y, z),
         quaternion,
@@ -145,7 +129,7 @@ function createWoodLogPieces(
     for (const side of [-1, 1]) {
       const localEndX = side * definition.length * 0.505;
       pieces.push({
-        geometry: createWoodLogCutGeometry(definition.radius),
+        geometry: createWoodCutGeometry(definition.radius),
         matrix: new THREE.Matrix4().compose(
           new THREE.Vector3(
             x + Math.cos(layout.yaw) * localEndX,
@@ -163,10 +147,22 @@ function createWoodLogPieces(
   return pieces;
 }
 
-/** 三块压扁的低多边形石头，与 createStonePileModel 的摆法一致。 */
-function createStonePilePieces(definition: StonePileRender, burning: boolean): PilePiece[] {
+/** 单块时是一颗压扁的石子；合并后摆成三块，与 createStonePileModel 的摆法一致。 */
+function createStonePilePieces(
+  definition: StonePileRender,
+  burning: boolean,
+  single: boolean,
+): PilePiece[] {
   const stone = new THREE.Color(burning ? '#c98a6a' : definition.stoneColor);
   const accent = new THREE.Color(burning ? '#a86a52' : definition.accentColor);
+  if (single) {
+    return [{
+      geometry: createStonePieceGeometry(definition.radius),
+      matrix: new THREE.Matrix4().setPosition(0, definition.height * 0.3, 0),
+      tint: stone,
+      edgeThreshold: 0.6,
+    }];
+  }
   return STONE_PILE_PIECES.map((piece) => ({
     geometry: createStonePieceGeometry(definition.radius * piece.scale),
     matrix: new THREE.Matrix4().compose(
@@ -183,7 +179,7 @@ function createStonePilePieces(definition: StonePileRender, burning: boolean): P
   }));
 }
 
-/** 四颗果子，与 createFruitPileModel 的摆法一致。 */
+/** 单颗时是一颗带梗的苹果；合并后摆成四颗，与 createFruitPileModel 的摆法一致。 */
 function createFruitPilePieces(
   definition: FruitPileRender,
   burning: boolean,
@@ -193,12 +189,20 @@ function createFruitPilePieces(
   const fruit = new THREE.Color(burning ? '#8a4a2c' : definition.fruitColor);
   const accent = new THREE.Color(burning ? '#6d3a24' : definition.accentColor);
   if (single) {
-    return [{
-      geometry: createFruitGeometry(definition.radius),
-      matrix: new THREE.Matrix4(),
-      tint: fruit,
-      edgeThreshold: 24,
-    }];
+    return [
+      {
+        geometry: createFruitGeometry(definition.radius),
+        matrix: new THREE.Matrix4(),
+        tint: fruit,
+        edgeThreshold: 24,
+      },
+      {
+        geometry: createFruitStemGeometry(definition.radius),
+        matrix: new THREE.Matrix4().setPosition(0, fruitStemOffsetY(definition.radius), 0),
+        tint: accent,
+        edgeThreshold: 24,
+      },
+    ];
   }
   return FRUIT_PILE_PIECES.map((piece) => ({
     geometry: createFruitGeometry(definition.radius * piece.scale),
@@ -212,17 +216,65 @@ function createFruitPilePieces(
   }));
 }
 
+/** 单朵时是一朵蘑菇；合并后摆成三朵，与 createMushroomPileModel 的摆法一致。 */
+function createMushroomPilePieces(
+  definition: MushroomPileRender,
+  burning: boolean,
+  single: boolean,
+): PilePiece[] {
+  const cap = new THREE.Color(burning ? '#a4523c' : definition.capColor);
+  const stem = new THREE.Color(burning ? '#c9b193' : definition.stemColor);
+  const layouts = single
+    ? [{ offsetX: 0, offsetZ: 0, scale: 1, yaw: 0 }] as const
+    : MUSHROOM_PILE_PIECES;
+  const pieces: PilePiece[] = [];
+  for (const layout of layouts) {
+    const x = definition.radius * layout.offsetX;
+    const z = definition.radius * layout.offsetZ;
+    const stemHeight = mushroomStemHeight(definition, layout.scale);
+    const rotation = new THREE.Quaternion().setFromAxisAngle(
+      new THREE.Vector3(0, 1, 0),
+      layout.yaw,
+    );
+    pieces.push({
+      geometry: createMushroomStemGeometry(definition.radius * layout.scale, stemHeight),
+      matrix: new THREE.Matrix4().compose(
+        new THREE.Vector3(x, stemHeight * 0.5, z),
+        rotation,
+        new THREE.Vector3(1, 1, 1),
+      ),
+      tint: stem,
+      edgeThreshold: 1,
+    });
+    pieces.push({
+      geometry: createMushroomCapGeometry(definition.radius * layout.scale),
+      matrix: new THREE.Matrix4().compose(
+        new THREE.Vector3(x, stemHeight, z),
+        rotation,
+        new THREE.Vector3(1, 1, 1),
+      ),
+      tint: cap,
+      edgeThreshold: 4,
+    });
+  }
+  return pieces;
+}
+
 function createPilePieces(
   definition: PileRender,
   burning: boolean,
   single: boolean,
   groundOffset: number,
 ): PilePiece[] {
-  if (definition.model === 'line-art-wood-pile') return createWoodPilePieces(definition, burning);
-  if (definition.model === 'line-art-wood-log') {
-    return createWoodLogPieces(definition, burning, single);
+  if (definition.model === 'line-art-wood-pile') {
+    return createWoodPilePieces(definition, burning, single);
   }
-  if (definition.model === 'line-art-stone-pile') return createStonePilePieces(definition, burning);
+  if (definition.model === 'line-art-stone-pile') {
+    return createStonePilePieces(definition, burning, single);
+  }
+  if (definition.model === 'line-art-mushroom-pile') {
+    return createMushroomPilePieces(definition, burning, single);
+  }
   return createFruitPilePieces(definition, burning, single, groundOffset);
 }
 

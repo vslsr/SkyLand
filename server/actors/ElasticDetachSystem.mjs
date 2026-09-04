@@ -57,8 +57,14 @@ export class ElasticDetachSystem {
           const holderId = tether.holderPlayerId;
           detachable.pop(direction);
           releaseElasticTether(tether, interactable);
-          // 拔下来之后它直接进嘴：既不弹飞，也不落地，等玩家再按一次才放下。
           const holder = world.getActor(holderId);
+          // 拔下来的东西**直接变成手上那件物品**：拔蘑菇的人要的是一朵蘑菇，
+          // 不是一个还要再按一次才处理得掉的世界物件。装配成功那一刻这个 Actor
+          // 就不在世界里了，所以这一轮到此为止——底下那些是给「还躺在世界里的
+          // 脱落物」准备的（建刚体、积分重力），对一个已经删掉的 Actor 没有意义。
+          if (world.context.stowPulledActor?.(actor, holder)) continue;
+          // 揣不走（没登记成物品、物品栏一格都腾不出来）就退回原来那条：
+          // 叼在嘴上，等玩家再按一次交互键放下。
           if (!pickupActor(world, actor, holder)) continue;
           if (interactable.enabled) {
             interactable.enabled = false;

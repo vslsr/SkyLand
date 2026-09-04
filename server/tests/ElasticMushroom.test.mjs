@@ -16,9 +16,29 @@ function pullUntilDetached(scene, clock, playerId, actorId, anchorX) {
   for (let index = 0; index < 20; index += 1) {
     clock.advance(0.05);
     scene.update();
-    if (scene.actorWorld.getActor(actorId).requireComponent('elasticDetach').detached) return true;
+    const actor = scene.actorWorld.getActor(actorId);
+    // 拔进物品栏那条路会把这个 Actor 从世界里删掉：它不在了，就是拔出来了。
+    if (!actor || actor.requireComponent('elasticDetach').detached) return true;
   }
   return false;
+}
+
+/**
+ * 把物品栏塞满，逼出「揣不走」那条退路。
+ *
+ * 拔出来的东西默认直接进物品栏（空手拔一朵，拔完就在手上）。一格都腾不出来时
+ * 才退回原来那条：叼在嘴上，等玩家再按一次放下。下面几条用例测的正是叼着之后
+ * 的那一整套——跟着嘴走、放下不弹、落地翻倒、chunk 卸载后姿态还在——所以它们
+ * 先把格子占满。
+ *
+ * 选中格保持空手（`NO_HOTBAR_SLOT`），否则嘴上会挂一个手持表现体，蘑菇根本叼不上去。
+ */
+function fillHotbar(scene, playerId) {
+  const inventory = scene.players.get(playerId).getComponent('inventory');
+  for (let index = 0; index < inventory.hotbarCapacity; index += 1) {
+    inventory.hotbar[index] = { itemType: 'stone', quantity: 1 };
+  }
+  inventory.revision += 1;
 }
 
 function createClock(startAt = 1_000_000) {
@@ -29,11 +49,88 @@ function createClock(startAt = 1_000_000) {
   };
 }
 
-test('叼住 → 拖拽 → 拔断进嘴 → 放下落地：一整趟交互', async () => {
+test('空手拔出来的蘑菇直接进物品栏，并且当场握在手上', async () => {
+  const clock = createClock();
+  const catalog = await SceneCatalog.load();
+  const scene = new ServerScene(catalog.require('grassland'), { now: clock.now });
+  scene.addPlayer({ id: 'picker', name: '拔蘑菇的人', slot: 0 });
+
+  const mushroomId = 'elastic-mushroom-01';
+  const initial = scene.createSnapshot().actors.find((actor) => actor.id === mushroomId);
+  assert.ok(initial);
+  assert.equal(initial.interactable.action, 'mushroom-bite');
+
+  const player = scene.players.get('picker');
+  const inventory = player.getComponent('inventory');
+  player.x = initial.transform.x - 0.8;
+  player.z = initial.transform.z;
+  player.yaw = Math.PI / 2;
+  assert.equal(scene.interactWithActor('picker', { actorId: mushroomId, sequence: 1 }), true);
+  assert.equal(
+    pullUntilDetached(scene, clock, 'picker', mushroomId, initial.transform.x),
+    true,
+  );
+
+  // 拔出来的是**一件物品**，不是一个还要再按一次才处理得掉的世界物件。
+  assert.equal(scene.actorWorld.getActor(mushroomId), undefined, '世界里那一株应该已经没了');
+  assert.deepEqual(inventory.hotbar[0], { itemType: 'mushroom', quantity: 1 });
+  assert.equal(inventory.quantityOf('mushroom'), 0, '它没有在背包里中转过');
+  assert.equal(inventory.heldItemType, 'mushroom', '拔完就在手上，不用再按数字键');
+
+  // 手上那件是个纯表现体：它有模型，但不参与世界。
+  const own = scene.createSnapshot().players.find((entry) => entry.id === 'picker');
+  assert.ok(own.heldActorId, '手上应该挂着一个手持表现体');
+  const held = scene.actorWorld.getActor(own.heldActorId);
+  assert.equal(held.getComponent('itemStack').itemType, 'mushroom');
+  assert.equal(scene.physics.hasDynamicActor(own.heldActorId), false);
+
+  // 再拔一朵就堆在同一格上，直到堆满上限。
+  const second = scene.createSnapshot().actors
+    .find((actor) => actor.archetypeId === 'elastic-mushroom' && actor.id !== mushroomId);
+  if (second) {
+    player.x = second.transform.x - 0.8;
+    player.z = second.transform.z;
+    clock.advance(0.05);
+    scene.update();
+  }
+});
+
+test('只有空手拔得出来：手上握着东西时连叼都叼不住', async () => {
+  const clock = createClock();
+  const catalog = await SceneCatalog.load();
+  const scene = new ServerScene(catalog.require('grassland'), { now: clock.now });
+  scene.addPlayer({ id: 'busy', name: '手上有东西', slot: 0 });
+
+  const mushroomId = 'elastic-mushroom-01';
+  const initial = scene.createSnapshot().actors.find((actor) => actor.id === mushroomId);
+  const player = scene.players.get('busy');
+  player.getComponent('inventory').add('wood', 2);
+  // 走命令那条路：装配 + 切到那一格，手上才会挂出表现体来。
+  scene.applyInventoryCommand('busy', {
+    sequence: 1,
+    command: { kind: 'assign', slotIndex: 0, itemType: 'wood' },
+  });
+  scene.applyInventoryCommand('busy', { sequence: 2, command: { kind: 'select', slotIndex: 0 } });
+  clock.advance(0.05);
+  scene.update();
+  assert.ok(scene.findCarriedActorId('busy'), '手上应该挂着木头那个表现体');
+
+  player.x = initial.transform.x - 0.8;
+  player.z = initial.transform.z;
+  player.yaw = Math.PI / 2;
+  assert.equal(
+    scene.interactWithActor('busy', { actorId: mushroomId, sequence: 1 }),
+    false,
+    '嘴里已经有东西，拉都拉不住，更谈不上拔',
+  );
+});
+
+test('物品栏一格都腾不出来时退回叼在嘴上：拖拽 → 拔断 → 放下落地', async () => {
   const clock = createClock();
   const catalog = await SceneCatalog.load();
   const scene = new ServerScene(catalog.require('grassland'), { now: clock.now });
   scene.addPlayer({ id: 'player-a', name: '蘑菇测试员', slot: 0 });
+  fillHotbar(scene, 'player-a');
 
   const mushroomId = 'elastic-mushroom-01';
   const initial = scene.createSnapshot().actors.find((actor) => actor.id === mushroomId);
@@ -61,7 +158,7 @@ test('叼住 → 拖拽 → 拔断进嘴 → 放下落地：一整趟交互', as
   assert.equal(mushroom.elasticTether.holderPlayerId, null);
   assert.equal(mushroom.elasticTether.releaseRevision, 1);
   assert.equal(mushroom.elasticDetach.detached, true);
-  // 拔断之后它在嘴上，不是掉在地上：既没有落回地面，也还不是自由刚体。
+  // 揣不走，于是它在嘴上：既没有落回地面，也还不是自由刚体。
   assert.equal(scene.createSnapshot().players.find((entry) => entry.id === 'player-a').heldActorId, mushroomId);
   assert.equal(mushroom.parentActorId, 'player-a');
   assert.equal(mushroom.transform, undefined, 'Attach 后不应继续复制冗余世界坐标');
@@ -113,6 +210,7 @@ test('蘑菇脱落后翻倒在地，权威朝向随快照下发', async () => {
   const catalog = await SceneCatalog.load();
   const scene = new ServerScene(catalog.require('grassland'), { now: clock.now });
   scene.addPlayer({ id: 'player-b', name: '拔蘑菇的人', slot: 0 });
+  fillHotbar(scene, 'player-b');
 
   const mushroomId = 'elastic-mushroom-01';
   const initial = scene.createSnapshot().actors.find((actor) => actor.id === mushroomId);
@@ -193,6 +291,7 @@ test('拖拽行程从叼住那一刻起算，站多远按 E 都一样长', async
     const clock = createClock();
     const scene = new ServerScene(catalog.require('grassland'), { now: clock.now });
     scene.addPlayer({ id: 'puller', name: '拖拽者', slot: 0 });
+  fillHotbar(scene, 'puller');
     const initial = scene.createSnapshot().actors.find((actor) => actor.id === mushroomId);
     const player = scene.players.get('puller');
     player.x = initial.transform.x - grabDistance;
@@ -226,6 +325,7 @@ test('走远让 chunk 卸载再回来，躺在地上的蘑菇不会站起来', a
   const catalog = await SceneCatalog.load();
   const scene = new ServerScene(catalog.require('open-world'), { now: clock.now });
   scene.addPlayer({ id: 'wanderer', name: '路过的人', slot: 0 });
+  fillHotbar(scene, 'wanderer');
   const player = scene.players.get('wanderer');
   const tick = (times) => {
     for (let index = 0; index < times; index += 1) {
@@ -324,6 +424,7 @@ test('嘴里已经叼着一株时，不能再叼另一株', async () => {
   const catalog = await SceneCatalog.load();
   const scene = new ServerScene(catalog.require('open-world'), { now: clock.now });
   scene.addPlayer({ id: 'greedy', name: '贪心', slot: 0 });
+  fillHotbar(scene, 'greedy');
   const player = scene.players.get('greedy');
   const tick = (times) => {
     for (let index = 0; index < times; index += 1) {
@@ -368,6 +469,7 @@ test('玩家离开房间时，叼着的那株原地落下，重进后仍可再�
   const catalog = await SceneCatalog.load();
   const scene = new ServerScene(catalog.require('grassland'), { now: clock.now });
   scene.addPlayer({ id: 'leaver', name: '要走了', slot: 0 });
+  fillHotbar(scene, 'leaver');
 
   const mushroomId = 'elastic-mushroom-01';
   const initial = scene.createSnapshot().actors.find((actor) => actor.id === mushroomId);
@@ -390,6 +492,7 @@ test('玩家离开房间时，叼着的那株原地落下，重进后仍可再�
   assert.equal(scene.physics.hasDynamicActor(mushroomId), true, '没有变回自由刚体');
 
   scene.addPlayer({ id: 'returner', name: '回来了', slot: 0 });
+  fillHotbar(scene, 'returner');
   const returner = scene.players.get('returner');
   returner.x = left.transform.x - 0.5;
   returner.z = left.transform.z;
@@ -423,6 +526,7 @@ test('放进水里的物件停在水底，不会一直往下掉', async () => {
   const catalog = await SceneCatalog.load();
   const scene = new ServerScene(catalog.require('open-world'), { now: clock.now });
   scene.addPlayer({ id: 'diver', name: '丢水里', slot: 0 });
+  fillHotbar(scene, 'diver');
   const player = scene.players.get('diver');
   const tick = (times) => {
     for (let index = 0; index < times; index += 1) {
@@ -474,6 +578,7 @@ test('叼着蘑菇不会被自己嘴里那一株顶住', async () => {
   const catalog = await SceneCatalog.load();
   const scene = new ServerScene(catalog.require('grassland'), { now: clock.now });
   scene.addPlayer({ id: 'walker', name: '叼着走', slot: 0 });
+  fillHotbar(scene, 'walker');
 
   const mushroomId = 'elastic-mushroom-01';
   const initial = scene.createSnapshot().actors.find((actor) => actor.id === mushroomId);

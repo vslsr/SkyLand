@@ -200,14 +200,6 @@ export type ActorRenderDefinition =
       cutColor: string;
       inkColor: string;
       radius: number;
-      height: number;
-    }
-  | {
-      model: 'line-art-wood-log';
-      woodColor: string;
-      cutColor: string;
-      inkColor: string;
-      radius: number;
       length: number;
     }
   | {
@@ -222,6 +214,14 @@ export type ActorRenderDefinition =
       model: 'line-art-fruit-pile';
       fruitColor: string;
       accentColor: string;
+      inkColor: string;
+      radius: number;
+      height: number;
+    }
+  | {
+      model: 'line-art-mushroom-pile';
+      capColor: string;
+      stemColor: string;
       inkColor: string;
       radius: number;
       height: number;

@@ -3,6 +3,7 @@ import type { InputSubsystem } from '../input/core/InputSubsystem';
 import { buildInventoryView, type InventoryModelLike } from '../inventory/index';
 import type { InventoryCommand } from '../network/messages';
 import type { InventoryItemAction } from '../ui/InventoryItemMenu';
+import type { InventorySlotRef } from '../ui/InventorySlotCell';
 import type {
   InventoryDragSource,
   InventoryDragTarget,
@@ -59,7 +60,7 @@ export class InventoryController {
       () => this.toggle(),
       { phases: ['triggered'] },
     );
-    this.view.onItemAction((action, itemType) => this.applyItemAction(action, itemType));
+    this.view.onItemAction((action, slot) => this.applyItemAction(action, slot));
     this.view.onDragDrop((source, target) => this.applyDragDrop(source, target));
   }
 
@@ -68,12 +69,17 @@ export class InventoryController {
    *
    * **「使用」不再是「拿到手上」**。这个项目里的使用是一条临时授予玩家的能力：
    * 点一下菜单把它挂上去，随后按使用键激活（点按物品当场结算，长按物品要按住走
-   * 完那圈圆形倒计时），完成后能力收回。它因此和物品栏是两条独立的路——用一次
-   * 燃烧瓶不该顺手改写物品栏的一格，也不该让玩家先装配再切格再按键。
+   * 完那圈圆形倒计时），完成后能力收回。它因此和物品栏是两条独立的路——吃一
+   * 个果子不该顺手改写物品栏的一格，也不该让玩家先装配再切格再按键。
    *
    * 「装配」才是把背包里那一摞搬进物品栏。
    */
-  private applyItemAction(action: InventoryItemAction, itemType: string): void {
+  private applyItemAction(action: InventoryItemAction, slot: InventorySlotRef): void {
+    if (slot.kind === 'hotbar') {
+      this.applyHotbarAction(action, slot.slotIndex);
+      return;
+    }
+    const itemType = slot.itemType;
     if (action === 'use') {
       // 让开画面：激活要按使用键，而使用键在背包盖着画面时收不到。
       this.port.armItem(itemType);
@@ -87,12 +93,39 @@ export class InventoryController {
       this.port.send({ kind: 'drop:stack', itemType });
       return;
     }
+    if (action !== 'equip') return;
     const slotIndex = this.resolveEquipSlot(itemType);
     if (slotIndex === undefined) return;
     // 动了物品栏就作废「刚刚在背包里点出来的那件」：服务端在同一批命令上撤同一条
     // 能力，两边说的因此始终是同一件东西。
     this.port.armItem(undefined);
     this.port.send({ kind: 'assign', slotIndex, itemType });
+  }
+
+  /**
+   * 物品栏那一格的菜单。
+   *
+   * 「使用」在这本账上不是 `use:arm`：物品栏里那件东西的用法**跟着选中格走**，
+   * 服务端在切格的同一刻就把能力挂上了。所以这里做的是「切到这一格 + 让开画面」，
+   * 接下来按使用键激活的正是它——再发一条 arm 只会让两条能力抢同一个槽位。
+   */
+  private applyHotbarAction(action: InventoryItemAction, slotIndex: number): void {
+    // 动了物品栏就作废「刚刚在背包里点出来的那件」，理由同 `applyItemAction`。
+    this.port.armItem(undefined);
+    if (action === 'use') {
+      // 已经握在手上的那一格不用再切：`select` 把「切到当前格」当成收手，
+      // 再发一次会把它从手上放下。
+      if (this.port.getInventory()?.activeHotbarIndex !== slotIndex) {
+        this.port.send({ kind: 'select', slotIndex });
+      }
+      this.close();
+      return;
+    }
+    if (action === 'unequip') {
+      this.port.send({ kind: 'hotbar:stow', slotIndex });
+      return;
+    }
+    if (action === 'drop') this.port.send({ kind: 'drop:hotbar', slotIndex });
   }
 
   /**
@@ -113,6 +146,7 @@ export class InventoryController {
       this.port.send({ kind: 'assign', slotIndex: target.slotIndex, itemType: source.itemType });
       return;
     }
+
     if (target.kind === 'backpack') {
       this.port.send({ kind: 'hotbar:stow', slotIndex: source.slotIndex });
       return;

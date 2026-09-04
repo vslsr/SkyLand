@@ -169,6 +169,7 @@ function activateItemAbility(scene, player, heldSeconds) {
  * 只有权威侧跑得动。
  */
 function executeItemUse(scene, player, use, source, slotIndex) {
+  if (use.action === 'eat') return eatItem(player, use, source, slotIndex);
   if (use.action === 'throw') return throwItem(scene, player, use, source, slotIndex);
   if (use.action === 'tool') {
     // 工具敲的是面前那个可采集物件，力度来自物品目录，不是写死在采集代码里。
@@ -177,6 +178,28 @@ function executeItemUse(scene, player, use, source, slotIndex) {
     return Boolean(target) && scene.applyToolHarvest(player, target, use.value) === true;
   }
   return false;
+}
+
+/**
+ * 吃掉一个。
+ *
+ * 「吃」在这里就是**从账上扣掉 `value` 个**，扣不出来就当这次使用没做成——
+ * 手上那一摞可能在倒计时走完之前被丢掉或收进了背包。
+ *
+ * 吃东西那段抖动是纯表现，跑在客户端：能力从按下到倒计时走完的那一整段就是嘴里
+ * 嚼的那一段，圈满 = 咽下去 = 这里扣账。表现不过网，因为它没有任何权威含义——
+ * 抖得对不对不改变背包里少了几个。
+ *
+ * 回血还没有：角色身上还没有一条可回复的属性。有了之后，加的是这一处的一行，
+ * 而不是再来一条动词。
+ */
+function eatItem(player, use, source, slotIndex) {
+  const inventory = player.getComponent(INVENTORY_COMPONENT);
+  if (!inventory) return false;
+  const eaten = source === 'hotbar'
+    ? inventory.consumeHotbarSlot(slotIndex, use.value)
+    : inventory.remove(use.itemType, use.value);
+  return eaten === use.value;
 }
 
 /**

@@ -23,15 +23,16 @@ const POOLED_CATEGORIES = new Set(['ammunition', 'tool']);
 /**
  * 使用这件物品时做什么。
  *
- * 只登记**已经有系统兑现**的效果：`tool` 走 `GeneratedProp.applyDamage`，
- * `throw` 走掉落物的 `DropMotion` 抛体。「吃下回血」这类要等角色身上先有一条
- * 可回复的属性——在那之前写进目录只会得到一个按下去没反应的动词。
+ * 只登记**已经有系统兑现**的效果：`eat` 扣掉 `value` 个并让角色演一段吃的动作，
+ * `tool` 走 `GeneratedProp.applyDamage`，`throw` 走掉落物的 `DropMotion` 抛体。
+ * 「吃下回血」里的回血还不在其中——角色身上还没有一条可回复的属性，所以 `eat`
+ * 现在兑现的是「吃掉一个」这件事本身，回血等那条属性到位再加。
  *
  * 这一段同时是**物品能力的定义源**：使用一件物品的兑现路径是「授予玩家一条
  * Ability → 按下面的 mode 激活 → 完成后收回」，`action` 决定那条 Ability 激活
  * 时执行什么，见 `shared/items/ItemAbility.mjs`。
  */
-export const ITEM_USE_ACTIONS = Object.freeze(['tool', 'throw']);
+export const ITEM_USE_ACTIONS = Object.freeze(['eat', 'tool', 'throw']);
 
 /**
  * 逻辑输入槽。
@@ -137,6 +138,9 @@ function validateItem(raw, index) {
   if (typeof definition.tint !== 'string' || !COLOR_PATTERN.test(definition.tint)) {
     throw new TypeError(`${path}.tint 必须是 #RRGGBB 颜色`);
   }
+  const durability = definition.durability === undefined
+    ? 0
+    : requireInteger(definition.durability, `${path}.durability`, 0, 1000);
   const coinValue = definition.coinValue === undefined
     ? undefined
     : requireInteger(definition.coinValue, `${path}.coinValue`, 1, 1000);
@@ -161,6 +165,14 @@ function validateItem(raw, index) {
     iconId: requireId(definition.iconId, `${path}.iconId`),
     tint: definition.tint,
     summary: requireString(definition.summary, `${path}.summary`, 64),
+    /**
+     * 耐久度。0 = 没有耐久，用不坏。
+     *
+     * 目前四件物品全是 0：耐久要有「用一次掉一点、掉光了坏掉」的系统才有意义，
+     * 那套还没有。字段先立在这里，是因为物品表本来就按「有没有耐久」描述一件
+     * 东西，缺了它，一件有耐久的道具进目录时得先改一遍校验。
+     */
+    durability,
     coinValue,
     contraband: definition.contraband === true,
     /** 不占货位的物品由独立上限池承载，背包格数对它们没有约束力。 */

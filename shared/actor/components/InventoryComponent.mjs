@@ -204,6 +204,41 @@ export class InventoryComponent extends ActorComponent {
     return true;
   }
 
+  /**
+   * 把一件**世界里的东西**直接交到物品栏上（空手从地里拔出来的蘑菇走这条）。
+   *
+   * 和 `assignHotbarSlot` 的区别是它**不经过背包**：那件东西刚从世界里出来，
+   * 账上本来就没有它，要求它先落进背包再搬一次，只会让「空手拔一朵、拔完就在
+   * 手上」在背包满的时候莫名其妙地失败。
+   *
+   * 落点顺序是「已经装着同种且装得下的那一格 → 空着的选中格 → 第一个空格」：
+   * 玩家说的「空手对应的那一格」就是选中的那一格，它空着时优先用它。
+   *
+   * @returns {number} 收进了哪一格；一格都腾不出来时是 `NO_HOTBAR_SLOT`。
+   */
+  equipToHotbar(itemType, quantity = 1) {
+    const definition = this.catalog.get(itemType);
+    const wanted = requestedQuantity(quantity);
+    if (!definition || wanted === 0) return NO_HOTBAR_SLOT;
+    const stackable = this.hotbar.findIndex((slot) => (
+      slot?.itemType === definition.id && slot.quantity + wanted <= definition.stackLimit
+    ));
+    const index = stackable >= 0 ? stackable : this.firstEmptyHotbarSlot();
+    if (index === NO_HOTBAR_SLOT) return NO_HOTBAR_SLOT;
+    const slot = this.hotbar[index];
+    if (slot) slot.quantity += wanted;
+    else this.hotbar[index] = { itemType: definition.id, quantity: wanted };
+    this.revision += 1;
+    return index;
+  }
+
+  /** 空着的选中格优先，没有再找第一个空格；全满时是 `NO_HOTBAR_SLOT`。 */
+  firstEmptyHotbarSlot(preferredIndex = this.activeHotbarIndex) {
+    if (this.isHotbarSlot(preferredIndex) && !this.hotbar[preferredIndex]) return preferredIndex;
+    const index = this.hotbar.findIndex((slot) => slot === null);
+    return index >= 0 ? index : NO_HOTBAR_SLOT;
+  }
+
   /** 两格对调（拖拽时把一格拖到另一格上）。 */
   swapHotbarSlots(fromIndex, toIndex) {
     if (!this.isHotbarSlot(fromIndex) || !this.isHotbarSlot(toIndex)) return false;

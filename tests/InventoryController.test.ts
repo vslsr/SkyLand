@@ -7,6 +7,7 @@ import {
 import type { InventoryView } from '../src/inventory/index.ts';
 import type { InventoryCommand } from '../src/network/messages.ts';
 import type { InventoryItemAction } from '../src/ui/InventoryItemMenu.ts';
+import type { InventorySlotRef } from '../src/ui/InventorySlotCell.ts';
 import type {
   InventoryDragSource,
   InventoryDragTarget,
@@ -22,7 +23,7 @@ class FakeInventoryPage {
   public readonly renders: (InventoryView | undefined)[] = [];
   public closeHint: string | undefined;
   /** 界面把菜单里选中的那一条交给 Controller 的入口。 */
-  public selectAction?: (action: InventoryItemAction, itemType: string) => void;
+  public selectAction?: (action: InventoryItemAction, slot: InventorySlotRef) => void;
   /** 界面把一次拖拽落地交给 Controller 的入口。 */
   public dropItem?: (source: InventoryDragSource, target: InventoryDragTarget) => void;
 
@@ -34,7 +35,9 @@ class FakeInventoryPage {
     this.closeHint = label;
   }
 
-  public onItemAction(handler: (action: InventoryItemAction, itemType: string) => void): void {
+  public onItemAction(
+    handler: (action: InventoryItemAction, slot: InventorySlotRef) => void,
+  ): void {
     this.selectAction = handler;
   }
 
@@ -182,7 +185,7 @@ test('菜单里的「使用」授予能力并让开画面，不代按一次使�
   harness.inventory.add('wood', 3);
   harness.controller.open();
 
-  harness.view.selectAction?.('use', 'wood');
+  harness.view.selectAction?.('use', { kind: 'backpack', itemType: 'wood' });
   // 「使用」不再是「拿到手上」：它挂一条能力上去，激活由玩家自己按使用键完成。
   assert.deepEqual(harness.sent, [{ kind: 'use:arm', itemType: 'wood' }]);
   assert.deepEqual(harness.armed, ['wood'], '输入层要知道接下来那一下说的是哪件东西');
@@ -200,17 +203,17 @@ test('「装配」把那一摞搬进物品栏的空格，已经装着就落回�
   harness.inventory.add('stone', 2);
   harness.controller.open();
 
-  harness.view.selectAction?.('equip', 'wood');
+  harness.view.selectAction?.('equip', { kind: 'backpack', itemType: 'wood' });
   assert.deepEqual(harness.sent, [{ kind: 'assign', slotIndex: 0, itemType: 'wood' }]);
   assert.equal(harness.open, true, '装配不关背包：可能要连配好几件');
 
-  // 第一格已经被木材占了，第二件落到下一个空格。
+  // 第一格已经被木头占了，第二件落到下一个空格。
   harness.inventory.assignHotbarSlot(0, 'wood');
-  harness.view.selectAction?.('equip', 'stone');
+  harness.view.selectAction?.('equip', { kind: 'backpack', itemType: 'stone' });
   assert.deepEqual(harness.sent.at(-1), { kind: 'assign', slotIndex: 1, itemType: 'stone' });
 
   // 已经在栏上的那件回到它自己那一格，而不是再占一个空格。
-  harness.view.selectAction?.('equip', 'wood');
+  harness.view.selectAction?.('equip', { kind: 'backpack', itemType: 'wood' });
   assert.deepEqual(harness.sent.at(-1), { kind: 'assign', slotIndex: 0, itemType: 'wood' });
 });
 
@@ -239,8 +242,43 @@ test('「丢弃」走 drop:stack，不经过手', () => {
   harness.inventory.add('stone', 2);
   harness.controller.open();
 
-  harness.view.selectAction?.('drop', 'stone');
+  harness.view.selectAction?.('drop', { kind: 'backpack', itemType: 'stone' });
   // 「先装配再丢」也能把东西丢出去，代价是改写物品栏、把手上握着的换下去。
   assert.deepEqual(harness.sent, [{ kind: 'drop:stack', itemType: 'stone' }]);
   assert.equal(harness.open, true, '丢一个不该顺手关掉背包');
+});
+
+test('物品栏那一格也点得开菜单：使用是切到它，收回与丢弃各自对着这一格', () => {
+  // 物品栏是一条特殊的背包，格子和背包那边是同一套。区别只在这三条兑现成什么：
+  // 「使用」在这本账上是切到那一格（用法跟着选中格走），「收回背包」和「丢弃」
+  // 说的都是**这一格**，不是背包里同名的那一摞。
+  const harness = createHarness();
+  harness.inventory.add('fruit', 2);
+  harness.inventory.assignHotbarSlot(1, 'fruit');
+  harness.controller.open();
+
+  harness.view.selectAction?.('use', { kind: 'hotbar', slotIndex: 1 });
+  assert.deepEqual(harness.sent, [{ kind: 'select', slotIndex: 1 }]);
+  assert.deepEqual(harness.armed, [undefined], '手持那条能力由服务端按选中格授予');
+  assert.equal(harness.open, false, '激活要按使用键，所以先让开画面');
+
+  harness.controller.open();
+  harness.view.selectAction?.('unequip', { kind: 'hotbar', slotIndex: 1 });
+  assert.deepEqual(harness.sent.at(-1), { kind: 'hotbar:stow', slotIndex: 1 });
+  assert.equal(harness.open, true, '收回一格不该顺手关掉背包');
+
+  harness.view.selectAction?.('drop', { kind: 'hotbar', slotIndex: 1 });
+  assert.deepEqual(harness.sent.at(-1), { kind: 'drop:hotbar', slotIndex: 1 });
+});
+
+test('已经握在手上的那一格点「使用」不再发 select：再切一次等于放下', () => {
+  const harness = createHarness();
+  harness.inventory.add('mushroom', 1);
+  harness.inventory.assignHotbarSlot(0, 'mushroom');
+  harness.inventory.setActiveHotbarSlot(0);
+  harness.controller.open();
+
+  harness.view.selectAction?.('use', { kind: 'hotbar', slotIndex: 0 });
+  assert.deepEqual(harness.sent, [], '它已经在手上了，什么都不用发');
+  assert.equal(harness.open, false, '仍然让开画面，等玩家按使用键');
 });

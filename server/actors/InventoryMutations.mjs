@@ -131,14 +131,29 @@ export function dropHeldObject(scene, player) {
  * @returns 是否真的丢下了
  */
 export function dropHeldItem(scene, player) {
-  const world = scene.actorWorld;
-  const actor = heldItemActor(world, player);
+  const actor = heldItemActor(scene.actorWorld, player);
   const inventory = player?.getComponent(INVENTORY_COMPONENT);
   if (!actor || !inventory) return false;
-  const itemType = actor.getComponent(ITEM_STACK_COMPONENT).itemType;
-  const archetypeId = findItemArchetypeId(world.context.archetypes, itemType);
+  return dropHotbarItem(scene, player, inventory.activeHotbarIndex);
+}
+
+/**
+ * 从物品栏某一格丢一个到身前。
+ *
+ * 手上那件走的也是这条（`dropHeldItem` 就是「丢选中的那一格」）：手上挂的只是
+ * 一个表现体，账从头到尾在格子上，所以丢哪一格是同一件事，不该有两套扣账。
+ *
+ * @returns 是否真的丢下了
+ */
+export function dropHotbarItem(scene, player, slotIndex) {
+  const inventory = player?.getComponent(INVENTORY_COMPONENT);
+  if (!inventory?.isHotbarSlot(slotIndex)) return false;
+  const slot = inventory.hotbar[slotIndex];
+  if (!slot) return false;
+  // 先确认这件东西掉在地上长什么样：没有掉落原型就丢不出去，这时账不能先扣。
+  const archetypeId = findItemArchetypeId(scene.actorWorld.context.archetypes, slot.itemType);
   if (!archetypeId) return false;
-  if (inventory.consumeHeldItem(1) !== 1) return false;
+  if (inventory.consumeHotbarSlot(slotIndex, 1) !== 1) return false;
   spawnDropInFront(scene, player, archetypeId, 1);
   // 那一格可能还剩几个，也可能刚好空了：重新对齐一次，手上跟着变。
   syncHeldItemActor(scene, player);
