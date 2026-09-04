@@ -63,6 +63,7 @@ import type {
   SnapshotLeash,
   SnapshotSlimeDrag,
 } from '../network/protocol';
+import { rotateActionOffset, type ActionPose } from '../animation/ActionClipRegistry';
 import {
   MAXIMUM_PENDING_INPUT_STEPS,
   SIMULATION_STEP_SECONDS,
@@ -397,8 +398,9 @@ export class PlayerEntity extends Actor {
    * 是过网的——所以别人眼里的这个人也在做同一个动作、在同一拍上。手上那件读的是
    * 同一份状态、同一条曲线（见 `ClientActorSystem.actionPoseOf`），两边因此不会分家。
    */
-  public setActionPose(pose: { offset?: { x: number; y: number; z: number } } | undefined): void {
-    this.actionOffset = pose?.offset;
+  public setActionPose(pose: ActionPose | undefined): void {
+    // 姿态写在角色坐标系里（拉弓要往「身后」拉），这里按当前朝向转成世界位移。
+    this.actionOffset = rotateActionOffset(pose?.offset, this.transform.rotation.y);
   }
 
   public update(deltaSeconds: number): void {

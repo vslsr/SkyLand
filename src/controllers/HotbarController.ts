@@ -32,6 +32,13 @@ export interface HeldItemProgress {
   readonly mode: 'hold' | 'charge';
   /** [0, 1]。`hold` 到 1 表示服务端也认为倒计时走完了；`charge` 到 1 是拉满了。 */
   readonly ratio: number;
+  /**
+   * 这次按住已经按了多久，秒。
+   *
+   * 和 `ratio` 的区别在**拉满之后**：比例停在 1，秒数继续走。拉满了还在抖的那种
+   * 表现读的是它——本地那份预测因此和服务端那份状态算出来的是同一件事。
+   */
+  readonly elapsedSeconds: number;
   readonly label: string;
   /**
    * 这圈倒计时说的是不是物品栏里那一格。
@@ -198,6 +205,7 @@ export class HotbarController {
       action: this.pending.action,
       mode: this.pending.mode === 'charge' ? 'charge' : 'hold',
       ratio,
+      elapsedSeconds: elapsed,
       label: this.pending.label,
       onHotbar: this.pending.onHotbar,
       inputLabel: this.pending.inputLabel,

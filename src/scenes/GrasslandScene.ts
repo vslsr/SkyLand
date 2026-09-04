@@ -446,7 +446,7 @@ export class GrasslandScene extends Scene {
           phase: progress.mode,
           itemType: undefined,
           ratio: progress.ratio,
-          elapsed: progress.ratio * 0,
+          elapsed: progress.elapsedSeconds,
           revision: 0,
         };
       },

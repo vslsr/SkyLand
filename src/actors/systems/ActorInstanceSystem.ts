@@ -24,7 +24,7 @@ import {
   InstanceIdTable,
   type RenderInstanceBuffer,
 } from '../../render/RenderInstanceBuffer';
-import type { ActionPose } from '../../animation/ActionClipRegistry';
+import { rotateActionOffset, type ActionPose } from '../../animation/ActionClipRegistry';
 
 /**
  * 合批内容的实例表由哪些原型、按什么规则产出（实现路径文档 §3）。
@@ -84,6 +84,8 @@ export class ActorInstanceSystem {
       // 手上那件跟着**持有者的动作状态**动（嚼、拉弓）。它的世界坐标是权威给的，
       // 这一份姿态是纯表现——所以只加在写出去的这一帧上，不回写 Transform。
       const pose = this.catalog.actionPoseOf?.(actor.id);
+      // 姿态写在角色坐标系里；手上那件的 yaw 就是持有者的朝向（它挂在他身上）。
+      const actionOffset = rotateActionOffset(pose?.offset, transform.yaw);
       this.live.add(actor.id);
       const integers = [0, 0, 0, 0, 0];
       integers[PROP_ARCHETYPE] = archetypeIndex;
@@ -92,9 +94,9 @@ export class ActorInstanceSystem {
       integers[PROP_SINGLE] = single ? 1 : 0;
       integers[PROP_ID] = this.ids.acquire(actor.id);
       this.instances.push(integers, [
-        transform.x + (pose?.offset?.x ?? 0),
-        transform.y + (pose?.offset?.y ?? 0),
-        transform.z + (pose?.offset?.z ?? 0),
+        transform.x + (actionOffset?.x ?? 0),
+        transform.y + (actionOffset?.y ?? 0),
+        transform.z + (actionOffset?.z ?? 0),
         transform.yaw,
         stack.quantity,
         // 只有「单个」形态才滚：一堆果子没有刚体姿态可言。

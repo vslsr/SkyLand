@@ -6,6 +6,7 @@ import {
 import { GrassDisplacementComponent } from '../actors/components/GrassDisplacementComponent';
 import type { GrassInteractionTarget } from '../grass';
 import type { InterpolatedPlayerState } from '../network/protocol';
+import { rotateActionOffset, type ActionPose } from '../animation/ActionClipRegistry';
 import type { ActorArchetypeDefinition } from '../scenes/data/SceneDefinition';
 import type { ProxyId, RenderScene } from '../render/RenderScene';
 import type { RenderProxyTable, RenderWorldHandle } from '../render/RenderProxyTable';
@@ -162,8 +163,8 @@ export class RemotePlayer extends Actor {
    * **别人在做什么是看得见的事**：这一份来自快照里那条动作状态，和本地玩家读的是
    * 同一条曲线、同一个相位公式。它只改写出去的渲染坐标，不碰插值出来的玩法位置。
    */
-  public setActionPose(pose: { offset?: { x: number; y: number; z: number } } | undefined): void {
-    this.actionOffset = pose?.offset;
+  public setActionPose(pose: ActionPose | undefined): void {
+    this.actionOffset = rotateActionOffset(pose?.offset, this.transform.yaw);
   }
 
   public update(deltaSeconds: number): void {
