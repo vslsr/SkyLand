@@ -1,0 +1,27 @@
+---
+description: Custom ShaderMaterial vertex shaders must apply instanceMatrix themselves
+alwaysApply: true
+---
+
+# Custom shaders carry their own instancing
+
+Three.js only multiplies `instanceMatrix` inside its built-in chunks (`project_vertex`,
+`worldpos_vertex`, `defaultnormal_vertex`). A `ShaderMaterial` written from scratch — such as
+`createFillMaterial` — gets none of that, so an `InstancedMesh` drawn with it collapses every
+instance onto the object's origin (world `0, 0, 0`) while any CPU-transformed outline stays in
+place. That failure reads as "the models lost their fill and the colour piled up at the origin",
+not as a shader error, so it must be prevented at write time.
+
+- Any custom vertex shader that a batched draw might use must branch on `USE_INSTANCING` and apply
+  `instanceMatrix` to the vertex position **and** the normal before the model matrix. Three declares
+  the attribute and the define automatically for `InstancedMesh`; the branch keeps the same shader
+  valid for non-instanced draws.
+- Derive the world position used by fog, cloud shadow, and any position-driven tint from that same
+  instanced position. Shading sampled at the object's origin makes a whole batch share one lighting
+  value and quietly flattens the scene even when the geometry looks right.
+- Before pairing a material with `InstancedMesh` or `InstancedBufferGeometry`, check what else the
+  built-in chunks would have supplied for it — instancing, `instanceColor`, skinning, morph targets,
+  `scene.fog` — and either implement the piece explicitly or keep the feature off that material.
+- The same applies in reverse: an outline built by transforming vertices on the CPU and a fill drawn
+  through `instanceMatrix` must be fed the identical matrix, so that fill and ink never disagree
+  about where an instance is.
