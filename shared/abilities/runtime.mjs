@@ -10,6 +10,9 @@ function defineTag(value) {
   }
   return value;
 }
+function isValidTag(value) {
+  return typeof value === "string" && TAG_PATTERN.test(value);
+}
 function tagMatches(tag, query) {
   const candidate = defineTag(tag);
   const expected = defineTag(query);
@@ -689,5 +692,8 @@ var AbilitySystem = class {
 export {
   AbilitySystem,
   AttributeSet,
-  JavascriptAttributeBackend
+  JavascriptAttributeBackend,
+  defineTag,
+  isValidTag,
+  tagMatches
 };

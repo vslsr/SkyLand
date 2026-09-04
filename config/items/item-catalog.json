@@ -41,6 +41,36 @@
       }
     },
     {
+      "id": "wood-bow",
+      "displayName": "木弓",
+      "category": "tool",
+      "stackLimit": 1,
+      "slotCost": 0,
+      "iconId": "item-wood-bow",
+      "tint": "#9A6B3F",
+      "summary": "一张弯木配一根弦，拉满了射得更远也更疼。",
+      "use": {
+        "action": "weapon",
+        "input": "primary",
+        "mode": "charge",
+        "holdSeconds": 1.2,
+        "value": 5
+      },
+      "weapon": {
+        "attack": 5,
+        "cooldownSeconds": 0.1,
+        "radius": 1.2,
+        "range": { "minimum": 6, "maximum": 22 },
+        "charge": {
+          "minimumRatio": 0.15,
+          "damageScale": { "minimum": 0.5, "maximum": 2 }
+        },
+        "tagMultipliers": [
+          { "tag": "Actor.Build", "multiplier": 0.1 }
+        ]
+      }
+    },
+    {
       "id": "mushroom",
       "displayName": "蘑菇",
       "category": "supply",

@@ -1,0 +1,47 @@
+{
+  "$schema": "./actor.schema.json",
+  "schemaVersion": 1,
+  "id": "wood-bow-pile",
+  "components": {
+    "interactable": {
+      "action": "pickup-stack",
+      "label": "木弓",
+      "maximumDistance": 2.4
+    },
+    "itemStack": {
+      "itemType": "wood-bow",
+      "displayName": "木弓",
+      "defaultQuantity": 1,
+      "maximumQuantity": 1,
+      "compatibilityKey": "wood-bow-standard"
+    },
+    "actorResidency": {
+      "sleepDelaySeconds": 1,
+      "dormantDelaySeconds": 3,
+      "dormantEligible": true
+    },
+    "dropMotion": {
+      "gravity": 9.8,
+      "drag": 0.5,
+      "groundDrag": 2.8,
+      "restitution": 0.15,
+      "radius": 0.2,
+      "settleSpeed": 0.08
+    },
+    "lifetime": {
+      "lifetimeSeconds": 900
+    },
+    "replicationPolicy": {
+      "mode": "aoi",
+      "radiusChunks": 2
+    },
+    "render": {
+      "model": "line-art-wood-bow",
+      "length": 0.92,
+      "thickness": 0.035,
+      "woodColor": "#9a6b3f",
+      "stringColor": "#e8dcc0",
+      "inkColor": "#2f2419"
+    }
+  }
+}

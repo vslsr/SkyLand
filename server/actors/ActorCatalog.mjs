@@ -19,6 +19,7 @@ const ID_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 
 /** 走高数量合批绘制的堆叠模型。新增一种堆叠物就在这里登记。 */
 const PILE_RENDER_MODELS = new Set([
+  'line-art-wood-bow',
   'line-art-wood-pile',
   'line-art-stone-pile',
   'line-art-fruit-pile',
@@ -995,6 +996,16 @@ function validateRender(raw, filename) {
       accentColor: requireColor(render.accentColor, `${path}.accentColor`),
       radius: requireNumber(render.radius, `${path}.radius`, Number.EPSILON, 3),
       height: requireNumber(render.height, `${path}.height`, Number.EPSILON, 3),
+    };
+  }
+  if (render.model === 'line-art-wood-bow') {
+    return {
+      model: render.model,
+      woodColor: requireColor(render.woodColor, `${path}.woodColor`),
+      stringColor: requireColor(render.stringColor, `${path}.stringColor`),
+      inkColor: requireColor(render.inkColor, `${path}.inkColor`),
+      length: requireNumber(render.length, `${path}.length`, Number.EPSILON, 3),
+      thickness: requireNumber(render.thickness, `${path}.thickness`, Number.EPSILON, 0.5),
     };
   }
   if (render.model === 'line-art-wood-pile') {

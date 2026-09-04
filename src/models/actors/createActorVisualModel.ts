@@ -15,6 +15,7 @@ import { createDryHayModel } from './createDryHayModel';
 import { createFruitPileModel } from './createFruitPileModel';
 import { createMushroomPileModel } from './createMushroomPileModel';
 import { createStonePileModel } from './createStonePileModel';
+import { createWoodBowModel } from './createWoodBowModel';
 import { createWoodPileModel } from './createWoodPileModel';
 import { createPbfSlimeModel } from './createPbfSlimeModel';
 import { createLeggedSlimeModel } from './createLeggedSlimeModel';
@@ -60,6 +61,9 @@ export function createActorVisualModel(
   }
   if (definition.model === 'line-art-dry-hay') {
     return createDryHayModel(environment, definition);
+  }
+  if (definition.model === 'line-art-wood-bow') {
+    return createWoodBowModel(environment, definition);
   }
   if (definition.model === 'line-art-wood-pile') {
     return createWoodPileModel(environment, definition);

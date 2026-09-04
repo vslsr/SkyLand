@@ -3,6 +3,12 @@ import { ItemCatalog } from './ItemCatalog.mjs';
 
 export { ItemCatalog, ITEM_CATEGORIES, ITEM_USE_MODES } from './ItemCatalog.mjs';
 export {
+  resolveWeaponStrike,
+  tagMultiplier,
+  weaponDamage,
+  weaponImpactPoint,
+} from './weaponStrike.mjs';
+export {
   createItemUseAbility,
   holdRatio,
   itemAbilityId,

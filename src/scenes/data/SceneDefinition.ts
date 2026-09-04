@@ -195,6 +195,16 @@ export type ActorRenderDefinition =
       height: number;
     }
   | {
+      model: 'line-art-wood-bow';
+      /** 上下弓梢之间的距离，米。 */
+      length: number;
+      /** 弓臂的粗细，米。弦按它的三成粗。 */
+      thickness: number;
+      woodColor: string;
+      stringColor: string;
+      inkColor: string;
+    }
+  | {
       model: 'line-art-wood-pile';
       woodColor: string;
       cutColor: string;

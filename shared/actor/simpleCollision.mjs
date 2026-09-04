@@ -175,6 +175,17 @@ export function createSimpleCollisionFromRender(render, dropMotion) {
       maximumY: positiveNumber(render.height, 0.6),
     });
   }
+  // 弓立着：长轴沿 Y，薄边沿 Z。盒子按「厚 × 长 × 厚」，躺下由掉落物理自己翻。
+  if (model === 'line-art-wood-bow') {
+    const thickness = positiveNumber(render.thickness, 0.04);
+    const length = positiveNumber(render.length, 0.9);
+    return createSimpleCollisionDefinition({
+      halfWidth: length * 0.35,
+      halfLength: thickness * 2,
+      minimumY: 0,
+      maximumY: length,
+    });
+  }
   // 木头是一根躺着的六棱柱：长轴沿 X，所以盒子是「长 × 直径」，不是一个方墩。
   if (model === 'line-art-wood-pile') {
     const radius = positiveNumber(render.radius, 0.1);

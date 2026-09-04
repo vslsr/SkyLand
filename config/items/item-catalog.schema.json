@@ -120,11 +120,12 @@
           ],
           "properties": {
             "action": {
-              "description": "用起来做什么。只登记已经有系统兑现的效果。",
+              "description": "用起来做什么。只登记已经有系统兑现的效果。weapon 走 EQS 范围伤害，数据在同一条物品的 weapon 块里。",
               "enum": [
                 "eat",
                 "tool",
-                "throw"
+                "throw",
+                "weapon"
               ]
             },
             "input": {
@@ -134,14 +135,15 @@
               ]
             },
             "mode": {
-              "description": "tap 是点一下就激活；hold 是按住 holdSeconds 秒，倒计时走完那一刻激活，中途松手是取消。",
+              "description": "tap 是点一下就激活；hold 是按住 holdSeconds 秒，倒计时走完那一刻激活，中途松手是取消；charge 是松手那一刻按蓄力比例激活。",
               "enum": [
                 "tap",
-                "hold"
+                "hold",
+                "charge"
               ]
             },
             "holdSeconds": {
-              "description": "长按倒计时多长，单位秒。mode 为 hold 时必填，tap 不能写。",
+              "description": "长按倒计时 / 蓄力拉满要多久，单位秒。mode 为 hold 或 charge 时必填，tap 不能写。",
               "type": "number",
               "exclusiveMinimum": 0,
               "maximum": 10
@@ -151,6 +153,126 @@
               "type": "integer",
               "minimum": 1,
               "maximum": 1000
+            }
+          }
+        },
+        "weapon": {
+          "description": "武器数据（设计稿 @w 的 D）。只有 use.action 为 weapon 的物品才有，也必须有。",
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "attack",
+            "cooldownSeconds",
+            "radius",
+            "range",
+            "charge"
+          ],
+          "properties": {
+            "attack": {
+              "description": "满蓄力之前的基础攻击力（D.Attack）。",
+              "type": "number",
+              "minimum": 0,
+              "maximum": 100000
+            },
+            "cooldownSeconds": {
+              "description": "两次攻击之间的冷却（D.CD），走 GAS 的能力冷却。",
+              "type": "number",
+              "minimum": 0,
+              "maximum": 60
+            },
+            "radius": {
+              "description": "落点周围这个半径内的目标全部命中（D.EQS）。",
+              "type": "number",
+              "minimum": 0.2,
+              "maximum": 16
+            },
+            "range": {
+              "description": "空放阈值处与拉满时分别打多远，米。落点由朝向与蓄力比例反解，抛物线只是表现。",
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "minimum",
+                "maximum"
+              ],
+              "properties": {
+                "minimum": {
+                  "description": "刚过空放阈值时的射程。",
+                  "type": "number",
+                  "minimum": 0.5,
+                  "maximum": 64
+                },
+                "maximum": {
+                  "description": "拉满时的射程。",
+                  "type": "number",
+                  "minimum": 0.5,
+                  "maximum": 64
+                }
+              }
+            },
+            "charge": {
+              "description": "蓄力怎么换算成这一下的强度。",
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "minimumRatio",
+                "damageScale"
+              ],
+              "properties": {
+                "minimumRatio": {
+                  "description": "低于它视为空放：不发射，也不进冷却。",
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 0.9
+                },
+                "damageScale": {
+                  "description": "伤害倍率随蓄力比例在这两个数之间线性变化。",
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "minimum",
+                    "maximum"
+                  ],
+                  "properties": {
+                    "minimum": {
+                      "description": "空放阈值处的倍率。",
+                      "type": "number",
+                      "minimum": 0,
+                      "maximum": 10
+                    },
+                    "maximum": {
+                      "description": "拉满时的倍率。",
+                      "type": "number",
+                      "minimum": 0,
+                      "maximum": 10
+                    }
+                  }
+                }
+              }
+            },
+            "tagMultipliers": {
+              "description": "按目标标签改判倍率（D.Attack.Tag）。按声明顺序取第一条命中的；Actor.Build 匹配得上 Actor.Build.Wall。",
+              "type": "array",
+              "maxItems": 16,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "tag",
+                  "multiplier"
+                ],
+                "properties": {
+                  "tag": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9_]+(?:\\.[A-Za-z0-9_]+)*$"
+                  },
+                  "multiplier": {
+                    "description": "倍率。",
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 100
+                  }
+                }
+              }
             }
           }
         }

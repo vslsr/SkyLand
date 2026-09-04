@@ -1694,6 +1694,44 @@
               "additionalProperties": false,
               "required": [
                 "model",
+                "length",
+                "thickness",
+                "woodColor",
+                "stringColor",
+                "inkColor"
+              ],
+              "properties": {
+                "model": {
+                  "const": "line-art-wood-bow"
+                },
+                "length": {
+                  "description": "上下弓梢之间的距离，米。",
+                  "type": "number",
+                  "exclusiveMinimum": 0,
+                  "maximum": 3
+                },
+                "thickness": {
+                  "description": "弓臂粗细，米；弦按它的三成粗。",
+                  "type": "number",
+                  "exclusiveMinimum": 0,
+                  "maximum": 0.5
+                },
+                "woodColor": {
+                  "$ref": "#/$defs/color"
+                },
+                "stringColor": {
+                  "$ref": "#/$defs/color"
+                },
+                "inkColor": {
+                  "$ref": "#/$defs/color"
+                }
+              }
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "model",
                 "woodColor",
                 "cutColor",
                 "inkColor",

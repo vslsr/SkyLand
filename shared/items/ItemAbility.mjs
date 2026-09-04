@@ -25,6 +25,7 @@ const USE_VERBS = Object.freeze({
   eat: '吃下',
   tool: '敲击',
   throw: '投掷',
+  weapon: '拉满',
 });
 
 /** 能力 id 按物品种类展开，快照里一眼看得出正握着哪件东西的用法。 */
@@ -39,8 +40,8 @@ export function itemAbilityId(itemType) {
  * 按键在它身上也不该有反应。
  *
  * @returns {{ id: string, action: string, itemType: string, displayName: string,
- *   verb: string, input: string, mode: 'tap' | 'hold', holdSeconds: number,
- *   value: number } | undefined}
+ *   verb: string, input: string, mode: 'tap' | 'hold' | 'charge', holdSeconds: number,
+ *   value: number, weapon?: object } | undefined}
  */
 export function resolveItemUse(itemType, catalog = itemCatalog) {
   const definition = itemType ? catalog.get(itemType) : undefined;
@@ -57,6 +58,11 @@ export function resolveItemUse(itemType, catalog = itemCatalog) {
     mode: use.mode,
     holdSeconds: use.holdSeconds,
     value: use.value,
+    /**
+     * 武器数据（`@w` 的 `D`）。跟着用法一起解析出来，两端因此读同一份
+     * attack / CD / EQS：客户端拿它画蓄力时那条抛物线的落点，服务端拿它判定。
+     */
+    weapon: definition.weapon,
   };
 }
 
@@ -67,6 +73,7 @@ export function resolveItemUse(itemType, catalog = itemCatalog) {
  * 和服务端判定倒计时结束是同一个时刻；客户端上报的时长只用来对齐表现。
  *
  * @returns {number} [0, 1]。`tap` 恒为 1——点一下就激活，没有倒计时可画。
+ *   `charge` 用的是同一个公式：攒到 1 就是拉满，松手那一刻的比例决定这一箭多重。
  */
 export function holdRatio(heldSeconds, holdSeconds) {
   if (!(holdSeconds > 0)) return 1;
@@ -93,6 +100,19 @@ export function createItemUseAbility(use, execute) {
     id: use.id,
     tags: Object.freeze(['Ability.Item', `Ability.Item.${use.action}`]),
     lifecycle: 'instant',
+    /**
+     * 冷却（`@w` 的 `D.CD`）。分组按**物品**取，不按能力句柄：这条能力每用一次
+     * 就被收回、再重新授予一条同 id 的（见 `ItemAbilityRuntime`），冷却记在
+     * AbilitySystem 上的分组里才活得过那一次换手。
+     */
+    ...(use.weapon?.cooldownSeconds > 0
+      ? {
+        cooldown: Object.freeze({
+          seconds: use.weapon.cooldownSeconds,
+          group: `Cooldown.Item.${use.itemType}`,
+        }),
+      }
+      : {}),
     // 同一时刻只结算一次使用：上一条还没结束时，后到的那次直接被挡下，
     // 而不是两次投掷抢同一个手持物。
     concurrency: 'blocking',

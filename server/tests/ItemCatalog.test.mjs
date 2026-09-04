@@ -23,10 +23,10 @@ const VALID_MATERIAL = {
   summary: '测试用材料。',
 };
 
-test('目录就是设计稿上那张物品表：木头、石头、果子、蘑菇', () => {
+test('目录就是设计稿上那张物品表：木头、石头、果子、木弓、蘑菇', () => {
   assert.deepEqual(
     itemCatalog.list().map((item) => item.id),
-    ['wood', 'stone', 'fruit', 'mushroom'],
+    ['wood', 'stone', 'fruit', 'wood-bow', 'mushroom'],
   );
 
   // 材料只是材料：占一格、能堆、没有用法。
@@ -49,6 +49,18 @@ test('目录就是设计稿上那张物品表：木头、石头、果子、蘑�
     assert.ok(definition.use.holdSeconds > 0);
     assert.equal(definition.use.value, 1);
   }
+
+  // 木弓是一件武器：不占货位的独立池、走长按蓄力、数据挂在同一条物品上。
+  const bow = itemCatalog.require('wood-bow');
+  assert.equal(bow.category, 'tool');
+  assert.equal(bow.slotCost, 0);
+  assert.equal(bow.pooled, true);
+  assert.equal(bow.use.action, 'weapon');
+  assert.equal(bow.use.mode, 'charge');
+  assert.ok(bow.use.holdSeconds > 0, '蓄力要有一个拉满时长');
+  assert.equal(bow.weapon.attack, 5);
+  assert.equal(bow.weapon.cooldownSeconds, 0.1);
+  assert.deepEqual(bow.weapon.tagMultipliers, [{ tag: 'Actor.Build', multiplier: 0.1 }]);
 
   // 耐久现在全是 0：没有「用一次掉一点」的系统，写成别的数只会是一个空承诺。
   for (const definition of itemCatalog.list()) {

@@ -7,6 +7,7 @@ import {
 } from '../../shared/actor/index.mjs';
 import { GAME_ABILITY_COMPONENT } from '../../shared/abilities/index.mjs';
 import { findItemArchetypeId } from './ItemArchetypes.mjs';
+import { fireWeapon } from './WeaponRuntime.mjs';
 
 /**
  * 物品使用的权威运行时。
@@ -66,8 +67,8 @@ export function armItemAbility(scene, player, itemType, source) {
   const armed = { itemType: use.itemType, source, slotIndex, use, succeeded: false };
   abilities.grant(
     ITEM_USE_ABILITY_SLOT,
-    createItemUseAbility(use, () => {
-      armed.succeeded = executeItemUse(scene, player, use, source, slotIndex);
+    createItemUseAbility(use, ({ payload }) => {
+      armed.succeeded = executeItemUse(scene, player, use, source, slotIndex, payload);
     }),
     `item:${use.itemType}`,
   );
@@ -104,6 +105,8 @@ export function beginItemUse(player, now) {
  * 松开使用键。
  *
  * - `tap`：这就是那一下点击，激活。
+ * - `charge`：**松手就是开火**，按住多久决定这一下多重（见 `holdRatio`）。
+ *   攒过了头也只是拉满，不会因为按太久而失败。
  * - `hold`：倒计时还没走完就松手 = 取消。走完的那一刻已经由 `updateItemUse`
  *   激活并清掉了起点，所以这里再收到的松手是一次空操作。
  */
@@ -112,7 +115,7 @@ export function releaseItemUse(scene, player, now) {
   const startedAt = player?.itemUseStartedAt;
   if (!armed || startedAt === undefined) return false;
   player.itemUseStartedAt = undefined;
-  if (armed.use.mode !== 'tap') return false;
+  if (armed.use.mode === 'hold') return false;
   return activateItemAbility(scene, player, (now - startedAt) / 1000);
 }
 
@@ -168,8 +171,14 @@ function activateItemAbility(scene, player, heldSeconds) {
  * 找面前那个可采集物件。能力定义留在 shared/，两端都读得到；世界效果留在服务端，
  * 只有权威侧跑得动。
  */
-function executeItemUse(scene, player, use, source, slotIndex) {
+function executeItemUse(scene, player, use, source, slotIndex, payload) {
   if (use.action === 'eat') return eatItem(player, use, source, slotIndex);
+  if (use.action === 'weapon') {
+    // 武器不消耗自己（弓射的是箭，不是弓）。蓄力比例由按住的时长换算，
+    // 判定与落点在 WeaponRuntime；空放返回 undefined，那次不算做成事。
+    const hits = fireWeapon(scene, player, use, holdRatio(payload?.heldSeconds, use.holdSeconds));
+    return hits !== undefined;
+  }
   if (use.action === 'throw') return throwItem(scene, player, use, source, slotIndex);
   if (use.action === 'tool') {
     // 工具敲的是面前那个可采集物件，力度来自物品目录，不是写死在采集代码里。

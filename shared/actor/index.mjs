@@ -46,6 +46,14 @@ export {
   HealthComponent,
 } from './components/HealthComponent.mjs';
 export {
+  ACTOR_BUILD_TAG,
+  ACTOR_CREATURE_TAG,
+  ACTOR_ITEM_TAG,
+  ACTOR_PLAYER_TAG,
+  ACTOR_PROP_TAG,
+  resolveActorTags,
+} from './actorTags.mjs';
+export {
   HEAT_EMITTER_COMPONENT,
   HeatEmitterComponent,
 } from './components/HeatEmitterComponent.mjs';

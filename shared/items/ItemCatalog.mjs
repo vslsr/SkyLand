@@ -1,3 +1,5 @@
+import { isValidTag } from '../abilities/index.mjs';
+
 const ID_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const COLOR_PATTERN = /^#[0-9a-f]{6}$/i;
 
@@ -32,7 +34,7 @@ const POOLED_CATEGORIES = new Set(['ammunition', 'tool']);
  * Ability → 按下面的 mode 激活 → 完成后收回」，`action` 决定那条 Ability 激活
  * 时执行什么，见 `shared/items/ItemAbility.mjs`。
  */
-export const ITEM_USE_ACTIONS = Object.freeze(['eat', 'tool', 'throw']);
+export const ITEM_USE_ACTIONS = Object.freeze(['eat', 'tool', 'throw', 'weapon']);
 
 /**
  * 逻辑输入槽。
@@ -53,8 +55,11 @@ export const ITEM_USE_INPUTS = Object.freeze(['primary']);
  * - `hold`：按住 `holdSeconds` 秒，**倒计时走完的那一刻激活**，中途松手是取消。
  *   长按不是「蓄力越久越强」——强度恒为 `value`，倒计时只决定成不成立。玩家看到
  *   的那圈圆形倒计时因此和判定是同一件事：圈满 = 激活。
+ * - `charge`：**松手那一刻激活**，按住的时长换算成 [0, 1] 的蓄力比例，效果按它缩放
+ *   （设计稿的「长按蓄力攻击」）。和 `hold` 的差别只有一处，但是根本的：`hold` 的
+ *   圈满是结算，`charge` 的圈满是「攒到头了」，还没打出去。
  */
-export const ITEM_USE_MODES = Object.freeze(['tap', 'hold']);
+export const ITEM_USE_MODES = Object.freeze(['tap', 'hold', 'charge']);
 
 function requireObject(value, path) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
@@ -98,10 +103,11 @@ function validateUse(raw, path, holdable) {
   if (!ITEM_USE_MODES.includes(definition.mode)) {
     throw new TypeError(`${path}.mode 必须是 ${ITEM_USE_MODES.join(' / ')} 之一`);
   }
-  const held = definition.mode === 'hold';
+  // 长按与蓄力都要一个倒计时长度：一个决定「几时算数」，一个决定「攒到头是多久」。
+  const held = definition.mode === 'hold' || definition.mode === 'charge';
   const holdSeconds = definition.holdSeconds;
   if (held !== (holdSeconds !== undefined)) {
-    throw new TypeError(`${path}.holdSeconds 只属于 hold，且长按必须给出倒计时长度`);
+    throw new TypeError(`${path}.holdSeconds 属于 hold 与 charge，且必须给出倒计时长度`);
   }
   if (held && (!Number.isFinite(holdSeconds) || holdSeconds <= 0 || holdSeconds > 10)) {
     throw new TypeError(`${path}.holdSeconds 必须是 (0, 10] 的秒数`);
@@ -113,6 +119,73 @@ function validateUse(raw, path, holdable) {
     /** tap 的倒计时长度是 0：点一下就激活，不需要再分一条支路。 */
     holdSeconds: held ? holdSeconds : 0,
     value: requireInteger(definition.value, `${path}.value`, 1, 1000),
+  });
+}
+
+function requireNumber(value, path, minimum, maximum) {
+  if (!Number.isFinite(value) || value < minimum || value > maximum) {
+    throw new TypeError(`${path} 必须是 ${minimum}-${maximum} 的数字`);
+  }
+  return value;
+}
+
+/**
+ * 武器数据（设计稿 `@w` 的 `D`）。
+ *
+ * 它落在**物品**上而不是另开一份武器表：`@w` 的 `I:` 指的就是一件 `@i`，一件东西
+ * 只有一条账。字段与设计稿一一对上：
+ *
+ * - `attack` = `D.Attack`；
+ * - `tagMultipliers` = `D.Attack.Tag`，按目标标签改判倍率（`Actor.Build` 匹配
+ *   `Actor.Build.Wall`，见 `shared/actor/actorTags.mjs`）；
+ * - `cooldownSeconds` = `D.CD`，走 GAS 的能力冷却，不是自己数帧；
+ * - `radius` + `range` = `D.EQS`：朝向 + 蓄力比例反解出落点，落点周围这个半径内的
+ *   目标全部命中。**抛物线不在这里**——它是 `A` 里的表现，判定只认落点与半径。
+ * - `charge` = 蓄力缩放：低于 `minimumRatio` 视为空放，不发射也不进冷却。
+ */
+function validateWeapon(raw, path, use) {
+  if (raw === undefined) {
+    if (use?.action === 'weapon') throw new TypeError(`${path}：weapon 动作必须给出武器数据`);
+    return undefined;
+  }
+  const definition = requireObject(raw, path);
+  if (use?.action !== 'weapon') throw new TypeError(`${path} 只属于 weapon 动作的物品`);
+  const range = requireObject(definition.range, `${path}.range`);
+  const minimumRange = requireNumber(range.minimum, `${path}.range.minimum`, 0.5, 64);
+  const maximumRange = requireNumber(range.maximum, `${path}.range.maximum`, 0.5, 64);
+  if (maximumRange < minimumRange) {
+    throw new TypeError(`${path}.range.maximum 不能小于 minimum`);
+  }
+  const charge = requireObject(definition.charge, `${path}.charge`);
+  const damageScale = requireObject(charge.damageScale, `${path}.charge.damageScale`);
+  const minimumScale = requireNumber(damageScale.minimum, `${path}.charge.damageScale.minimum`, 0, 10);
+  const maximumScale = requireNumber(damageScale.maximum, `${path}.charge.damageScale.maximum`, 0, 10);
+  if (maximumScale < minimumScale) {
+    throw new TypeError(`${path}.charge.damageScale.maximum 不能小于 minimum`);
+  }
+  const multipliers = definition.tagMultipliers === undefined
+    ? []
+    : definition.tagMultipliers;
+  if (!Array.isArray(multipliers)) throw new TypeError(`${path}.tagMultipliers 必须是数组`);
+  const tagMultipliers = multipliers.map((entry, index) => {
+    const entryPath = `${path}.tagMultipliers[${index}]`;
+    const value = requireObject(entry, entryPath);
+    if (!isValidTag(value.tag)) throw new TypeError(`${entryPath}.tag 必须是点分层级标签`);
+    return Object.freeze({
+      tag: value.tag,
+      multiplier: requireNumber(value.multiplier, `${entryPath}.multiplier`, 0, 100),
+    });
+  });
+  return Object.freeze({
+    attack: requireNumber(definition.attack, `${path}.attack`, 0, 100_000),
+    cooldownSeconds: requireNumber(definition.cooldownSeconds, `${path}.cooldownSeconds`, 0, 60),
+    radius: requireNumber(definition.radius, `${path}.radius`, 0.2, 16),
+    range: Object.freeze({ minimum: minimumRange, maximum: maximumRange }),
+    charge: Object.freeze({
+      minimumRatio: requireNumber(charge.minimumRatio, `${path}.charge.minimumRatio`, 0, 0.9),
+      damageScale: Object.freeze({ minimum: minimumScale, maximum: maximumScale }),
+    }),
+    tagMultipliers: Object.freeze(tagMultipliers),
   });
 }
 
@@ -156,6 +229,10 @@ function validateItem(raw, index) {
   // 弹药是按发数记的独立池，没有「一发子弹拿在手上」这种东西；其余默认可手持。
   const holdable = definition.holdable ?? category !== 'ammunition';
   const use = validateUse(definition.use, `${path}.use`, holdable);
+  const weapon = validateWeapon(definition.weapon, `${path}.weapon`, use);
+  if (use?.action === 'weapon' && use.mode !== 'charge') {
+    throw new TypeError(`${path}.use.mode：武器走长按蓄力，必须是 charge`);
+  }
   return Object.freeze({
     id,
     displayName: requireString(definition.displayName, `${path}.displayName`, 32),
@@ -184,6 +261,8 @@ function validateItem(raw, index) {
     holdable,
     /** 怎么用它；不可使用时是 undefined。 */
     use,
+    /** 武器数据；不是武器时是 undefined。见 validateWeapon。 */
+    weapon,
   });
 }
 

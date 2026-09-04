@@ -2,6 +2,9 @@ export {
   AbilitySystem,
   AttributeSet,
   JavascriptAttributeBackend,
+  defineTag,
+  isValidTag,
+  tagMatches,
 } from './runtime.mjs';
 export {
   GAME_ABILITY_COMPONENT,
