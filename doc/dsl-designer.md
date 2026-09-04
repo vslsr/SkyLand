@@ -55,7 +55,7 @@
 | 文档 | 用到的定义 |
 | --- | --- |
 | [`doc/designer-inventory.md`](designer-inventory.md) | `@i` 物品表 |
-| [`doc/designer-toolandweapon.md`](designer-toolandweapon.md) | `@i`（重型工具举例）、`@w` 的适用范围 |
+| [`doc/designer-toolandweapon.md`](designer-toolandweapon.md) | `@i` / `@b` / `@w`——重炮就是三条合起来的一件重型工具 |
 | [`doc/desinger-buildsys.md`](desinger-buildsys.md) | 建造件的散文设计，`@b` 的取值来源 |
 
 **这份文档只定义记法本身。** 某一类东西**当前有哪些**，看上面那几份设计稿；
