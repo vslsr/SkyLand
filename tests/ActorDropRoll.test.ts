@@ -264,7 +264,7 @@ test('拉到最长时菌盖仍然长在菌柄顶端，不会脱开', () => {
   );
 });
 
-test('手上有蘑菇时，交互键指向它并给出放下/松开提示', () => {
+test('手上有蘑菇时，交互键让开：叼着的那株归丢出键，拉着的那株才归它', () => {
   const sent: string[] = [];
   let prompt: string | undefined;
   let held: ActorInteractionCandidate | undefined;
@@ -300,14 +300,21 @@ test('手上有蘑菇时，交互键指向它并给出放下/松开提示', () =
     ...over,
   });
 
-  // 叼在嘴上：提示放下，但**按下这一刻不发**。手上有东西时交互键是按住语义
-  // ——短按放下、长按收进背包——由 HotbarController 在松手那一刻结算。在这里
-  // 按下就发出去，等于永远走短按分支，长按收包一次都到不了。
+  // 叼在嘴上：放下归丢出键（Q），交互键完全让开——它得能在手上有东西时照常
+  // 够到脚下那堆货。让它占住候选的话，手上一有东西，交互键就废了一半。
   held = candidate({ pickupHolderActorId: 'me' });
+  nearby = candidate({ actorId: 'pile-1', action: 'pickup-stack', quantity: 3 });
   trigger();
   controller.update(frame);
-  assert.match(prompt ?? '', /放下/);
-  assert.deepEqual(sent, [], '放下归按住路径结算');
+  assert.match(prompt ?? '', /拾取/, '提示说的是够得到的那堆货，不是手上那件');
+  assert.deepEqual(sent, ['pile-1'], '一次按下只做一件事：捡起脚下那堆');
+
+  // 手上叼着、周围又没有别的可交互：交互键这时没有对象，什么都不做。
+  sent.length = 0;
+  nearby = undefined;
+  trigger();
+  controller.update(frame);
+  assert.deepEqual(sent, []);
 
   // 拉着还没断：提示松开，按键同样指向它，即使它已经被拖出就近搜索半径。
   // 这一支不是「放下手上那件」，所以仍然按下即发。

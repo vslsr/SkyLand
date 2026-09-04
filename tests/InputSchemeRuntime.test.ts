@@ -241,6 +241,7 @@ test('虚拟摇杆 V2 配置来自 JSON，并拒绝没有 touch Mapping 的控�
       'Virtual.JumpButton',
       'Virtual.InventoryButton',
       'Virtual.WorldInteractButton',
+      'Virtual.DropButton',
     ],
   );
 

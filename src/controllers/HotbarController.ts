@@ -131,9 +131,9 @@ export class HotbarController {
     this.disposers.push(
       this.input.bind(PlayerInputTags.HotbarPrevious, () => this.cycle(-1), triggered),
       this.input.bind(PlayerInputTags.HotbarNext, () => this.cycle(1), triggered),
-      // 手上有东西时交互键就是放下，按下即掉；空手时它仍然是就近拾取，
-      // 那条路走 ActorInteractionController，不经过这里。
-      this.input.bind(PlayerInputTags.WorldInteract, () => this.dropHeld(), triggered),
+      // 丢出键单独一个：一个键一件事。交互键归「和世界互动」（拾取、采集、开箱），
+      // 手上有没有东西都不改变它的含义。
+      this.input.bind(PlayerInputTags.Drop, () => this.dropHeld(), triggered),
       this.input.bind(
         ItemUseInputTags.primary,
         (event) => this.handleUse('primary', event.phase),
@@ -212,15 +212,17 @@ export class HotbarController {
   }
 
   /**
-   * 交互键：手上有东西时放下它。空手时这里不参与。
+   * 丢出键：把手上那件放到身前地上。空手时什么都不做。
    *
-   * **按下即掉，没有第二层含义。** 这里以前是一条按住计时：短按放下、按住走完
-   * 一圈倒计时是「收进背包」。删掉的理由是它把一个常用动作压在了一个不常用动作
-   * 下面——玩家想放下手上那件东西，得先学会「别按太久」；而真想把东西收回背包，
-   * 打开背包在那一格上点「收回背包」是更直接、也能看见结果的一条路。
+   * **它有自己的一个键**，不和交互键挤在一起。挤在一起时一次按下会同时触发两件
+   * 事——手上那件掉出去，脚下那堆又被捡回来——因为「和世界互动」和「处理手上那件」
+   * 本来就是两条独立的判断，共用一个键就只能靠优先级把其中一条藏起来。
+   *
+   * 它也曾经是交互键上的一次按住计时（短按放下、长按收进背包），那把一个常用动作
+   * 压在了不常用动作下面。现在是：按一下 Q，掉。
    *
    * 「手上有东西」按嘴上那个 Actor 判，不按物品栏：叼着的蘑菇也是手上那件，
-   * 它同样该被这一下放下。
+   * 它同样该被这一下丢出去。
    */
   private dropHeld(): void {
     if (!this.port.isActive() || !this.port.getHeldActorId()) return;
