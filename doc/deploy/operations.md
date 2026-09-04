@@ -120,12 +120,29 @@ server { server_name h5sgame.<域名>;  location / { proxy_pass http://h5sgame:3
 两个容器要在同一个 Docker 网络里，nginx 才能按服务名访问。
 在此之前的临时办法是给其中一个换非标准端口。
 
-### 3. 房间状态持久化
+### 3. 为什么不能退回 HTTP（已评估，决定不做）
+
+同一台机器上的其他站点走 HTTP 不弹警告，是因为它们不用 `SharedArrayBuffer`——
+浏览器对 HTTP 只在地址栏挂个「不安全」标签，不拦截；自签 HTTPS 才会出全屏拦截页。
+换句话说 SkyLand 弹警告不是配错了，是它对运行环境的要求更高。
+
+技术上可以让 HTTP 跑起来：`src/render/RenderWorldRuntime.ts` 里的
+`connectRenderWorldInProcess()` 和 worker 版返回同一个 `RenderWorldConnection`，
+`GrasslandScene` 也没用到 `render.worker`，加个回退是很小的改动。
+
+**但决定不做。** `connectRenderWorldInWorker` 里那个 throw 是刻意的——旁边写着
+「没有 SAB 就只能每帧把整段字节复制过去，那比留在主线程还慢」。加回退等于放弃
+「渲染循环在 worker」这个不变量，让线上悄悄跑在一条比设计目标慢的路径上，
+而问题的正解（可信证书）是部署层面就能解决的。
+
+现阶段接受自签证书的一次警告，长期解法是上面第 1 条。
+
+### 4. 房间状态持久化
 
 目前重启即丢。要做无损发版就得先把房间状态搬出进程内存，这是引擎侧的改动，
 不是部署能解决的。
 
-### 4. 日志与监控
+### 5. 日志与监控
 
 `/app/logs` 已经挂在 `skyland-logs` 卷上，但那只是调试用的 PlayerTransform 记录。
 容器 stdout 目前没有轮转配置，长期跑要加：
