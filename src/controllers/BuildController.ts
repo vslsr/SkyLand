@@ -69,13 +69,25 @@ export interface BuildPort {
 const REMOVE_PICK_RADIUS = 1.4;
 
 /**
+ * 放下这一件的键。
+ *
+ * 主键（鼠标左键 / 手柄下键）排第一：建造是「对着指针指的地方干这一下」，
+ * 而指针本来就在鼠标上——让手离开鼠标去按 E 是把一个连续动作掰成两半。
+ * 交互键跟在后面，因为触屏那颗按钮和手柄北键都绑在它上面，少了它触屏就没法建造。
+ *
+ * 建造模式下这两个键都不再有别的含义：`GrasslandScene` 在建造时关掉手持物的
+ * 使用与就近交互，所以点一下不会既放一件又吃掉手上的果子。
+ */
+const PLACE_TAGS = [PlayerInputTags.Primary, PlayerInputTags.WorldInteract] as const;
+
+/**
  * 建造模式的输入驱动。
  *
  * 每帧做三件事：把指针（或准星）打到的点吸附成一个放置位、按共享规则给幽灵判红绿、
- * 在交互键按下那一帧把**格坐标**发给服务端。它**不判定结果**：能不能放由服务端按
+ * 在放置键按下那一帧把**格坐标**发给服务端。它**不判定结果**：能不能放由服务端按
  * 权威状态再跑一遍同一份规则，幽灵是预期，不是许可。
  *
- * 没有选中件时它完全惰性——`update` 收起幽灵就返回，交互键的按下也会被丢掉，
+ * 没有选中件时它完全惰性——`update` 收起幽灵就返回，放置键的按下也会被丢掉，
  * 所以建造栏「收起 = 退出建造」不需要额外的开关。
  */
 export class BuildController {
@@ -83,17 +95,17 @@ export class BuildController {
   private interactionRequested = false;
   /** 上一帧有没有在画幽灵；没画时不再每帧发一条「收起」。 */
   private presenting = false;
-  private readonly disposeBinding: () => void;
+  private readonly disposeBindings: readonly (() => void)[];
 
   public constructor(
     private readonly input: InputSubsystem,
     private readonly port: BuildPort,
   ) {
-    this.disposeBinding = input.bind(
-      PlayerInputTags.WorldInteract,
+    this.disposeBindings = PLACE_TAGS.map((tag) => input.bind(
+      tag,
       () => { this.interactionRequested = true; },
       { phases: ['triggered'] },
-    );
+    ));
   }
 
   public get active(): boolean {
@@ -136,14 +148,23 @@ export class BuildController {
 
   public dispose(): void {
     this.reset();
-    this.disposeBinding();
+    for (const dispose of this.disposeBindings) dispose();
+  }
+
+  /** 提示里写哪个键：优先主键，触屏上没有主键时退回交互键。 */
+  private placeLabel(): string | undefined {
+    for (const tag of PLACE_TAGS) {
+      const label = this.port.getInputLabel(tag);
+      if (label) return label;
+    }
+    return undefined;
   }
 
   private updateRemove(point: { x: number; z: number }, requested: boolean): void {
     const target = this.port.findPieceNear(point.x, point.z, REMOVE_PICK_RADIUS);
     this.port.setPreview(undefined);
     this.port.setHoveredActorId(target?.actorId);
-    const label = this.port.getInputLabel(PlayerInputTags.WorldInteract);
+    const label = this.placeLabel();
     this.port.setPrompt(target
       ? this.withLabel(label, `拆除「${target.label}」`)
       : '拆除：指向一件建造件');
@@ -163,8 +184,12 @@ export class BuildController {
       return;
     }
     const hullGrid = piece.hull ? this.port.hullGridOf(piece.hull) : undefined;
-    const placement = resolveBuildPlacement(point, piece, this.port.listHulls(), hullGrid);
     const sites = this.port.getSites();
+    const placement = resolveBuildPlacement(point, piece, this.port.listHulls(), {
+      hullGrid,
+      // 地基靠这条判「挨没挨着这座船坞」：挨着就接上去，不挨着就是新的一座。
+      hasDeck: (surfaceKey, cellX, cellZ) => sites?.hasFoundation(surfaceKey, cellX, cellZ) ?? false,
+    });
     const position = this.port.getPlayerPosition();
     const inventory = this.port.getInventory();
     const thickness = render.model === 'line-art-build-foundation' ? render.thickness : 0;
@@ -208,7 +233,7 @@ export class BuildController {
       yaw: placement.yaw,
       valid,
     });
-    const label = this.port.getInputLabel(PlayerInputTags.WorldInteract);
+    const label = this.placeLabel();
     const reason = verdict.ok ? BUILD_REJECTIONS.SUPPORT : verdict.reason;
     const action = placement.founding ? `在这里立一艘船（${piece.label}）` : `放置「${piece.label}」`;
     this.port.setPrompt(valid

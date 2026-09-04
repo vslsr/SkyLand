@@ -13,7 +13,7 @@ const REMOVE_KEY = 'remove';
  * 告诉玩家缺什么。最后一行是「拆除」。
  *
  * 收起时**整套建造功能都关掉**：当前选择被清空，场景那边收到 undefined 就收起
- * 幽灵、也不再把交互键当成「放置」。
+ * 幽灵、也不再把主键当成「放置」。
  */
 export class BuildPanel {
   private readonly root: HTMLElement;

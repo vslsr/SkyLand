@@ -8,7 +8,7 @@
 | 设计稿里的概念 | 代码里的对应物 |
 | --- | --- |
 | 水上建筑 / 静态建筑 | `buildPiece.surface = 'floating' / 'static'`（物件可以写 `any`） |
-| 水上地基（最初的一块板） | `config/actors/float-foundation.actor.json`；放在开阔水面上时按 `buildPiece.hull` 立起 `float-hull` |
+| 水上地基（最初的一块板） | `config/actors/float-foundation.actor.json`；挨着已有甲板就接到那座船坞上，不挨着就按 `buildPiece.hull` 立起一座新的 `float-hull` |
 | 连接在一起的模块形成一个可浮动的船体 | `float-hull` 是看不见的**船体根节点**：`buoyancy + vesselMotor + buildGrid`，每块地基是它的子 Actor 与浮力部件 |
 | 外部动量驱动 / 玩家开船（留接口） | 根节点带 `vesselMotor`，走现有的载具接管（`actor:claim`）与 `VesselMotorSystem`，不另写一套 |
 | 水上墙体 | `float-wall.actor.json`，吸附在甲板格的四条边上，一层、无天花板 |
@@ -28,7 +28,7 @@
                      指针射线 → SceneWorld.pickBuildPoint → 世界点
                      resolveBuildPlacement → 吸附成格 / 边（水上件先找船）
                      validateBuildPlacement + resolveBuildElevation → 幽灵红绿、提示
-                     交互键 → build:command { archetypeId, surface, hullActorId?, cellX, cellZ, edge? }
+                     主键按下 → build:command { archetypeId, surface, hullActorId?, cellX, cellZ, edge? }
                                       │
                                       ▼
 房间 DS：ServerScene.applyBuildCommand → BuildMutations.placeBuildPiece
@@ -50,13 +50,18 @@
   （没有自带甲板），第 (0, 0) 格在根节点正下方，最初那块地基就放在那里；`extentCells` 限制往外扩多远，
   `maxPieces` 限制一艘船的件数。预制木筏若声明 `columns × rows` 的 `buildGrid`，自带甲板也走同一套规则
   （当前的 `raft` 没有声明：它的格宽 1.6 米和地皮一格对不上）。
+- **吸附到哪座船坞**（`resolveBuildPlacement`）：地基按**四邻相邻**判——这一格自己是甲板、或前后左右
+  任一格是甲板，就吸到那艘船的网格上；都不是就落在世界格上立一座新的。范围（`extentCells`）不参与
+  吸附，它只是那艘船还能长多大的上限。墙与物件按范围找船：它们本来就该落在船上，落在没有甲板的
+  格子上时幽灵停在船上变红说「下面没有地基撑着」，比跳回世界网格好读。
 - **边只有两个名字**：`north` 是格子 +Z 侧，`east` 是 +X 侧。南边就是南邻格的 `north`，西边就是西邻格的 `east`，
   两个人从两侧各放一面墙不会放出两面重叠的墙。
 
 ## 4. 规则（`validateBuildPlacement` 的顺序）
 
 1. 表面匹配、够得着（`reach`）、槽位没被占；
-2. 水上地基：没船 → 这一格必须是水（立船）；有船 → 不盖自带甲板、不出扩建范围、四邻至少一格是甲板；
+2. 水上地基：没吸到船 → 这一格必须是水（立一座新船坞）；吸到船 → 不盖自带甲板、不出扩建范围、
+   四邻至少一格是甲板；
 3. 水上墙 / 物件：所在边 / 格要有甲板；
 4. 静态件要求这张图有地面（纯海域图没有）；地基放陆地格或河床格；墙两侧任一格是地基或地形格；
    物件放在地基上或陆地格中心；
@@ -79,11 +84,20 @@
 拆除全额退回材料，背包装不下的掉在件的位置上。地基上还立着墙（另一侧没有地基撑着）或摆着物件时拆不掉；
 船上最后一件拆掉，看不见的船体根节点也一并移除。
 
-## 7. 留了接口 / 还没做
+## 7. 放置键
+
+主键（鼠标左键 / 手柄下键）：建造是「对着指针指的地方干这一下」，而指针本来就在鼠标上，
+让手离开鼠标去按 E 是把一个连续动作掰成两半。交互键也收，因为触屏那颗按钮和手柄北键绑在它上面。
+
+建造模式下这两个键不再有别的含义：`GrasslandScene` 在建造时把手持物的使用（`HotbarController`
+的 `isActive`）与就近交互一起关掉，所以点一下不会既放一件又吃掉手上的果子。
+
+## 8. 留了接口 / 还没做
 
 - **窗户与门**（墙的变体，按 E 开合）：墙是普通 Actor，加 `interactable` 与一个开合状态即可；占位与吸附不用改。
 - **更多物件**（棚子、大炮、箱子）：给原型加 `buildPiece { kind: 'fixture', slot }` 就进建造栏；箱子可直接复用
   `container` 组件。
-- **船的整体起伏**：船体根节点的 Transform 由 `BuoyancySystem` 结算吃水与静态倾斜，逐帧的波浪起伏目前只画在
-  预制木筏自己的模型上；用地基拼出来的船没有自己的模型，板随根节点的权威位姿走，不随波起伏。
+- **船的整体起伏**：船体根节点在渲染侧有一个没有模型的空 proxy，波浪起伏与倾斜画在它身上，板由
+  `ThreeAttachmentVisual` 顺着父子关系继承——整座船坞一起起伏、一起倾斜。吃水与静态倾斜仍由
+  `BuoyancySystem` 在服务端结算。
 - **连通性**：拆掉中间一块地基不会把船拆成两艘；两块不相连的板仍算同一艘船。
