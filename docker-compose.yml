@@ -14,7 +14,7 @@ services:
     ports:
       # 默认只发布到回环。纯 HTTP 直连公网是跑不起来的——没有安全上下文就没有
       # SharedArrayBuffer，客户端会直接抛「渲染循环搬不进线程」，见
-      # doc/docker-deployment.md 4.1。要 HTTPS 就用下面的 tls profile。
+      # doc/deploy/build-and-run.md 4.1。要 HTTPS 就用下面的 tls profile。
       # 真要临时对外裸跑（只够验 /api/health）：SKYLAND_PUBLISH=0.0.0.0:80
       - "${SKYLAND_PUBLISH:-127.0.0.1:3090}:3090"
     environment:

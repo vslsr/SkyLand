@@ -118,12 +118,14 @@ docker run -d --name skyland --restart unless-stopped --init \
 `https://` 或 `http://localhost` 下可用，走 `http://<公网 IP>/` 时 COOP/COEP 发得再对，
 `crossOriginIsolated` 也是 `false`，`connectRenderWorldInWorker` 会直接抛
 「拿不到 SharedArrayBuffer」——没有主线程回退分支。没有域名时的三条替代路径
-（SSH 隧道 / 自签证书 / 域名签证书）见 `doc/docker-deployment.md` 4.2。
+（SSH 隧道 / 自签证书 / 域名签证书）见 `doc/deploy/build-and-run.md` 4.2。
 
 反代要转发 WebSocket 升级、放长读超时，并且不要覆盖服务端发的 COOP/COEP 头。
 
-完整的构建参数、跨架构构建、Nginx/Caddy 配置、更新回滚和排查表见
-[`doc/docker-deployment.md`](doc/docker-deployment.md)。
+部署文档在 [`doc/deploy/`](doc/deploy/)：[`build-and-run.md`](doc/deploy/build-and-run.md)
+讲第一次部署（构建参数、跨架构构建、四种拿到 HTTPS 的方案、Nginx/Caddy 配置），
+[`operations.md`](doc/deploy/operations.md) 讲跑起来之后（发版、回滚、证书续期、
+后续演进、备份、分层排查）。
 
 ### 开发模式：Vite 热更新 + Node.js DS
 
