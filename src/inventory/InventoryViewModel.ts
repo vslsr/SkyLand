@@ -75,8 +75,6 @@ export interface InventoryModelLike {
   readonly hotbar?: readonly (HotbarSlotModelLike | null)[];
   readonly activeHotbarIndex?: number;
   readonly heldItemType?: string;
-  /** 交互键按住多久算「收回背包」。来自玩家原型，两端读同一份。 */
-  readonly stowHoldSeconds?: number;
 }
 
 export interface InventoryStackView {

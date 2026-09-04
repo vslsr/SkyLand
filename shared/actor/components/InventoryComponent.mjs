@@ -15,9 +15,6 @@ export const MAXIMUM_HOTBAR_CAPACITY = 9;
 /** 空手。`activeHotbarIndex` 取这个值时嘴上不挂任何手持物。 */
 export const NO_HOTBAR_SLOT = -1;
 
-/** 交互键按住多久算「收回背包」而不是「放下」。原型没写时的默认值。 */
-export const DEFAULT_STOW_HOLD_SECONDS = 0.6;
-
 function positiveInteger(value, fallback) {
   const number = Number(value);
   return Number.isInteger(number) && number > 0 ? number : fallback;
@@ -56,17 +53,6 @@ export class InventoryComponent extends ActorComponent {
       MAXIMUM_HOTBAR_CAPACITY,
       positiveInteger(definition.hotbarCapacity, DEFAULT_HOTBAR_CAPACITY),
     );
-    /**
-     * 交互键短按是放下、长按是收回背包，这里是两者的分界。
-     *
-     * 它来自原型配置而不是常量：客户端画的那圈倒计时和服务端判定用的是同一个数，
-     * 圈满那一刻就是服务端认定长按那一刻。两端各写一个数就会出现「圈满了
-     * 但东西掉在了地上」。
-     */
-    this.stowHoldSeconds = Number.isFinite(Number(definition.stowHoldSeconds))
-      && Number(definition.stowHoldSeconds) > 0
-      ? Number(definition.stowHoldSeconds)
-      : DEFAULT_STOW_HOLD_SECONDS;
     /**
      * @type {({ itemType: string, quantity: number } | null)[]}
      * 物品栏每格实际持有的那一摞；null 是空格。

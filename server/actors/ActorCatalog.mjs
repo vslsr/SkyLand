@@ -272,11 +272,6 @@ function validateInventory(raw, filename) {
     if (!Number.isInteger(hotbarCapacity)) throw new TypeError(`${path}.hotbarCapacity 必须是整数`);
     validated.hotbarCapacity = hotbarCapacity;
   }
-  if (definition.stowHoldSeconds !== undefined) {
-    validated.stowHoldSeconds = requireNumber(
-      definition.stowHoldSeconds, `${path}.stowHoldSeconds`, 0.1, 5,
-    );
-  }
   return validated;
 }
 

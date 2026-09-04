@@ -101,7 +101,8 @@ export class HotbarBar {
   }
 
   /**
-   * 画那圈圆形倒计时：物品能力的长按激活与交互键长按共用同一个圈，靠 `kind` 换颜色。
+   * 画那圈圆形倒计时：长按使用一件物品时它盖在那一格上，`data-progress` 记的是
+   * 这次用法（吃 / 敲 / 投）。
    *
    * 圈盖在当前手持那一格上，是一个真正的环——不是把方格底色填掉一角。倒计时是
    * 「还剩多少时间」，环的周长天然是一条闭合的时间轴，扫到起点就是结束；方块被
@@ -119,7 +120,7 @@ export class HotbarBar {
     this.progressLabel = progress.label;
     held.dial.hidden = false;
     held.dial.style.setProperty('--hotbar-progress', `${Math.round(progress.ratio * 100)}%`);
-    held.button.dataset.progress = progress.kind;
+    held.button.dataset.progress = progress.action;
     this.syncPlate();
   }
 

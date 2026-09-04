@@ -88,7 +88,12 @@ export type InventoryCommand =
   | { kind: 'use:release' }
   /** 这次按下被打断（界面盖上来、切走手持物）。 */
   | { kind: 'use:cancel' }
-  /** 丢下手上那件。 */
+  /**
+   * 丢下手上那件。
+   *
+   * 交互键在手上有东西时就是这一条，按下即掉。它以前是一次按住的短按分支
+   * （长按是收进背包），那条按住已经删掉——收回背包在背包界面里那一格上点。
+   */
   | { kind: 'drop' }
   /**
    * 从背包里直接丢一个到身前，不经过手。
@@ -105,13 +110,6 @@ export type InventoryCommand =
    * 和别的格子完全一样。
    */
   | { kind: 'drop:hotbar'; slotIndex: number }
-  /**
-   * 交互键按下/松开。短按放下、长按收回背包，分界由服务端按自己的计时判定，
-   * 客户端那圈圆形倒计时只负责让玩家看见还要按多久。
-   */
-  | { kind: 'stow:begin' }
-  | { kind: 'stow:release' }
-  | { kind: 'stow:cancel' }
   | { kind: 'container:open'; actorId: string }
   | { kind: 'container:close'; actorId: string }
   | {

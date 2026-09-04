@@ -233,11 +233,7 @@ body.has-interaction-target .crosshair {
   );
 }
 
-.hold-progress[data-kind='stow'] {
-  --hold-progress-color: rgba(79, 214, 149, 0.92);
-}
-
-.hold-progress[data-kind='use'] {
+.hold-progress[data-kind] {
   --hold-progress-color: rgba(201, 120, 104, 0.92);
 }
 
@@ -1240,12 +1236,8 @@ body.is-topdown .virtual-controls.is-desktop-debug {
   display: none;
 }
 
-.hotbar__slot[data-progress='use'] {
+.hotbar__slot[data-progress] {
   --hotbar-progress-color: rgba(201, 120, 104, 0.92);
-}
-
-.hotbar__slot[data-progress='stow'] {
-  --hotbar-progress-color: rgba(79, 214, 149, 0.92);
 }
 
 /*

@@ -88,9 +88,9 @@ export class ActorInteractionController {
         this.toActionTarget(this.candidate),
         { playerId, controlledActorId: vesselId },
       );
-      // 「放下手上那件」不在这里发。手上有东西时交互键是**按住**语义——短按放下、
-      // 长按收进背包——由 HotbarController 在松手那一刻结算。在按下这一刻就发出去，
-      // 等于永远走短按分支，长按收包一次都到不了。
+      // 「放下手上那件」不在这里发，由 `HotbarController` 那一条统一发：两种手持物
+      // （物品栏的表现体、叼着的世界物件）它都认得，而这里只看得见有 interactable
+      // 的那一种。两边都发就会放下两次。这里仍然出提示——提示归动作表管。
       if (action && !action.blocked && action.id !== 'drop-held') {
         this.port.sendInteraction(this.candidate.actorId);
       }
