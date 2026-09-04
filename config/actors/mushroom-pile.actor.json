@@ -33,12 +33,13 @@
       "radiusChunks": 2
     },
     "render": {
-      "model": "line-art-fruit-pile",
-      "fruitColor": "#C97868",
-      "accentColor": "#EADFC5",
-      "inkColor": "#51463E",
-      "radius": 0.42,
-      "height": 0.3
+      "model": "line-art-mushroom-pile",
+      "capColor": "#c97868",
+      "stemColor": "#eadfc5",
+      "spotColor": "#f8f1df",
+      "inkColor": "#51463e",
+      "radius": 0.26,
+      "height": 0.5
     }
   }
 }

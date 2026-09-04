@@ -137,6 +137,13 @@ test('ActorCatalog 加载并净化木筏原型', async () => {
   assert.equal(wood.components.replicationPolicy.mode, 'aoi');
   assert.equal(wood.components.render.model, 'line-art-wood-pile');
 
+  // 采下来的弹弹菇用自己的堆叠模型，不再借果子堆的模板：包里那件、地上那件和
+  // 世界里长着的那株应当是同一种蘑菇。
+  const mushroomPile = catalog.require('mushroom-pile');
+  assert.equal(mushroomPile.components.itemStack.itemType, 'mushroom');
+  assert.equal(mushroomPile.components.render.model, 'line-art-mushroom-pile');
+  assert.equal(mushroomPile.components.render.capColor, '#c97868');
+
   const woodLog = catalog.require('wood-log');
   assert.equal(woodLog.components.itemStack.itemType, 'wood-log');
   assert.equal(woodLog.components.itemStack.displayName, '圆木');
@@ -285,6 +292,25 @@ test('ActorCatalog 保留软体形变与咬合参数，并拒绝越界值', asyn
   deepGrip.id = 'probe-grip';
   deepGrip.components.bite.gripDepth = 5;
   await assert.rejects(loadSingleActor(deepGrip), /gripDepth 数值范围无效/);
+});
+
+/**
+ * 合批只画得出堆叠模型。itemStack 配了别的 render 时它一声不响地什么都不画——
+ * 地上的掉落物和拿在手上那件同时消失，而没有任何报错指向那份配置。
+ */
+test('ActorCatalog 拒绝画不出来的物品堆 render', async () => {
+  const catalog = await ActorCatalog.load();
+  const pile = structuredClone(catalog.require('mushroom-pile'));
+  pile.id = 'probe-pile';
+  pile.components.render = {
+    model: 'line-art-elastic-mushroom',
+    capColor: '#c97868',
+    stemColor: '#eadfc5',
+    spotColor: '#f8f1df',
+    radius: 0.26,
+    height: 0.5,
+  };
+  await assert.rejects(loadSingleActor(pile), /itemStack 需要堆叠 render/);
 });
 
 test('ActorCatalog 拒绝未知原型', async () => {

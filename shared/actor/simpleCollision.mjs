@@ -166,6 +166,7 @@ export function createSimpleCollisionFromRender(render, dropMotion) {
     || model === 'line-art-wood-pile'
     || model === 'line-art-stone-pile'
     || model === 'line-art-fruit-pile'
+    || model === 'line-art-mushroom-pile'
   ) {
     const radius = positiveNumber(render.radius, 0.5);
     return createSimpleCollisionDefinition({

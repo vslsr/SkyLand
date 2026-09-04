@@ -7,6 +7,43 @@ import type { ActorVisualModel } from './ActorVisualModel';
 
 type MushroomRender = Extract<ActorRenderDefinition, { model: 'line-art-elastic-mushroom' }>;
 
+/**
+ * 菌盖压扁到这个比例；菌柄顶端再抬这么多个半径。
+ *
+ * 这几条和下面的几何构造一起，就是「弹弹菇长什么样」的唯一一份答案：掉在地上、
+ * 拿在手上的那一堆（`createMushroomPileModel` 与合批模板）读的都是它，换个数字
+ * 三处一起变。世界里那一株和包里那一个本来就该是同一种蘑菇。
+ */
+export const MUSHROOM_CAP_FLATTEN = 0.42;
+export const MUSHROOM_CAP_LIFT = 0.04;
+
+/** 菌盖之下那截菌柄的长度。 */
+export function mushroomStemLength(radius: number, height: number): number {
+  return Math.max(0.1, height - radius * 0.46);
+}
+
+export function createMushroomStemGeometry(
+  radius: number,
+  stemLength: number,
+): THREE.BufferGeometry {
+  return new THREE.CylinderGeometry(radius * 0.2, radius * 0.31, stemLength, 10, 3);
+}
+
+export function createMushroomCapGeometry(radius: number): THREE.BufferGeometry {
+  return new THREE.SphereGeometry(radius, 16, 9);
+}
+
+/** 菌盖上那三点白斑：半径、位置与朝向都按半径成比例。 */
+export const MUSHROOM_CAP_SPOTS = [
+  { scale: 0.105, offset: [-0.23, 0.39, 0.05], rotation: [-Math.PI / 2, 0, -0.32] },
+  { scale: 0.085, offset: [0.25, 0.34, 0.16], rotation: [-1.18, 0.18, 0.42] },
+  { scale: 0.07, offset: [0.08, 0.32, -0.27], rotation: [-1.02, -2.7, 0.1] },
+] as const satisfies readonly {
+  scale: number;
+  offset: readonly [number, number, number];
+  rotation: readonly [number, number, number];
+}[];
+
 function addSpot(
   capRoot: THREE.Group,
   radius: number,
@@ -47,15 +84,9 @@ export function createElasticMushroomModel(
   elasticRoot.add(stemRoot, capRoot);
 
   const outline = new THREE.LineBasicMaterial({ color: 0x352b27 });
-  const restLength = Math.max(0.1, definition.height - definition.radius * 0.46);
+  const restLength = mushroomStemLength(definition.radius, definition.height);
   const stem = createOutlinedObject(
-    new THREE.CylinderGeometry(
-      definition.radius * 0.2,
-      definition.radius * 0.31,
-      restLength,
-      10,
-      3,
-    ),
+    createMushroomStemGeometry(definition.radius, restLength),
     createFillMaterial(definition.stemColor, environment),
     1,
     outline,
@@ -64,40 +95,30 @@ export function createElasticMushroomModel(
   stemRoot.add(stem);
 
   const cap = createOutlinedObject(
-    new THREE.SphereGeometry(definition.radius, 16, 9),
+    createMushroomCapGeometry(definition.radius),
     createFillMaterial(definition.capColor, environment),
     4,
     outline,
   );
-  cap.scale.y = 0.42;
-  cap.position.y = definition.radius * 0.04;
+  cap.scale.y = MUSHROOM_CAP_FLATTEN;
+  cap.position.y = definition.radius * MUSHROOM_CAP_LIFT;
   capRoot.add(cap);
   capRoot.position.y = restLength;
 
-  addSpot(
-    capRoot,
-    definition.radius * 0.105,
-    [-definition.radius * 0.23, definition.radius * 0.39, definition.radius * 0.05],
-    [-Math.PI / 2, 0, -0.32],
-    definition.spotColor,
-    environment,
-  );
-  addSpot(
-    capRoot,
-    definition.radius * 0.085,
-    [definition.radius * 0.25, definition.radius * 0.34, definition.radius * 0.16],
-    [-1.18, 0.18, 0.42],
-    definition.spotColor,
-    environment,
-  );
-  addSpot(
-    capRoot,
-    definition.radius * 0.07,
-    [definition.radius * 0.08, definition.radius * 0.32, -definition.radius * 0.27],
-    [-1.02, -2.7, 0.1],
-    definition.spotColor,
-    environment,
-  );
+  for (const spot of MUSHROOM_CAP_SPOTS) {
+    addSpot(
+      capRoot,
+      definition.radius * spot.scale,
+      [
+        definition.radius * spot.offset[0],
+        definition.radius * spot.offset[1],
+        definition.radius * spot.offset[2],
+      ],
+      spot.rotation,
+      definition.spotColor,
+      environment,
+    );
+  }
 
   const shadow = new THREE.Mesh(
     new THREE.CircleGeometry(definition.radius * 0.7, 18),

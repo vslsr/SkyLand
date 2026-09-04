@@ -13,6 +13,7 @@ import { createPlayerSlimeModel } from '../playerSlime';
 import { createCampfireModel } from './createCampfireModel';
 import { createDryHayModel } from './createDryHayModel';
 import { createFruitPileModel } from './createFruitPileModel';
+import { createMushroomPileModel } from './createMushroomPileModel';
 import { createStonePileModel } from './createStonePileModel';
 import { createWoodPileModel } from './createWoodPileModel';
 import { createWoodLogModel } from './createWoodLogModel';
@@ -70,6 +71,9 @@ export function createActorVisualModel(
   }
   if (definition.model === 'line-art-fruit-pile') {
     return createFruitPileModel(environment, definition);
+  }
+  if (definition.model === 'line-art-mushroom-pile') {
+    return createMushroomPileModel(environment, definition);
   }
   return createReefModel(environment, definition);
 }

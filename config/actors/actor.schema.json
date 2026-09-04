@@ -1775,6 +1775,46 @@
                   "maximum": 3
                 }
               }
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "model",
+                "capColor",
+                "stemColor",
+                "spotColor",
+                "inkColor",
+                "radius",
+                "height"
+              ],
+              "properties": {
+                "model": {
+                  "const": "line-art-mushroom-pile"
+                },
+                "capColor": {
+                  "$ref": "#/$defs/color"
+                },
+                "stemColor": {
+                  "$ref": "#/$defs/color"
+                },
+                "spotColor": {
+                  "$ref": "#/$defs/color"
+                },
+                "inkColor": {
+                  "$ref": "#/$defs/color"
+                },
+                "radius": {
+                  "type": "number",
+                  "exclusiveMinimum": 0,
+                  "maximum": 3
+                },
+                "height": {
+                  "type": "number",
+                  "exclusiveMinimum": 0,
+                  "maximum": 5
+                }
+              }
             }
           ]
         }

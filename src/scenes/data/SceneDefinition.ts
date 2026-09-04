@@ -225,6 +225,15 @@ export type ActorRenderDefinition =
       inkColor: string;
       radius: number;
       height: number;
+    }
+  | {
+      model: 'line-art-mushroom-pile';
+      capColor: string;
+      stemColor: string;
+      spotColor: string;
+      inkColor: string;
+      radius: number;
+      height: number;
     };
 
 export interface ActorArchetypeDefinition {

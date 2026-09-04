@@ -12,12 +12,18 @@ export const DEFAULT_ACTOR_DIRECTORY = fileURLToPath(new URL('../../config/actor
 
 const ID_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 
-/** 走高数量合批绘制的堆叠模型。新增一种堆叠物就在这里登记。 */
-const PILE_RENDER_MODELS = new Set([
+/**
+ * 走高数量合批绘制的堆叠模型。新增一种堆叠物就在这里登记。
+ *
+ * 导出是有意的：`ThreeHighCountBatchVisual` 那一侧有同一张表，只有它列出的模型
+ * 才真的画得出来。两张表由 `tests/PileRenderModels.test.ts` 钉在一起。
+ */
+export const PILE_RENDER_MODELS = new Set([
   'line-art-wood-pile',
   'line-art-wood-log',
   'line-art-stone-pile',
   'line-art-fruit-pile',
+  'line-art-mushroom-pile',
 ]);
 const COLOR_PATTERN = /^#[0-9a-f]{6}$/i;
 /**
@@ -794,6 +800,17 @@ function validateRender(raw, filename) {
       height: requireNumber(render.height, `${path}.height`, Number.EPSILON, 5),
     };
   }
+  if (render.model === 'line-art-mushroom-pile') {
+    return {
+      model: render.model,
+      capColor: requireColor(render.capColor, `${path}.capColor`),
+      stemColor: requireColor(render.stemColor, `${path}.stemColor`),
+      spotColor: requireColor(render.spotColor, `${path}.spotColor`),
+      inkColor: requireColor(render.inkColor, `${path}.inkColor`),
+      radius: requireNumber(render.radius, `${path}.radius`, Number.EPSILON, 3),
+      height: requireNumber(render.height, `${path}.height`, Number.EPSILON, 5),
+    };
+  }
   if (render.model === 'line-art-training-dummy') {
     return {
       model: render.model,
@@ -1045,6 +1062,14 @@ function validateActorArchetype(raw, filename) {
   // 堆叠模型由 HighCountActorBatchSystem 合批绘制，没有 itemStack 就没有东西可画。
   if (PILE_RENDER_MODELS.has(render?.model) && !itemStack) {
     throw new TypeError(`${filename}.components.render ${render.model} 需要 itemStack`);
+  }
+  // 反过来也一样，而且更要紧：合批只画得出堆叠模型，itemStack 配了别的 render
+  // 会**一声不响地什么都不画**——地上的掉落物和手上那件同时消失，没有任何报错
+  // 指向这份配置。所以在读配置这一刻就拦下来。
+  if (itemStack && !PILE_RENDER_MODELS.has(render?.model)) {
+    throw new TypeError(
+      `${filename}.components.itemStack 需要堆叠 render，${render?.model ?? '没有 render'} 画不出来`,
+    );
   }
   if (generatedProp && interactable?.action !== 'harvest-prop') {
     throw new TypeError(`${filename}.components.generatedProp 需要 harvest-prop interactable`);

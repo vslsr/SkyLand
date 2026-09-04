@@ -884,7 +884,7 @@ export class ClientActorSystem implements SceneFrameSystem {
   private createInstanceCatalog(): ActorInstanceCatalog {
     const archetypeIndex = new Map<string, number>();
     this.archetypeOrder.forEach((id, index) => archetypeIndex.set(id, index));
-    const singleModels = new Set(['line-art-fruit-pile', 'line-art-wood-log']);
+    const singleModels = new Set(['line-art-fruit-pile', 'line-art-wood-log', 'line-art-mushroom-pile']);
     return {
       archetypeIndex,
       isBatched: (archetypeId) => (
