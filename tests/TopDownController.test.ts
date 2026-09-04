@@ -112,7 +112,7 @@ test('TopDown 垂直拖动保持距离并把俯仰限制在可移动范围', () 
   assert.ok(Math.abs(Math.hypot(...lowered) - distance) < 1e-9);
 });
 
-test('TopDown 移动决定朝向，按住鼠标主操作时只让鼠标决定朝向', () => {
+test('TopDown 朝向只由移动的 Yaw 轴驱动，鼠标按键不再改写它', () => {
   let now = 0;
   const device = new TestKeyboardMouseDevice(() => now);
   const scheme = createPlayerInputScheme({ storage: null });
@@ -124,7 +124,8 @@ test('TopDown 移动决定朝向，按住鼠标主操作时只让鼠标决定朝
     now: () => now,
   });
   const { canvas, dispatchPointer } = createCanvas();
-  const controller = new TopDownController(canvas, new Object3D(), input);
+  const player = new Object3D();
+  const controller = new TopDownController(canvas, player, input);
 
   device.emit('Keyboard.KeyW', true);
   now = 16;
@@ -145,30 +146,114 @@ test('TopDown 移动决定朝向，按住鼠标主操作时只让鼠标决定朝
   input.update();
   controller.update(0.1);
   frame = controller.inputFrame;
-  assert.notEqual(frame.yaw, movementYaw, '按住鼠标后朝向应切到光标方向');
-  assert.notDeepEqual(controller.position, beforeMouseMove, '鼠标控制朝向时移动仍应生效');
-  const mouseYaw = frame.yaw;
+  assertAngleClose(frame.yaw, movementYaw, '按住鼠标不应把朝向拉向光标');
+  assert.notDeepEqual(controller.position, beforeMouseMove, '按住鼠标时移动仍应生效');
 
   device.emit('Keyboard.KeyW', false);
   device.emit('Keyboard.KeyD', true);
   now = 48;
   input.update();
-  const beforeStrafe = controller.position;
   controller.update(0.1);
   frame = controller.inputFrame;
-  assertAngleClose(frame.yaw, mouseYaw, '按住鼠标移动时不应改写鼠标朝向');
-  assert.notDeepEqual(controller.position, beforeStrafe, '按住鼠标时移动只控制位置');
+  assert.notEqual(frame.yaw, movementYaw, '改变移动方向后朝向应跟着转');
+  assert.ok(
+    Math.abs(normalizeAngle(frame.yaw - Math.atan2(frame.move.x, frame.move.z)))
+      < Math.abs(normalizeAngle(movementYaw - Math.atan2(frame.move.x, frame.move.z))),
+    '朝向应向新的移动方向收敛',
+  );
 
   device.emit('Mouse.Button0', false);
   now = 64;
   input.update();
   controller.update(0.1);
-  frame = controller.inputFrame;
+  assert.equal(player.rotation.x, 0, '默认只放开 Yaw 轴，Pitch 不应被写入');
+  assert.equal(player.rotation.z, 0, '默认只放开 Yaw 轴，Roll 不应被写入');
+
+  controller.dispose();
+  input.dispose();
+});
+
+test('TopDown 保留对准接口：外部朝向请求接管 Yaw，撤销后交回移动方向', () => {
+  let now = 0;
+  const device = new TestKeyboardMouseDevice(() => now);
+  const scheme = createPlayerInputScheme({ storage: null });
+  const input = new InputSubsystem({
+    actions: scheme.actions,
+    config: scheme.config,
+    contexts: scheme.contexts,
+    devices: [device],
+    now: () => now,
+  });
+  const { canvas } = createCanvas();
+  const controller = new TopDownController(canvas, new Object3D(), input);
+
+  device.emit('Keyboard.KeyW', true);
+  now = 16;
+  input.update();
+  controller.update(0.1);
+  const movementYaw = controller.inputFrame.yaw;
+
+  controller.setFacingRequest({ target: { x: 10, z: 0 }, immediate: true });
+  controller.update(0.1);
+  let frame = controller.inputFrame;
+  const aimed = controller.position;
   assertAngleClose(
     frame.yaw,
-    Math.atan2(frame.move.x, frame.move.z),
-    '松开鼠标后应恢复面向移动方向',
+    Math.atan2(10 - aimed.x, 0 - aimed.z),
+    '应按角色当前位置正对世界坐标里的对准点',
   );
+  assert.notEqual(frame.yaw, movementYaw, '对准请求应接管移动朝向');
+
+  controller.setFacingRequest({ yaw: -Math.PI / 2, immediate: true });
+  controller.update(0.1);
+  assertAngleClose(controller.inputFrame.yaw, -Math.PI / 2, '也可以直接给定朝向角');
+  assertAngleClose(controller.facing.yaw, -Math.PI / 2, 'facing 应报告当前朝向');
+  assert.equal(controller.facingRequestState?.yaw, -Math.PI / 2, '生效中的请求应可读回');
+
+  controller.setFacingRequest(undefined);
+  assert.equal(controller.facingRequestState, undefined, '撤销后不应再有生效的请求');
+  for (let step = 0; step < 120; step += 1) controller.update(1 / 60);
+  frame = controller.inputFrame;
+  const movementDifference = Math.abs(
+    normalizeAngle(frame.yaw - Math.atan2(frame.move.x, frame.move.z)),
+  );
+  assert.ok(
+    movementDifference < 1e-3,
+    `撤销对准请求后应重新收敛到移动方向：相差 ${movementDifference}`,
+  );
+
+  controller.dispose();
+  input.dispose();
+});
+
+test('TopDown 旋转轴配置可以放开 Pitch/Roll，并且只由对准请求驱动', () => {
+  let now = 0;
+  const device = new TestKeyboardMouseDevice(() => now);
+  const scheme = createPlayerInputScheme({ storage: null });
+  const input = new InputSubsystem({
+    actions: scheme.actions,
+    config: scheme.config,
+    contexts: scheme.contexts,
+    devices: [device],
+    now: () => now,
+  });
+  const { canvas } = createCanvas();
+  const player = new Object3D();
+  const controller = new TopDownController(canvas, player, input, {
+    rotationAxes: { yaw: false, pitch: true, roll: true },
+  });
+
+  device.emit('Keyboard.KeyW', true);
+  now = 16;
+  input.update();
+  controller.update(0.1);
+  assert.equal(player.rotation.y, 0, '关掉 Yaw 之后移动不应再写转身');
+
+  controller.setFacingRequest({ pitch: 0.4, roll: -0.2, immediate: true });
+  controller.update(0.1);
+  assert.ok(Math.abs(player.rotation.x - 0.4) < 1e-9, '放开的 Pitch 应写进 transform');
+  assert.ok(Math.abs(player.rotation.z + 0.2) < 1e-9, '放开的 Roll 应写进 transform');
+  assert.equal(player.rotation.y, 0, '关掉的 Yaw 轴不应被对准请求写入');
 
   controller.dispose();
   input.dispose();
@@ -758,7 +843,7 @@ test('旧房间缺少拖拽配置时渲染侧仍自动装配蒙皮拖拽，并�
     renderWorld.scene,
     proxyId,
     () => player.controller.frame,
-    (active) => player.controller.setMouseFacingSuppressed(active),
+    (active) => player.controller.setCameraDragSuppressed(active),
   );
   const simulation = renderWorld.scene.resolveSlimeVisual(proxyId)!.simulation;
   assert.equal(renderWorld.scene.isSlimeSurfaceDragging(proxyId), false);
