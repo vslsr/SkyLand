@@ -2,9 +2,11 @@
 
 一条给**动作表现**用的复制通道，加上它两端各一半的状态机。
 
-今天吃东西那段抖动**只有自己看得见**：它由本地那次按住驱动（`HotbarController` 的
-`HeldItemProgress` → `PlayerEntity.setChewing` + `ClientActorSystem.setChewingItem`），
-从来没过网。别人眼里那个人只是站着不动，然后手上的果子凭空少了一个。
+**现状：第一步、第二步已落地**（吃东西、弹弓拉弓与发射），第三步（世界物件）按
+§7 的理由暂缓。下面写的是已经跑着的东西，不是计划。
+
+起因：吃东西那段抖动曾经**只有自己看得见**——它由本地那次按住驱动，从来没过网。
+别人眼里那个人只是站着不动，然后手上的果子凭空少了一个。
 
 弹弓把这个问题变得更硬：拉弓要拉将近一秒，这一秒里**别人必须看见他在拉**，否则
 「谁要打我」这件事在多人对局里没有任何前摇可读。
@@ -80,8 +82,8 @@ export interface SnapshotActionState {
 
 - `SnapshotPlayer.action?`——玩家。**发给所有人**（不像背包只发给本人）：别人在做
   什么本来就是看得见的事。
-- `SnapshotActor.action?`——世界 Actor。这一版先不写入任何 Actor，字段留着是因为
-  「树被砍中晃一下」「箱子被撬」将来走的是同一条路，那时不该再造一条通道。
+- `SnapshotActor.action?`——世界 Actor。**这一版没有落地这一半**，理由见 §7：
+  今天没有一个世界物件的动作是它演得出来的。
 
 **手上那件不带自己的状态。** 它是挂在玩家身上的纯表现体，动作是玩家的动作——它读
 玩家那一份，用 `itemType` 挑自己那条曲线。给它单独发一份，两份在丢帧时会错开，
@@ -119,6 +121,10 @@ export interface SnapshotActionState {
                                         ↓
                  role 'actor' → 玩家模型偏移      role 'held' → 手上那件的偏移/缩放
 ```
+
+**姿态位移写在角色自己的坐标系里**（x 右、y 上、z 身前），读它的三处（本地玩家、
+远端玩家、手上那件）各自按自己的 yaw 转一次。拉弓要往「身后」拉，而「后」只有在
+角色朝向里才说得通——写成世界坐标的话，玩家一转身，弓就往错误的方向拉了。
 
 **采样器**（`src/animation/ActionStateSampler.ts`）只做时间换算：
 
@@ -161,27 +167,41 @@ registerActionClip('eat.hold', 'held',  (phase) => ({
 
 ## 6. 落地要动的地方
 
+「世界 Actor」那两行还没做（§7），其余都已经在跑。
+
 | 去处 | 做什么 |
 | --- | --- |
 | `shared/animation/actionStates.mjs` | 状态 id 的拼法、`fire` 的表现时长表，两端共读 |
 | `shared/actor/components/ActionStateComponent.mjs` | 那五个字段 + `priority`，快照与 `applySnapshot` |
 | `server/actors/ItemAbilityRuntime.mjs` | 三个写入点（begin / activate / cancel-revoke） |
 | `server/scene/ServerScene.mjs` | 玩家快照带上 `action`（发给所有人） |
-| `src/network/protocol.ts` | `SnapshotPlayer.action` / `SnapshotActor.action` |
+| `src/network/protocol.ts` | `SnapshotPlayer.action`（`SnapshotActor.action` 暂缓） |
 | `src/animation/ActionStateSampler.ts` | 快照 + 时钟 → `{ state, ratio, fired }` |
 | `src/animation/ActionClipRegistry.ts` | `(state, role) → 曲线`；`eat` 那两条从现有代码迁进来 |
 | `src/player/PlayerEntity.ts` / `RemotePlayer.ts` | 本地与远端玩家都读采样器，替掉 `setChewing` |
 | `src/actors/systems/ActorInstanceSystem.ts` | 手上那件读同一份采样结果，替掉 `chewRatioOf` |
 | `src/controllers/HotbarController.ts` | 按下的同一刻本地进状态（表现层预测） |
 
-## 7. 分三步，每一步自己站得住
+## 7. 分三步，走到了第二步
 
-1. **通道 + 吃东西迁过去。** 落地后立刻能验：两个客户端，一个人吃果子，另一个人
-   看得见他在嚼、手上那颗在变小。这一步不新增任何动画，只是把已有的那段搬上通道。
-2. **弹弓接上。** `shoot.charge` 拉弓、`shoot.fire` 弹一下。武器系统只管弹丸飞出去，
-   动作表现由状态机播——两边在 `ItemUseActions` 那条注册表上已经是分开的。
-3. **世界 Actor。** 砍树晃一下、箱盖开合各自已有做法，不强行统一；等第三个动作出现
-   时再看要不要合并。
+1. **通道 + 吃东西迁过去。**（已落地）两个客户端，一个人吃果子，另一个看得见他在
+   嚼、手上那颗在变小。这一步没新增任何动画，只是把已有的那段搬上通道。
+2. **弹弓接上。**（已落地）`shoot.charge` 往后拉、往下沉、拉满之后抖；`shoot.fire`
+   一记后坐。武器系统只管弹丸飞出去，两边在 `ItemUseActions` 那条注册表上分开着。
+   `shoot.fire` 现在演不出来——`shoot` 还没有执行器，**空转的一次不该有动作**。
+3. **世界 Actor。暂缓，而且不是因为没时间。** 落地前面两步之后回头看，今天没有一个
+   世界物件的动作是这条通道演得出来的：
+
+   - **树、石头这些世界物件是按 chunk 烘进网格的**（只有一个「这一株被采掉了」的
+     覆盖位，没有按物件的实例变换）。「被敲中晃一下」要先有一条按物件的实例通道，
+     那是渲染侧的一个项目，比这条状态通道本身大得多。
+   - **箱盖已经有更合适的做法**：过一个 0/1 的目标值，回弹在渲染侧用弹簧积分。
+     状态机说的是「在做什么」，不是「现在开到几度」——把它改过来是降级。
+   - 剩下的世界 Actor（篝火、方尖碑、货箱）今天没有要演的动作。
+
+   所以 `SnapshotActor.action` 没有落地：一条没有人写的通道不是「留给将来」，是
+   一个迟早和现实分家的空壳。第三个动作真的出现时，再按这份设计把它接上——
+   要动的地方 §6 已经列清楚了。
 
 ## 8. 不做什么
 
