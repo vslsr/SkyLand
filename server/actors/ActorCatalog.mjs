@@ -1118,4 +1118,15 @@ export class ActorCatalog {
     if (!definition) throw new Error(`未知 Actor 原型：${archetypeId}`);
     return definition;
   }
+
+  /**
+   * 全部登记的原型。
+   *
+   * 场景按 id 取原型是常态，但也有「凡是带某个 Component 的都要」这一类需求
+   * ——物品堆原型就是：背包里的东西要拿到手上、要丢到地上，都得先找到它掉在
+   * 地上时长什么样，而那和这张地图摆了什么、长了什么无关。
+   */
+  archetypes() {
+    return this.definitions.values();
+  }
 }
