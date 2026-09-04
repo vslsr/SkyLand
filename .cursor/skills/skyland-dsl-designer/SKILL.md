@@ -1,6 +1,6 @@
 ---
 name: skyland-dsl-designer
-description: Read, write, and implement SkyLand's `@` design-note DSL — the `@i` item, `@b` building-piece, `@w` tool/weapon and reserved `@e` entity entries used in doc/designer-*.md, their M/I/F/G/N/R, T/L, B/D and A (animation) fields, the `#design` placeholder, and how each field lands in config/items/item-catalog.json, a config/actors/*.actor.json buildPiece, an item-use Ability, or — for `A` — a procedural Visual under src/render/three. Use when a request quotes or asks for an `@i` / `@b` / `@w` entry, when adding an item, build piece, tool or weapon from a design note, or when extending the notation itself. For scene placement use skyland-scene-authoring; for new Components, Systems or replication use skyland-actor-component.
+description: Read, write, and implement SkyLand's `@` design-note DSL — the `@i` item, `@b` building-piece, `@w` tool/weapon and reserved `@e` entity entries used in doc/designer-*.md, their M/I/F/G/N/R, T/L, B/D and A (animation) fields, the `@todo` and `#design` markers including `#design`'s (do) / (w) / (s,n) modes, and how each field lands in config/items/item-catalog.json, a config/actors/*.actor.json buildPiece, an item-use Ability, or — for `A` — a procedural Visual under src/render/three. Use when a request quotes or asks for an `@i` / `@b` / `@w` entry, when adding an item, build piece, tool or weapon from a design note, or when extending the notation itself. For scene placement use skyland-scene-authoring; for new Components, Systems or replication use skyland-actor-component.
 ---
 
 # SkyLand Design-Note DSL
@@ -16,6 +16,36 @@ description: Read, write, and implement SkyLand's `@` design-note DSL — the `@
    - `config/items/item-catalog.schema.json` and `config/items/item-catalog.json` for `@i`
    - the `buildPiece` definition inside `config/actors/actor.schema.json` and the closest existing piece (`campfire`, `float-wall`, `ground-foundation`) for `@b`
    - `shared/items/ItemAbility.mjs` and `server/actors/ItemAbilityRuntime.mjs` for any `F` that is not "不能使用"
+
+## Read the two markers correctly
+
+They mark different gaps, and confusing them wastes the most time:
+
+- **`#design`** sits in a value position (`T: #design`). The **design** is deliberately blank. Propose one, write the answer back into the entry, and then do whatever its mode says — see below.
+- **`@todo`** marks a whole block or a single line — on the line above a heading (or the blank line there) for a whole module, or trailing at end of line for just that line. The design is settled; only the **code** is missing. Implement what is written; do not redesign it.
+
+A `#design` already implies unimplemented, so it needs no `@todo`. The reverse does not hold. A `@todo` block covers everything under it, so entries inside it are not marked again — and an entry carrying `@todo` is still a **complete, binding definition**: the marker says it has not shipped, not that it may be written loosely.
+
+`@todo` tracks whether a **piece of content** is built. The 现状 column in `doc/dsl-designer.md`'s landing tables tracks whether a **notation field** has a system behind it. Different levels — do not copy one into the other.
+
+### `#design` modes decide how far you go
+
+The parameter is an instruction, not a label. Read it before doing anything:
+
+| Written | Mode | After you design |
+| --- | --- | --- |
+| `#design(do)` | design-only | Write the design back into the md at that spot, drop the `#design`, mark the entry `@todo`. **Write no code.** |
+| `#design(w)` | write | Write the design back into the md **and implement it**. No `@todo` afterwards. |
+| `#design(s,n)` | select | Produce **n genuinely different directions** with their trade-offs and **ask the user to pick**. Do not pick for them. |
+| `#design` | bare | Treat as `(do)` — design only, no code. |
+
+Three rules follow from this:
+
+1. **Bare `#design` never authorises writing code.** Only `(w)` does. Mistaking a request for a proposal as permission to implement costs far more than the reverse.
+2. **`(s,n)` ends your turn with a question**, not with a chosen design. Use `AskUserQuestion` with the n directions. After they pick, finish as `(do)` unless they say otherwise.
+3. **Handling a `#design` always leaves a trace.** It becomes either `@todo` (mode `do`) or an unmarked, shipped entry (mode `w`). A `#design` still sitting there means nobody has processed it — so never delete one without putting its answer in place.
+
+The three markers are one lifecycle: `#design(...)` (no design) → `@todo` (designed, unbuilt) → unmarked (shipped).
 
 ## Separate the three places a fact can live
 
@@ -61,7 +91,7 @@ The DSL does not carry every field a schema requires. Supply these explicitly ra
 - `@b` also needs `surface`, `reach`, `cost`, and for floating pieces `mass`, plus `buoyancy` and `hull` on a floating foundation.
 - `holdable` is separate from `M`: a thing can have a model and still not be holdable.
 
-A value written `#design` is a deliberate blank you are being asked to fill — answer it and record the answer. A field that is simply absent is an omission; ask for it or state the assumption. `0` and an absent line both mean "none" for `R` and `B`.
+A value written `#design` is a deliberate blank you are being asked to fill — answer it, record the answer, and follow its mode (above) for how far to take it. A field that is simply absent is an omission; ask for it or state the assumption. `0` and an absent line both mean "none" for `R` and `B`.
 
 ## Preserve the constraints the catalogs enforce
 
