@@ -1,118 +1,41 @@
 ---
 name: skyland-dsl-designer
-description: Read, write, and implement SkyLand's `@` design-note DSL — the `@i` item, `@b` building-piece, `@w` tool/weapon and reserved `@e` entity entries used in doc/designer-*.md, their M/I/F/G/N/R, T/L, B/D and A (animation) fields, the `@todo`, `#design` and `#advice` markers including the shared (do) / (w) / (s,n) modes, and how each field lands in config/items/item-catalog.json, a config/actors/*.actor.json buildPiece, an item-use Ability, or — for `A` — a procedural Visual under src/render/three. Use when a request quotes or asks for an `@i` / `@b` / `@w` entry, when adding an item, build piece, tool or weapon from a design note, or when extending the notation itself. For scene placement use skyland-scene-authoring; for new Components, Systems or replication use skyland-actor-component.
+description: Read, write, review, and implement SkyLand's `@` design-note DSL in doc/designer-*.md, including global `@design`, `@advice`, and `@todo` prompts and gameplay entries for items, build pieces, tools, weapons, and procedural animation. Use when handling these markers, authoring or reviewing `@i` / `@b` / `@w` entries, extending the notation, or landing an entry in config and code. For scene placement use skyland-scene-authoring; for new Components, Systems, or replication use skyland-actor-component.
 ---
 
 # SkyLand Design-Note DSL
 
-`@i` / `@b` / `@w` entries in `doc/designer-*.md` are a design language, not free prose. Each entry fixes the fields one thing must declare, so a missing field is visible rather than silently unimplemented. Your job is either to write a well-formed entry or to land an existing one in configuration — never to treat the entry as a loose description you paraphrase into code.
+Treat `@` entries as a binding design language, not loose prose. Keep notation, design content, and shipped configuration distinct:
 
-## Read before editing
+- Notation and marker behavior live in this skill's references.
+- Content lives in `doc/designer-*.md`.
+- Runtime truth lives in `config/` and code.
 
-1. Read [`doc/dsl-designer.md`](../../../doc/dsl-designer.md) completely. It is the normative definition of the notation, the per-field landing table, and the honest implementation status of each field.
-2. Read [references/dsl-authoring.md](references/dsl-authoring.md) when writing a new entry or reviewing one for completeness.
-3. Read the design note that owns the entry: `doc/designer-inventory.md` for `@i`, `doc/desinger-buildsys.md` for `@b`, `doc/designer-toolandweapon.md` for `@w`.
-4. Read the schema that receives the fields before writing any JSON:
-   - `config/items/item-catalog.schema.json` and `config/items/item-catalog.json` for `@i`
-   - the `buildPiece` definition inside `config/actors/actor.schema.json` and the closest existing piece (`campfire`, `float-wall`, `ground-foundation`) for `@b`
-   - `shared/items/ItemAbility.mjs` and `server/actors/ItemAbilityRuntime.mjs` for any `F` that is not "不能使用"
+## Load only what the task needs
 
-## Read the markers correctly
+- For any `@` syntax or marker task, read [references/common-prompts.md](references/common-prompts.md) completely.
+- For `@i`, `@b`, `@w`, `@e`, animation `A`, landing mappings, or implementation work, read [references/gameplay-prompts.md](references/gameplay-prompts.md) completely.
+- When writing a new entry or reviewing one for completeness, also read [references/dsl-authoring.md](references/dsl-authoring.md).
+- Do not load the gameplay reference for a task that only interprets or updates global markers; this separation exists so subagents can avoid irrelevant context.
 
-They mark different gaps, and confusing them wastes the most time:
+## Before changing shipped data or code
 
-- **`#design`** means the **design** is missing or half-written. Complete it, write the answer back into the entry, then do whatever its mode says — see below. It can fill a value slot (`T: #design`) or trail a line that names a topic or is only half-specified (`Effect: 受到攻击力的伤害，按照蓄力倍率缩放 #design`).
-- **`#advice`** is `#design`'s dual: the content is **already complete**, and you are asked what would make it better. Same modes.
-- **`@todo`** marks a whole block or a single line — on the line above a heading (or the blank line there) for a whole module, or trailing at end of line for just that line. The design is settled; only the **code** is missing. Implement what is written; do not redesign it.
+Read the design note that owns the entry:
 
-Position does not pick the marker — the starting point does: nothing there or only a direction sketched → `#design`; complete but improvable → `#advice`; complete and settled, only code missing → `@todo`. All three can trail a line; only `#design` also fills a value slot.
+- `doc/designer-inventory.md` for `@i`.
+- `doc/desinger-buildsys.md` for `@b` source constraints.
+- `doc/designer-toolandweapon.md` for `@b` / `@w`.
 
-A `#design` already implies unimplemented, so it needs no `@todo`. The reverse does not hold. A `@todo` block covers everything under it, so entries inside it are not marked again — and an entry carrying `@todo` is still a **complete, binding definition**: the marker says it has not shipped, not that it may be written loosely.
+Before writing JSON, inspect its receiving schema and closest existing example. For item-use behavior, inspect `shared/items/ItemAbility.mjs` and `server/actors/ItemAbilityRuntime.mjs`.
 
-`@todo` tracks whether a **piece of content** is built. The 现状 column in `doc/dsl-designer.md`'s landing tables tracks whether a **notation field** has a system behind it. Different levels — do not copy one into the other.
+A field with an existing landing is data. A field marked unsupported in the gameplay reference requires a new system; do not approximate it through an unrelated field. Extending a closed enum requires schema, server validation, client types, consumers, and focused tests together.
 
-### Modes decide how far you go
+## Verify implementation work
 
-`#design` and `#advice` share one parameter set. It is an instruction, not a label — read it before doing anything:
+Run the checks proportional to the changed layer:
 
-| Mode | Name | After you produce the answer |
-| --- | --- | --- |
-| `(do)` | design-only | Write it back into the md at that spot, drop the marker, mark the entry `@todo`. **Write no code.** |
-| `(w)` | write | Write it back into the md **and implement it**. No `@todo` afterwards. |
-| `(s,n)` | select | Produce **n genuinely different directions** with their trade-offs and **ask the user to pick**. Do not pick for them. |
-| bare | | Treat as `(do)` — proposal only, no code. |
-
-Four rules follow:
-
-1. **A bare marker never authorises writing code.** Only `(w)` does. Mistaking a request for a proposal as permission to implement costs far more than the reverse.
-2. **`(s,n)` ends your turn with a question**, not with a chosen answer. Use `AskUserQuestion` with the n directions. After they pick, finish as `(do)` unless they say otherwise.
-3. **Handling a marker always leaves a trace.** It becomes either `@todo` (mode `do`) or an unmarked, shipped entry (mode `w`). A marker still sitting there means nobody has processed it — so never delete one without putting its answer in place.
-4. **`#advice` may legitimately conclude "no change needed."** Say why the current form is already right and drop the marker; do not manufacture a suggestion to look productive. `#design` has no such exit — the slot is empty and must be filled.
-
-The markers are one lifecycle: `#design(...)` / `#advice(...)` → `@todo` (answered, unbuilt) → unmarked (shipped).
-
-## Separate the three places a fact can live
-
-- **The notation** lives in `doc/dsl-designer.md`. Change it only when adding a field, a type letter, or a syntax rule.
-- **The content** lives in the design notes. A new item, piece, tool or weapon is a new entry there.
-- **The truth** lives in `config/`. The runtime reads JSON, never the Markdown.
-
-Do not restate a full entry in `doc/dsl-designer.md`, and do not restate catalog JSON in a design note. When they disagree, the JSON is what ships; fix whichever side is wrong rather than leaving both.
-
-## Land an entry, field by field
-
-Work the landing tables in `doc/dsl-designer.md` in order and account for every field. The mapping in one line each:
-
-- `@i` → one entry in `config/items/item-catalog.json` (name/summary/`I`/`G`/`N`/`R`) plus one drop archetype `config/actors/<id>-pile.actor.json` carrying `M` as `components.render`. There is only one model: the held item is that drop archetype with collision, drop physics, lifetime and interaction stripped by `heldItemArchetype()`. Do not author a second held model.
-- `@b` → one `config/actors/<id>.actor.json` with a `buildPiece` Component. `T` picks `kind`, `L` becomes `slot`, `M` becomes `render`.
-- `A` → **code, not JSON.** It becomes a Visual under `src/render/three/`, driven by a visual param across the render boundary. Never look for a schema field to put it in.
-- `@w` → **no dedicated config exists.** A light tool (`B` empty or `0`) is today an `@i` with `category: "tool"` and `use.action: "tool"`. A heavy tool (`B` set) is an `@i` plus a `fixture` `@b`, the way 篝火 already is.
-
-Three rules that decide whether a request is data or architecture:
-
-1. A field with a landing cell is **data**: write the JSON and stop.
-2. A field marked ❌ in `doc/dsl-designer.md` (`@b`'s `I`, all of `@w`'s `D`) needs a **new system**. Say so, scope the system, and do not fake it by overloading an existing field — `use.value` is harvest strength, not attack power.
-3. Adding a value to `category`, `use.action`, or `buildPiece.kind` is **extending the language**. Change the JSON Schema, the server validation, the client TypeScript types, the renderer or runtime that consumes it, and tests together.
-
-## Treat animation as procedural
-
-This project loads no art assets: `SkinnedMesh`, `AnimationMixer` and `GLTFLoader` are all zero. Every animation is code moving a part along a curve. So an `A` entry naming an action or an asset ("play the attack clip") cannot land — push it back and get a part, a pivot, a curve and an amount instead.
-
-Three rules decide whether an `A` entry is implementable:
-
-1. **Prefer a ratio to seconds.** Anything following a charge or a hold reads the same `[0, 1]` value the countdown ring reads, the way `src/player/chewAnimation.ts` does. Seconds drift out of sync with the ring; a ratio cannot.
-2. **Share one curve between parts that move together.** The player's chew wobble and the food shrinking read one module. Two copies drift and stop reading as a single event.
-3. **Trigger a one-shot with an incrementing revision, never a bool.** A bool that flips back between two frames is missed; a changed revision is not. The mushroom's snap-back rides `PARAM_ELASTIC_RELEASE_REVISION`.
-4. **Send the gameplay quantity, not the animation.** The chest sends "how many have it open"; the spring-damped lid angle is computed render-side. Replicating the angle itself pipes 10 Hz snapshot jitter straight into the visual.
-
-`纯表现` is the default and means only the acting player sees it — the chew wobble is invisible to everyone else because it is not replicated. An `A` marked `需复制` is asking for a replication channel; make that cost explicit rather than assuming it is free.
-
-## Fill the gaps the notation leaves
-
-The DSL does not carry every field a schema requires. Supply these explicitly rather than letting an implementer guess, and write the answer back into the entry:
-
-- `@i` also needs a kebab-case `id`, a `tint`, and `slotCost` (`0` puts it in an independent pool — that is what tools and ammunition use, not the backpack grid).
-- `@b` also needs `surface`, `reach`, `cost`, and for floating pieces `mass`, plus `buoyancy` and `hull` on a floating foundation.
-- `holdable` is separate from `M`: a thing can have a model and still not be holdable.
-
-A value written `#design` is a deliberate blank you are being asked to fill — answer it, record the answer, and follow its mode (above) for how far to take it. A field that is simply absent is an omission; ask for it or state the assumption. `0` and an absent line both mean "none" for `R` and `B`.
-
-## Preserve the constraints the catalogs enforce
-
-These fail at server startup, not at runtime, so check them before running anything:
-
-- A foundation must render `line-art-build-foundation`, a wall must render `line-art-build-wall`, and a fixture must render neither. A wall's `width` must equal the build cell size.
-- Any `buildPiece` archetype needs a `replicationPolicy`.
-- `use.holdSeconds` is required for `mode: "hold"` and forbidden for `mode: "tap"`.
-- `slot` is two-state. Same slot excludes, different slots coexist. An `L` table asking for a count above 1 in one slot has no landing today — raise it instead of approximating.
-- Every `iconId` needs a real sprite in `src/ui/icons/ItemIconSprite.ts`; an unregistered id silently falls back.
-- `cost.itemType` must name an item that exists in the catalog.
-
-## Verify
-
-1. `npm run test:server` — covers `ItemCatalog`, `ActorCatalog`, and `BuildSystem` validation.
-2. `npm run test:client` for anything touching inventory, hotbar, build UI, or icons.
+1. `npm run test:server` for item, actor, build, or server validation.
+2. `npm run test:client` for inventory, hotbar, build UI, icons, or client behavior.
 3. `npm run build` for type and bundle errors.
-4. Start the server and confirm the new item or piece is accepted; a schema-valid file that the server rejects means a cross-field rule above was missed.
 
-For a schema or enum change, also add a focused test for the new value and update `README.md` when the authoring contract changes. Adding one ordinary entry does not need a README change.
+For a schema or enum change, add a focused test. An ordinary documentation-only DSL edit does not require runtime tests.
