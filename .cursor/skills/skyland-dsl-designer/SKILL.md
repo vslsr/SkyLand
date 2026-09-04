@@ -1,6 +1,6 @@
 ---
 name: skyland-dsl-designer
-description: Read, write, and implement SkyLand's `@` design-note DSL — the `@i` item, `@b` building-piece, `@w` tool/weapon and reserved `@e` entity entries used in doc/designer-*.md, their M/I/F/G/N/R, T/L, B/D and A (animation) fields, the `@todo`, `#design` and `#advice` markers including the shared (do) / (w) / (s,n) modes, and how each field lands in config/items/item-catalog.json, a config/actors/*.actor.json buildPiece, an item-use Ability, or — for `A` — a procedural Visual under src/render/three. Use when a request quotes or asks for an `@i` / `@b` / `@w` entry, when adding an item, build piece, tool or weapon from a design note, or when extending the notation itself. For scene placement use skyland-scene-authoring; for new Components, Systems or replication use skyland-actor-component.
+description: Read, write, and implement SkyLand's `@` design-note DSL — the `@i` item, `@b` building-piece, `@w` tool/weapon and reserved `@e` entity entries used in doc/designer-*.md, their M/I/F/G/N/R, T/L, B/D and A (animation) fields, the `@todo`, `@design` and `@advice` markers including the shared (do) / (w) / (s,n) modes, and how each field lands in config/items/item-catalog.json, a config/actors/*.actor.json buildPiece, an item-use Ability, or — for `A` — a procedural Visual under src/render/three. Use when a request quotes or asks for an `@i` / `@b` / `@w` entry, when adding an item, build piece, tool or weapon from a design note, or when extending the notation itself. For scene placement use skyland-scene-authoring; for new Components, Systems or replication use skyland-actor-component.
 ---
 
 # SkyLand Design-Note DSL
@@ -21,19 +21,21 @@ description: Read, write, and implement SkyLand's `@` design-note DSL — the `@
 
 They mark different gaps, and confusing them wastes the most time:
 
-- **`#design`** means the **design** is missing or half-written. Complete it, write the answer back into the entry, then do whatever its mode says — see below. It can fill a value slot (`T: #design`) or trail a line that names a topic or is only half-specified (`Effect: 受到攻击力的伤害，按照蓄力倍率缩放 #design`).
-- **`#advice`** is `#design`'s dual: the content is **already complete**, and you are asked what would make it better. Same modes.
+- **`@design`** means the **design** is missing or half-written. Complete it, write the answer back into the entry, then do whatever its mode says — see below. It can fill a value slot (`T: @design`) or trail a line that names a topic or is only half-specified (`Effect: 受到攻击力的伤害，按照蓄力倍率缩放 @design`).
+- **`@advice`** is `@design`'s dual: the content is **already complete**, and you are asked what would make it better. Same modes.
 - **`@todo`** marks a whole block or a single line — on the line above a heading (or the blank line there) for a whole module, or trailing at end of line for just that line. The design is settled; only the **code** is missing. Implement what is written; do not redesign it.
 
-Position does not pick the marker — the starting point does: nothing there or only a direction sketched → `#design`; complete but improvable → `#advice`; complete and settled, only code missing → `@todo`. All three can trail a line; only `#design` also fills a value slot.
+Position does not pick the marker — the starting point does: nothing there or only a direction sketched → `@design`; complete but improvable → `@advice`; complete and settled, only code missing → `@todo`. All three may own a line or trail one; only `@design` also fills a value slot.
 
-A `#design` already implies unimplemented, so it needs no `@todo`. The reverse does not hold. A `@todo` block covers everything under it, so entries inside it are not marked again — and an entry carrying `@todo` is still a **complete, binding definition**: the marker says it has not shipped, not that it may be written loosely.
+Every piece of the notation starts with `@`, and the character after it says which kind: **`@` + a single letter** is a definition (`@i` `@b` `@w` `@e`), **`@` + a word** is a marker (`@todo` `@design` `@advice`). Markers use `@` rather than `#` because `#` at the start of a line is a Markdown heading, and a marker must be able to own a line. Do not "tidy" them into `<!-- -->` either — a comment is invisible in the rendered doc, and being visible is the whole point of a marker.
+
+A `@design` already implies unimplemented, so it needs no `@todo`. The reverse does not hold. A `@todo` block covers everything under it, so entries inside it are not marked again — and an entry carrying `@todo` is still a **complete, binding definition**: the marker says it has not shipped, not that it may be written loosely.
 
 `@todo` tracks whether a **piece of content** is built. The 现状 column in `doc/dsl-designer.md`'s landing tables tracks whether a **notation field** has a system behind it. Different levels — do not copy one into the other.
 
 ### Modes decide how far you go
 
-`#design` and `#advice` share one parameter set. It is an instruction, not a label — read it before doing anything:
+`@design` and `@advice` share one parameter set. It is an instruction, not a label — read it before doing anything:
 
 | Mode | Name | After you produce the answer |
 | --- | --- | --- |
@@ -47,9 +49,9 @@ Four rules follow:
 1. **A bare marker never authorises writing code.** Only `(w)` does. Mistaking a request for a proposal as permission to implement costs far more than the reverse.
 2. **`(s,n)` ends your turn with a question**, not with a chosen answer. Use `AskUserQuestion` with the n directions. After they pick, finish as `(do)` unless they say otherwise.
 3. **Handling a marker always leaves a trace.** It becomes either `@todo` (mode `do`) or an unmarked, shipped entry (mode `w`). A marker still sitting there means nobody has processed it — so never delete one without putting its answer in place.
-4. **`#advice` may legitimately conclude "no change needed."** Say why the current form is already right and drop the marker; do not manufacture a suggestion to look productive. `#design` has no such exit — the slot is empty and must be filled.
+4. **`@advice` may legitimately conclude "no change needed."** Say why the current form is already right and drop the marker; do not manufacture a suggestion to look productive. `@design` has no such exit — the slot is empty and must be filled.
 
-The markers are one lifecycle: `#design(...)` / `#advice(...)` → `@todo` (answered, unbuilt) → unmarked (shipped).
+The markers are one lifecycle: `@design(...)` / `@advice(...)` → `@todo` (answered, unbuilt) → unmarked (shipped).
 
 ## Separate the three places a fact can live
 
@@ -95,7 +97,7 @@ The DSL does not carry every field a schema requires. Supply these explicitly ra
 - `@b` also needs `surface`, `reach`, `cost`, and for floating pieces `mass`, plus `buoyancy` and `hull` on a floating foundation.
 - `holdable` is separate from `M`: a thing can have a model and still not be holdable.
 
-A value written `#design` is a deliberate blank you are being asked to fill — answer it, record the answer, and follow its mode (above) for how far to take it. A field that is simply absent is an omission; ask for it or state the assumption. `0` and an absent line both mean "none" for `R` and `B`.
+A value written `@design` is a deliberate blank you are being asked to fill — answer it, record the answer, and follow its mode (above) for how far to take it. A field that is simply absent is an omission; ask for it or state the assumption. `0` and an absent line both mean "none" for `R` and `B`.
 
 ## Preserve the constraints the catalogs enforce
 

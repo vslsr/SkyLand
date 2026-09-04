@@ -14,8 +14,8 @@ Use this reference when writing a new entry into a design note, or when reviewin
 - The letter picks the type: `i` item, `b` build piece, `w` tool/weapon, `e` entity (reserved, still being designed).
 - Keys are case-sensitive. Fields are unordered but read fastest in the order the definition lists them.
 - `0` or an absent line means "none" (`R`, `B`).
-- `#design` in a value position is a deliberate blank for the implementer to answer. An absent line is an omission, not a blank. Its parameter says how far to go: `(do)` answer and mark `@todo`, `(w)` answer and implement, `(s,n)` offer n directions and ask. A bare marker means `(do)` — never write code for it.
-- `#advice` is the same but starts from existing content: say what would make it better, under the same modes. Concluding "no change needed" is a valid outcome; inventing a suggestion is not.
+- `@design` in a value position is a deliberate blank for the implementer to answer. An absent line is an omission, not a blank. Its parameter says how far to go: `(do)` answer and mark `@todo`, `(w)` answer and implement, `(s,n)` offer n directions and ask. A bare marker means `(do)` — never write code for it.
+- `@advice` is the same but starts from existing content: say what would make it better, under the same modes. Concluding "no change needed" is a valid outcome; inventing a suggestion is not.
 - `@todo` marks unbuilt content — above a heading for a whole module, or trailing for one line. The design still binds; implement it rather than redesigning it. It does not excuse missing fields.
 - Cross-references use the **display name** of another entry, never an id. The referenced entry must actually exist somewhere in the design notes.
 - Legacy entries use a full-width `：` on some fields. Read both; write half-width `:`.

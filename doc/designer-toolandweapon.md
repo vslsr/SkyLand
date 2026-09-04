@@ -19,8 +19,8 @@
     * 先接入一个简单的GAS实体生命值Attribute，在场景中生成一些legged-slime，生命值为100
     * 受到伤害、治疗时，弹出一个向上飞出的对应值的数字
     * 生命值为0时，玩家死亡，变为自由视角控制，并且不能再控制这个死亡的角色
-        * bpf-slime的死亡动画、状态 #design
-        * legged-slime的死亡动画、状态 #design
+        * bpf-slime的死亡动画、状态 @design
+        * legged-slime的死亡动画、状态 @design
 
 ## 工具、武器使用流程
 
@@ -75,9 +75,9 @@
     * N: 1
     * A:
         * 手持: 弓箭贴在身侧，不动
-        * 蓄力: #design
-        * 发射: #design
-        * 装填: #design
+        * 蓄力: @design
+        * 发射: @design
+        * 装填: @design
 
 * @w 木弓: 
     * M: 复用木弓模型
@@ -86,7 +86,7 @@
         * Attack：5
             * 建筑：伤害×0.1
         * CD: 0.1s
-        * Effect: 受到攻击力的伤害，按照蓄力倍率缩放 #design
+        * Effect: 受到攻击力的伤害，按照蓄力倍率缩放 @design
         * EQS: 范围内 所有建筑块、玩家、生物实体
 
 
