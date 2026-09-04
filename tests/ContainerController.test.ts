@@ -22,6 +22,7 @@ function fakeView() {
 function harness(openActorId: string | undefined) {
   const container = new ContainerComponent({ slotCapacity: 24, label: '储物箱', reach: 3 });
   container.add('wood', 4);
+  const inventory = new InventoryComponent({ slotCapacity: 8 });
   const state = {
     openActorId,
     open: false,
@@ -31,14 +32,14 @@ function harness(openActorId: string | undefined) {
   };
   const view = fakeView();
   const controller = new ContainerController(view.page as never, {
-    getInventory: () => new InventoryComponent({ slotCapacity: 8 }),
+    getInventory: () => inventory,
     getContainer: (actorId) => (actorId === state.openActorId ? container : undefined),
     findOpenContainerActorId: () => state.openActorId,
     isOpen: () => state.open,
     setOpen: (open) => { state.open = open; state.opens.push(open); },
     send: (command) => state.sent.push(command),
   });
-  return { controller, state, view, container };
+  return { controller, state, view, container, inventory };
 }
 
 test('关闭时不闪：确认到达之前，快照不会把页面推回来', () => {
@@ -81,4 +82,72 @@ test('没开着任何容器时点关闭，不发无主的消息', () => {
   const { controller, state } = harness(undefined);
   controller.requestClose();
   assert.deepEqual(state.sent, []);
+});
+
+test('搬一次：菜单和拖拽报的是同一份意图，Controller 把它翻成一条命令', () => {
+  const { controller, state, view, inventory } = harness('chest-1');
+  inventory.add('stone', 6);
+  controller.sync();
+
+  // 身上那一格 → 存进箱子。
+  view.handlers.transfer?.({
+    slot: { kind: 'backpack', itemType: 'stone' },
+    quantity: 6,
+    direction: 'store',
+  });
+  assert.deepEqual(state.sent.at(-1), {
+    kind: 'container:transfer',
+    actorId: 'chest-1',
+    itemType: 'stone',
+    quantity: 6,
+    direction: 'store',
+  });
+
+  // 箱内那一格 → 取回身上。
+  view.handlers.transfer?.({
+    slot: { kind: 'container', itemType: 'wood' },
+    quantity: 4,
+    direction: 'withdraw',
+  });
+  assert.deepEqual(state.sent.at(-1), {
+    kind: 'container:transfer',
+    actorId: 'chest-1',
+    itemType: 'wood',
+    quantity: 4,
+    direction: 'withdraw',
+  });
+});
+
+test('物品栏那一格存的是「第几格」：按物品种类找不到它那一本账', () => {
+  const { controller, state, view, inventory } = harness('chest-1');
+  inventory.add('fruit', 3);
+  inventory.assignHotbarSlot(2, 'fruit');
+  controller.sync();
+
+  view.handlers.transfer?.({ slot: { kind: 'hotbar', slotIndex: 2 }, quantity: 3, direction: 'store' });
+  assert.deepEqual(state.sent.at(-1), {
+    kind: 'container:transfer',
+    actorId: 'chest-1',
+    itemType: 'fruit',
+    quantity: 3,
+    direction: 'store',
+    slotIndex: 2,
+  });
+
+  // 空格子搬不动，也不该发一条没有主语的命令。
+  const before = state.sent.length;
+  view.handlers.transfer?.({ slot: { kind: 'hotbar', slotIndex: 5 }, quantity: 1, direction: 'store' });
+  assert.equal(state.sent.length, before);
+});
+
+test('下半屏画的是背包，所以背包变了也要重画', () => {
+  const { controller, state, view, inventory } = harness('chest-1');
+  controller.sync();
+  assert.equal(view.renders.length, 1);
+
+  // 箱子没动、背包动了：只盯着箱子的 revision 会让下半屏停在旧的那一摞上。
+  inventory.add('stone', 1);
+  controller.sync();
+  assert.equal(view.renders.length, 2);
+  assert.equal(state.open, true);
 });

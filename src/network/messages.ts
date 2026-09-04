@@ -139,6 +139,14 @@ export type InventoryCommand =
       itemType: string;
       quantity: number;
       direction: 'store' | 'withdraw';
+      /**
+       * 存的是**物品栏第几格**里那一摞；不带就是从背包那本账上搬。
+       *
+       * 物品栏是一本独立的账，按物品种类找不到它那一格——同一种东西可能在包里
+       * 也在手上，只发 itemType 会扣错一本。取出来的东西一律落进背包，所以
+       * `withdraw` 不需要它。
+       */
+      slotIndex?: number;
     };
 
 /**

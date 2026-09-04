@@ -372,26 +372,24 @@ function buildHotbar(
   });
 }
 
-/** 容器界面里的一行：同一种物品，箱内和身上的数量并排。 */
-export interface ContainerRowView {
-  readonly itemType: string;
-  readonly displayName: string;
-  readonly iconId: string;
-  readonly tint: string;
-  /** 身上有多少（可以存进去）。 */
-  readonly carried: number;
-  /** 箱内有多少（可以取出来）。 */
-  readonly stored: number;
-}
-
 export interface ContainerView {
   readonly actorId: string;
   readonly label: string;
   readonly slotCapacity: number;
   readonly usedSlots: number;
+  /** 箱内还空着几格；界面按这个数补空格子。 */
+  readonly freeSlots: number;
   /** 除自己以外还有几个人开着这个箱子；不为 0 时东西会在眼前变化。 */
   readonly otherViewerCount: number;
-  readonly rows: readonly ContainerRowView[];
+  /** 箱内的每一摞，按分类序、目录序稳定排——和背包里同一套排法。 */
+  readonly stored: readonly InventoryStackView[];
+  /**
+   * 身上那一份，原封不动就是背包界面画的那一份（背包 + 物品栏）。
+   *
+   * 容器界面下半屏画的就是它：**同一个玩家的同一个背包，不该在两个界面里长得
+   * 不一样**。没有角色时是 undefined。
+   */
+  readonly carried?: InventoryView;
   readonly revision: number;
 }
 
@@ -407,17 +405,17 @@ export interface ContainerModelLike {
 }
 
 /**
- * 把容器和背包并成界面能直接画的一张表。
+ * 把容器和身上那份并成界面能直接画的两片格子。
  *
- * 「身上」指的是**背包**那一本账，不含物品栏：箱子前面能存进去的只有包里那些，
- * 手上正拿着的那一摞要先收回背包才搬得动（见 `transferItems`）。把物品栏也算进这
- * 一列，玩家会按着一个搬不动的数字去点「存」。
+ * **箱子和背包装的是同一种东西，所以界面上也该是同一种格子**：上半屏是箱内，
+ * 下半屏就是背包界面那一份原封不动（背包 + 物品栏），中间隔一道线。搬东西是把
+ * 一格拖到另一片上——玩家已经在背包里学过这个动作，不必为箱子再学一套。
  *
- * 一行 = 一种物品，箱内和身上并排——这是「存 / 取」两个按钮能成立的前提：玩家要
- * 决定搬哪一边，就得同时看见两边。分成两个面板再让人拖来拖去，是把这个判断拆散
- * 之后再要求玩家自己拼回去。
+ * 这一版之前是「一行一种物品、箱内身上两个数字并排、右侧两个按钮」。那张表读起来
+ * 像一份库存清单，而不像一个箱子：一件东西在包里占几格、堆没堆满、箱子还剩多少
+ * 空位，全都被折叠成了数字。格子把这些还原成看得见的形状。
  *
- * 行的顺序和背包界面用的是同一套（分类序、目录序），所以同一件东西在两个界面里
+ * 箱内那一片的顺序和背包界面同一套（分类序、目录序），所以同一件东西在两个界面里
  * 的相对位置一致。
  */
 export function buildContainerView(
@@ -428,54 +426,29 @@ export function buildContainerView(
 ): ContainerView {
   const order = catalogOrder(catalog);
   const categories = Object.keys(ITEM_CATEGORY_LABELS) as ItemCategory[];
-  const totals = new Map<string, { carried: number; stored: number }>();
-  const accumulate = (
-    entries: readonly { readonly itemType: string; readonly quantity: number }[],
-    key: 'carried' | 'stored',
-  ): void => {
-    for (const entry of entries) {
-      const row = totals.get(entry.itemType) ?? { carried: 0, stored: 0 };
-      row[key] += entry.quantity;
-      totals.set(entry.itemType, row);
-    }
-  };
-  accumulate(container.slots, 'stored');
-  accumulate(container.pooled, 'stored');
-  if (inventory) {
-    accumulate(inventory.slots, 'carried');
-    accumulate(inventory.pooled, 'carried');
-  }
-
-  const rows: ContainerRowView[] = [];
-  for (const [itemType, counts] of totals) {
-    const definition = catalog.get(itemType);
+  const stored: InventoryStackView[] = [];
+  for (const entry of [...container.slots, ...container.pooled]) {
+    const definition = catalog.get(entry.itemType);
     // 目录里没有的物品不画：它进不了权威账本，出现在这里说明配置漏了登记。
     if (!definition) continue;
-    rows.push({
-      itemType: definition.id,
-      displayName: definition.displayName,
-      iconId: definition.iconId,
-      tint: definition.tint,
-      carried: counts.carried,
-      stored: counts.stored,
-    });
+    stored.push(toStackView(entry, definition, catalog));
   }
-  rows.sort((left, right) => {
-    const leftCategory = catalog.get(left.itemType)?.category ?? '';
-    const rightCategory = catalog.get(right.itemType)?.category ?? '';
-    return categories.indexOf(leftCategory as ItemCategory)
-      - categories.indexOf(rightCategory as ItemCategory)
-      || (order.get(left.itemType) ?? 0) - (order.get(right.itemType) ?? 0);
-  });
+  stored.sort((left, right) => (
+    categories.indexOf(left.category) - categories.indexOf(right.category)
+    || (order.get(left.itemType) ?? 0) - (order.get(right.itemType) ?? 0)
+  ));
+  const usedSlots = stored.reduce((total, stack) => total + stack.slotCost, 0);
 
   return {
     actorId,
     label: container.label,
     slotCapacity: container.slotCapacity,
-    usedSlots: container.usedSlots,
+    usedSlots,
+    freeSlots: Math.max(0, container.slotCapacity - usedSlots),
     // 自己也算在服务端那个计数里，所以减掉自己才是「另有几个人」。
     otherViewerCount: Math.max(0, container.viewerCount - 1),
-    rows,
+    stored,
+    carried: inventory ? buildInventoryView(inventory, catalog) : undefined,
     revision: container.revision,
   };
 }

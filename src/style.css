@@ -1628,14 +1628,16 @@ body.is-topdown .virtual-controls.is-desktop-debug {
 /* ---- 容器界面 ------------------------------------------------------------ */
 
 /*
- * 不做双面板拖拽：一行同时给出「身上」和「箱内」，两个按钮各搬一个方向。玩家要
- * 决定搬哪边就得同时看见两边，分成两个面板再让人拖来拖去，是把这个判断拆散之后
- * 再要求玩家自己拼回去。
+ * 上半屏是箱内、下半屏是背包，中间隔一道线，格子和背包界面完全是同一种。
+ *
+ * 箱子和背包装的是同一种东西、守的是同一套堆叠与货位规则，所以界面上也只该有一
+ * 种格子。搬东西是把一格拖到另一片上——玩家已经在背包里学过这个动作。上一版是
+ * 一张「一行一种物品、两个数字并排」的表，读起来像库存清单而不像一个箱子。
  */
 .container__summary {
   display: flex;
+  flex-wrap: wrap;
   align-items: baseline;
-  justify-content: space-between;
   gap: 12px;
   margin-bottom: 10px;
 }
@@ -1653,7 +1655,7 @@ body.is-topdown .virtual-controls.is-desktop-debug {
 }
 
 .container__store-all {
-  margin-bottom: 12px;
+  margin-left: auto;
   padding: 6px 14px;
   font-size: 11px;
   font-weight: 700;
@@ -1668,63 +1670,31 @@ body.is-topdown .virtual-controls.is-desktop-debug {
   cursor: default;
 }
 
-.container__rows {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.container__row {
-  display: grid;
-  grid-template-columns: 32px 1fr auto auto auto;
-  align-items: center;
-  gap: 10px;
-  padding: 7px 10px;
+/*
+ * 箱内那一片。
+ *
+ * 底色比背包那片深一点：两片格子长得一样是**对的**（它们装的是同一种东西），
+ * 但玩家得一眼看出哪一片是箱子——拖过去之前就要知道自己往哪拖。
+ */
+.container__grid {
+  padding: 8px;
+  background: rgba(138, 98, 56, 0.07);
   border: 1px solid rgba(138, 98, 56, 0.28);
-  border-radius: 4px;
 }
 
-.container__swatch {
-  display: grid;
-  place-items: center;
-  width: 28px;
-  height: 28px;
-  color: var(--item-tint);
-}
-
-.container__icon {
-  width: 22px;
-  height: 22px;
-}
-
-.container__name {
-  font-size: 12px;
-  font-weight: 700;
-}
-
-.container__counts {
-  font-size: 11px;
-  opacity: 0.7;
-  white-space: nowrap;
-}
-
-.container__action {
-  min-width: 40px;
-  padding: 4px 10px;
+/* 「背包」那一行小标题：两片之间的那道分界，不是装饰。 */
+.container__heading {
+  margin: 14px 0 8px;
+  padding-top: 12px;
+  color: rgba(28, 26, 23, 0.62);
   font-size: 11px;
   font-weight: 700;
-  background: transparent;
-  border: 1px solid rgba(138, 98, 56, 0.5);
-  border-radius: 4px;
-  cursor: pointer;
+  letter-spacing: 0.14em;
+  border-top: 1px dashed rgba(138, 98, 56, 0.42);
 }
 
-.container__action:disabled {
-  opacity: 0.32;
-  cursor: default;
+.container__heading[hidden] {
+  display: none;
 }
 
 .container__empty-notice {

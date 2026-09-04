@@ -1,5 +1,6 @@
 import { buildContainerView, type ContainerModelLike, type InventoryModelLike } from '../inventory/index';
 import type { InventoryCommand } from '../network/messages';
+import type { InventorySlotRef } from '../ui/InventorySlotCell';
 import type { ContainerPage } from '../ui/pages/ContainerPage';
 
 export interface ContainerPort {
@@ -44,12 +45,28 @@ export class ContainerController {
     private readonly view: ContainerPage,
     private readonly port: ContainerPort,
   ) {
-    this.view.onTransfer((itemType, quantity, direction) => {
+    this.view.onTransfer(({ slot, quantity, direction }) => {
       const actorId = this.port.findOpenContainerActorId();
-      if (!actorId || quantity <= 0) return;
-      this.port.send({ kind: 'container:transfer', actorId, itemType, quantity, direction });
+      const itemType = this.itemTypeAt(slot);
+      if (!actorId || !itemType || quantity <= 0) return;
+      this.port.send({
+        kind: 'container:transfer',
+        actorId,
+        itemType,
+        quantity,
+        direction,
+        // 物品栏是一本**独立的账**，按物品种类找不到它那一格：存的是「第几格里
+        // 那一摞」，所以序号要跟着走。背包与箱内那两片没有第几格可言，不带。
+        ...(slot.kind === 'hotbar' ? { slotIndex: slot.slotIndex } : {}),
+      });
     });
     this.view.onStoreAll(() => this.storeAll());
+  }
+
+  /** 那一格里装的是哪一种；空格是 undefined。 */
+  private itemTypeAt(slot: InventorySlotRef): string | undefined {
+    if (slot.kind !== 'hotbar') return slot.itemType || undefined;
+    return this.port.getInventory()?.hotbar?.[slot.slotIndex]?.itemType;
   }
 
   /** 收到快照后调用：跟随服务端开合，内容变了才重画。 */
@@ -71,10 +88,14 @@ export class ContainerController {
     }
     if (!this.port.isOpen()) this.port.setOpen(true);
     // 换了一个箱子也可能撞上同一个 revision，所以 actorId 也要比。
-    if (this.renderedActorId === actorId && this.renderedRevision === container.revision) return;
+    // 下半屏画的是背包，所以背包变了也要重画——只盯着箱子的 revision 会让「存进去
+    // 一摞」只在上半屏生效，下面那一摞还在原地。
+    const inventory = this.port.getInventory();
+    const revision = container.revision + (inventory?.revision ?? 0);
+    if (this.renderedActorId === actorId && this.renderedRevision === revision) return;
     this.renderedActorId = actorId;
-    this.renderedRevision = container.revision;
-    this.view.setContainer(buildContainerView(actorId, container, this.port.getInventory()));
+    this.renderedRevision = revision;
+    this.view.setContainer(buildContainerView(actorId, container, inventory));
   }
 
   /** 主动关：X 按钮与 Esc 都走这里。界面立刻收起，服务端确认在后面到。 */

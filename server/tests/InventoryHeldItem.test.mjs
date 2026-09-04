@@ -238,6 +238,68 @@ test('目标装满时差额留在来源，不会凭空消失', () => {
   assert.equal(container.quantityOf('wood'), moved);
 });
 
+test('物品栏那一格也存得进箱子：搬的是第几格，不是包里同名的那一摞', () => {
+  const container = new ContainerComponent({ slotCapacity: 8, label: '储物箱', reach: 3 });
+  const inventory = new InventoryComponent({ slotCapacity: 8, hotbarCapacity: 9 });
+  inventory.add('stone', 8);
+  inventory.assignHotbarSlot(1, 'stone');
+  inventory.add('stone', 3);
+  container.openFor('p1');
+  const box = chest(container);
+
+  // 物品栏第 1 格有 8 个，背包里另有 3 个：只带 itemType 的话会扣错一本账。
+  assert.equal(inventory.hotbar[1].quantity, 8);
+  assert.equal(inventory.quantityOf('stone'), 3);
+  const moved = transferItems(player(inventory), box, {
+    itemType: 'stone', quantity: 8, direction: 'store', slotIndex: 1,
+  });
+  assert.equal(moved, 8);
+  assert.equal(inventory.hotbar[1], null, '那一格搬空了就空出来');
+  assert.equal(inventory.quantityOf('stone'), 3, '背包里那三个一个都没动');
+
+  // 那一格里装的不是这一种时整件事不做：命令过时了（玩家刚换过手）。
+  assert.equal(
+    transferItems(player(inventory), box, {
+      itemType: 'wood', quantity: 1, direction: 'store', slotIndex: 1,
+    }),
+    0,
+  );
+});
+
+test('装着弹药的那一件整条进箱子：那几发不会在半路上蒸发', () => {
+  const container = new ContainerComponent({ slotCapacity: 8, label: '储物箱', reach: 3 });
+  const inventory = new InventoryComponent({ slotCapacity: 8, hotbarCapacity: 9 });
+  inventory.add('slingshot', 1);
+  inventory.add('stone', 4);
+  inventory.loadAmmo(
+    { kind: 'backpack', itemType: 'slingshot' },
+    { kind: 'backpack', itemType: 'stone' },
+  );
+  container.openFor('p1');
+  const box = chest(container);
+
+  assert.equal(
+    transferItems(player(inventory), box, { itemType: 'slingshot', quantity: 1, direction: 'store' }),
+    1,
+  );
+  assert.equal(inventory.quantityOf('slingshot'), 0);
+  assert.deepEqual(
+    container.ledger.pooled[0]?.ammo,
+    { itemType: 'stone', quantity: 4 },
+    '箱子里那一把还装着四颗',
+  );
+
+  // 取回来也带着：弹药跟着那一格走，存取一趟不该把它洗掉。
+  assert.equal(
+    transferItems(player(inventory), box, { itemType: 'slingshot', quantity: 1, direction: 'withdraw' }),
+    1,
+  );
+  assert.deepEqual(
+    inventory.ammoAt({ kind: 'backpack', itemType: 'slingshot' }),
+    { itemType: 'stone', quantity: 4 },
+  );
+});
+
 test('放下分派：物品堆走物品的落法，世界物件走它自己的', () => {
   const inventory = new InventoryComponent({ slotCapacity: 8 });
   const mushroom = {
