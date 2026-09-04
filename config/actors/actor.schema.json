@@ -1775,8 +1775,224 @@
                   "maximum": 3
                 }
               }
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "model",
+                "size",
+                "thickness",
+                "plankColor",
+                "accentColor",
+                "inkColor"
+              ],
+              "properties": {
+                "model": {
+                  "const": "line-art-build-foundation"
+                },
+                "size": {
+                  "description": "正方形地基的边长；必须等于建造格宽。",
+                  "type": "number",
+                  "exclusiveMinimum": 0,
+                  "maximum": 8
+                },
+                "thickness": {
+                  "type": "number",
+                  "exclusiveMinimum": 0,
+                  "maximum": 1
+                },
+                "plankColor": {
+                  "$ref": "#/$defs/color"
+                },
+                "accentColor": {
+                  "$ref": "#/$defs/color"
+                },
+                "inkColor": {
+                  "$ref": "#/$defs/color"
+                }
+              }
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "model",
+                "width",
+                "height",
+                "thickness",
+                "color",
+                "accentColor",
+                "inkColor"
+              ],
+              "properties": {
+                "model": {
+                  "const": "line-art-build-wall"
+                },
+                "width": {
+                  "description": "墙沿格边的长度；必须等于所在网格的格宽。",
+                  "type": "number",
+                  "exclusiveMinimum": 0,
+                  "maximum": 8
+                },
+                "height": {
+                  "type": "number",
+                  "exclusiveMinimum": 0,
+                  "maximum": 4
+                },
+                "thickness": {
+                  "type": "number",
+                  "exclusiveMinimum": 0,
+                  "maximum": 1
+                },
+                "color": {
+                  "$ref": "#/$defs/color"
+                },
+                "accentColor": {
+                  "$ref": "#/$defs/color"
+                },
+                "inkColor": {
+                  "$ref": "#/$defs/color"
+                }
+              }
             }
           ]
+        },
+        "buildPiece": {
+          "description": "建造件（设计稿 doc/desinger-buildsys.md）：地基、墙体或物件。玩家用背包里的材料按网格放置，服务端权威校验并生成 Actor；件放在哪一格是复制状态。",
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "surface",
+            "label",
+            "reach",
+            "cost"
+          ],
+          "properties": {
+            "kind": {
+              "description": "foundation 占一格（水上地基 / 静态地基），wall 占一条格边（墙体），fixture 占格中心的一个槽（物件：篝火、箱子…）。",
+              "enum": [
+                "foundation",
+                "wall",
+                "fixture"
+              ]
+            },
+            "surface": {
+              "description": "floating 是水上建筑：吸附到船体根节点的 buildGrid，件成为船的子 Actor，最初的一块水上地基在开阔水面上立起一艘新船；static 是静态建筑：吸附世界对齐的地形格；any 只有物件可以用，两边都能放。",
+              "enum": [
+                "floating",
+                "static",
+                "any"
+              ]
+            },
+            "label": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 32
+            },
+            "reach": {
+              "description": "角色到放置位的最大水平距离（米）。",
+              "type": "number",
+              "minimum": 1,
+              "maximum": 16
+            },
+            "cost": {
+              "description": "放一件从背包扣多少材料；每一样都要够，缺一样整件不放。拆除全额退回。",
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 4,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "itemType",
+                  "quantity"
+                ],
+                "properties": {
+                  "itemType": {
+                    "type": "string",
+                    "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+                  },
+                  "quantity": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 99
+                  }
+                }
+              }
+            },
+            "mass": {
+              "description": "水上件进船的浮力结算的质量；静态件不写。",
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1000
+            },
+            "buoyancy": {
+              "description": "水上地基提供的浮力；只有水上地基才写。",
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1000
+            },
+            "slot": {
+              "description": "物件占格中心的哪个槽：同槽互斥（一格只能有一个篝火），异槽共存（篝火和棚子可以同在一格）。只有物件才有。",
+              "type": "string",
+              "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+              "maxLength": 24
+            },
+            "hull": {
+              "description": "水上地基放在开阔水面上时立起来的船体根节点原型 id（要有 buildGrid + buoyancy）。只有水上地基才有；没有它的水上地基只能扩建已有的船。",
+              "type": "string",
+              "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+            }
+          }
+        },
+        "buildGrid": {
+          "description": "船体根节点身上的建造网格：预制木筏自带 columns × rows 格甲板（用地基立起来的船写 0），地基从它四周向外扩。",
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "cellSize",
+            "columns",
+            "rows",
+            "deckHeight"
+          ],
+          "properties": {
+            "cellSize": {
+              "description": "一格多宽（米）；水上地基的 render 尺寸要和它一致。",
+              "type": "number",
+              "minimum": 0.5,
+              "maximum": 8
+            },
+            "columns": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 8
+            },
+            "rows": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 8
+            },
+            "deckHeight": {
+              "description": "甲板面在船体本地空间的高度；地基顶面、墙脚和物件都落在这里。",
+              "type": "number",
+              "minimum": -2,
+              "maximum": 10
+            },
+            "extentCells": {
+              "description": "地基最多离船体几格；不写为 3。",
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 8
+            },
+            "maxPieces": {
+              "description": "这艘船最多挂几件建造件；不写为 24。",
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 128
+            }
+          }
         }
       }
     }

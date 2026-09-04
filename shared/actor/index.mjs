@@ -154,3 +154,11 @@ export {
   VESSEL_MOTOR_COMPONENT,
   VesselMotorComponent,
 } from './components/VesselMotorComponent.mjs';
+export {
+  BUILD_PIECE_COMPONENT,
+  BuildPieceComponent,
+} from './components/BuildPieceComponent.mjs';
+export {
+  BUILD_GRID_COMPONENT,
+  BuildGridComponent,
+} from './components/BuildGridComponent.mjs';

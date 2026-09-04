@@ -225,6 +225,25 @@ export type ActorRenderDefinition =
       inkColor: string;
       radius: number;
       height: number;
+    }
+  | {
+      /** 地基（静态 / 水上）：原点在底面中心，从 y=0 长到 thickness；边长必须等于建造格宽。 */
+      model: 'line-art-build-foundation';
+      size: number;
+      thickness: number;
+      plankColor: string;
+      accentColor: string;
+      inkColor: string;
+    }
+  | {
+      /** 墙 / 舷墙：沿本地 X 展开，原点在墙脚中心；宽度必须等于所在网格的格宽。 */
+      model: 'line-art-build-wall';
+      width: number;
+      height: number;
+      thickness: number;
+      color: string;
+      accentColor: string;
+      inkColor: string;
     };
 
 export interface ActorArchetypeDefinition {
@@ -352,6 +371,33 @@ export interface ActorArchetypeDefinition {
       mouthLocalY: number;
       mouthLocalZ: number;
       mouthLocalYaw: number;
+    };
+    /**
+     * 建造件：地基、墙或物件。放在哪种表面、占一格 / 一条边 / 一个槽、花多少材料。
+     * 放在哪一格是运行态，随快照复制，不在原型里。
+     */
+    buildPiece?: {
+      kind: 'foundation' | 'wall' | 'fixture';
+      /** 物件可以是 any：两种表面都能放。 */
+      surface: 'floating' | 'static' | 'any';
+      label: string;
+      reach: number;
+      cost: Array<{ itemType: string; quantity: number }>;
+      mass: number;
+      buoyancy: number;
+      /** 物件占格中心的哪个槽：同槽互斥，异槽共存。 */
+      slot?: string;
+      /** 水上地基放在开阔水面上时立起来的船体根节点原型。 */
+      hull?: string;
+    };
+    /** 载具身上的建造网格：船体自带几格甲板、格多宽、甲板面多高、最多往外扩几格。 */
+    buildGrid?: {
+      cellSize: number;
+      columns: number;
+      rows: number;
+      deckHeight: number;
+      extentCells: number;
+      maxPieces: number;
     };
     hazard?: {
       radius: number;
@@ -547,6 +593,8 @@ export interface SceneDefinition extends SceneSummary {
   gameplay: {
     playerActor: { archetypeId: string };
     runtimeActorArchetypes?: string[];
+    /** 新玩家进房间时发到背包里的物品；给没有可采集材料的地图用。 */
+    startingInventory?: { itemType: string; quantity: number }[];
     /** 流式世界每种物件的带权原型变体；实例选择由世界种子确定。 */
     worldProps?: Partial<Record<
       'tree' | 'grass' | 'rock' | 'mushroom',

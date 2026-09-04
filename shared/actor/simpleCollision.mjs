@@ -185,6 +185,25 @@ export function createSimpleCollisionFromRender(render, dropMotion) {
       maximumY: radius,
     });
   }
+  if (model === 'line-art-build-foundation') {
+    // 地基从 y=0 长到 thickness：盒子就是那块板，顶面是能站上去的那一层。
+    const size = positiveNumber(render.size, 2);
+    return createSimpleCollisionDefinition({
+      halfWidth: size * 0.5,
+      halfLength: size * 0.5,
+      minimumY: 0,
+      maximumY: positiveNumber(render.thickness, 0.12),
+    });
+  }
+  if (model === 'line-art-build-wall') {
+    // 墙沿本地 X 展开、薄边沿 Z：整堵墙都挡路也挡镜头，没有可站的顶面。
+    return createSimpleCollisionDefinition({
+      halfWidth: positiveNumber(render.width, 2) * 0.5,
+      halfLength: positiveNumber(render.thickness, 0.2) * 0.5,
+      minimumY: 0,
+      maximumY: positiveNumber(render.height, 1.5),
+    });
+  }
   throw new TypeError(`无法为模型 ${model || '<unknown>'} 生成简易碰撞`);
 }
 

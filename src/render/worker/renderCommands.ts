@@ -3,6 +3,7 @@ import type {
   AbilityLabViewState,
 } from '../../abilities/lab/AbilityLabSimulation';
 import type {
+  BuildPreviewState,
   GuidePathState,
   MeshProxyDesc,
   PlayerProxyDesc,
@@ -53,6 +54,7 @@ export type RenderCommand =
       readonly opacity?: number;
     }
   | { readonly kind: 'setHoveredProxy'; readonly id: ProxyId }
+  | { readonly kind: 'setBuildPreview'; readonly state: BuildPreviewState | undefined }
   | { readonly kind: 'setAbilityLabTarget'; readonly id: ProxyId }
   | {
       readonly kind: 'setAbilityLabState';
@@ -209,6 +211,10 @@ export class RenderCommandQueue implements RenderScene, ChunkViewSink, RenderWor
 
   public setHoveredProxy(id: ProxyId): void {
     this.#commands.push({ kind: 'setHoveredProxy', id });
+  }
+
+  public setBuildPreview(state: BuildPreviewState | undefined): void {
+    this.#commands.push({ kind: 'setBuildPreview', state });
   }
 
   public setAbilityLabTarget(id: ProxyId): void {
@@ -455,6 +461,9 @@ export function applyRenderCommand(
       return;
     case 'setHoveredProxy':
       target.scene.setHoveredProxy(command.id);
+      return;
+    case 'setBuildPreview':
+      target.scene.setBuildPreview(command.state);
       return;
     case 'beginSlimeSurfaceDrag':
       target.scene.beginSlimeSurfaceDrag(command.id, command.ray);

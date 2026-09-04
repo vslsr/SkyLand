@@ -168,6 +168,24 @@ export interface SlimeSurfaceDragReport extends SlimeSurfaceDragState {
 export type SlimeSurfaceDragListener = (report: SlimeSurfaceDragReport) => void;
 
 /**
+ * 建造幽灵：玩家正要放的那一件，吸附到网格上、按能不能放染成两种颜色。
+ *
+ * 它不是 proxy——没有 Actor、没有槽位，和悬停高亮盒一样是纯粹的选择辅助。
+ * 建造模式下每帧一条命令（和 `setFrameContext` 一个节奏）；渲染侧按 `pieceId`
+ * 缓存模型，只有换件时才重建，位姿与红绿每帧改。`render` 是原型里那份配置，
+ * 幽灵用和真件同一个工厂建，所以放下去之后长得一模一样。
+ */
+export interface BuildPreviewState {
+  readonly pieceId: string;
+  readonly render: ActorRenderDefinition;
+  readonly x: number;
+  readonly y: number;
+  readonly z: number;
+  readonly yaw: number;
+  readonly valid: boolean;
+}
+
+/**
  * 引导路径每帧可能变的那部分。**变长**，所以它走命令而不是参数段。
  *
  * 路径与索引装在同一条命令里：`GuidePath.setPath` 内部会 `reset()` 把进度归零，
@@ -235,6 +253,8 @@ export interface RenderScene extends RenderCommandSink {
    */
   setInteractionMarker(id: ProxyId, label: string, opacity?: number): void;
   setHoveredProxy(id: ProxyId): void;
+  /** 建造幽灵。传 undefined 收起。见 `BuildPreviewState`。 */
+  setBuildPreview(state: BuildPreviewState | undefined): void;
   /**
    * 能力实验室的三条命令（只有开发用的实验室地图会发）。
    *

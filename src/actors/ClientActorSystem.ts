@@ -5,6 +5,10 @@ import {
   ActorControlComponent,
   Actor,
   ActorWorld,
+  BUILD_GRID_COMPONENT,
+  BUILD_PIECE_COMPONENT,
+  BuildGridComponent,
+  BuildPieceComponent,
   BUOYANCY_COMPONENT,
   BuoyancyComponent,
   CARGO_COMPONENT,
@@ -43,6 +47,8 @@ import {
   VesselMotorComponent,
 } from '../../shared/actor/index.mjs';
 import { createSimpleCollisionFromRender } from '../../shared/actor/simpleCollision.mjs';
+import type { BuildFootprint } from '../../shared/build/buildFootprint.mjs';
+import { BuildSiteIndex, STATIC_SURFACE_KEY, footprintBlocked } from '../../shared/build/index.mjs';
 import {
   COLLISION_LAYER,
   COLLISION_LAYER_SOLID,
@@ -67,6 +73,8 @@ import type { SnapshotActor, SnapshotPlayer } from '../network/protocol';
 import type { SceneDefinition } from '../scenes/data/SceneDefinition';
 import type {
   ActorInteractionCandidate,
+  BuildHullCandidate,
+  BuildPieceCandidate,
   SceneFrameSystem,
   VesselHudState,
 } from '../scene/SceneVisualSystem';
@@ -289,6 +297,12 @@ export class ClientActorSystem implements SceneFrameSystem {
   private readonly externalParentActorIds = new Map<string, string>();
   /** 快照换过一批 Actor 之后必须重新登记，置位后由下一次查询或 update 兑现。 */
   private collidersStale = true;
+  /**
+   * 建造占位表：幽灵判红绿、拆除找依赖都问它。按快照惰性重建——格坐标是离散
+   * 状态，只在 Actor 集合或某件的格坐标变了之后才需要重来。
+   */
+  private readonly buildSites = new BuildSiteIndex();
+  private buildSitesStale = true;
   private hoveredActorId?: string;
   private readonly generatedPropChunks = new Map<string, Set<string>>();
   private readonly generatedPropStates = new Map<string, PropStateSnapshot>();
@@ -385,6 +399,7 @@ export class ClientActorSystem implements SceneFrameSystem {
 
   private applySnapshotSet(snapshots: readonly SnapshotActor[]): void {
     this.collidersStale = true;
+    this.buildSitesStale = true;
     const liveIds = new Set<string>();
     const applicableSnapshots: SnapshotActor[] = [];
 
@@ -1009,6 +1024,22 @@ export class ClientActorSystem implements SceneFrameSystem {
     if (archetype.components.replicationPolicy) {
       actor.addComponent(new ReplicationPolicyComponent(archetype.components.replicationPolicy));
     }
+    if (archetype.components.buildPiece) {
+      // 厚度和服务端一样从 render 取：地基的顶面 = 落点 + 厚度，墙和物件没有这一说。
+      const render = archetype.components.render;
+      const pieceDefinition = {
+        ...archetype.components.buildPiece,
+        thickness: render?.model === 'line-art-build-foundation' ? render.thickness : 0,
+        cellX: snapshot.buildPiece?.cellX,
+        cellZ: snapshot.buildPiece?.cellZ,
+        edge: snapshot.buildPiece?.edge ?? null,
+        placedSurface: snapshot.buildPiece?.surface,
+      };
+      actor.addComponent(new BuildPieceComponent(pieceDefinition));
+    }
+    if (archetype.components.buildGrid) {
+      actor.addComponent(new BuildGridComponent(archetype.components.buildGrid));
+    }
     const clientStack = actor.getComponent(ITEM_STACK_COMPONENT) as ItemStackComponent | undefined;
     const clientFuel = actor.getComponent(COMBUSTIBLE_COMPONENT) as CombustibleComponent | undefined;
     if (clientStack && clientFuel) {
@@ -1022,6 +1053,12 @@ export class ClientActorSystem implements SceneFrameSystem {
       actor.addComponent(new SimpleCollisionComponent(
         createSimpleCollisionFromRender(archetype.components.render, archetype.components.dropMotion),
       ));
+      this.world.addActor(actor);
+      return actor;
+    }
+    if (!archetype.components.render && archetype.components.buildGrid) {
+      // 船体根节点看不见：它的样子就是挂在它身上的那些地基。没有 proxy，只有位姿、
+      // 浮力和网格——幽灵吸附、驾驶与船况都从这里读。
       this.world.addActor(actor);
       return actor;
     }
@@ -1218,6 +1255,10 @@ export class ClientActorSystem implements SceneFrameSystem {
       const guidePath = actor.requireComponent(GUIDE_PATH_COMPONENT) as GuidePathComponent;
       guidePath.applySnapshot(snapshot.guidePath);
     }
+    if (snapshot.buildPiece) {
+      const piece = actor.getComponent(BUILD_PIECE_COMPONENT) as BuildPieceComponent | undefined;
+      if (piece?.applySnapshot(snapshot.buildPiece)) this.buildSitesStale = true;
+    }
     if (snapshot.propState) {
       this.applyGeneratedPropState(actor, {
         ...snapshot.propState,
@@ -1253,6 +1294,108 @@ export class ClientActorSystem implements SceneFrameSystem {
   getContainer(actorId: string): ContainerComponent | undefined {
     return this.world.getActor(actorId)?.getComponent(CONTAINER_COMPONENT) as
       ContainerComponent | undefined;
+  }
+
+  // --- 建造 ---------------------------------------------------------------
+
+  /**
+   * 建造占位表。船上的件以父 Actor（船体根节点）的 id 为表面键，和服务端一致；
+   * 父节点还没到（分帧建 Replica 时会有一两帧）的件先不进表，下一次快照再来。
+   */
+  getBuildSites(): BuildSiteIndex {
+    if (!this.buildSitesStale) return this.buildSites;
+    this.buildSitesStale = false;
+    this.buildSites.clear();
+    for (const actor of this.world.query(BUILD_PIECE_COMPONENT)) {
+      const piece = actor.getComponent(BUILD_PIECE_COMPONENT) as BuildPieceComponent;
+      const surfaceKey = piece.placedSurface === 'floating' ? actor.parent?.id : STATIC_SURFACE_KEY;
+      if (!surfaceKey) continue;
+      this.buildSites.add({
+        actorId: actor.id,
+        surfaceKey,
+        kind: piece.kind,
+        cellX: piece.cellX,
+        cellZ: piece.cellZ,
+        edge: piece.edge ?? undefined,
+        slot: piece.slot ?? undefined,
+        builderPlayerId: piece.builderPlayerId ?? undefined,
+      });
+    }
+    return this.buildSites;
+  }
+
+  /** 视野里每一艘能建的船：id、这一帧的位姿、它的网格。 */
+  listBuildHulls(): readonly BuildHullCandidate[] {
+    const hulls: BuildHullCandidate[] = [];
+    for (const actor of this.world.query(BUILD_GRID_COMPONENT)) {
+      const grid = actor.getComponent(BUILD_GRID_COMPONENT) as BuildGridComponent;
+      const transform = actor.getComponent(TRANSFORM_COMPONENT) as TransformComponent | undefined;
+      if (!transform) continue;
+      hulls.push({
+        actorId: actor.id,
+        x: transform.x,
+        y: transform.y,
+        z: transform.z,
+        yaw: transform.yaw,
+        grid: grid.grid,
+      });
+    }
+    return hulls;
+  }
+
+  /** 离某个点最近的建造件（水平距离在 radius 内）；拆除模式靠它决定指着谁。 */
+  findBuildPieceNear(x: number, z: number, radius: number): BuildPieceCandidate | undefined {
+    let best: BuildPieceCandidate | undefined;
+    let bestDistance = radius;
+    for (const actor of this.world.query(BUILD_PIECE_COMPONENT)) {
+      const piece = actor.getComponent(BUILD_PIECE_COMPONENT) as BuildPieceComponent;
+      const transform = actor.getComponent(TRANSFORM_COMPONENT) as TransformComponent | undefined;
+      if (!transform) continue;
+      const distance = Math.hypot(transform.x - x, transform.z - z);
+      if (distance > bestDistance) continue;
+      bestDistance = distance;
+      best = {
+        actorId: actor.id,
+        label: piece.label,
+        x: transform.x,
+        y: transform.y,
+        z: transform.z,
+      };
+    }
+    return best;
+  }
+
+  /**
+   * 某格上已放地基的顶面高度；墙脚落在它上面。水上件给的是船体本地高度，
+   * 和服务端一致。没有地基就是 undefined。
+   */
+  buildFoundationTop(surfaceKey: string, cellX: number, cellZ: number): number | undefined {
+    const record = this.getBuildSites().at(surfaceKey, cellX, cellZ);
+    if (!record || record.kind !== 'foundation') return undefined;
+    const actor = this.world.getActor(record.actorId);
+    const piece = actor?.getComponent(BUILD_PIECE_COMPONENT) as BuildPieceComponent | undefined;
+    const transform = actor?.getComponent(TRANSFORM_COMPONENT) as TransformComponent | undefined;
+    if (!piece || !transform) return undefined;
+    const base = piece.placedSurface === 'floating' ? transform.localY : transform.y;
+    return base + piece.thickness;
+  }
+
+  /**
+   * 放置位有没有被实体挡住：碰撞世界里的树、石头、掉落物、远端玩家、别的船。
+   * 同一表面上已有的建造件不算——它们之间靠占位槽互斥。本地玩家不在碰撞世界里，
+   * 由调用方另判。
+   */
+  buildFootprintBlocked(footprint: BuildFootprint, ignoreSurfaceKey?: string): boolean {
+    this.refreshColliders();
+    const sites = this.getBuildSites();
+    return footprintBlocked(footprint, {
+      forEachNear: (x, z, radius, visit) => {
+        this.collision.forEachNear(x, z, radius, COLLISION_LAYER.MOVEMENT, visit);
+      },
+      identify: (instance) => (instance as { actorId?: string }).actorId,
+      ignore: (actorId) => ignoreSurfaceKey !== undefined
+        && sites.getByActor(actorId)?.surfaceKey === ignoreSurfaceKey,
+    });
   }
 
   /**

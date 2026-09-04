@@ -5,6 +5,10 @@ import {
   ActorControlComponent,
   Actor,
   ActorWorld,
+  BUILD_GRID_COMPONENT,
+  BUILD_PIECE_COMPONENT,
+  BuildGridComponent,
+  BuildPieceComponent,
   BUOYANCY_COMPONENT,
   BuoyancyComponent,
   CARGO_COMPONENT,
@@ -103,6 +107,18 @@ export function createServerActor(spawn, archetype, runtime = {}) {
   }
   if (archetype.components.stowable) {
     actor.addComponent(new StowableComponent(archetype.components.stowable));
+  }
+  if (archetype.components.buildPiece) {
+    const render = archetype.components.render;
+    actor.addComponent(new BuildPieceComponent({
+      ...archetype.components.buildPiece,
+      // 地基的厚度决定它顶面多高、墙脚落在哪；墙和物件没有这一说。
+      thickness: render?.model === 'line-art-build-foundation' ? render.thickness : 0,
+      ...runtime.buildPiece,
+    }));
+  }
+  if (archetype.components.buildGrid) {
+    actor.addComponent(new BuildGridComponent(archetype.components.buildGrid));
   }
   if (archetype.components.itemStack) {
     actor.addComponent(new ItemStackComponent({ ...archetype.components.itemStack, ...runtime.itemStack }));
@@ -272,6 +288,7 @@ export function createActorSnapshots(world, options = {}) {
     const residency = actor.getComponent(ACTOR_RESIDENCY_COMPONENT);
     const generatedProp = actor.getComponent(GENERATED_PROP_COMPONENT);
     const guidePath = actor.getComponent(GUIDE_PATH_COMPONENT);
+    const buildPiece = actor.getComponent(BUILD_PIECE_COMPONENT);
     // 生成物件的 id 已经携带种类与位置地址。偏离态只发 id + 状态，
     // 默认 Interactable 与最大生命由两端同一原型提供。
     if (generatedProp) {
@@ -307,6 +324,7 @@ export function createActorSnapshots(world, options = {}) {
         itemStack?.revision ?? 0,
         residency?.revision ?? 0,
         guidePath?.revision ?? 0,
+        buildPiece?.revision ?? 0,
       ),
       // Attach 状态下客户端由父 Actor 同时刻的坐标与 localTransform 推导位置。
       // 物品的其余 Component 仍照常复制，只有冗余的世界 Transform 被省略。
@@ -423,6 +441,17 @@ export function createActorSnapshots(world, options = {}) {
         },
       } : {}),
       ...(guidePath ? { guidePath: guidePath.snapshot() } : {}),
+      // 放在哪一格是离散状态：客户端靠它重建占位表，不靠世界坐标反推。
+      ...(buildPiece ? {
+        buildPiece: {
+          kind: buildPiece.kind,
+          surface: buildPiece.placedSurface,
+          cellX: buildPiece.cellX,
+          cellZ: buildPiece.cellZ,
+          ...(buildPiece.edge ? { edge: buildPiece.edge } : {}),
+          revision: buildPiece.revision,
+        },
+      } : {}),
     };
     });
 }

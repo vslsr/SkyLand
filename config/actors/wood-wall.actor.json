@@ -1,0 +1,24 @@
+{
+  "$schema": "./actor.schema.json",
+  "schemaVersion": 1,
+  "id": "wood-wall",
+  "components": {
+    "buildPiece": {
+      "kind": "wall",
+      "surface": "static",
+      "label": "木墙",
+      "reach": 6,
+      "cost": [{ "itemType": "wood", "quantity": 2 }]
+    },
+    "replicationPolicy": { "mode": "aoi", "radiusChunks": 2 },
+    "render": {
+      "model": "line-art-build-wall",
+      "width": 2,
+      "height": 1.5,
+      "thickness": 0.18,
+      "color": "#d6bea3",
+      "accentColor": "#b98558",
+      "inkColor": "#51463e"
+    }
+  }
+}

@@ -180,6 +180,12 @@ export class RoomConnectionHub {
             this.roomManager.sendInventoryCommand(session.roomId, session.playerId, message);
           }
           break;
+        case 'build:command':
+          // 建造和其它输入共用同一个令牌桶：连点放置不会绕过限流。
+          if (session.roomId && session.playerId && this.consumeInputToken(session)) {
+            this.roomManager.sendBuildCommand(session.roomId, session.playerId, message);
+          }
+          break;
         case 'terrain:edit':
           // 和其它输入共用同一个令牌桶：连点编辑不会绕过限流。
           if (session.roomId && session.playerId && this.consumeInputToken(session)) {

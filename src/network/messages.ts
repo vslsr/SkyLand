@@ -122,6 +122,27 @@ export type InventoryCommand =
       direction: 'store' | 'withdraw';
     };
 
+/**
+ * 建造的上行意图。
+ *
+ * 发的是**格坐标**而不是世界坐标：服务端按自己手里的载具位姿把它还原成世界位姿，
+ * 再跑和客户端同一份放置规则。世界坐标过网只会让两端各自取整一次。
+ */
+export type BuildCommand =
+  | {
+      kind: 'place';
+      /** 建造件原型 id；它的 buildPiece 说明是地基、墙还是物件，放水上还是静态。 */
+      archetypeId: string;
+      surface: 'floating' | 'static';
+      /** 水上件吸附到哪艘船；水上地基不带它就是在这一格立一艘新船；静态件不带。 */
+      hullActorId?: string;
+      cellX: number;
+      cellZ: number;
+      /** 墙占的那条格边：north 是格子 +Z 侧，east 是 +X 侧；地基与物件不带。 */
+      edge?: 'north' | 'east';
+    }
+  | { kind: 'remove'; actorId: string };
+
 export type ClientMessage =
   | { type: 'room:join'; roomId: string; name: string }
   | { type: 'room:leave' }
@@ -150,6 +171,7 @@ export type ClientMessage =
   | { type: 'actor:event'; actorId: string; sequence: number; event: ActorGameplayEvent }
   | { type: 'actor:interact'; actorId: string; sequence: number }
   | { type: 'inventory:command'; sequence: number; command: InventoryCommand }
+  | { type: 'build:command'; sequence: number; command: BuildCommand }
   | {
       type: 'terrain:edit';
       sequence: number;

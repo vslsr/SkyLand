@@ -1,4 +1,5 @@
 import type { RenderCamera } from '../render/RenderCameraBuffer';
+import { computeCameraRay, intersectRayWithHorizontalPlane } from '../camera/cameraRay';
 import type { GrassInteractionTarget } from './GrassInteraction';
 
 interface PendingPointer {
@@ -83,11 +84,7 @@ export class MouseGrassInteractor {
   }
 
   /**
-   * 屏幕坐标 → 地面（y = 0）交点。
-   *
-   * 相机基由 forward 与 up 现算：`right = forward × up`，再把 up 正交化回去，
-   * 这样即使传进来的 up 不严格垂直也不会歪。NDC 到视锥方向的比例就是
-   * `tan(fov / 2)`——透视投影的定义。
+   * 屏幕坐标 → 地面（y = 0）交点。射线由共享的相机数学算，这里只做与地面求交。
    */
   #intersectGround(
     camera: RenderCamera,
@@ -95,43 +92,10 @@ export class MouseGrassInteractor {
     ndcX: number,
     ndcY: number,
   ): { x: number; z: number } | undefined {
-    const [fx, fy, fz] = camera.forward;
-    const forwardLength = Math.hypot(fx, fy, fz);
-    if (forwardLength < 1e-6) return undefined;
-    const nfx = fx / forwardLength;
-    const nfy = fy / forwardLength;
-    const nfz = fz / forwardLength;
-
-    const [ux, uy, uz] = camera.up;
-    // right = forward × up
-    let rx = nfy * uz - nfz * uy;
-    let ry = nfz * ux - nfx * uz;
-    let rz = nfx * uy - nfy * ux;
-    const rightLength = Math.hypot(rx, ry, rz);
-    if (rightLength < 1e-6) return undefined;
-    rx /= rightLength;
-    ry /= rightLength;
-    rz /= rightLength;
-    // up = right × forward，保证三轴正交。
-    const cux = ry * nfz - rz * nfy;
-    const cuy = rz * nfx - rx * nfz;
-    const cuz = rx * nfy - ry * nfx;
-
-    const tangent = Math.tan(viewport.fovRadians * 0.5);
-    const scaleX = ndcX * tangent * viewport.aspect;
-    const scaleY = ndcY * tangent;
-    const dirX = nfx + rx * scaleX + cux * scaleY;
-    const dirY = nfy + ry * scaleX + cuy * scaleY;
-    const dirZ = nfz + rz * scaleX + cuz * scaleY;
-
-    // 和 y = 0 求交。射线朝上或与地面平行时没有交点。
-    if (Math.abs(dirY) < 1e-6) return undefined;
-    const distance = -camera.position[1] / dirY;
-    if (distance <= 0) return undefined;
-    return {
-      x: camera.position[0] + dirX * distance,
-      z: camera.position[2] + dirZ * distance,
-    };
+    const ray = computeCameraRay(camera, viewport, ndcX, ndcY);
+    if (!ray) return undefined;
+    const hit = intersectRayWithHorizontalPlane(ray.origin, ray.direction, 0);
+    return hit ? { x: hit.x, z: hit.z } : undefined;
   }
 
   private readonly handlePointerMove = (event: PointerEvent): void => {

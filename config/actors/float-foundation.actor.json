@@ -1,0 +1,26 @@
+{
+  "$schema": "./actor.schema.json",
+  "schemaVersion": 1,
+  "id": "float-foundation",
+  "components": {
+    "buildPiece": {
+      "kind": "foundation",
+      "surface": "floating",
+      "label": "水上地基",
+      "reach": 6,
+      "cost": [{ "itemType": "wood", "quantity": 2 }],
+      "mass": 8,
+      "buoyancy": 30,
+      "hull": "float-hull"
+    },
+    "replicationPolicy": { "mode": "aoi", "radiusChunks": 2 },
+    "render": {
+      "model": "line-art-build-foundation",
+      "size": 2,
+      "thickness": 0.16,
+      "plankColor": "#dfc99f",
+      "accentColor": "#c99f72",
+      "inkColor": "#51463e"
+    }
+  }
+}

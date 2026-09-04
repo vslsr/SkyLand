@@ -1,17 +1,37 @@
 import type { Actor } from '../../shared/actor/Actor.mjs';
+import type { BuildSiteIndex } from '../../shared/build/BuildSiteIndex.mjs';
+import type { BuildFootprint } from '../../shared/build/buildFootprint.mjs';
+import { cellWithinBounds } from '../../shared/build/index.mjs';
 import type { PhysicsWorld } from '../../shared/physics/PhysicsWorld.mjs';
 import { TERRAIN_CELL_SIZE } from '../../shared/world/terrainConfig.mjs';
+import { intersectRayWithHorizontalPlane } from '../camera/cameraRay';
 import type { ContainerModelLike } from '../inventory/index';
 import type { GrassBendImpulse, GrassInteractionTarget } from '../grass';
 import type { RenderWorldCommands } from '../render/RenderWorldRuntime';
 import type { SnapshotActor, SnapshotPlayer } from '../network/protocol';
+import type { SceneBounds } from '../scenes/data/SceneDefinition';
 import type { TerrainWorld } from '../world/TerrainWorld';
 import type {
   ActorInteractionCandidate,
   ActorSnapshotTarget,
+  BuildCellStatus,
+  BuildHullCandidate,
+  BuildPieceCandidate,
   SceneComposition,
   VesselHudState,
 } from './SceneVisualSystem';
+
+/** 这张地图里和建造有关的玩法事实；随场景一起交进来。 */
+export interface SceneWorldFacts {
+  fixedWaterWorld: boolean;
+  fixedWaterLevel: number;
+  /** 有没有可以建静态件的地面：流式地形图、固定地面图有，纯海域图没有。 */
+  hasLand: boolean;
+  /** 活动范围；建造件要整格落在里面。 */
+  bounds?: SceneBounds;
+}
+
+const NO_HULLS: readonly BuildHullCandidate[] = Object.freeze([]);
 
 /**
  * 当前场景里**不属于渲染**的那一半：地形采样、物理查询、Actor 查询
@@ -38,6 +58,8 @@ export class SceneWorld implements GrassInteractionTarget {
    */
   private fixedWaterWorld = false;
   private fixedWaterLevel = 0;
+  private landAvailable = false;
+  private bounds?: SceneBounds;
 
   /**
    * 往渲染世界发命令的口子。
@@ -48,15 +70,14 @@ export class SceneWorld implements GrassInteractionTarget {
   public constructor(private readonly render: RenderWorldCommands) {}
 
   /** 换场景：把新组合里属于玩法的那几个句柄接过来。 */
-  public adopt(composition: SceneComposition, water: {
-    fixedWaterWorld: boolean;
-    fixedWaterLevel: number;
-  }): void {
+  public adopt(composition: SceneComposition, facts: SceneWorldFacts): void {
     this.terrainWorld = composition.terrainWorld;
     this.physicsWorld = composition.physicsWorld;
     this.actorSnapshotTarget = composition.actorSnapshotTarget;
-    this.fixedWaterWorld = water.fixedWaterWorld;
-    this.fixedWaterLevel = water.fixedWaterLevel;
+    this.fixedWaterWorld = facts.fixedWaterWorld;
+    this.fixedWaterLevel = facts.fixedWaterLevel;
+    this.landAvailable = facts.hasLand;
+    this.bounds = facts.bounds;
   }
 
   public clear(): void {
@@ -65,6 +86,8 @@ export class SceneWorld implements GrassInteractionTarget {
     this.actorSnapshotTarget = undefined;
     this.fixedWaterWorld = false;
     this.fixedWaterLevel = 0;
+    this.landAvailable = false;
+    this.bounds = undefined;
   }
 
   /**
@@ -141,6 +164,82 @@ export class SceneWorld implements GrassInteractionTarget {
   /** 当前场景任意来源的地形 patch 通知。 */
   public onTerrainChanged(listener: () => void): () => void {
     return this.terrainWorld?.subscribe(listener) ?? (() => undefined);
+  }
+
+  // --- 建造 ---------------------------------------------------------------
+
+  /**
+   * 建造的拾取点：有地形就打地形（水面也算——水上地基要吸附的船就浮在那上面），
+   * 没有地形就打这张图的水面或地面平面。只有 x/z 参与吸附，y 只给幽灵兜底。
+   */
+  public pickBuildPoint(
+    origin: readonly [number, number, number],
+    direction: readonly [number, number, number],
+  ): { x: number; y: number; z: number } | undefined {
+    if (this.terrainWorld) {
+      const hit = this.terrainWorld.raycast(origin, direction);
+      return hit ? { x: hit.x, y: hit.y, z: hit.z } : undefined;
+    }
+    return intersectRayWithHorizontalPlane(
+      origin,
+      direction,
+      this.fixedWaterWorld ? this.fixedWaterLevel : 0,
+    );
+  }
+
+  /** 有没有可以建静态件的地面。 */
+  public hasLand(): boolean {
+    return this.landAvailable;
+  }
+
+  /** 这张图的水面高度；立起来的新船就浮在这个高度上。 */
+  public seaLevel(): number {
+    if (this.terrainWorld) return this.terrainWorld.seaLevel;
+    return this.fixedWaterWorld ? this.fixedWaterLevel : 0;
+  }
+
+  /**
+   * 一个世界格是什么：出了活动范围 → bounds；水域格（或整张图都是海）→ water；
+   * 其余 → land。和服务端 `ServerScene.buildCellStatus` 是同一套判断。
+   */
+  public buildCellStatus(cellX: number, cellZ: number): BuildCellStatus {
+    if (!cellWithinBounds(cellX, cellZ, this.bounds)) return 'bounds';
+    if (this.terrainWorld) return this.terrainWorld.isWaterCell(cellX, cellZ) ? 'water' : 'land';
+    return this.fixedWaterWorld ? 'water' : 'land';
+  }
+
+  /**
+   * 静态件落在一格上的支撑面：陆地格是最高角点，河床格是水面（码头板浮在水上），
+   * 固定地面图上是 0。没有可建的陆地或出了范围就是 undefined。
+   */
+  public groundTopHeight(cellX: number, cellZ: number): number | undefined {
+    if (!this.landAvailable) return undefined;
+    const status = this.buildCellStatus(cellX, cellZ);
+    if (status === 'bounds') return undefined;
+    if (!this.terrainWorld) return 0;
+    const top = this.terrainWorld.sampleCellTopHeight(cellX, cellZ);
+    return status === 'water' ? Math.max(top, this.terrainWorld.seaLevel) : top;
+  }
+
+  public getBuildSites(): BuildSiteIndex | undefined {
+    return this.actorSnapshotTarget?.getBuildSites?.();
+  }
+
+  public listBuildHulls(): readonly BuildHullCandidate[] {
+    return this.actorSnapshotTarget?.listBuildHulls?.() ?? NO_HULLS;
+  }
+
+  public findBuildPieceNear(x: number, z: number, radius: number): BuildPieceCandidate | undefined {
+    return this.actorSnapshotTarget?.findBuildPieceNear?.(x, z, radius);
+  }
+
+  public buildFoundationTop(surfaceKey: string, cellX: number, cellZ: number): number | undefined {
+    return this.actorSnapshotTarget?.buildFoundationTop?.(surfaceKey, cellX, cellZ);
+  }
+
+  /** 放置位有没有被实体挡住；没有 Actor 世界（大厅背后）就当没挡。 */
+  public buildFootprintBlocked(footprint: BuildFootprint, ignoreSurfaceKey?: string): boolean {
+    return this.actorSnapshotTarget?.buildFootprintBlocked?.(footprint, ignoreSurfaceKey) ?? false;
   }
 
   // --- 物理 ---------------------------------------------------------------

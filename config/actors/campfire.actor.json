@@ -3,6 +3,19 @@
   "schemaVersion": 1,
   "id": "campfire",
   "components": {
+    "buildPiece": {
+      "kind": "fixture",
+      "surface": "any",
+      "slot": "hearth",
+      "label": "篝火",
+      "reach": 6,
+      "cost": [
+        { "itemType": "wood", "quantity": 3 },
+        { "itemType": "stone", "quantity": 2 }
+      ],
+      "mass": 20
+    },
+    "replicationPolicy": { "mode": "aoi", "radiusChunks": 2 },
     "heatEmitter": {
       "power": 520,
       "radius": 3.2,

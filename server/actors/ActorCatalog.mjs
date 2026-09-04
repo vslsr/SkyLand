@@ -7,6 +7,11 @@ import {
   MAX_PATROL_WAYPOINTS,
 } from '../../shared/actor/components/PatrolPathComponent.mjs';
 import { itemCatalog } from '../../shared/items/index.mjs';
+import {
+  BUILD_CELL_SIZE,
+  BUILD_PIECE_KINDS,
+  BUILD_PIECE_SURFACES,
+} from '../../shared/build/index.mjs';
 
 export const DEFAULT_ACTOR_DIRECTORY = fileURLToPath(new URL('../../config/actors/', import.meta.url));
 
@@ -463,6 +468,118 @@ function validateSlimeSurfaceDrag(raw, filename) {
   };
 }
 
+function requireKnownKeys(definition, path, knownKeys) {
+  for (const key of Object.keys(definition)) {
+    if (!knownKeys.has(key)) throw new TypeError(`${path} 包含未知字段：${key}`);
+  }
+}
+
+function validateBuildPiece(raw, filename) {
+  const path = `${filename}.components.buildPiece`;
+  const definition = requireObject(raw, path);
+  requireKnownKeys(
+    definition,
+    path,
+    new Set(['kind', 'surface', 'label', 'reach', 'cost', 'mass', 'buoyancy', 'slot', 'hull']),
+  );
+  if (!BUILD_PIECE_KINDS.includes(definition.kind)) {
+    throw new TypeError(`${path}.kind 必须是 ${BUILD_PIECE_KINDS.join(' / ')} 之一`);
+  }
+  if (!BUILD_PIECE_SURFACES.includes(definition.surface)) {
+    throw new TypeError(`${path}.surface 必须是 ${BUILD_PIECE_SURFACES.join(' / ')} 之一`);
+  }
+  // 地基和墙的几何跟着网格走，必须说清自己属于哪种建筑；只有物件两边都能放。
+  if (definition.surface === 'any' && definition.kind !== 'fixture') {
+    throw new TypeError(`${path}.surface any 只有物件可以用`);
+  }
+  if (!Array.isArray(definition.cost) || definition.cost.length < 1 || definition.cost.length > 4) {
+    throw new TypeError(`${path}.cost 必须是 1-4 项材料`);
+  }
+  const seen = new Set();
+  const cost = definition.cost.map((rawEntry, index) => {
+    const entryPath = `${path}.cost[${index}]`;
+    const entry = requireObject(rawEntry, entryPath);
+    const itemType = requireId(entry.itemType, `${entryPath}.itemType`);
+    // 材料必须是物品目录里登记过的东西，否则背包里永远凑不出这份价。
+    if (!itemCatalog.has(itemType)) {
+      throw new TypeError(`${entryPath}.itemType 没有登记进物品目录：${itemType}`);
+    }
+    if (seen.has(itemType)) throw new TypeError(`${path}.cost 材料重复：${itemType}`);
+    seen.add(itemType);
+    const quantity = requireNumber(entry.quantity, `${entryPath}.quantity`, 1, 99);
+    if (!Number.isInteger(quantity)) throw new TypeError(`${entryPath}.quantity 必须是整数`);
+    return { itemType, quantity };
+  });
+  const mass = definition.mass === undefined
+    ? 0
+    : requireNumber(definition.mass, `${path}.mass`, 0, 1000);
+  const buoyancy = definition.buoyancy === undefined
+    ? 0
+    : requireNumber(definition.buoyancy, `${path}.buoyancy`, 0, 1000);
+  // 质量与浮力只对可能上船的件有意义：静态件不进任何浮力结算，写了只会误导后来的人。
+  if (definition.surface === 'static' && (mass > 0 || buoyancy > 0)) {
+    throw new TypeError(`${path} 静态件没有 mass / buoyancy`);
+  }
+  if (definition.kind !== 'foundation' && buoyancy > 0) {
+    throw new TypeError(`${path} 只有地基提供浮力`);
+  }
+  let slot;
+  if (definition.kind === 'fixture') {
+    slot = requireId(definition.slot, `${path}.slot`);
+    if (slot.length > 24) throw new TypeError(`${path}.slot 最多 24 个字符`);
+  } else if (definition.slot !== undefined) {
+    throw new TypeError(`${path}.slot 只有物件才有`);
+  }
+  let hull;
+  if (definition.hull !== undefined) {
+    if (definition.kind !== 'foundation' || definition.surface !== 'floating') {
+      throw new TypeError(`${path}.hull 只有水上地基才有`);
+    }
+    hull = requireId(definition.hull, `${path}.hull`);
+  }
+  return {
+    kind: definition.kind,
+    surface: definition.surface,
+    label: requireString(definition.label, `${path}.label`, 32),
+    reach: requireNumber(definition.reach, `${path}.reach`, 1, 16),
+    cost,
+    mass,
+    buoyancy,
+    ...(slot ? { slot } : {}),
+    ...(hull ? { hull } : {}),
+  };
+}
+
+function validateBuildGrid(raw, filename) {
+  const path = `${filename}.components.buildGrid`;
+  const definition = requireObject(raw, path);
+  requireKnownKeys(
+    definition,
+    path,
+    new Set(['cellSize', 'columns', 'rows', 'deckHeight', 'extentCells', 'maxPieces']),
+  );
+  // 0 × 0 是用地基立起来的船：没有自带甲板，第 (0, 0) 格就是最初那块板。
+  const columns = requireNumber(definition.columns, `${path}.columns`, 0, 8);
+  const rows = requireNumber(definition.rows, `${path}.rows`, 0, 8);
+  const extentCells = definition.extentCells === undefined
+    ? 3
+    : requireNumber(definition.extentCells, `${path}.extentCells`, 0, 8);
+  const maxPieces = definition.maxPieces === undefined
+    ? 24
+    : requireNumber(definition.maxPieces, `${path}.maxPieces`, 0, 128);
+  if (![columns, rows, extentCells, maxPieces].every(Number.isInteger)) {
+    throw new TypeError(`${path} 的 columns、rows、extentCells 与 maxPieces 必须是整数`);
+  }
+  return {
+    cellSize: requireNumber(definition.cellSize, `${path}.cellSize`, 0.5, 8),
+    columns,
+    rows,
+    deckHeight: requireNumber(definition.deckHeight, `${path}.deckHeight`, -2, 10),
+    extentCells,
+    maxPieces,
+  };
+}
+
 function validateLifetime(raw, filename) {
   const path = `${filename}.components.lifetime`;
   const definition = requireObject(raw, path);
@@ -881,6 +998,27 @@ function validateRender(raw, filename) {
       height: requireNumber(render.height, `${path}.height`, Number.EPSILON, 3),
     };
   }
+  if (render.model === 'line-art-build-foundation') {
+    return {
+      model: render.model,
+      size: requireNumber(render.size, `${path}.size`, Number.EPSILON, 8),
+      thickness: requireNumber(render.thickness, `${path}.thickness`, Number.EPSILON, 1),
+      plankColor: requireColor(render.plankColor, `${path}.plankColor`),
+      accentColor: requireColor(render.accentColor, `${path}.accentColor`),
+      inkColor: requireColor(render.inkColor, `${path}.inkColor`),
+    };
+  }
+  if (render.model === 'line-art-build-wall') {
+    return {
+      model: render.model,
+      width: requireNumber(render.width, `${path}.width`, Number.EPSILON, 8),
+      height: requireNumber(render.height, `${path}.height`, Number.EPSILON, 4),
+      thickness: requireNumber(render.thickness, `${path}.thickness`, Number.EPSILON, 1),
+      color: requireColor(render.color, `${path}.color`),
+      accentColor: requireColor(render.accentColor, `${path}.accentColor`),
+      inkColor: requireColor(render.inkColor, `${path}.inkColor`),
+    };
+  }
   throw new TypeError(`${path}.model 不受支持：${render.model}`);
 }
 
@@ -916,6 +1054,8 @@ function validateActorArchetype(raw, filename) {
     'generatedProp',
     'guidePath',
     'patrolPath',
+    'buildPiece',
+    'buildGrid',
     'render',
   ]);
   for (const componentName of Object.keys(components)) {
@@ -933,8 +1073,9 @@ function validateActorArchetype(raw, filename) {
   const patrolPath = components.patrolPath
     ? validatePatrolPath(components.patrolPath, filename)
     : undefined;
-  if (!render && !generatedProp && !guidePath) {
-    throw new TypeError(`${filename}.components 至少需要 render、generatedProp 或 guidePath`);
+  // 船体根节点看不见：它的样子就是挂在它身上的那些地基，所以只有 buildGrid 也算。
+  if (!render && !generatedProp && !guidePath && !components.buildGrid) {
+    throw new TypeError(`${filename}.components 至少需要 render、generatedProp、guidePath 或 buildGrid`);
   }
   const playerMovement = components.playerMovement
     ? validatePlayerMovement(components.playerMovement, filename)
@@ -1014,6 +1155,42 @@ function validateActorArchetype(raw, filename) {
   const replicationPolicy = components.replicationPolicy
     ? validateReplicationPolicy(components.replicationPolicy, filename)
     : undefined;
+  const buildPiece = components.buildPiece ? validateBuildPiece(components.buildPiece, filename) : undefined;
+  const buildGrid = components.buildGrid ? validateBuildGrid(components.buildGrid, filename) : undefined;
+  const buildModel = render?.model === 'line-art-build-foundation' || render?.model === 'line-art-build-wall';
+  if (buildPiece) {
+    // 件的种类决定它长什么样：地基占一格、墙占一条边，模型和碰撞盒都按此派生；
+    // 物件用自己的模型（篝火就是篝火），只是多了「可以建造」这一层。
+    const expectedModel = buildPiece.kind === 'foundation'
+      ? 'line-art-build-foundation'
+      : (buildPiece.kind === 'wall' ? 'line-art-build-wall' : undefined);
+    if (expectedModel && render?.model !== expectedModel) {
+      throw new TypeError(`${filename}.components.buildPiece ${buildPiece.kind} 需要 ${expectedModel} render`);
+    }
+    if (!expectedModel && buildModel) {
+      throw new TypeError(`${filename}.components.buildPiece 物件不能用地基 / 墙的模型`);
+    }
+    // 地基的大小要和地皮的一格一样、墙要和格边一样宽，否则会伸出格外或和邻格重叠。
+    // 水上地基按它立起来的那艘船的格宽再校一遍（SceneCatalog）。
+    if (buildPiece.kind === 'foundation' && buildPiece.surface === 'static'
+      && Math.abs(render.size - BUILD_CELL_SIZE) > 1e-6) {
+      throw new TypeError(`${filename}.components.render.size 必须等于建造格宽 ${BUILD_CELL_SIZE}`);
+    }
+    if (buildPiece.kind === 'wall' && Math.abs(render.width - BUILD_CELL_SIZE) > 1e-6) {
+      throw new TypeError(`${filename}.components.render.width 必须等于建造格宽 ${BUILD_CELL_SIZE}`);
+    }
+    // 建造件会散布在整张大世界上，必须按 AOI 复制，否则快照随建筑数无界增长。
+    if (!replicationPolicy) {
+      throw new TypeError(`${filename}.components.buildPiece 需要 replicationPolicy`);
+    }
+  }
+  if (buildModel && !buildPiece) {
+    throw new TypeError(`${filename}.components.render ${render.model} 需要 buildPiece`);
+  }
+  // 能挂地基的必须先是一条船：地基要进它的浮力结算。
+  if (buildGrid && !components.buoyancy) {
+    throw new TypeError(`${filename}.components.buildGrid 需要 buoyancy`);
+  }
   if (combustible && !temperature) {
     throw new TypeError(`${filename}.components.combustible 需要 temperature`);
   }
@@ -1086,6 +1263,8 @@ function validateActorArchetype(raw, filename) {
       ...(generatedProp ? { generatedProp } : {}),
       ...(guidePath ? { guidePath } : {}),
       ...(patrolPath ? { patrolPath } : {}),
+      ...(buildPiece ? { buildPiece } : {}),
+      ...(buildGrid ? { buildGrid } : {}),
       ...(render ? { render } : {}),
     },
   };
