@@ -85,6 +85,7 @@ export {
 export {
   createItemUseAbility,
   itemAbilityId,
+  itemCooldownGroup,
   resolveItemUse,
   ITEM_USE_ABILITY_SLOT,
   ITEM_USE_STATE_TAG,

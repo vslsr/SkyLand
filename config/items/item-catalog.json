@@ -50,15 +50,15 @@
       "tint": "#9A6B3F",
       "summary": "一张弯木配一根弦，拉满了射得更远也更疼。",
       "use": {
-        "action": "weapon",
+        "action": "shoot",
         "input": "primary",
         "mode": "charge",
         "holdSeconds": 1.2,
-        "value": 5
+        "cooldownSeconds": 0.1,
+        "value": 340
       },
       "weapon": {
         "attack": 5,
-        "cooldownSeconds": 0.1,
         "radius": 1.2,
         "range": { "minimum": 6, "maximum": 22 },
         "charge": {
@@ -85,6 +85,29 @@
         "mode": "hold",
         "holdSeconds": 1,
         "value": 1
+      }
+    },
+    {
+      "id": "slingshot",
+      "displayName": "弹弓",
+      "category": "tool",
+      "stackLimit": 1,
+      "slotCost": 0,
+      "iconId": "item-slingshot",
+      "tint": "#8A6A46",
+      "summary": "一把树杈弹弓，装上石头，拉满了打出去。",
+      "durability": 0,
+      "ammo": {
+        "accepts": ["stone"],
+        "capacity": 5
+      },
+      "use": {
+        "action": "shoot",
+        "input": "primary",
+        "mode": "charge",
+        "holdSeconds": 0.9,
+        "cooldownSeconds": 0.5,
+        "value": 180
       }
     }
   ]

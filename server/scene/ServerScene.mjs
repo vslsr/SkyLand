@@ -80,6 +80,8 @@ import {
   revokeItemAbility,
   updateItemUse,
 } from '../actors/ItemAbilityRuntime.mjs';
+// 引进来是为了副作用：武器系统在这里把物品目录里的 `shoot` 动词认领下来。
+import '../actors/WeaponRuntime.mjs';
 import { PlayerIdleSimulation } from './PlayerIdleSimulation.mjs';
 import { ServerChunkColliders } from './ServerChunkColliders.mjs';
 import { ServerTerrainColliders } from './ServerTerrainColliders.mjs';
@@ -113,6 +115,8 @@ const HOTBAR_COMMAND_KINDS = new Set([
   'hotbar:swap',
   'hotbar:stow',
   'drop:hotbar',
+  'ammo:load',
+  'ammo:unload',
 ]);
 
 /** 调试伤害指令够得到多远的生物，米。和交互距离同量级，不是远程打击。 */
@@ -176,6 +180,22 @@ function sanitizeActorId(value) {
 function sanitizeItemType(value) {
   const id = String(value ?? '');
   return itemCatalog.has(id) ? id : undefined;
+}
+
+/**
+ * 上行的「哪一格」。
+ *
+ * 形状和界面上那一格、`InventoryComponent.entryAt` 三处一致，所以这里只做清洗，
+ * 不做翻译：物品栏认第几格，背包认物品种类，别的都当成无效。
+ */
+function sanitizeSlotAddress(value) {
+  if (value?.kind === 'hotbar') {
+    const slotIndex = Math.trunc(toFiniteNumber(value.slotIndex, -1));
+    return slotIndex >= 0 ? { kind: 'hotbar', slotIndex } : undefined;
+  }
+  if (value?.kind !== 'backpack') return undefined;
+  const itemType = sanitizeItemType(value.itemType);
+  return itemType ? { kind: 'backpack', itemType } : undefined;
 }
 
 function resolvePlayerActorArchetype(definition) {
@@ -846,6 +866,19 @@ export class ServerScene {
         // 那件东西，不该顺手把手上握着的换掉。
         changed = dropInventoryItem(this, player, sanitizeItemType(command.itemType), 1);
         break;
+      case 'ammo:load': {
+        // 装填：从来源那一格扣，记到目标那一格的弹药位上。装什么、装几发由物品
+        // 目录的 `ammo` 说了算，客户端只发「从哪一格到哪一格」。
+        const slot = sanitizeSlotAddress(command.slot);
+        const from = sanitizeSlotAddress(command.source);
+        changed = Boolean(slot && from) && inventory.loadAmmo(slot, from) > 0;
+        break;
+      }
+      case 'ammo:unload': {
+        const slot = sanitizeSlotAddress(command.slot);
+        changed = Boolean(slot) && inventory.unloadAmmo(slot) > 0;
+        break;
+      }
       case 'container:open':
       case 'container:close':
       case 'container:transfer':
@@ -877,11 +910,17 @@ export class ServerScene {
     if (command.kind === 'container:close') return container.closeFor(player.id);
     if (distance > container.reach) return false;
     if (command.kind === 'container:open') return container.openFor(player.id);
-    return transferItems(player, actor, {
+    const moved = transferItems(player, actor, {
       itemType: sanitizeItemType(command.itemType),
       quantity: toFiniteNumber(command.quantity, 0),
       direction: command.direction === 'withdraw' ? 'withdraw' : 'store',
-    }) > 0;
+      // 从物品栏那一格存进去时手上那件可能刚好被搬空，模型要跟着消失——
+      // 所以这条命令也要走一次手持同步（`applyInventoryCommand` 末尾统一做）。
+      slotIndex: command.slotIndex === undefined
+        ? undefined
+        : Math.trunc(toFiniteNumber(command.slotIndex, -1)),
+    });
+    return moved > 0;
   }
 
   /** 走远的人自动退出容器；不依赖客户端自觉发关闭。 */
@@ -1529,6 +1568,28 @@ export class ServerScene {
   setTimeOfDay(playerId, timeOfDay) {
     if (!this.players.has(playerId)) return false;
     return this.environment.requestTimeOfDay(timeOfDay);
+  }
+
+  /**
+   * 调试：直接给某名玩家一个物品（F8 菜单里的那一栏）。
+   *
+   * 走的是**拾取那一条路**（`receive`：先手上、再物品栏、最后背包），不是往背包
+   * 里塞一笔账：在游戏里「拿到一个东西」只有这一种落法，调试给的那一个也该落在
+   * 玩家预期的位置上，否则用它验出来的手感不是真的。
+   *
+   * 目录里没有的 id 直接丢掉；身上一个都收不下时返回 false，什么都不发生。
+   *
+   * @returns 真的给出去了没有
+   */
+  giveDebugItem(playerId, itemType) {
+    const player = this.players.get(playerId);
+    const id = sanitizeItemType(itemType);
+    const inventory = player?.getComponent(INVENTORY_COMPONENT);
+    if (!player || !id || !inventory) return false;
+    if (inventory.receive(id, 1) !== 1) return false;
+    // 落在手上那一格时嘴上要跟着出现模型，和拾取完全一样。
+    syncHeldItemActor(this, player);
+    return true;
   }
 
   isWaterAt(x, z) {

@@ -255,6 +255,9 @@ export class GrasslandScene extends Scene {
       this.debugMenuPage.onHealthCommand((target, amount) => {
         if (this.joinedRoom) this.roomClient.sendHealthDebug(target, amount);
       });
+      this.debugMenuPage.onItemGrant((itemType) => {
+        if (this.joinedRoom) this.roomClient.giveDebugItem(itemType);
+      });
       this.refreshDebugMenuShortcut();
     }
     this.virtualControls = new VirtualControls({
@@ -406,7 +409,7 @@ export class GrasslandScene extends Scene {
         // 吃东西那一段跟着这次按住走：圈满那一刻服务端扣账，抖动与食物同时停。
         // 玩家模型和手上那件食物读同一个比例，所以它们嚼在同一拍上。
         // 蓄力那条白线和物品栏那圈读同一个比例：线的长度就是圈的进度。
-        this.weaponAim.setChargeRatio(progress?.action === 'weapon' ? progress.ratio : undefined);
+        this.weaponAim.setChargeRatio(progress?.action === 'shoot' ? progress.ratio : undefined);
         const chewing = progress?.action === 'eat' ? progress.ratio : undefined;
         this.player?.setChewing(chewing);
         this.world.setChewingItem(chewing === undefined ? undefined : this.heldActorId(), chewing ?? 0);

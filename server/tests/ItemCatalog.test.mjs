@@ -23,10 +23,10 @@ const VALID_MATERIAL = {
   summary: '测试用材料。',
 };
 
-test('目录就是设计稿上那张物品表：木头、石头、果子、木弓、蘑菇', () => {
+test('目录就是设计稿上那张物品表：木头、石头、果子、木弓、蘑菇、弹弓', () => {
   assert.deepEqual(
     itemCatalog.list().map((item) => item.id),
-    ['wood', 'stone', 'fruit', 'wood-bow', 'mushroom'],
+    ['wood', 'stone', 'fruit', 'wood-bow', 'mushroom', 'slingshot'],
   );
 
   // 材料只是材料：占一格、能堆、没有用法。
@@ -50,17 +50,33 @@ test('目录就是设计稿上那张物品表：木头、石头、果子、木�
     assert.equal(definition.use.value, 1);
   }
 
-  // 木弓是一件武器：不占货位的独立池、走长按蓄力、数据挂在同一条物品上。
+  // 木弓是一件武器：不占货位的独立池、走蓄力松手、武器数据挂在同一条物品上。
   const bow = itemCatalog.require('wood-bow');
   assert.equal(bow.category, 'tool');
   assert.equal(bow.slotCost, 0);
   assert.equal(bow.pooled, true);
-  assert.equal(bow.use.action, 'weapon');
+  assert.equal(bow.use.action, 'shoot');
   assert.equal(bow.use.mode, 'charge');
   assert.ok(bow.use.holdSeconds > 0, '蓄力要有一个拉满时长');
+  assert.ok(bow.use.cooldownSeconds > 0, '冷却写在用法上，和别的动词同一处');
   assert.equal(bow.weapon.attack, 5);
-  assert.equal(bow.weapon.cooldownSeconds, 0.1);
   assert.deepEqual(bow.weapon.tagMultipliers, [{ tag: 'Actor.Build', multiplier: 0.1 }]);
+
+  // 弹弓：工具走独立池，一格一把（弹药记在那一格上的前提），石头当弹药，
+  // 蓄力松手打出去，打完有冷却。发射本身由武器系统注册执行器兑现。
+  const slingshot = itemCatalog.require('slingshot');
+  assert.equal(slingshot.category, 'tool');
+  assert.equal(slingshot.slotCost, 0);
+  assert.equal(slingshot.pooled, true);
+  assert.equal(slingshot.stackLimit, 1);
+  assert.deepEqual(slingshot.ammo.accepts, ['stone']);
+  assert.ok(slingshot.ammo.capacity > 0);
+  assert.equal(slingshot.use.action, 'shoot');
+  assert.equal(slingshot.use.mode, 'charge');
+  assert.ok(slingshot.use.holdSeconds > 0);
+  assert.ok(slingshot.use.cooldownSeconds > 0);
+  // 弹弓还没有 `@w` 条目：动词认得，兑现不了——它现在是一把打不响的弹弓。
+  assert.equal(slingshot.weapon, undefined);
 
   // 耐久现在全是 0：没有「用一次掉一点」的系统，写成别的数只会是一个空承诺。
   for (const definition of itemCatalog.list()) {

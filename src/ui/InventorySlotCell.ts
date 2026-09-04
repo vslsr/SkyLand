@@ -1,5 +1,5 @@
 import { createItemIcon } from './icons/ItemIconSprite';
-import type { HotbarSlotView, InventoryStackView } from '../inventory/index';
+import type { AmmoLoadView, HotbarSlotView, InventoryStackView } from '../inventory/index';
 
 /**
  * 背包和物品栏共用的那一格。
@@ -13,10 +13,16 @@ import type { HotbarSlotView, InventoryStackView } from '../inventory/index';
  * 序号、拿在手上的那一格描粗；这些由 `variant` 决定，不是另一套实现。
  */
 
-/** 这一格指的是哪本账上的哪一格。菜单和拖拽说的都是它。 */
+/**
+ * 这一格指的是哪本账上的哪一格。菜单和拖拽说的都是它。
+ *
+ * 三本账用两种寻址方式，因为它们本来就是两种东西：物品栏有固定的第几格，背包和
+ * 箱子里是一摞摞按种类排的货（顺序自动推导，没有「第几格」这回事）。
+ */
 export type InventorySlotRef =
   | { readonly kind: 'backpack'; readonly itemType: string }
-  | { readonly kind: 'hotbar'; readonly slotIndex: number };
+  | { readonly kind: 'hotbar'; readonly slotIndex: number }
+  | { readonly kind: 'container'; readonly itemType: string };
 
 /** 画一格要知道的全部。两本账各自把自己的视图摊成这一份。 */
 export interface InventorySlotView {
@@ -42,6 +48,10 @@ export interface InventorySlotView {
   readonly active?: boolean;
   /** 能不能拿在手上。不能的话这一格拖不动，也不弹菜单。 */
   readonly holdable: boolean;
+  /** 这件东西吃哪几种弹药、装几发；不吃弹药时是 undefined。 */
+  readonly ammoSlot?: { readonly accepts: readonly string[]; readonly capacity: number };
+  /** 现在装着什么弹药；没装时是 undefined，那时**不画**弹药小框。 */
+  readonly ammo?: AmmoLoadView;
 }
 
 export interface InventorySlotCellHandlers {
@@ -53,6 +63,11 @@ export interface InventorySlotCellHandlers {
   readonly dropOn?: (slot: InventorySlotView) => void;
   /** 现在有没有东西正被拖着；没有就不接。 */
   readonly isDragging?: () => boolean;
+}
+
+/** 箱子里的一摞摊成一格。和背包那一格长得一样，因为它本来就是同一种东西。 */
+export function containerSlotView(stack: InventoryStackView): InventorySlotView {
+  return { ...backpackSlotView(stack), ref: { kind: 'container', itemType: stack.itemType } };
 }
 
 /** 背包里的一摞摊成一格。 */
@@ -73,6 +88,8 @@ export function backpackSlotView(stack: InventoryStackView): InventorySlotView {
     coinValue: stack.coinValue,
     full: stack.full,
     holdable: stack.holdable,
+    ammoSlot: stack.ammoSlot,
+    ammo: stack.ammo,
   };
 }
 
@@ -91,6 +108,8 @@ export function hotbarSlotView(slot: HotbarSlotView): InventorySlotView {
     active: slot.active,
     full: slot.stackLimit > 0 && slot.quantity >= slot.stackLimit,
     holdable: true,
+    ammoSlot: slot.ammoSlot,
+    ammo: slot.ammo,
   };
 }
 
@@ -101,7 +120,11 @@ function describe(slot: InventorySlotView): string {
   const where = slot.shortcut === undefined ? '' : `物品栏第 ${slot.shortcut} 格 `;
   const category = slot.categoryLabel ? `${slot.categoryLabel} ` : '';
   const held = slot.active ? '，正拿在手上' : '';
-  return `${where}${category}${slot.displayName ?? ''}，${slot.quantity} 个，上限 ${slot.stackLimit}${held}`;
+  // 装着什么念出来：弹药小框是个视觉记号，读屏的人只有这一句能知道弓里还有几发。
+  const ammo = slot.ammo
+    ? `，装着 ${slot.ammo.quantity} / ${slot.ammo.capacity} ${slot.ammo.displayName}`
+    : '';
+  return `${where}${category}${slot.displayName ?? ''}，${slot.quantity} 个，上限 ${slot.stackLimit}${held}${ammo}`;
 }
 
 /**
@@ -163,6 +186,8 @@ export function createInventorySlotCell(
     : `${slot.quantity} / ${slot.stackLimit}`;
   cell.append(count);
 
+  if (slot.ammo) cell.append(createAmmoBox(slot.ammo));
+
   if (!hotbar) cell.append(...createBadges(slot));
 
   // 点一下弹菜单，按住拖动直接搬。两条入口指向同一件事：快的那条不用打开菜单，
@@ -189,6 +214,26 @@ function createShortcut(shortcut: number): HTMLElement {
   element.className = 'inventory__shortcut';
   element.textContent = String(shortcut);
   return element;
+}
+
+/**
+ * 右下角那个弹药小框：装着的弹药图标 + 还剩几发。
+ *
+ * **没装弹药时整个不画**。一个空框看起来像坏了，而不像「没装」——而「这件东西
+ * 吃弹药」这件事，玩家在把石头拖上去的时候自然会知道。
+ */
+function createAmmoBox(ammo: AmmoLoadView): HTMLElement {
+  const box = document.createElement('span');
+  box.className = 'inventory__ammo';
+  box.setAttribute('style', `--item-tint:${ammo.tint}`);
+  box.setAttribute('aria-hidden', 'true');
+  box.append(createItemIcon(ammo.iconId, { className: 'inventory__ammo-icon' }));
+  const count = document.createElement('span');
+  count.className = 'inventory__ammo-count';
+  count.textContent = String(ammo.quantity);
+  box.append(count);
+  box.setAttribute('title', `${ammo.displayName} ${ammo.quantity} / ${ammo.capacity}`);
+  return box;
 }
 
 function createBadges(slot: InventorySlotView): HTMLElement[] {

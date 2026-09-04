@@ -1,7 +1,12 @@
 import rawItemCatalog from '../../config/items/item-catalog.json' with { type: 'json' };
 import { ItemCatalog } from './ItemCatalog.mjs';
 
-export { ItemCatalog, ITEM_CATEGORIES, ITEM_USE_MODES } from './ItemCatalog.mjs';
+export {
+  ItemCatalog,
+  ITEM_CATEGORIES,
+  ITEM_USE_ACTIONS,
+  ITEM_USE_MODES,
+} from './ItemCatalog.mjs';
 export {
   resolveWeaponStrike,
   tagMultiplier,
@@ -12,6 +17,7 @@ export {
   createItemUseAbility,
   holdRatio,
   itemAbilityId,
+  itemCooldownGroup,
   resolveItemUse,
   ITEM_USE_ABILITY_SLOT,
   ITEM_USE_STATE_TAG,

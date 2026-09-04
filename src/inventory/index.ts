@@ -2,9 +2,9 @@ export {
   buildContainerView,
   buildInventoryView,
   ITEM_CATEGORY_LABELS,
+  type AmmoLoadView,
   type InventoryModelLike,
   type ContainerModelLike,
-  type ContainerRowView,
   type ContainerView,
   type HotbarSlotModelLike,
   type HotbarSlotView,
@@ -14,4 +14,6 @@ export {
   type ItemCatalogLike,
   type ItemCategory,
   type ItemDefinitionLike,
+  type ItemUseMode,
+  type LedgerEntryLike,
 } from './InventoryViewModel';

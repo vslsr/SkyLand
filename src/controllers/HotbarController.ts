@@ -22,8 +22,15 @@ export interface HeldItemProgress {
    * 界面按它挑表现：`eat` 那一段是角色在嚼，模型要抖起来。表现读的是**同一次
    * 按住**，所以抖动的起止和圈的起止是同一件事，不需要另一条状态。
    */
-  readonly action: 'eat' | 'tool' | 'throw' | 'weapon';
-  /** [0, 1]。到 1 表示服务端也认为倒计时走完了。 */
+  readonly action: ItemUseAction;
+  /**
+   * 圈满那一刻发生什么：`hold` 是结算，`charge` 是**停在满圈上等松手**。
+   *
+   * 界面据此决定圈画满之后收不收：蓄力那一圈满了还要留着，玩家看的就是「已经
+   * 拉满了，松手就出去」。
+   */
+  readonly mode: 'hold' | 'charge';
+  /** [0, 1]。`hold` 到 1 表示服务端也认为倒计时走完了；`charge` 到 1 是拉满了。 */
   readonly ratio: number;
   readonly label: string;
   /**
@@ -75,16 +82,24 @@ export interface HotbarPort {
   setProgress(progress: HeldItemProgress | undefined): void;
 }
 
-/** 一次还没结束的按住（长按使用）。 */
+/** 物品目录里那几个使用动词。`shoot` 由武器系统兑现，圈和提示仍归这里画。 */
+export type ItemUseAction = 'eat' | 'shoot' | 'tool' | 'throw';
+
+/** 一次还没结束的按住（长按使用 / 蓄力）。 */
 interface PendingHold {
-  /** 蓄力：圈满不结算，松手才打出去。 */
-  readonly charge: boolean;
-  readonly action: HeldItemProgress['action'];
+  readonly action: ItemUseAction;
   /** 用的是哪件东西。它变了这次按住就作废。 */
   readonly itemType: string;
   readonly startedAt: number;
   /** 倒计时多长。0 表示这是一次点按，没有圈可画，松手即结算。 */
   readonly durationSeconds: number;
+  /**
+   * 圈满那一刻是结算还是等松手。
+   *
+   * `hold` 的圈满 = 服务端已经激活，松手不再有含义；`charge` 的圈满只是拉满，
+   * 那一下发生在松手的时候。两者画的是同一个圈，收尾完全相反。
+   */
+  readonly mode: 'tap' | 'hold' | 'charge';
   readonly label: string;
   readonly onHotbar: boolean;
   /** 按下那一刻的键位。记在这次按住上：中途重绑定不该改写正在进行的这一次。 */
@@ -171,15 +186,17 @@ export class HotbarController {
     }
     const elapsed = (this.now() - this.pending.startedAt) / 1000;
     const ratio = holdRatio(elapsed, this.pending.durationSeconds);
-    if (ratio >= 1 && !this.pending.charge) {
+    if (ratio >= 1 && this.pending.mode !== 'charge') {
       // 圈满即激活：服务端在同一刻自己动手，客户端不再发任何东西，也不再画圈。
       this.pending.completed = true;
       this.port.setProgress(undefined);
       this.armed = undefined;
       return;
     }
+    // 蓄力拉满之后圈留在那里：这一下要等松手，收掉圈会让玩家以为已经打出去了。
     this.port.setProgress({
       action: this.pending.action,
+      mode: this.pending.mode === 'charge' ? 'charge' : 'hold',
       ratio,
       label: this.pending.label,
       onHotbar: this.pending.onHotbar,
@@ -247,11 +264,10 @@ export class HotbarController {
     }
     if (phase === 'started') {
       this.begin({
-        action: use.action as HeldItemProgress['action'],
+        action: use.action as ItemUseAction,
         startedAt: this.now(),
-        // 点按没有倒计时；长按的圈满那一刻就是服务端激活那一刻；蓄力的圈满只是
-        // 「攒到头了」，要等松手，所以圈留在画面上不撤。
-        charge: use.mode === 'charge',
+        mode: use.mode,
+        // 点按没有倒计时；长按的圈满那一刻就是服务端激活那一刻，蓄力的圈满是拉满。
         durationSeconds: use.mode === 'tap' ? 0 : use.holdSeconds,
         label: use.verb,
         itemType: use.itemType,

@@ -57,6 +57,7 @@ Use a semantic message such as `actor:interact` when an action changes relations
 ## Route adjacent work
 
 - Use `skyland-scene-authoring` when only placing supported archetypes or changing scene renderer/gameplay/camera data.
+- Use `skyland-build-piece` when the Actor is one players place themselves from the build bar. That authoring surface — `buildPiece`, grid snapping, costs, occupancy — sits on top of this pipeline and has its own contract.
 - Use `skyland-input-system` when changing key, touch, Gamepad, trigger, rebinding, or prompt semantics. Actor controllers consume tags and must not listen to DOM events directly.
 - Use `skyland-collision-partition` for player movement physics, Actor/simple-collision shapes or layers, Rapier registration, grounding, camera probes, and client/server collision parity. This skill still owns the Actor Component and snapshot state that supplies that authoring, but not the character solver.
 - Use `skyland-render-boundary` for how a Replica becomes pixels: proxies, the transform and visual-param SoA, instance channels, and where a visual System is allowed to live. This skill owns state and authority up to the point the Replica exists; that one owns everything after.

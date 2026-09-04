@@ -12,6 +12,7 @@ Read this reference only when the task touches gameplay entries (`@i`, `@b`, `@w
     * G: <分类>
     * N: <堆叠上限>
     * R: <是否有耐久，有的话耐久度，0或不写为无>
+    * AM: <弹药位：吃哪几种弹药、装几发，不写为不吃弹药>
     * A: <动画说明，见「动画定义」>
 
 ## 建筑定义
@@ -74,10 +75,12 @@ Read this reference only when the task touches gameplay entries (`@i`, `@b`, `@w
 | 说明 | `summary`（≤ 64 字） | ✅ |
 | `M` | 掉落物原型的 `components.render`（`model` + 颜色 + 尺寸） | ✅ |
 | `I` | `iconId` + `tint`；SVG 画进 `src/ui/icons/ItemIconSprite.ts` | ✅ |
-| `F` | `use: { action, input, mode, holdSeconds, value }`；**「不能使用」= 整个 `use` 不写** | ✅ 动词限 `eat` / `tool` / `throw` / `weapon` |
+| `F` | `use: { action, input, mode, holdSeconds, cooldownSeconds, value }`；**「不能使用」= 整个 `use` 不写** | ✅ 动词限 `eat` / `shoot` / `tool` / `throw`；`mode` 有 `tap` / `hold` / `charge`（蓄力松手才结算）。`shoot` 的执行器由**武器系统**注册，见 `server/actors/ItemUseActions.mjs` |
 | `G` | `category` | ✅ 见下表 |
 | `N` | `stackLimit`；另配 `slotCost`（占几个货位，`0` 走独立池） | ✅ |
 | `R` | `durability`，`0` 或不写就不写这个字段 | ⚠️ 字段可配，还没有系统消耗它 |
+| 冷却 | `use.cooldownSeconds`；落成能力自己的 `cooldown`，按**物品种类**分组 | ✅ 冷却中按不下去，圈都不开始画 |
+| `AM` | 目录里一个 `ammo: { accepts, capacity }`（`accepts` 写**物品 id**，不写分类），加上格子上的一段弹药状态 | ✅ 只有 `slotCost: 0` + `stackLimit: 1` 的物品能写；装填 / 卸下走 `ammo:load` / `ammo:unload`。掉落物还记不住弹药，丢下时先卸回身上 |
 | `A` | 渲染侧代码，不是 JSON。见[动画字段 A 落到哪](#动画字段-a-落到哪) | ⚠️ 吃东西那段已落地，其余靠一事一议 |
 
 `G` 的取值对照 `category` 枚举：
@@ -128,13 +131,15 @@ Read this reference only when the task touches gameplay entries (`@i`, `@b`, `@w
 `@w` 落在**它 `I:` 指着的那件物品**上，不另开一份武器表：一件东西只有一条账。
 
 * **轻型工具**（`B` 为空或 `0`）：玩家拿在手上。采集类走 `use.action: "tool"`
-  （`use.value` 是采集力度）；打人的走 `use.action: "weapon"` + 同一条物品上的
-  `weapon` 块，`use.mode` 必须是 `charge`（长按蓄力，松手开火）。
+  （`use.value` 是采集力度）；打人的走 `use.action: "shoot"` + 同一条物品上的
+  `weapon` 块，`use.mode` 必须是 `charge`（长按蓄力，松手开火）。没有 `weapon` 块的
+  `shoot` 物品是一把打不响的武器：动词认得，兑现不了。
 * **重型工具**（`B` 指向一条 `@b`）：玩家拿不住，放出来才能用。落地是**一条 `@i` 加一条 `@b`**：
   背包里那一摞是物品，放出去那个是 `fixture` 建造件。`@i 篝火物品` + 篝火建造件就是这个形状。
 
 `D` 之下五项现在都有承接，判定内核在
-[`server/actors/WeaponRuntime.mjs`](../../../../server/actors/WeaponRuntime.mjs)，
+[`server/actors/WeaponRuntime.mjs`](../../../../server/actors/WeaponRuntime.mjs)（它把物品系统
+留出来的 `shoot` 动词认领下来），
 两端共用的换算在
 [`shared/items/weaponStrike.mjs`](../../../../shared/items/weaponStrike.mjs)：
 
@@ -142,7 +147,7 @@ Read this reference only when the task touches gameplay entries (`@i`, `@b`, `@w
 | --- | --- | --- |
 | `Attack` | `weapon.attack`，乘上蓄力倍率之后走 `applyDamage` | ✅ |
 | `Attack.Tag` | `weapon.tagMultipliers`，标签由 Component 推导（`shared/actor/actorTags.mjs`） | ✅ 按声明顺序取第一条命中的；建造件还没有生命值，所以打不到 |
-| `CD` | `weapon.cooldownSeconds` → `AbilityDefinition.cooldown`，分组按物品取 | ✅ |
+| `CD` | `use.cooldownSeconds`（写在用法上，和别的动词同一处）→ `AbilityDefinition.cooldown`，分组按物品取 | ✅ |
 | `Effect` | 命中即扣血；附加状态（点燃、减速）还要各自的 `EffectDefinition` | ⚠️ 伤害已通，别的效果一事一议 |
 | `EQS` | `weapon.radius` + `weapon.range`：权威朝向 × 蓄力比例反解落点，落点半径内全中 | ✅ 只有这一种取法；单体与射线还没有 |
 

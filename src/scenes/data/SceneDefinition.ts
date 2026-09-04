@@ -229,6 +229,14 @@ export type ActorRenderDefinition =
       height: number;
     }
   | {
+      model: 'line-art-slingshot-pile';
+      frameColor: string;
+      bandColor: string;
+      inkColor: string;
+      radius: number;
+      height: number;
+    }
+  | {
       model: 'line-art-mushroom-pile';
       capColor: string;
       stemColor: string;

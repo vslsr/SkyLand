@@ -6,6 +6,7 @@ import {
   type WeatherType,
 } from '../../weather/index';
 import { DAY_PHASE_HOURS, DEFAULT_START_HOUR } from '../../../shared/dayNight.mjs';
+import { itemCatalog } from '../../../shared/items/index.mjs';
 import type { PlayerTransformLogState } from '../../debug/PlayerTransformLogRecorder';
 
 interface TimePresetDefinition {
@@ -55,6 +56,10 @@ function describePhase(timeOfDay: number): string {
 }
 
 export class DebugMenuPage extends ModalWindow {
+  private readonly giveItemButton: HTMLButtonElement;
+  private readonly giveItemMenu: HTMLElement;
+  private readonly giveItemStatus: HTMLParagraphElement;
+  private itemGrantHandler?: (itemType: string) => void;
   private readonly transformLogButton: HTMLButtonElement;
   private readonly transformLogStatus: HTMLParagraphElement;
   private readonly collisionButton: HTMLButtonElement;
@@ -159,6 +164,63 @@ export class DebugMenuPage extends ModalWindow {
     });
     temperatureSection.append(temperatureHeading, temperatureDescription, this.temperatureButton);
 
+    // 物品那一栏：列的是**物品目录本身**，不是一张写死的清单——目录里加一件东西，
+    // 这里就多一条，不用有人记得回来补。
+    const giveItemSection = document.createElement('section');
+    giveItemSection.className = 'debug-menu__section';
+    const giveItemHeading = document.createElement('h3');
+    giveItemHeading.textContent = 'GIVE ITEM';
+    const giveItemDescription = document.createElement('p');
+    giveItemDescription.textContent = '点开列表，点一件就给自己一个。'
+      + '落点和拾取完全一样：先手上、再物品栏、最后背包——身上满了就给不进去。';
+    this.giveItemButton = document.createElement('button');
+    this.giveItemButton.className = 'paper-button debug-menu__toggle';
+    this.giveItemButton.type = 'button';
+    this.giveItemButton.setAttribute('aria-haspopup', 'menu');
+    this.giveItemButton.addEventListener('click', () => this.setGiveItemMenuOpen(this.giveItemMenu.hidden));
+
+    // 菜单收在按钮下面而不是浮在窗口外：F8 这个窗口自己会滚动，浮层挂进来会被
+    // 裁掉半截，挂到外面又得自己算位置。物品多起来时它自己滚。
+    this.giveItemMenu = document.createElement('div');
+    this.giveItemMenu.className = 'debug-menu__item-menu';
+    this.giveItemMenu.setAttribute('role', 'menu');
+    this.giveItemMenu.setAttribute('aria-label', '所有物品');
+    this.giveItemMenu.hidden = true;
+    for (const definition of itemCatalog.list()) {
+      const button = document.createElement('button');
+      button.className = 'paper-button debug-menu__item-button';
+      button.type = 'button';
+      button.setAttribute('role', 'menuitem');
+      button.dataset.itemType = definition.id;
+      // 名字后面跟一个暗一点的 id：调试时要对着的是目录里那一条，而重名和改名
+      // 都只在名字那一侧发生。
+      const label = document.createElement('span');
+      label.textContent = definition.displayName;
+      const id = document.createElement('span');
+      id.className = 'debug-menu__item-id';
+      id.textContent = definition.id;
+      button.append(label, id);
+      button.setAttribute('aria-label', `给自己一个${definition.displayName}`);
+      button.addEventListener('click', () => {
+        this.itemGrantHandler?.(definition.id);
+        // 给出去没有由下一帧快照说了算，这里只回执「已经请求了哪一件」——
+        // 写「已获得」会在背包满的时候撒谎。
+        this.giveItemStatus.textContent = `已请求 ${definition.displayName} ×1；背包里没有就是没收下。`;
+        this.setGiveItemMenuOpen(false);
+      });
+      this.giveItemMenu.append(button);
+    }
+    this.giveItemStatus = document.createElement('p');
+    this.giveItemStatus.className = 'debug-menu__status';
+    this.giveItemStatus.setAttribute('role', 'status');
+    giveItemSection.append(
+      giveItemHeading,
+      giveItemDescription,
+      this.giveItemButton,
+      this.giveItemMenu,
+      this.giveItemStatus,
+    );
+
     const weatherSection = document.createElement('section');
     weatherSection.className = 'debug-menu__section';
     const weatherHeading = document.createElement('h3');
@@ -237,12 +299,14 @@ export class DebugMenuPage extends ModalWindow {
       // 滚动区域底部后看起来像是没有昼夜控制。
       dayNightSection,
       weatherSection,
+      giveItemSection,
       transformLogSection,
       profilerSection,
       collisionSection,
       temperatureSection,
       healthSection,
     );
+    this.setGiveItemMenuOpen(false);
     this.setTransformLogState('inactive');
     this.setTransformLogAvailable(false);
     this.setProfilerVisible(false);
@@ -269,6 +333,22 @@ export class DebugMenuPage extends ModalWindow {
 
   public onTemperatureToggle(handler: (visible: boolean) => void): void {
     this.temperatureToggleHandler = handler;
+  }
+
+  /** 关掉 F8 就把物品列表收起来：下次打开不该看见上一次翻开的那一半。 */
+  public onClose(): void {
+    this.setGiveItemMenuOpen(false);
+  }
+
+  /** 点了列表里的一件：由场景把它发成一条 `debug:give-item`。 */
+  public onItemGrant(handler: (itemType: string) => void): void {
+    this.itemGrantHandler = handler;
+  }
+
+  private setGiveItemMenuOpen(open: boolean): void {
+    this.giveItemMenu.hidden = !open;
+    this.giveItemButton.setAttribute('aria-expanded', String(open));
+    this.giveItemButton.textContent = open ? '收起物品列表' : '选择物品…';
   }
 
   public onWeatherSelect(handler: (weather: WeatherType) => void): void {

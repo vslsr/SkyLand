@@ -70,3 +70,33 @@ test('目录里查不到的物品不进视图', () => {
   assert.equal(view.usedSlots, 1, '货位数按画得出来的格子重算');
   assert.equal(view.revision, 3);
 });
+
+test('弹药位摊成界面画得出来的一份：名字、图标、还剩几发、装得下几发', () => {
+  const inventory = new InventoryComponent({ slotCapacity: 6, hotbarCapacity: 9 });
+  inventory.add('slingshot', 1);
+  inventory.add('stone', 4);
+
+  // 没装的时候不该冒出一个「0 发」的视图：格子上那个小框据此决定画不画。
+  const empty = buildInventoryView(inventory as unknown as InventoryModelLike);
+  const before = empty.pooled.find((stack) => stack.itemType === 'slingshot');
+  assert.deepEqual(before?.ammoSlot, { accepts: ['stone'], capacity: 5 });
+  assert.equal(before?.ammo, undefined);
+
+  inventory.loadAmmo(
+    { kind: 'backpack', itemType: 'slingshot' },
+    { kind: 'backpack', itemType: 'stone' },
+    3,
+  );
+  inventory.assignHotbarSlot(0, 'slingshot');
+  const view = buildInventoryView(inventory as unknown as InventoryModelLike);
+
+  // 弹药自己的名字与图标照样从物品目录查：那个小框画的是一件物品，不是一个数字。
+  assert.deepEqual(view.hotbar[0]?.ammo, {
+    itemType: 'stone',
+    quantity: 3,
+    displayName: itemCatalog.require('stone').displayName,
+    iconId: itemCatalog.require('stone').iconId,
+    tint: itemCatalog.require('stone').tint,
+    capacity: 5,
+  });
+});

@@ -1840,6 +1840,42 @@
               "additionalProperties": false,
               "required": [
                 "model",
+                "frameColor",
+                "bandColor",
+                "inkColor",
+                "radius",
+                "height"
+              ],
+              "properties": {
+                "model": {
+                  "const": "line-art-slingshot-pile"
+                },
+                "frameColor": {
+                  "$ref": "#/$defs/color"
+                },
+                "bandColor": {
+                  "$ref": "#/$defs/color"
+                },
+                "inkColor": {
+                  "$ref": "#/$defs/color"
+                },
+                "radius": {
+                  "type": "number",
+                  "exclusiveMinimum": 0,
+                  "maximum": 3
+                },
+                "height": {
+                  "type": "number",
+                  "exclusiveMinimum": 0,
+                  "maximum": 3
+                }
+              }
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "model",
                 "capColor",
                 "stemColor",
                 "inkColor",

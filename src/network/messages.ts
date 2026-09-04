@@ -59,6 +59,17 @@ export type ActorGameplayEvent =
  * 回退），并且都以「改完权威 Component、让下一帧快照去确认」收尾。传输层因此只需要
  * 认识一个 case，服务端只需要一个入口。
  */
+/**
+ * 一格的地址。
+ *
+ * 背包按物品种类寻址、物品栏按第几格寻址，因为两本账本来就是两种东西。界面上那
+ * 一格（`InventorySlotRef`）和权威侧的 `InventoryComponent.entryAt` 用的是同一个
+ * 形状，命令过网因此不需要再翻译一次。
+ */
+export type InventorySlotAddress =
+  | { readonly kind: 'backpack'; readonly itemType: string }
+  | { readonly kind: 'hotbar'; readonly slotIndex: number };
+
 export type InventoryCommand =
   /** 切到物品栏第 N 格；再发一次同一格就是收手。 */
   | { kind: 'select'; slotIndex: number }
@@ -110,6 +121,16 @@ export type InventoryCommand =
    * 和别的格子完全一样。
    */
   | { kind: 'drop:hotbar'; slotIndex: number }
+  /**
+   * 装填：把一摞弹药从 `source` 那一格搬进 `slot` 那一格的弹药位。
+   *
+   * 弹药记在**格子**上，所以两头说的都是「哪一格」：同一把弹弓，装着三颗石头和
+   * 空着是两种状态，那是这一把的状态，不是「弹弓」这个种类的。装得下几发、来源
+   * 够不够，都由服务端按物品目录的 `ammo` 算。
+   */
+  | { kind: 'ammo:load'; slot: InventorySlotAddress; source: InventorySlotAddress }
+  /** 卸下：把那一格里装着的弹药收回身上（先手上、再物品栏、最后背包）。 */
+  | { kind: 'ammo:unload'; slot: InventorySlotAddress }
   | { kind: 'container:open'; actorId: string }
   | { kind: 'container:close'; actorId: string }
   | {
@@ -118,6 +139,14 @@ export type InventoryCommand =
       itemType: string;
       quantity: number;
       direction: 'store' | 'withdraw';
+      /**
+       * 存的是**物品栏第几格**里那一摞；不带就是从背包那本账上搬。
+       *
+       * 物品栏是一本独立的账，按物品种类找不到它那一格——同一种东西可能在包里
+       * 也在手上，只发 itemType 会扣错一本。取出来的东西一律落进背包，所以
+       * `withdraw` 不需要它。
+       */
+      slotIndex?: number;
     };
 
 /**
@@ -145,6 +174,14 @@ export type ClientMessage =
   | { type: 'room:join'; roomId: string; name: string }
   | { type: 'room:leave' }
   | { type: 'weather:set'; weather: WeatherType }
+  /**
+   * 调试：直接给自己一个某种物品（F8 菜单里的那一栏）。
+   *
+   * 和 `weather:set` 同一个性质——它是**开发期的一条请求**，不是玩法：产品构建
+   * 里 F8 那套开发 Context 整个被移除，谁都发不出这条。落点走拾取那条规矩
+   * （先手上、再物品栏、最后背包），因为「拿到一个东西」在游戏里只有这一种落法。
+   */
+  | { type: 'debug:give-item'; itemType: string }
   | { type: 'daynight:set'; timeOfDay: number }
   | {
       type: 'player:input';

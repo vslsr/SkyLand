@@ -34,6 +34,13 @@ import {
   woodBowStringOffsetX,
 } from '../../models/actors/createWoodBowModel';
 import {
+  createSlingshotBandGeometry,
+  createSlingshotForkGeometry,
+  createSlingshotGripGeometry,
+  slingshotBandHeight,
+  slingshotForkPlacements,
+} from '../../models/actors/createSlingshotModel';
+import {
   STONE_PILE_PIECES,
   createStonePieceGeometry,
 } from '../../models/actors/createStonePileModel';
@@ -50,12 +57,14 @@ type StonePileRender = Extract<ActorRender, { model: 'line-art-stone-pile' }>;
 type FruitPileRender = Extract<ActorRender, { model: 'line-art-fruit-pile' }>;
 type MushroomPileRender = Extract<ActorRender, { model: 'line-art-mushroom-pile' }>;
 type WoodBowRender = Extract<ActorRender, { model: 'line-art-wood-bow' }>;
+type SlingshotRender = Extract<ActorRender, { model: 'line-art-slingshot-pile' }>;
 type PileRender =
   | WoodPileRender
   | StonePileRender
   | FruitPileRender
   | MushroomPileRender
-  | WoodBowRender;
+  | WoodBowRender
+  | SlingshotRender;
 
 /** 走合批绘制的堆叠模型。新增一种堆叠物就在这里登记，并补一个 pieces 构造。 */
 const PILE_RENDER_MODELS = new Set<PileRender['model']>([
@@ -64,6 +73,7 @@ const PILE_RENDER_MODELS = new Set<PileRender['model']>([
   'line-art-fruit-pile',
   'line-art-mushroom-pile',
   'line-art-wood-bow',
+  'line-art-slingshot-pile',
 ]);
 
 /**
@@ -270,6 +280,7 @@ function createMushroomPilePieces(
 }
 
 /**
+/**
  * 掉在地上的一把弓：**只有一件，不堆**（`maximumQuantity` 是 1）。
  *
  * 几何和手持那把是同一对函数，所以地上那把和手上那把是同一副样子——两处各画一套
@@ -305,6 +316,42 @@ function createWoodBowPieces(definition: WoodBowRender, burning: boolean): PileP
   ];
 }
 
+/**
+ * 一把弹弓：手柄 + 两根杈 + 皮筋。
+ *
+ * 没有「一小堆」那一支：`stackLimit` 是 1，一格只放得下一把，地上那一份因此
+ * 永远是单把——所以这里不看 `single`。
+ */
+function createSlingshotPieces(definition: SlingshotRender, burning: boolean): PilePiece[] {
+  const frame = new THREE.Color(burning ? '#6b4a2c' : definition.frameColor);
+  const band = new THREE.Color(burning ? '#3f2f24' : definition.bandColor);
+  const pieces: PilePiece[] = [{
+    geometry: createSlingshotGripGeometry(definition.radius, definition.height),
+    matrix: new THREE.Matrix4().setPosition(0, definition.height * 0.22, 0),
+    tint: frame,
+    edgeThreshold: 1,
+  }];
+  for (const placement of slingshotForkPlacements(definition.radius, definition.height)) {
+    pieces.push({
+      geometry: createSlingshotForkGeometry(definition.radius, definition.height),
+      matrix: new THREE.Matrix4().compose(
+        new THREE.Vector3(placement.x, placement.y, 0),
+        new THREE.Quaternion().setFromEuler(new THREE.Euler(0, 0, placement.tilt)),
+        new THREE.Vector3(1, 1, 1),
+      ),
+      tint: frame,
+      edgeThreshold: 1,
+    });
+  }
+  pieces.push({
+    geometry: createSlingshotBandGeometry(definition.radius),
+    matrix: new THREE.Matrix4().setPosition(0, slingshotBandHeight(definition.height), 0),
+    tint: band,
+    edgeThreshold: 1,
+  });
+  return pieces;
+}
+
 function createPilePieces(
   definition: PileRender,
   burning: boolean,
@@ -322,6 +369,9 @@ function createPilePieces(
   }
   if (definition.model === 'line-art-wood-bow') {
     return createWoodBowPieces(definition, burning);
+  }
+  if (definition.model === 'line-art-slingshot-pile') {
+    return createSlingshotPieces(definition, burning);
   }
   return createFruitPilePieces(definition, burning, single, groundOffset);
 }

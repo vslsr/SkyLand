@@ -67,6 +67,18 @@
       "localTransform": { "position": [-1.5, 0, -8.5], "yaw": -0.7853982 }
     },
     {
+      "id": "slingshot-01",
+      "archetype": "slingshot-pile",
+      "localTransform": {
+        "position": [
+          -2.6,
+          0,
+          4.6
+        ],
+        "yaw": 0.6
+      }
+    },
+    {
       "id": "storage-chest-01",
       "archetype": "storage-chest",
       "localTransform": {
@@ -102,7 +114,7 @@
   },
   "gameplay": {
     "playerActor": {
-      "archetype": "player-slime"
+      "archetype": "pbf-slime"
     },
     "bounds": {
       "minimumX": -16,

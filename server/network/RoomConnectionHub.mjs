@@ -156,6 +156,13 @@ export class RoomConnectionHub {
             this.roomManager.setTimeOfDay(session.roomId, session.playerId, message.timeOfDay);
           }
           break;
+        case 'debug:give-item':
+          // 一次点击一条消息，和其它玩家驱动的上行一样过令牌桶：按住不放的连点
+          // 不该绕开限流。
+          if (session.roomId && session.playerId && this.consumeInputToken(session)) {
+            this.roomManager.giveDebugItem(session.roomId, session.playerId, message.itemType);
+          }
+          break;
         case 'actor:claim':
           if (session.roomId && session.playerId) {
             this.roomManager.claimActorControl(session.roomId, session.playerId, message.actorId);

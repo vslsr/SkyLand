@@ -655,6 +655,45 @@ body.has-interaction-target .crosshair {
   letter-spacing: 0.04em;
 }
 
+/*
+ * F8 里的物品列表。
+ *
+ * 它收在按钮下面，而不是浮在窗口外：F8 这个窗口自己会滚动，浮层挂进来会被裁掉
+ * 半截，挂到外面又得自己算位置。物品多起来时它自己滚（`max-height`），所以这一栏
+ * 不会把整个调试菜单撑长。
+ */
+.debug-menu__item-menu {
+  display: grid;
+  gap: 4px;
+  max-height: 208px;
+  margin-top: 7px;
+  padding: 6px;
+  overflow-y: auto;
+  background: rgba(253, 251, 246, 0.72);
+  border: 1px solid rgba(28, 26, 23, 0.24);
+}
+
+.debug-menu__item-menu[hidden] {
+  display: none;
+}
+
+.debug-menu__item-button {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  justify-content: flex-start;
+  min-height: 30px;
+  padding: 0 9px;
+  text-align: left;
+}
+
+.debug-menu__item-id {
+  margin-left: auto;
+  opacity: 0.5;
+  font-size: 10px;
+  letter-spacing: 0.04em;
+}
+
 .debug-menu__weather-grid {
   display: flex;
   flex-wrap: wrap;
@@ -1060,6 +1099,38 @@ body.is-topdown .virtual-controls.is-desktop-debug {
   font-weight: 700;
 }
 
+/*
+ * 右下角那个弹药小框：装着的那种弹药 + 还剩几发。
+ *
+ * 绝对定位在格子角上，因为它说的是「这一格里那件东西的状态」，不是格子内容的一
+ * 部分——排进流里会把图标和名字挤下去，而物品栏那种 46 像素的小格根本挤不下。
+ * 没装弹药时这个元素整个不存在（见 `createAmmoBox`），所以这里不需要空态。
+ */
+.inventory__ammo {
+  position: absolute;
+  right: 2px;
+  bottom: 2px;
+  display: flex;
+  gap: 2px;
+  align-items: center;
+  padding: 1px 3px;
+  color: #35281f;
+  background: color-mix(in srgb, var(--item-tint, #b9b4a8) 42%, #fdfbf6);
+  border: 1px solid rgba(28, 26, 23, 0.34);
+}
+
+.inventory__ammo-icon {
+  display: block;
+  width: 11px;
+  height: 11px;
+}
+
+.inventory__ammo-count {
+  font-size: 9px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+}
+
 .inventory__badge {
   padding: 1px 6px;
   color: rgba(28, 26, 23, 0.72);
@@ -1235,6 +1306,27 @@ body.is-topdown .virtual-controls.is-desktop-debug {
 }
 
 /*
+ * 还剩几发弹药，画在格子左下角。
+ *
+ * 和右下角的堆叠数量分两个角：一件东西**有几个**和它**装着几发**是两回事，
+ * 挤在同一个角上会读成一个奇怪的分数。没装弹药的格子整个不画，理由同背包里
+ * 那个小框——一个空框看起来像坏了。
+ */
+.hotbar__ammo {
+  position: absolute;
+  bottom: 4px;
+  left: 6px;
+  color: rgba(226, 168, 88, 0.96);
+  font-size: 10px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.hotbar__ammo[hidden] {
+  display: none;
+}
+
+/*
  * 长按时盖在这一格上的圆形倒计时。
  *
  * 是一个真正的**环**，不是把方格底色填掉一角：倒计时说的是「还剩多少时间」，
@@ -1265,6 +1357,16 @@ body.is-topdown .virtual-controls.is-desktop-debug {
 
 .hotbar__slot[data-progress] {
   --hotbar-progress-color: rgba(201, 120, 104, 0.92);
+}
+
+/*
+ * 蓄力拉满了。
+ *
+ * 蓄力那一圈满了不会自己打出去，它停在满圈上等松手——所以「满了」必须自己有个
+ * 记号，否则玩家只能靠盯着那圈还在不在猜这一下到没到顶。
+ */
+.hotbar__dial[data-charged='true'] {
+  --hotbar-progress-color: rgba(226, 168, 88, 0.96);
 }
 
 /*
@@ -1553,14 +1655,16 @@ body.is-topdown .virtual-controls.is-desktop-debug {
 /* ---- 容器界面 ------------------------------------------------------------ */
 
 /*
- * 不做双面板拖拽：一行同时给出「身上」和「箱内」，两个按钮各搬一个方向。玩家要
- * 决定搬哪边就得同时看见两边，分成两个面板再让人拖来拖去，是把这个判断拆散之后
- * 再要求玩家自己拼回去。
+ * 上半屏是箱内、下半屏是背包，中间隔一道线，格子和背包界面完全是同一种。
+ *
+ * 箱子和背包装的是同一种东西、守的是同一套堆叠与货位规则，所以界面上也只该有一
+ * 种格子。搬东西是把一格拖到另一片上——玩家已经在背包里学过这个动作。上一版是
+ * 一张「一行一种物品、两个数字并排」的表，读起来像库存清单而不像一个箱子。
  */
 .container__summary {
   display: flex;
+  flex-wrap: wrap;
   align-items: baseline;
-  justify-content: space-between;
   gap: 12px;
   margin-bottom: 10px;
 }
@@ -1578,7 +1682,7 @@ body.is-topdown .virtual-controls.is-desktop-debug {
 }
 
 .container__store-all {
-  margin-bottom: 12px;
+  margin-left: auto;
   padding: 6px 14px;
   font-size: 11px;
   font-weight: 700;
@@ -1593,63 +1697,31 @@ body.is-topdown .virtual-controls.is-desktop-debug {
   cursor: default;
 }
 
-.container__rows {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.container__row {
-  display: grid;
-  grid-template-columns: 32px 1fr auto auto auto;
-  align-items: center;
-  gap: 10px;
-  padding: 7px 10px;
+/*
+ * 箱内那一片。
+ *
+ * 底色比背包那片深一点：两片格子长得一样是**对的**（它们装的是同一种东西），
+ * 但玩家得一眼看出哪一片是箱子——拖过去之前就要知道自己往哪拖。
+ */
+.container__grid {
+  padding: 8px;
+  background: rgba(138, 98, 56, 0.07);
   border: 1px solid rgba(138, 98, 56, 0.28);
-  border-radius: 4px;
 }
 
-.container__swatch {
-  display: grid;
-  place-items: center;
-  width: 28px;
-  height: 28px;
-  color: var(--item-tint);
-}
-
-.container__icon {
-  width: 22px;
-  height: 22px;
-}
-
-.container__name {
-  font-size: 12px;
-  font-weight: 700;
-}
-
-.container__counts {
-  font-size: 11px;
-  opacity: 0.7;
-  white-space: nowrap;
-}
-
-.container__action {
-  min-width: 40px;
-  padding: 4px 10px;
+/* 「背包」那一行小标题：两片之间的那道分界，不是装饰。 */
+.container__heading {
+  margin: 14px 0 8px;
+  padding-top: 12px;
+  color: rgba(28, 26, 23, 0.62);
   font-size: 11px;
   font-weight: 700;
-  background: transparent;
-  border: 1px solid rgba(138, 98, 56, 0.5);
-  border-radius: 4px;
-  cursor: pointer;
+  letter-spacing: 0.14em;
+  border-top: 1px dashed rgba(138, 98, 56, 0.42);
 }
 
-.container__action:disabled {
-  opacity: 0.32;
-  cursor: default;
+.container__heading[hidden] {
+  display: none;
 }
 
 .container__empty-notice {

@@ -151,6 +151,7 @@ export function dropHotbarItem(scene, player, slotIndex) {
   // 先确认这件东西掉在地上长什么样：没有掉落原型就丢不出去，这时账不能先扣。
   const archetypeId = findItemArchetypeId(scene.actorWorld.context.archetypes, slot.itemType);
   if (!archetypeId) return false;
+  salvageAmmo(scene, player, { kind: 'hotbar', slotIndex });
   if (inventory.consumeHotbarSlot(slotIndex, 1) !== 1) return false;
   spawnDropInFront(scene, player, archetypeId, 1);
   // 那一格可能还剩几个，也可能刚好空了：重新对齐一次，手上跟着变。
@@ -175,10 +176,35 @@ export function dropInventoryItem(scene, player, itemType, quantity = 1) {
   // 先确认这件东西掉在地上长什么样：没有掉落原型就丢不出去，这时账不能先扣。
   const archetypeId = findItemArchetypeId(scene.actorWorld.context.archetypes, itemType);
   if (!archetypeId) return false;
+  salvageAmmo(scene, player, { kind: 'backpack', itemType });
   const removed = inventory.remove(itemType, wanted);
   if (removed <= 0) return false;
   spawnDropInFront(scene, player, archetypeId, removed);
   return true;
+}
+
+/**
+ * 丢掉一件装着弹药的东西之前，先把弹药抢救出来。
+ *
+ * 掉落物身上还没有弹药位（掉在地上的那一堆是「几个同类」，不是「哪一件」），所以
+ * 连着弹药一起丢下去等于让那几发凭空蒸发。落点按卸下的规矩来：先回玩家身上（手上
+ * → 物品栏 → 背包），身上一发都收不下的才跟着一起掉在地上——总之不消失。
+ *
+ * @returns 这一格现在还剩几发装不掉的（正常情况恒为 0）
+ */
+function salvageAmmo(scene, player, ref) {
+  const inventory = player?.getComponent(INVENTORY_COMPONENT);
+  const ammo = inventory?.ammoAt(ref);
+  if (!ammo) return 0;
+  const ammoType = ammo.itemType;
+  inventory.unloadAmmo(ref);
+  const left = inventory.ammoAt(ref)?.quantity ?? 0;
+  if (left === 0) return 0;
+  const archetypeId = findItemArchetypeId(scene.actorWorld.context.archetypes, ammoType);
+  if (!archetypeId) return left;
+  spawnDropInFront(scene, player, archetypeId, left);
+  inventory.consumeAmmo(ref, left);
+  return 0;
 }
 
 /** 身前 0.85 米、抬高 0.35 米。就地生成会和角色的碰撞体重叠，把人卡住。 */
@@ -196,18 +222,22 @@ function spawnDropInFront(scene, player, archetypeId, quantity) {
 }
 
 /**
- * 背包与容器之间搬东西。
+ * 背包、物品栏与容器之间搬东西。
  *
- * 搬的是**背包**那一本账，物品栏不参与：箱子前面按「存」，玩家指的是包里那些，
- * 而不是把手上正拿着的那一摞也一并塞进去。要存物品栏里的东西，先把它收回背包。
+ * 搬的默认是**背包**那一本账。物品栏是另一本，按物品种类找不到它那一格——同一种
+ * 东西可能在包里也在手上——所以要搬它得指名道姓：`slotIndex` 给出第几格。
+ * 取出来的东西一律落进背包，不自动上手：玩家在箱子前面要的是「收起来」。
  *
  * 不加锁：两个人同时掏同一个箱子时，两次请求在同一条 tick 线上依次执行，
  * `ItemLedger.remove` 按账上实际有的数量截断，所以先到的拿走、后到的拿到 0，
  * 各自在下一帧快照里看到真实结果。
  *
+ * 装着弹药的那一件**整条搬**（`takeEntry` / `putEntry`）：拆成「扣几个、加几个」
+ * 会让那几发弹药在半路上蒸发。
+ *
  * @returns 实际搬动的数量
  */
-export function transferItems(player, containerActor, { itemType, quantity, direction }) {
+export function transferItems(player, containerActor, { itemType, quantity, direction, slotIndex }) {
   const inventory = player?.getComponent(INVENTORY_COMPONENT);
   const container = containerActor?.getComponent(CONTAINER_COMPONENT);
   if (!inventory || !container || !itemCatalog.has(itemType)) return 0;
@@ -215,13 +245,67 @@ export function transferItems(player, containerActor, { itemType, quantity, dire
   const requested = Math.max(0, Math.floor(Number(quantity) || 0));
   if (requested === 0) return 0;
 
-  const [from, to] = direction === 'withdraw' ? [container, inventory] : [inventory, container];
-  // 先按来源实际有多少截断，再按目标能收多少截断，最后才真的从来源扣：
-  // 顺序反了会在目标装满时把差额凭空销毁。
-  const available = Math.min(requested, from.quantityOf(itemType));
+  const fromHotbar = direction === 'store' && slotIndex !== undefined;
+  if (fromHotbar && inventory.hotbar[slotIndex]?.itemType !== itemType) return 0;
+  const source = fromHotbar
+    ? { kind: 'hotbar', slotIndex }
+    : { kind: 'backpack', itemType };
+
+  // 带弹药的那一件是一个整体：整条搬得动才搬，搬不动什么都不做。拆成「扣几个、
+  // 加几个」会让那几发在半路上蒸发，两个方向都是。
+  if (hasLoadedAmmo(inventory, container, { itemType, direction, source })) {
+    return transferLoadedEntry(inventory, container, { itemType, fromHotbar, slotIndex, direction });
+  }
+
+  if (direction === 'withdraw') {
+    // 先按来源实际有多少截断，再按目标能收多少截断，最后才真的从来源扣：
+    // 顺序反了会在目标装满时把差额凭空销毁。
+    const available = Math.min(requested, container.quantityOf(itemType));
+    if (available === 0) return 0;
+    const accepted = inventory.add(itemType, available);
+    if (accepted === 0) return 0;
+    container.remove(itemType, accepted);
+    return accepted;
+  }
+
+  const carried = fromHotbar
+    ? inventory.hotbar[slotIndex]?.quantity ?? 0
+    : inventory.quantityOf(itemType);
+  const available = Math.min(requested, carried);
   if (available === 0) return 0;
-  const accepted = to.add(itemType, available);
+  const accepted = container.add(itemType, available);
   if (accepted === 0) return 0;
-  from.remove(itemType, accepted);
+  if (fromHotbar) inventory.consumeHotbarSlot(slotIndex, accepted);
+  else inventory.remove(itemType, accepted);
   return accepted;
+}
+
+/** 要搬的那一件身上装着弹药吗。装着的话它只能整条搬。 */
+function hasLoadedAmmo(inventory, container, { itemType, direction, source }) {
+  if (direction === 'store') return inventory.ammoAt(source) !== undefined;
+  return [...container.ledger.pooled, ...container.ledger.slots]
+    .some((entry) => entry.itemType === itemType && entry.ammo);
+}
+
+/**
+ * 整条搬一件装着弹药的东西。全有或全无。
+ *
+ * 先从来源取走、再往目标放；目标收不下就原样放回来——一发弹药都不能丢在半路上。
+ */
+function transferLoadedEntry(inventory, container, { itemType, fromHotbar, slotIndex, direction }) {
+  const storing = direction === 'store';
+  const entry = storing
+    ? (fromHotbar ? { ...inventory.hotbar[slotIndex] } : inventory.ledger.takeEntry(itemType))
+    : container.ledger.takeEntry(itemType);
+  if (!entry?.itemType) return 0;
+  const target = storing ? container.ledger : inventory.ledger;
+  if (target.putEntry(entry)) {
+    if (storing && fromHotbar) inventory.consumeHotbarSlot(slotIndex, entry.quantity);
+    inventory.revision += 1;
+    container.revision += 1;
+    return entry.quantity;
+  }
+  // 收不下：放回来源，账本回到搬之前的样子。物品栏那一格本来就没动过。
+  if (!(storing && fromHotbar)) (storing ? inventory.ledger : container.ledger).putEntry(entry);
+  return 0;
 }

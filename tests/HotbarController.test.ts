@@ -199,3 +199,33 @@ test('按住途中真的换了东西，这次使用才作废', () => {
   bar.controller.update();
   assert.deepEqual(bar.sent.at(-1), { kind: 'use:cancel' });
 });
+
+test('蓄力：圈满停在满圈上等松手，松手才发出那一下', () => {
+  // 弹弓是 charge / 0.9 秒。和长按画的是同一个圈，收尾完全相反：长按的圈满是
+  // 结算，蓄力的圈满只是拉满——松手才是那一下，所以圈不能收。
+  const bar = harness('held-1');
+  bar.inventory.add('slingshot', 1);
+  bar.inventory.assignHotbarSlot(0, 'slingshot');
+  bar.inventory.setActiveHotbarSlot(0);
+
+  bar.use('started');
+  assert.deepEqual(bar.sent, [{ kind: 'use:begin' }]);
+
+  bar.advance(450);
+  bar.controller.update();
+  const halfway = bar.progress.at(-1);
+  assert.equal(halfway?.action, 'shoot');
+  assert.equal(halfway?.mode, 'charge');
+  assert.ok(halfway!.ratio > 0.4 && halfway!.ratio < 0.6, `圈应当在中途，实际 ${halfway?.ratio}`);
+
+  bar.advance(1000);
+  bar.controller.update();
+  assert.equal(bar.progress.at(-1)?.ratio, 1, '拉满了，圈留在那里等松手');
+
+  bar.use('completed');
+  assert.deepEqual(
+    bar.sent,
+    [{ kind: 'use:begin' }, { kind: 'use:release' }],
+    '松手那一下要发出去：蓄了几成由服务端按自己记的时刻算',
+  );
+});

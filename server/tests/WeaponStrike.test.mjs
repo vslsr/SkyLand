@@ -141,7 +141,7 @@ test('拉满一箭打中面前的史莱姆，伤害按蓄力与标签结算', as
   assert.equal(health.current, 90);
 });
 
-test('空放不发射也不进冷却，拉满之后的连发被 CD 挡住', async () => {
+test('空放不发射，拉满之后的连发被 CD 挡住', async () => {
   const context = await createScene();
   const { scene, player } = context;
   const walker = scene.actorWorld.getActor('legged-slime-walker-01');
@@ -152,6 +152,9 @@ test('空放不发射也不进冷却，拉满之后的连发被 CD 挡住', asyn
   // 点一下就松：比例远低于 0.15，空放。
   assert.equal(fire(context, 0.05, walker), false, '空放不该算做成事');
   assert.equal(health.current, 100);
+  // 冷却记在「按下去用了一次」上，不记在「打没打中」上：空放同样要等这 0.1 秒，
+  // 否则空放就成了一个可以无限点的动作。
+  context.advance(0.2);
 
   assert.equal(fire(context, 1.5, walker), true);
   assert.equal(health.current, 90);

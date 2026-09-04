@@ -1,0 +1,47 @@
+{
+  "$schema": "./actor.schema.json",
+  "schemaVersion": 1,
+  "id": "slingshot-pile",
+  "components": {
+    "interactable": {
+      "action": "pickup-stack",
+      "label": "弹弓",
+      "maximumDistance": 2.4
+    },
+    "itemStack": {
+      "itemType": "slingshot",
+      "displayName": "弹弓",
+      "defaultQuantity": 1,
+      "maximumQuantity": 1,
+      "compatibilityKey": "slingshot-standard"
+    },
+    "actorResidency": {
+      "sleepDelaySeconds": 1,
+      "dormantDelaySeconds": 3,
+      "dormantEligible": true
+    },
+    "dropMotion": {
+      "gravity": 9.8,
+      "drag": 0.5,
+      "groundDrag": 2.6,
+      "restitution": 0.15,
+      "radius": 0.16,
+      "settleSpeed": 0.08
+    },
+    "lifetime": {
+      "lifetimeSeconds": 900
+    },
+    "replicationPolicy": {
+      "mode": "aoi",
+      "radiusChunks": 2
+    },
+    "render": {
+      "model": "line-art-slingshot-pile",
+      "frameColor": "#8A6A46",
+      "bandColor": "#5B4636",
+      "inkColor": "#4A453E",
+      "radius": 0.16,
+      "height": 0.42
+    }
+  }
+}

@@ -161,7 +161,7 @@ test('蓄力的圈满了也不结算：线和圈都留着，松手才打出去',
   bar.advance(600);
   bar.controller.update();
   const half = bar.progress.at(-1)!;
-  assert.equal(half.action, 'weapon');
+  assert.equal(half.action, 'shoot');
   assert.ok(half.ratio > 0.4 && half.ratio < 0.6, `半程比例应当在中间，实际 ${half.ratio}`);
 
   // 拉满：长按物品到这里就结算了，蓄力不是——圈停在满格等松手。

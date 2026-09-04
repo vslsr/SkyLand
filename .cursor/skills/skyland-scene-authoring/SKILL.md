@@ -21,6 +21,8 @@ Create scenes as server-authoritative JSON data. Keep the lobby on its empty sce
 
 If the request adds or changes Actor Component state, server Systems, ownership, interactions, snapshot fields, or client Replica behavior, use `skyland-actor-component`. This skill only owns placement of already-supported archetypes and the surrounding scene contract.
 
+If the request adds a block players place themselves — a foundation, wall, or buildable fixture — use `skyland-build-piece`. Offering an existing piece on a map is scene work and stays here: list its archetype id in `gameplay.runtimeActorArchetypes`, and make sure the map can supply the materials it costs.
+
 ## Choose the change scope
 
 - For a new composition of supported content (`ground`, `trees`, `grass`, `ocean`), add only a new `config/scenes/<id>.scene.json` file.

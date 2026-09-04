@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { DebugMenuPage } from '../src/ui/pages/DebugMenuPage.ts';
+import { itemCatalog } from '../shared/items/index.mjs';
 
 class FakeElement extends EventTarget {
   public className = '';
@@ -178,6 +179,65 @@ test('F8 调试菜单的帧耗时面板开关切换文案、无障碍状态并�
     page.setProfilerVisible(true);
     assert.equal(profilerButton.textContent, '关闭帧耗时面板');
     assert.deepEqual(requests, [true, false], 'setProfilerVisible 不该反过来触发回调');
+  } finally {
+    Object.defineProperty(globalThis, 'document', {
+      value: previousDocument,
+      configurable: true,
+      writable: true,
+    });
+  }
+});
+
+test('F8 里的物品那一栏：点开列表是物品目录本身，点一件报一次意图', () => {
+  const previousDocument = globalThis.document;
+  const fakeDocument = new FakeDocument();
+  Object.defineProperty(globalThis, 'document', {
+    value: fakeDocument,
+    configurable: true,
+    writable: true,
+  });
+
+  try {
+    const page = new DebugMenuPage();
+    const toggle = fakeDocument.elements.find((element) => (
+      element.tagName === 'button' && element.textContent === '选择物品…'
+    ));
+    assert.ok(toggle, '那一栏该有一个点开列表的按钮');
+    const menu = fakeDocument.elements.find((element) => (
+      element.className.includes('debug-menu__item-menu')
+    ));
+    assert.ok(menu);
+    assert.equal(menu.hidden, true, '默认收着：F8 一打开不该被一长条物品占满');
+
+    // 列的是目录本身，不是一张写死的清单：目录里加一件东西这里就多一条。
+    const listed = menu.children.map((child) => child.dataset.itemType);
+    assert.deepEqual(listed, itemCatalog.list().map((item) => item.id));
+
+    toggle.dispatchEvent(new Event('click'));
+    assert.equal(menu.hidden, false);
+    assert.equal(toggle.textContent, '收起物品列表');
+    assert.equal(toggle.getAttribute('aria-expanded'), 'true');
+
+    const grants: string[] = [];
+    page.onItemGrant((itemType) => grants.push(itemType));
+    const slingshot = menu.children.find((child) => child.dataset.itemType === 'slingshot');
+    assert.ok(slingshot, '目录里的弹弓也该列出来');
+    slingshot.dispatchEvent(new Event('click'));
+    assert.deepEqual(grants, ['slingshot']);
+    assert.equal(menu.hidden, true, '点完就收起来：一次点击给一个');
+
+    // 给没给成由下一帧快照说了算，回执只说「已经请求了哪一件」。
+    const status = fakeDocument.elements.find((element) => (
+      element.className.includes('debug-menu__status') && element.textContent.includes('已请求')
+    ));
+    assert.ok(status);
+    assert.ok(status.textContent.includes('弹弓'), status.textContent);
+
+    // 关掉 F8 再打开，不该看见上一次翻开的那一半。
+    toggle.dispatchEvent(new Event('click'));
+    assert.equal(menu.hidden, false);
+    page.onClose();
+    assert.equal(menu.hidden, true);
   } finally {
     Object.defineProperty(globalThis, 'document', {
       value: previousDocument,

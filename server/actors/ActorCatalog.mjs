@@ -24,6 +24,7 @@ const PILE_RENDER_MODELS = new Set([
   'line-art-stone-pile',
   'line-art-fruit-pile',
   'line-art-mushroom-pile',
+  'line-art-slingshot-pile',
 ]);
 const COLOR_PATTERN = /^#[0-9a-f]{6}$/i;
 /**
@@ -1043,6 +1044,16 @@ function validateRender(raw, filename) {
       model: render.model,
       stoneColor: requireColor(render.stoneColor, `${path}.stoneColor`),
       accentColor: requireColor(render.accentColor, `${path}.accentColor`),
+      inkColor: requireColor(render.inkColor, `${path}.inkColor`),
+      radius: requireNumber(render.radius, `${path}.radius`, Number.EPSILON, 3),
+      height: requireNumber(render.height, `${path}.height`, Number.EPSILON, 3),
+    };
+  }
+  if (render.model === 'line-art-slingshot-pile') {
+    return {
+      model: render.model,
+      frameColor: requireColor(render.frameColor, `${path}.frameColor`),
+      bandColor: requireColor(render.bandColor, `${path}.bandColor`),
       inkColor: requireColor(render.inkColor, `${path}.inkColor`),
       radius: requireNumber(render.radius, `${path}.radius`, Number.EPSILON, 3),
       height: requireNumber(render.height, `${path}.height`, Number.EPSILON, 3),

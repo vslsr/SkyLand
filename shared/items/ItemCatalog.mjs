@@ -25,8 +25,10 @@ const POOLED_CATEGORIES = new Set(['ammunition', 'tool']);
 /**
  * 使用这件物品时做什么。
  *
- * 只登记**已经有系统兑现**的效果：`eat` 扣掉 `value` 个并让角色演一段吃的动作，
- * `tool` 走 `GeneratedProp.applyDamage`，`throw` 走掉落物的 `DropMotion` 抛体。
+ * 只登记**有人兑现得了**的效果：`eat` 扣掉 `value` 个并让角色演一段吃的动作，
+ * `tool` 走 `GeneratedProp.applyDamage`，`throw` 走掉落物的 `DropMotion` 抛体，
+ * `shoot` 由**武器系统**自己注册执行器（见 `server/actors/ItemUseActions.mjs`）——
+ * 物品侧只负责把这一次激活连同蓄力比例交出去，不替它决定飞出去的是什么。
  * 「吃下回血」里的回血还不在其中——角色身上还没有一条可回复的属性，所以 `eat`
  * 现在兑现的是「吃掉一个」这件事本身，回血等那条属性到位再加。
  *
@@ -34,7 +36,7 @@ const POOLED_CATEGORIES = new Set(['ammunition', 'tool']);
  * Ability → 按下面的 mode 激活 → 完成后收回」，`action` 决定那条 Ability 激活
  * 时执行什么，见 `shared/items/ItemAbility.mjs`。
  */
-export const ITEM_USE_ACTIONS = Object.freeze(['eat', 'tool', 'throw', 'weapon']);
+export const ITEM_USE_ACTIONS = Object.freeze(['eat', 'shoot', 'tool', 'throw']);
 
 /**
  * 逻辑输入槽。
@@ -55,9 +57,12 @@ export const ITEM_USE_INPUTS = Object.freeze(['primary']);
  * - `hold`：按住 `holdSeconds` 秒，**倒计时走完的那一刻激活**，中途松手是取消。
  *   长按不是「蓄力越久越强」——强度恒为 `value`，倒计时只决定成不成立。玩家看到
  *   的那圈圆形倒计时因此和判定是同一件事：圈满 = 激活。
- * - `charge`：**松手那一刻激活**，按住的时长换算成 [0, 1] 的蓄力比例，效果按它缩放
- *   （设计稿的「长按蓄力攻击」）。和 `hold` 的差别只有一处，但是根本的：`hold` 的
- *   圈满是结算，`charge` 的圈满是「攒到头了」，还没打出去。
+ * - `charge`：按住蓄力，**松手那一刻激活**，蓄到几成由激活时的比例说了算。圈满之后
+ *   不自己激活，停在满圈上等松手——弓拉满了不会自己射出去。
+ *
+ * `hold` 和 `charge` 画的是同一个圈、读的是同一个 `holdSeconds`，差别只有一个：
+ * 圈满那一刻是**结算**还是**等松手**。分成两个 mode 而不是加一个布尔，是因为这决定
+ * 了「松手」有没有含义——`hold` 的松手是取消，`charge` 的松手才是那一下。
  */
 export const ITEM_USE_MODES = Object.freeze(['tap', 'hold', 'charge']);
 
@@ -103,14 +108,19 @@ function validateUse(raw, path, holdable) {
   if (!ITEM_USE_MODES.includes(definition.mode)) {
     throw new TypeError(`${path}.mode 必须是 ${ITEM_USE_MODES.join(' / ')} 之一`);
   }
-  // 长按与蓄力都要一个倒计时长度：一个决定「几时算数」，一个决定「攒到头是多久」。
+  // 按住的两种（长按、蓄力）都要给出圈的长度；点按没有圈可画。
   const held = definition.mode === 'hold' || definition.mode === 'charge';
   const holdSeconds = definition.holdSeconds;
   if (held !== (holdSeconds !== undefined)) {
-    throw new TypeError(`${path}.holdSeconds 属于 hold 与 charge，且必须给出倒计时长度`);
+    throw new TypeError(`${path}.holdSeconds 只属于 hold / charge，且按住必须给出圈的长度`);
   }
   if (held && (!Number.isFinite(holdSeconds) || holdSeconds <= 0 || holdSeconds > 10)) {
     throw new TypeError(`${path}.holdSeconds 必须是 (0, 10] 的秒数`);
+  }
+  const cooldownSeconds = definition.cooldownSeconds;
+  if (cooldownSeconds !== undefined
+    && (!Number.isFinite(cooldownSeconds) || cooldownSeconds <= 0 || cooldownSeconds > 60)) {
+    throw new TypeError(`${path}.cooldownSeconds 必须是 (0, 60] 的秒数`);
   }
   return Object.freeze({
     action: definition.action,
@@ -118,7 +128,47 @@ function validateUse(raw, path, holdable) {
     mode: definition.mode,
     /** tap 的倒计时长度是 0：点一下就激活，不需要再分一条支路。 */
     holdSeconds: held ? holdSeconds : 0,
+    /**
+     * 用完之后多久才能再用一次，秒；0 = 没有冷却。
+     *
+     * 它落成能力自己的 `cooldown`，由 GAS 判定——冷却中的那次激活在能力那一层就被
+     * 挡下，物品侧不用再写一遍「还能不能用」。
+     */
+    cooldownSeconds: cooldownSeconds ?? 0,
     value: requireInteger(definition.value, `${path}.value`, 1, 1000),
+  });
+}
+
+/**
+ * 弹药位：这件东西吃哪几种弹药、装几发。整块不写 = 它不吃弹药。
+ *
+ * **只有走独立池、且一格只放一件的物品能装弹药**（`slotCost: 0` + `stackLimit: 1`，
+ * 也就是分类里的工具）。弹药记在**那一格**上而不是物品目录里——同一把弹弓，装着
+ * 三颗石头和空着是两种状态，那是「这一把」的状态。一格里能堆两件时，装进去的石头
+ * 归哪一件答不上来；独立池每种只有一条，「背包里的那一把」因此永远只有一把，
+ * 用 itemType 就寻址得到它。
+ *
+ * `accepts` 写的是**物品 id**，不是分类：弹弓吃的是普通石头，而石头是材料。
+ * 「什么算弹药」由吃它的那件东西说了算，不由弹药自己的分类说了算。
+ */
+function validateAmmo(raw, path, { pooled, stackLimit }) {
+  if (raw === undefined) return undefined;
+  const definition = requireObject(raw, path);
+  if (!pooled || stackLimit !== 1) {
+    throw new TypeError(`${path}：只有 slotCost 为 0 且 stackLimit 为 1 的物品能装弹药`);
+  }
+  if (!Array.isArray(definition.accepts) || definition.accepts.length === 0) {
+    throw new TypeError(`${path}.accepts 至少要写一种弹药`);
+  }
+  const accepts = definition.accepts.map(
+    (itemType, index) => requireId(itemType, `${path}.accepts[${index}]`),
+  );
+  if (new Set(accepts).size !== accepts.length) {
+    throw new TypeError(`${path}.accepts 里有重复的弹药`);
+  }
+  return Object.freeze({
+    accepts: Object.freeze(accepts),
+    capacity: requireInteger(definition.capacity, `${path}.capacity`, 1, 999),
   });
 }
 
@@ -138,18 +188,20 @@ function requireNumber(value, path, minimum, maximum) {
  * - `attack` = `D.Attack`；
  * - `tagMultipliers` = `D.Attack.Tag`，按目标标签改判倍率（`Actor.Build` 匹配
  *   `Actor.Build.Wall`，见 `shared/actor/actorTags.mjs`）；
- * - `cooldownSeconds` = `D.CD`，走 GAS 的能力冷却，不是自己数帧；
  * - `radius` + `range` = `D.EQS`：朝向 + 蓄力比例反解出落点，落点周围这个半径内的
- *   目标全部命中。**抛物线不在这里**——它是 `A` 里的表现，判定只认落点与半径。
+ *   目标全部命中。**抛物线不在这里**——它是 `A` 里的表现，判定只认落点与半径；
  * - `charge` = 蓄力缩放：低于 `minimumRatio` 视为空放，不发射也不进冷却。
+ *
+ * `D.CD` 不在这里：冷却是**所有物品**都可能有的东西，写在 `use.cooldownSeconds` 上，
+ * 由能力自己的 cooldown 兑现。
+ *
+ * **只属于 `shoot` 的物品，但 `shoot` 不强制要有它**：一件登记了 `shoot` 却还没有
+ * `@w` 条目的东西（比如今天的弹弓）是「打不响的武器」，那是设计还没到，不是配置错。
  */
 function validateWeapon(raw, path, use) {
-  if (raw === undefined) {
-    if (use?.action === 'weapon') throw new TypeError(`${path}：weapon 动作必须给出武器数据`);
-    return undefined;
-  }
+  if (raw === undefined) return undefined;
   const definition = requireObject(raw, path);
-  if (use?.action !== 'weapon') throw new TypeError(`${path} 只属于 weapon 动作的物品`);
+  if (use?.action !== 'shoot') throw new TypeError(`${path} 只属于 shoot 动作的物品`);
   const range = requireObject(definition.range, `${path}.range`);
   const minimumRange = requireNumber(range.minimum, `${path}.range.minimum`, 0.5, 64);
   const maximumRange = requireNumber(range.maximum, `${path}.range.maximum`, 0.5, 64);
@@ -163,9 +215,7 @@ function validateWeapon(raw, path, use) {
   if (maximumScale < minimumScale) {
     throw new TypeError(`${path}.charge.damageScale.maximum 不能小于 minimum`);
   }
-  const multipliers = definition.tagMultipliers === undefined
-    ? []
-    : definition.tagMultipliers;
+  const multipliers = definition.tagMultipliers === undefined ? [] : definition.tagMultipliers;
   if (!Array.isArray(multipliers)) throw new TypeError(`${path}.tagMultipliers 必须是数组`);
   const tagMultipliers = multipliers.map((entry, index) => {
     const entryPath = `${path}.tagMultipliers[${index}]`;
@@ -178,7 +228,6 @@ function validateWeapon(raw, path, use) {
   });
   return Object.freeze({
     attack: requireNumber(definition.attack, `${path}.attack`, 0, 100_000),
-    cooldownSeconds: requireNumber(definition.cooldownSeconds, `${path}.cooldownSeconds`, 0, 60),
     radius: requireNumber(definition.radius, `${path}.radius`, 0.2, 16),
     range: Object.freeze({ minimum: minimumRange, maximum: maximumRange }),
     charge: Object.freeze({
@@ -229,10 +278,8 @@ function validateItem(raw, index) {
   // 弹药是按发数记的独立池，没有「一发子弹拿在手上」这种东西；其余默认可手持。
   const holdable = definition.holdable ?? category !== 'ammunition';
   const use = validateUse(definition.use, `${path}.use`, holdable);
+  const ammo = validateAmmo(definition.ammo, `${path}.ammo`, { pooled, stackLimit });
   const weapon = validateWeapon(definition.weapon, `${path}.weapon`, use);
-  if (use?.action === 'weapon' && use.mode !== 'charge') {
-    throw new TypeError(`${path}.use.mode：武器走长按蓄力，必须是 charge`);
-  }
   return Object.freeze({
     id,
     displayName: requireString(definition.displayName, `${path}.displayName`, 32),
@@ -261,7 +308,17 @@ function validateItem(raw, index) {
     holdable,
     /** 怎么用它；不可使用时是 undefined。 */
     use,
-    /** 武器数据；不是武器时是 undefined。见 validateWeapon。 */
+    /**
+     * 弹药位：吃哪几种弹药、装几发。不吃弹药时是 undefined。
+     *
+     * 装了多少记在账本那一格上（`ItemLedger` 的条目、物品栏那一格），不记在这里——
+     * 这里说的是「这类东西能装什么」，那里说的是「这一件现在装着什么」。
+     */
+    ammo,
+    /**
+     * 武器数据（`@w` 的 `D`）；不是武器、或者还没有 `@w` 条目时是 undefined。
+     * 见 `validateWeapon`。
+     */
     weapon,
   });
 }

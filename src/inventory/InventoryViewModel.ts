@@ -39,11 +39,23 @@ export interface ItemDefinitionLike {
    * `mode` 决定按一下还是按住 `holdSeconds` 秒。
    */
   readonly use?: {
-    readonly action: 'eat' | 'tool' | 'throw';
+    readonly action: 'eat' | 'shoot' | 'tool' | 'throw';
     readonly input: 'primary';
-    readonly mode: 'tap' | 'hold';
+    readonly mode: ItemUseMode;
     readonly holdSeconds: number;
+    /** 用完之后多久才能再用一次，秒；0 = 没有冷却。 */
+    readonly cooldownSeconds: number;
     readonly value: number;
+  };
+  /**
+   * 弹药位：这件东西吃哪几种弹药、装几发。不写 = 它不吃弹药。
+   *
+   * 界面读它来判断「这一摞石头能不能拖到这一格上」，判断的依据因此和服务端
+   * 装填时读的是同一份数据。
+   */
+  readonly ammo?: {
+    readonly accepts: readonly string[];
+    readonly capacity: number;
   };
 }
 
@@ -53,10 +65,37 @@ export interface ItemCatalogLike {
   list?(): readonly ItemDefinitionLike[];
 }
 
+/**
+ * 怎么激活一件东西的用法。
+ *
+ * `tap` 点一下，`hold` 按住走完圈（圈满即结算），`charge` 按住蓄力（圈满停住，
+ * **松手才是那一下**）。
+ */
+export type ItemUseMode = 'tap' | 'hold' | 'charge';
+
+/** 一格里装着的弹药。弹药记在格子上，不记在物品目录里。 */
+export interface AmmoLoadView {
+  readonly itemType: string;
+  readonly quantity: number;
+  readonly displayName: string;
+  readonly iconId: string;
+  readonly tint: string;
+  /** 这件东西最多装几发。格子上那个小框写「3 / 5」用的是它。 */
+  readonly capacity: number;
+}
+
 /** 物品栏一格持有的那一摞；空格是 null。 */
 export interface HotbarSlotModelLike {
   readonly itemType: string;
   readonly quantity: number;
+  readonly ammo?: { readonly itemType: string; readonly quantity: number };
+}
+
+/** 账本里的一条：一摞货，可能还装着弹药。 */
+export interface LedgerEntryLike {
+  readonly itemType: string;
+  readonly quantity: number;
+  readonly ammo?: { readonly itemType: string; readonly quantity: number };
 }
 
 /** 背包 Component 里视图关心的部分；`InventoryComponent` 天然满足这个形状。 */
@@ -64,8 +103,8 @@ export interface InventoryModelLike {
   readonly slotCapacity: number;
   readonly usedSlots: number;
   readonly revision: number;
-  readonly slots: readonly { readonly itemType: string; readonly quantity: number }[];
-  readonly pooled: readonly { readonly itemType: string; readonly quantity: number }[];
+  readonly slots: readonly LedgerEntryLike[];
+  readonly pooled: readonly LedgerEntryLike[];
   /**
    * 物品栏每格实际持有的那一摞。
    *
@@ -97,10 +136,14 @@ export interface InventoryStackView {
   readonly holdable: boolean;
   /** 有没有用法。没有的话菜单里那条「使用」列出来但点不动。 */
   readonly usable: boolean;
-  /** `tap` 点一下就结算，`hold` 要按住走完圆形倒计时。没有用法时是 undefined。 */
-  readonly useMode?: 'tap' | 'hold';
+  /** `tap` 点一下就结算，`hold` / `charge` 要按住走完圆形倒计时。没有用法时是 undefined。 */
+  readonly useMode?: ItemUseMode;
   /** 长按倒计时多长，秒。`tap` 是 0。 */
   readonly holdSeconds: number;
+  /** 这件东西吃哪几种弹药、装几发；不吃弹药时是 undefined。 */
+  readonly ammoSlot?: { readonly accepts: readonly string[]; readonly capacity: number };
+  /** 现在装着什么弹药；没装时是 undefined。 */
+  readonly ammo?: AmmoLoadView;
 }
 
 /** 分类页。第一页固定是「全部」，其余按物品目录的分类顺序，空分类不出现。 */
@@ -124,10 +167,14 @@ export interface HotbarSlotView {
   readonly active: boolean;
   /** 有没有使用方式；界面据此决定要不要提示按一下还是按住。 */
   readonly usable: boolean;
-  /** `hold` 的那些要画圆形倒计时，`tap` 点一下就结算。没有用法时是 undefined。 */
-  readonly useMode?: 'tap' | 'hold';
+  /** `hold` / `charge` 的那些要画圆形倒计时，`tap` 点一下就结算。没有用法时是 undefined。 */
+  readonly useMode?: ItemUseMode;
   /** 长按倒计时多长，秒。`tap` 与没有用法时是 0。 */
   readonly holdSeconds: number;
+  /** 这件东西吃哪几种弹药、装几发；不吃弹药时是 undefined。 */
+  readonly ammoSlot?: { readonly accepts: readonly string[]; readonly capacity: number };
+  /** 现在装着什么弹药；没装时是 undefined。 */
+  readonly ammo?: AmmoLoadView;
 }
 
 export interface InventoryView {
@@ -157,8 +204,9 @@ function isItemCategory(value: string): value is ItemCategory {
 }
 
 function toStackView(
-  entry: { readonly itemType: string; readonly quantity: number },
+  entry: LedgerEntryLike,
   definition: ItemDefinitionLike,
+  catalog: ItemCatalogLike,
 ): InventoryStackView {
   const category = isItemCategory(definition.category) ? definition.category : 'material';
   return {
@@ -180,6 +228,31 @@ function toStackView(
     usable: definition.use !== undefined,
     useMode: definition.use?.mode,
     holdSeconds: definition.use?.holdSeconds ?? 0,
+    ammoSlot: definition.ammo,
+    ammo: toAmmoView(entry.ammo, definition, catalog),
+  };
+}
+
+/**
+ * 一格里装着的弹药摊成界面能画的一份。
+ *
+ * 弹药的名字、图标、颜色照样从物品目录查：格子上那个小框画的是**一件物品**，
+ * 不是一个数字，它该和背包里那一摞石头长得一样。
+ */
+function toAmmoView(
+  ammo: { readonly itemType: string; readonly quantity: number } | undefined,
+  definition: ItemDefinitionLike,
+  catalog: ItemCatalogLike,
+): AmmoLoadView | undefined {
+  const loaded = ammo ? catalog.get(ammo.itemType) : undefined;
+  if (!ammo || !loaded || !definition.ammo) return undefined;
+  return {
+    itemType: loaded.id,
+    quantity: ammo.quantity,
+    displayName: loaded.displayName,
+    iconId: loaded.iconId,
+    tint: loaded.tint,
+    capacity: definition.ammo.capacity,
   };
 }
 
@@ -207,7 +280,7 @@ export function buildInventoryView(
       const definition = catalog.get(entry.itemType);
       // 目录里没有的物品不画：它进不了权威背包，出现在这里说明配置漏了登记。
       if (!definition) continue;
-      const view = toStackView(entry, definition);
+      const view = toStackView(entry, definition, catalog);
       target.push(view);
       if (view.coinValue !== undefined) cargoValue += view.coinValue * view.quantity;
       if (view.contraband) contrabandCount += view.quantity;
@@ -293,20 +366,10 @@ function buildHotbar(
       usable: Boolean(definition?.use),
       useMode: definition?.use?.mode,
       holdSeconds: definition?.use?.holdSeconds ?? 0,
+      ammoSlot: definition?.ammo,
+      ammo: definition ? toAmmoView(slot?.ammo, definition, catalog) : undefined,
     };
   });
-}
-
-/** 容器界面里的一行：同一种物品，箱内和身上的数量并排。 */
-export interface ContainerRowView {
-  readonly itemType: string;
-  readonly displayName: string;
-  readonly iconId: string;
-  readonly tint: string;
-  /** 身上有多少（可以存进去）。 */
-  readonly carried: number;
-  /** 箱内有多少（可以取出来）。 */
-  readonly stored: number;
 }
 
 export interface ContainerView {
@@ -314,9 +377,19 @@ export interface ContainerView {
   readonly label: string;
   readonly slotCapacity: number;
   readonly usedSlots: number;
+  /** 箱内还空着几格；界面按这个数补空格子。 */
+  readonly freeSlots: number;
   /** 除自己以外还有几个人开着这个箱子；不为 0 时东西会在眼前变化。 */
   readonly otherViewerCount: number;
-  readonly rows: readonly ContainerRowView[];
+  /** 箱内的每一摞，按分类序、目录序稳定排——和背包里同一套排法。 */
+  readonly stored: readonly InventoryStackView[];
+  /**
+   * 身上那一份，原封不动就是背包界面画的那一份（背包 + 物品栏）。
+   *
+   * 容器界面下半屏画的就是它：**同一个玩家的同一个背包，不该在两个界面里长得
+   * 不一样**。没有角色时是 undefined。
+   */
+  readonly carried?: InventoryView;
   readonly revision: number;
 }
 
@@ -327,22 +400,22 @@ export interface ContainerModelLike {
   readonly usedSlots: number;
   readonly viewerCount: number;
   readonly revision: number;
-  readonly slots: readonly { readonly itemType: string; readonly quantity: number }[];
-  readonly pooled: readonly { readonly itemType: string; readonly quantity: number }[];
+  readonly slots: readonly LedgerEntryLike[];
+  readonly pooled: readonly LedgerEntryLike[];
 }
 
 /**
- * 把容器和背包并成界面能直接画的一张表。
+ * 把容器和身上那份并成界面能直接画的两片格子。
  *
- * 「身上」指的是**背包**那一本账，不含物品栏：箱子前面能存进去的只有包里那些，
- * 手上正拿着的那一摞要先收回背包才搬得动（见 `transferItems`）。把物品栏也算进这
- * 一列，玩家会按着一个搬不动的数字去点「存」。
+ * **箱子和背包装的是同一种东西，所以界面上也该是同一种格子**：上半屏是箱内，
+ * 下半屏就是背包界面那一份原封不动（背包 + 物品栏），中间隔一道线。搬东西是把
+ * 一格拖到另一片上——玩家已经在背包里学过这个动作，不必为箱子再学一套。
  *
- * 一行 = 一种物品，箱内和身上并排——这是「存 / 取」两个按钮能成立的前提：玩家要
- * 决定搬哪一边，就得同时看见两边。分成两个面板再让人拖来拖去，是把这个判断拆散
- * 之后再要求玩家自己拼回去。
+ * 这一版之前是「一行一种物品、箱内身上两个数字并排、右侧两个按钮」。那张表读起来
+ * 像一份库存清单，而不像一个箱子：一件东西在包里占几格、堆没堆满、箱子还剩多少
+ * 空位，全都被折叠成了数字。格子把这些还原成看得见的形状。
  *
- * 行的顺序和背包界面用的是同一套（分类序、目录序），所以同一件东西在两个界面里
+ * 箱内那一片的顺序和背包界面同一套（分类序、目录序），所以同一件东西在两个界面里
  * 的相对位置一致。
  */
 export function buildContainerView(
@@ -353,54 +426,29 @@ export function buildContainerView(
 ): ContainerView {
   const order = catalogOrder(catalog);
   const categories = Object.keys(ITEM_CATEGORY_LABELS) as ItemCategory[];
-  const totals = new Map<string, { carried: number; stored: number }>();
-  const accumulate = (
-    entries: readonly { readonly itemType: string; readonly quantity: number }[],
-    key: 'carried' | 'stored',
-  ): void => {
-    for (const entry of entries) {
-      const row = totals.get(entry.itemType) ?? { carried: 0, stored: 0 };
-      row[key] += entry.quantity;
-      totals.set(entry.itemType, row);
-    }
-  };
-  accumulate(container.slots, 'stored');
-  accumulate(container.pooled, 'stored');
-  if (inventory) {
-    accumulate(inventory.slots, 'carried');
-    accumulate(inventory.pooled, 'carried');
-  }
-
-  const rows: ContainerRowView[] = [];
-  for (const [itemType, counts] of totals) {
-    const definition = catalog.get(itemType);
+  const stored: InventoryStackView[] = [];
+  for (const entry of [...container.slots, ...container.pooled]) {
+    const definition = catalog.get(entry.itemType);
     // 目录里没有的物品不画：它进不了权威账本，出现在这里说明配置漏了登记。
     if (!definition) continue;
-    rows.push({
-      itemType: definition.id,
-      displayName: definition.displayName,
-      iconId: definition.iconId,
-      tint: definition.tint,
-      carried: counts.carried,
-      stored: counts.stored,
-    });
+    stored.push(toStackView(entry, definition, catalog));
   }
-  rows.sort((left, right) => {
-    const leftCategory = catalog.get(left.itemType)?.category ?? '';
-    const rightCategory = catalog.get(right.itemType)?.category ?? '';
-    return categories.indexOf(leftCategory as ItemCategory)
-      - categories.indexOf(rightCategory as ItemCategory)
-      || (order.get(left.itemType) ?? 0) - (order.get(right.itemType) ?? 0);
-  });
+  stored.sort((left, right) => (
+    categories.indexOf(left.category) - categories.indexOf(right.category)
+    || (order.get(left.itemType) ?? 0) - (order.get(right.itemType) ?? 0)
+  ));
+  const usedSlots = stored.reduce((total, stack) => total + stack.slotCost, 0);
 
   return {
     actorId,
     label: container.label,
     slotCapacity: container.slotCapacity,
-    usedSlots: container.usedSlots,
+    usedSlots,
+    freeSlots: Math.max(0, container.slotCapacity - usedSlots),
     // 自己也算在服务端那个计数里，所以减掉自己才是「另有几个人」。
     otherViewerCount: Math.max(0, container.viewerCount - 1),
-    rows,
+    stored,
+    carried: inventory ? buildInventoryView(inventory, catalog) : undefined,
     revision: container.revision,
   };
 }

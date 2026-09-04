@@ -151,6 +151,11 @@ export class RoomClient {
     this.send({ type: 'weather:set', weather }, 'control');
   }
 
+  /** 调试：给自己一个某种物品。收不下（身上满了）由服务端说了算。 */
+  public giveDebugItem(itemType: string): void {
+    this.send({ type: 'debug:give-item', itemType }, 'control');
+  }
+
   /** 请求房间跳到某个时刻；服务端按场景配置决定接不接受。 */
   public setTimeOfDay(timeOfDay: number): void {
     this.send({ type: 'daynight:set', timeOfDay }, 'control');

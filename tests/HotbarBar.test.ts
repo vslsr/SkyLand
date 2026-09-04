@@ -192,7 +192,7 @@ test('牌子平时写手上拿的是什么，按住时改写这次按住', () =>
     assert.equal(plate.hidden, false);
     assert.equal(plate.textContent, '火把');
 
-    bar.setProgress({ action: 'throw', ratio: 0.5, label: '投掷「火把」', onHotbar: true });
+    bar.setProgress({ action: 'throw', mode: 'hold', ratio: 0.5, label: '投掷「火把」', onHotbar: true });
     assert.equal(plate.textContent, '投掷「火把」');
     assert.equal(plate.dataset.progress, 'true');
 
@@ -209,7 +209,7 @@ test('圆形倒计时盖在手持那一格上，换手时旧格子上的圈被�
       slot(0, { itemType: 'wood', displayName: '木头', quantity: 4, active: true }),
       slot(1, { itemType: 'torch', displayName: '火把', quantity: 2 }),
     ]);
-    bar.setProgress({ action: 'eat', ratio: 0.25, label: '吃下「果子」', onHotbar: true });
+    bar.setProgress({ action: 'eat', mode: 'hold', ratio: 0.25, label: '吃下「果子」', onHotbar: true });
 
     const buttons = slotsOf(bar);
     const dials = dialsOf(bar);
@@ -235,7 +235,7 @@ test('不属于物品栏的那次按住不在格子上画圈：同一件事不�
     const bar = new HotbarBar();
     bar.setSlots([slot(0, { itemType: 'wood', displayName: '木头', quantity: 4, active: true })]);
     // 背包里点出来的用法没有格子，它的圈在准星下方那块牌子上。
-    bar.setProgress({ action: 'eat', ratio: 0.9, label: '吃下「果子」', onHotbar: false });
+    bar.setProgress({ action: 'eat', mode: 'hold', ratio: 0.9, label: '吃下「果子」', onHotbar: false });
 
     assert.equal(slotsOf(bar)[0].dataset.progress, undefined);
     assert.equal(dialsOf(bar)[0].hidden, true);
@@ -247,7 +247,7 @@ test('空格拿不到手上，没有圈也没有牌子', () => {
   withFakeDocument(() => {
     const bar = new HotbarBar();
     bar.setSlots([slot(0, { itemType: 'stone', displayName: '石头', quantity: 0, active: true })]);
-    bar.setProgress({ action: 'eat', ratio: 0.9, label: '吃下「果子」', onHotbar: true });
+    bar.setProgress({ action: 'eat', mode: 'hold', ratio: 0.9, label: '吃下「果子」', onHotbar: true });
 
     const button = slotsOf(bar)[0];
     assert.equal(button.dataset.state, 'empty');
@@ -267,5 +267,45 @@ test('换了图标就要重画：签名把画出来的每一样都算进去', ()
 
     bar.setSlots([slot(0, { itemType: 'wood', displayName: '木头', iconId: 'item-stone', quantity: 1 })]);
     assert.notEqual(figure.children[0], before, '图标换了却没重画');
+  });
+});
+
+test('装着弹药的那一格写出还剩几发，拉满的蓄力圈自己有个记号', () => {
+  withFakeDocument(() => {
+    const bar = new HotbarBar();
+    const loaded = {
+      itemType: 'stone',
+      quantity: 3,
+      displayName: '石头',
+      iconId: 'item-stone',
+      tint: '#B9B4A8',
+      capacity: 5,
+    };
+    bar.setSlots([
+      slot(0, { itemType: 'slingshot', displayName: '弹弓', quantity: 1, active: true, ammo: loaded }),
+      slot(1, { itemType: 'wood', displayName: '木头', quantity: 4 }),
+    ]);
+    const root = bar.element as unknown as FakeElement;
+    const ammo = root.collect((element) => element.className === 'hotbar__ammo');
+    assert.equal(ammo[0].hidden, false);
+    assert.equal(ammo[0].textContent, '3');
+    assert.equal(ammo[1].hidden, true, '不装弹药的格子上不画这个数');
+    assert.ok(
+      slotsOf(bar)[0].getAttribute('aria-label')?.includes('装着 3 发石头'),
+      slotsOf(bar)[0].getAttribute('aria-label') ?? '',
+    );
+
+    // 蓄力拉满了停在满圈上等松手，所以「满了」要看得出来。
+    bar.setProgress({ action: 'shoot', mode: 'charge', ratio: 0.5, label: '发射「弹弓」', onHotbar: true });
+    assert.equal(dialsOf(bar)[0].dataset.charged, 'false');
+    bar.setProgress({ action: 'shoot', mode: 'charge', ratio: 1, label: '发射「弹弓」', onHotbar: true });
+    assert.equal(dialsOf(bar)[0].dataset.charged, 'true');
+
+    // 打掉一发之后这一格看得见地变了：签名要认得出来，不然停在旧发数上。
+    bar.setSlots([
+      slot(0, { itemType: 'slingshot', displayName: '弹弓', quantity: 1, active: true, ammo: { ...loaded, quantity: 2 } }),
+      slot(1, { itemType: 'wood', displayName: '木头', quantity: 4 }),
+    ]);
+    assert.equal(root.collect((element) => element.className === 'hotbar__ammo')[0].textContent, '2');
   });
 });

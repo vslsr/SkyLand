@@ -1,7 +1,8 @@
+import { itemCatalog } from '../../shared/items/index.mjs';
 import { PlayerInputTags } from '../input/config/playerInput';
 import type { InputSubsystem } from '../input/core/InputSubsystem';
 import { buildInventoryView, type InventoryModelLike } from '../inventory/index';
-import type { InventoryCommand } from '../network/messages';
+import type { InventoryCommand, InventorySlotAddress } from '../network/messages';
 import type { InventoryItemAction } from '../ui/InventoryItemMenu';
 import type { InventorySlotRef } from '../ui/InventorySlotCell';
 import type {
@@ -93,6 +94,10 @@ export class InventoryController {
       this.port.send({ kind: 'drop:stack', itemType });
       return;
     }
+    if (action === 'unload') {
+      this.port.send({ kind: 'ammo:unload', slot: { kind: 'backpack', itemType } });
+      return;
+    }
     if (action !== 'equip') return;
     const slotIndex = this.resolveEquipSlot(itemType);
     if (slotIndex === undefined) return;
@@ -132,6 +137,10 @@ export class InventoryController {
       this.port.send({ kind: 'hotbar:stow', slotIndex });
       return;
     }
+    if (action === 'unload') {
+      this.port.send({ kind: 'ammo:unload', slot: { kind: 'hotbar', slotIndex } });
+      return;
+    }
     if (action === 'drop') this.port.send({ kind: 'drop:hotbar', slotIndex });
   }
 
@@ -148,6 +157,21 @@ export class InventoryController {
     // 和「装配」同一个理由：动过物品栏，背包里点出来的那条能力就不再指向玩家想的
     // 那件东西了。
     this.port.armItem(undefined);
+    // 背包界面里没有箱子那本账：`container` 那种格子只出现在容器界面上，
+    // 它的拖拽由 `ContainerController` 兑现。
+    if (source.kind === 'container') return;
+    // 装填这一条优先：拖的是弹药、落点又收这种弹药时，玩家想的是「装进去」，
+    // 不是「这两格对调」。其余情况仍然是搬。
+    const loadTarget = this.resolveAmmoTarget(source, target);
+    if (loadTarget) {
+      this.port.send({ kind: 'ammo:load', slot: loadTarget, source });
+      return;
+    }
+    if (target.kind === 'backpack' && target.itemType !== undefined && source.kind === 'backpack') {
+      // 落在包里另一件东西上、又装不进去：包里的顺序是自动排的，没有「搬到这一格」
+      // 这回事，所以什么都不做，而不是悄悄换个语义。
+      return;
+    }
     if (source.kind === 'backpack') {
       if (target.kind !== 'hotbar') return;
       this.port.send({ kind: 'assign', slotIndex: target.slotIndex, itemType: source.itemType });
@@ -164,6 +188,35 @@ export class InventoryController {
       fromIndex: source.slotIndex,
       slotIndex: target.slotIndex,
     });
+  }
+
+  /**
+   * 这次拖拽是不是一次装填；是的话，装到哪一格。
+   *
+   * 判据只有一条，和服务端读的是同一份数据：**落点那件东西的 `ammo.accepts` 收不收
+   * 拖过来的这一种**。所以「什么算弹药」由吃它的那件东西说了算——弹弓吃的是普通
+   * 石头，而石头是材料，不是弹药分类。
+   */
+  private resolveAmmoTarget(
+    source: InventorySlotAddress,
+    target: InventoryDragTarget,
+  ): InventorySlotAddress | undefined {
+    const ammoType = this.itemTypeAt(source);
+    const targetType = target.kind === 'hotbar'
+      ? this.itemTypeAt({ kind: 'hotbar', slotIndex: target.slotIndex })
+      : target.itemType;
+    if (!ammoType || !targetType || ammoType === targetType) return undefined;
+    const accepts = itemCatalog.get(targetType)?.ammo?.accepts;
+    if (!accepts?.includes(ammoType)) return undefined;
+    return target.kind === 'hotbar'
+      ? { kind: 'hotbar', slotIndex: target.slotIndex }
+      : { kind: 'backpack', itemType: targetType };
+  }
+
+  /** 那一格里现在装的是哪一种；空格是 undefined。 */
+  private itemTypeAt(ref: InventorySlotAddress): string | undefined {
+    if (ref.kind === 'backpack') return ref.itemType;
+    return this.port.getInventory()?.hotbar?.[ref.slotIndex]?.itemType;
   }
 
   /**
