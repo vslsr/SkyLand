@@ -5,12 +5,12 @@
   "components": {
     "interactable": {
       "action": "pickup-stack",
-      "label": "弹弹菇",
+      "label": "蘑菇",
       "maximumDistance": 2.4
     },
     "itemStack": {
       "itemType": "mushroom",
-      "displayName": "弹弹菇",
+      "displayName": "蘑菇",
       "defaultQuantity": 1,
       "maximumQuantity": 999,
       "compatibilityKey": "mushroom-standard"
@@ -22,7 +22,10 @@
     },
     "dropMotion": {
       "gravity": 9.8,
-      "drag": 5,
+      "drag": 0.5,
+      "groundDrag": 2.6,
+      "restitution": 0.2,
+      "radius": 0.16,
       "settleSpeed": 0.08
     },
     "lifetime": {
@@ -33,12 +36,12 @@
       "radiusChunks": 2
     },
     "render": {
-      "model": "line-art-fruit-pile",
-      "fruitColor": "#C97868",
-      "accentColor": "#EADFC5",
+      "model": "line-art-mushroom-pile",
+      "capColor": "#C97868",
+      "stemColor": "#EADFC5",
       "inkColor": "#51463E",
-      "radius": 0.42,
-      "height": 0.3
+      "radius": 0.2,
+      "height": 0.34
     }
   }
 }

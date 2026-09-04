@@ -1,19 +1,21 @@
 import { ModalWindow } from '../common/ModalWindow';
-import { createItemIcon } from '../icons/ItemIconSprite';
 import {
   InventoryItemMenu,
   type InventoryItemAction,
   type InventoryItemMenuEntry,
 } from '../InventoryItemMenu';
+import {
+  backpackSlotView,
+  createInventorySlotCell,
+  hotbarSlotView,
+  type InventorySlotRef,
+  type InventorySlotView,
+} from '../InventorySlotCell';
 import type { CommonUICloseReason } from '../common/CommonUIPage';
-import type { HotbarSlotView, InventoryStackView, InventoryView } from '../../inventory/index';
+import type { InventoryView } from '../../inventory/index';
 
-/** 一次拖拽从哪本账上拿的。 */
-export type InventoryDragSource =
-  | { readonly kind: 'backpack'; readonly itemType: string }
-  | { readonly kind: 'hotbar'; readonly slotIndex: number };
-
-/** 一次拖拽落到哪本账上。 */
+/** 一次拖拽从哪本账上拿的、落到哪本账上。两头说的都是「哪一格」。 */
+export type InventoryDragSource = InventorySlotRef;
 export type InventoryDragTarget =
   | { readonly kind: 'backpack' }
   | { readonly kind: 'hotbar'; readonly slotIndex: number };
@@ -26,8 +28,10 @@ export type InventoryDragTarget =
  * 什么时候画、画哪一份，由 `InventoryController` 决定。
  *
  * 界面上是两本账并排：上面是背包，下面那条是**物品栏**。它们看起来是两个区域，
- * 实质是同一种东西的两个去处，所以中间那道动作是「搬」而不是「设置」——把一格
- * 拖到另一边，或者在菜单里选「装配」，两条路说的是同一件事。
+ * 实质是同一种东西的两个去处，所以格子只有一套（`createInventorySlotCell`）：
+ * 两边都点得开菜单、都拖得动、都用同一套记号说「这一格里是什么」。中间那道动作
+ * 因此是「搬」而不是「设置」——把一格拖到另一边，或者在菜单里选装配 / 收回背包，
+ * 说的都是同一件事。
  */
 export class InventoryPage extends ModalWindow {
   private readonly ledgerText: HTMLElement;
@@ -43,10 +47,10 @@ export class InventoryPage extends ModalWindow {
   private activePageId: string = 'all';
   private view?: InventoryView;
   private readonly itemMenu: InventoryItemMenu;
-  private actionHandler?: (action: InventoryItemAction, itemType: string) => void;
+  private actionHandler?: (action: InventoryItemAction, slot: InventorySlotRef) => void;
   private dragHandler?: (source: InventoryDragSource, target: InventoryDragTarget) => void;
   /**
-   * 正在拖的是哪一摞。
+   * 正在拖的是哪一格。
    *
    * 记在这里而不是塞进 `DataTransfer`：拖拽全程都在这一个页面里，读回来的东西
    * 只有自己写得出来，走一遍字符串序列化没有任何收益，还会把「拖的是第几格」这条
@@ -88,7 +92,7 @@ export class InventoryPage extends ModalWindow {
     this.slotGrid.setAttribute('role', 'list');
     // 背包这一整片都是落点：从物品栏往回拖时，玩家想的是「放回包里」，
     // 而不是「放回包里第几格」——包里的顺序本来就是自动排的。
-    this.makeDropZone(this.slotGrid, () => ({ kind: 'backpack' }));
+    this.makeGridDropZone(this.slotGrid);
 
     this.bodyElement.append(
       this.emptyNotice,
@@ -102,7 +106,7 @@ export class InventoryPage extends ModalWindow {
     this.hotbarSection.setAttribute('aria-label', '物品栏');
     const hotbarHint = document.createElement('p');
     hotbarHint.className = 'inventory-hotbar__hint';
-    hotbarHint.textContent = '拖到这一条，或用菜单里的「装配」，把东西交给物品栏（1-9 切换手持）';
+    hotbarHint.textContent = '这一条也是格子：点开有使用 / 收回背包 / 丢弃，拖进来就是装配（1-9 切换手持）';
     this.hotbarTrack = document.createElement('ul');
     this.hotbarTrack.className = 'inventory-hotbar__track';
     this.hotbarTrack.setAttribute('role', 'list');
@@ -117,7 +121,7 @@ export class InventoryPage extends ModalWindow {
 
     // 菜单挂在页面根节点上而不是正文里：正文 `overflow: auto` 会把它裁掉半截。
     this.itemMenu = new InventoryItemMenu(this.element);
-    this.itemMenu.onSelect((action, itemType) => this.actionHandler?.(action, itemType));
+    this.itemMenu.onSelect((action, slot) => this.actionHandler?.(action, slot));
 
     this.setInventory(undefined);
   }
@@ -129,12 +133,12 @@ export class InventoryPage extends ModalWindow {
   }
 
   /**
-   * 点一下某件物品会弹出菜单，选中哪一条由这里交出去。
+   * 点一下某一格会弹出菜单，选中哪一条由这里交出去。
    *
-   * View 只报意图：`use` / `equip` / `drop` 各自要发哪几条命令，是 Controller 的事。
+   * View 只报意图：每条动作要发哪几条命令，是 Controller 的事。
    */
   public onItemAction(
-    handler: (action: InventoryItemAction, itemType: string) => void,
+    handler: (action: InventoryItemAction, slot: InventorySlotRef) => void,
   ): void {
     this.actionHandler = handler;
   }
@@ -214,10 +218,17 @@ export class InventoryPage extends ModalWindow {
   private renderPage(view: InventoryView): void {
     const page = view.pages.find((entry) => entry.id === this.activePageId) ?? view.pages[0];
     const stacks = page?.stacks ?? [];
-    const cells = stacks.map((stack) => this.createStackCell(stack));
+    const cells = stacks.map((stack) => this.createCell(backpackSlotView(stack)));
     // 空格只在「全部」页补：分类页补空格会让人以为那个分类有独立容量。
     if (this.activePageId === 'all') {
-      for (let index = 0; index < view.freeSlots; index += 1) cells.push(this.createEmptyCell());
+      for (let index = 0; index < view.freeSlots; index += 1) {
+        cells.push(this.createCell({
+          ref: { kind: 'backpack', itemType: '' },
+          quantity: 0,
+          stackLimit: 0,
+          holdable: false,
+        }));
+      }
     }
     this.slotGrid.replaceChildren(...cells);
   }
@@ -230,7 +241,32 @@ export class InventoryPage extends ModalWindow {
    */
   private renderHotbar(view: InventoryView): void {
     this.hotbarSection.hidden = view.hotbar.length === 0;
-    this.hotbarTrack.replaceChildren(...view.hotbar.map((slot) => this.createHotbarCell(slot)));
+    this.hotbarTrack.replaceChildren(...view.hotbar.map(
+      (slot) => this.createCell(hotbarSlotView(slot)),
+    ));
+  }
+
+  /** 两本账共用同一个格子构造，只在这里接上这一页的拖拽与菜单。 */
+  private createCell(slot: InventorySlotView): HTMLElement {
+    return createInventorySlotCell(slot, {
+      openMenu: (cell, target) => this.openItemMenu(cell, target),
+      beginDrag: (target) => {
+        this.dragSource = target.ref;
+        this.itemMenu.close();
+      },
+      endDrag: () => { this.dragSource = undefined; },
+      isDragging: () => this.dragSource !== undefined,
+      // 物品栏那一条的每一格都是落点（拖进来 = 装配到这一格）；背包那边整片是
+      // 一个落点，所以背包格子自己不接。
+      dropOn: slot.ref.kind === 'hotbar'
+        ? (target) => {
+          const source = this.dragSource;
+          this.dragSource = undefined;
+          if (!source || target.ref.kind !== 'hotbar') return;
+          this.dragHandler?.(source, { kind: 'hotbar', slotIndex: target.ref.slotIndex });
+        }
+        : undefined,
+    });
   }
 
   private describeLedger(view: InventoryView): string {
@@ -253,12 +289,13 @@ export class InventoryPage extends ModalWindow {
    * 已经在同一格上开着就收起来：再点一次是「我不选了」，而不是把同一份菜单
    * 重画一遍。
    */
-  private openItemMenu(cell: HTMLElement, stack: InventoryStackView): void {
-    if (this.itemMenu.isOpen && this.itemMenu.itemType === stack.itemType) {
+  private openItemMenu(cell: HTMLElement, slot: InventorySlotView): void {
+    if (!slot.itemType) return;
+    if (this.itemMenu.isOpen && sameSlot(this.itemMenu.slot, slot.ref)) {
       this.itemMenu.close();
       return;
     }
-    this.itemMenu.open(cell, stack.itemType, stack.displayName, this.menuEntries(stack));
+    this.itemMenu.open(cell, slot.ref, slot.displayName ?? '', this.menuEntries(slot));
   }
 
   /**
@@ -266,168 +303,51 @@ export class InventoryPage extends ModalWindow {
    *
    * 三条都列出来，做不了的那条列出来但点不动：直接抹掉会让菜单在不同格子上长得
    * 不一样，玩家得先数一遍才知道点的是哪一条。
+   *
+   * 两本账的第三条方向相反：背包里那一格往物品栏搬（装配），物品栏那一格往背包
+   * 搬（收回背包）。这也是它们唯一的区别。
    */
-  private menuEntries(stack: InventoryStackView): InventoryItemMenuEntry[] {
-    const equipped = this.view?.hotbar.some((slot) => slot.itemType === stack.itemType) ?? false;
+  private menuEntries(slot: InventorySlotView): InventoryItemMenuEntry[] {
+    const stack = this.view?.slots.find((entry) => entry.itemType === slot.itemType);
+    const hotbar = this.view?.hotbar.find((entry) => entry.itemType === slot.itemType);
+    const usable = slot.ref.kind === 'hotbar' ? hotbar?.usable === true : stack?.usable === true;
+    const equipped = this.view?.hotbar.some((entry) => entry.itemType === slot.itemType) ?? false;
+    const onHotbar = slot.ref.kind === 'hotbar';
+    const useHint = describeUse(
+      usable,
+      onHotbar ? hotbar?.useMode : stack?.useMode,
+      (onHotbar ? hotbar?.holdSeconds : stack?.holdSeconds) ?? 0,
+      onHotbar,
+    );
+    if (onHotbar) {
+      return [
+        { action: 'use', label: '使用', hint: useHint, disabled: !usable },
+        {
+          action: 'unequip',
+          label: '收回背包',
+          hint: '把这一格整摞搬回背包，那一格空出来',
+        },
+        { action: 'drop', label: '丢弃', hint: '把这一格的一个丢到身前的地上' },
+      ];
+    }
     return [
-      {
-        action: 'use',
-        label: '使用',
-        hint: useHint(stack),
-        disabled: !stack.usable,
-      },
+      { action: 'use', label: '使用', hint: useHint, disabled: !usable },
       {
         action: 'equip',
         label: '装配',
         hint: equipped ? '已经在物品栏上了' : '交给物品栏的空格，数字键就能切到手上',
-        disabled: equipped || !stack.holdable,
+        disabled: equipped || !slot.holdable,
       },
-      {
-        action: 'drop',
-        label: '丢弃',
-        hint: '把一个丢到身前的地上',
-      },
+      { action: 'drop', label: '丢弃', hint: '把一个丢到身前的地上' },
     ];
   }
 
-  private createEmptyCell(): HTMLElement {
-    const cell = document.createElement('li');
-    cell.className = 'inventory__cell inventory__cell--empty';
-    cell.setAttribute('aria-label', '空格子');
-    return cell;
-  }
-
-  private createStackCell(stack: InventoryStackView): HTMLElement {
-    const cell = document.createElement('li');
-    cell.className = 'inventory__cell';
-    // 一次点击弹出菜单，动作在菜单里选；按住拖动则是直接搬到物品栏那一条上。
-    // 两条入口指向同一件事，快的那条不用打开菜单，慢的那条不用先学会拖拽。
-    if (stack.holdable) {
-      cell.classList.add('inventory__cell--actionable');
-      cell.tabIndex = 0;
-      cell.setAttribute('role', 'button');
-      cell.setAttribute('aria-haspopup', 'menu');
-      // 格子是 `<li role="button">`，不是真的 `<button>`。`CommonUIManager` 只按标签名
-      // 认「这次点击是给 DOM 的」，认不出它就会在捕获阶段把事件拦掉——点了格子毫无
-      // 反应、菜单永远弹不出来。这条标记是它给出的显式入口。
-      cell.dataset.commonUiReceiver = '';
-      cell.addEventListener('click', () => this.openItemMenu(cell, stack));
-      cell.addEventListener('keydown', (event) => {
-        if (event.key !== 'Enter' && event.key !== ' ') return;
-        event.preventDefault();
-        this.openItemMenu(cell, stack);
-      });
-      this.makeDraggable(cell, { kind: 'backpack', itemType: stack.itemType });
-    }
-    cell.dataset.itemType = stack.itemType;
-    cell.dataset.category = stack.category;
-    if (stack.contraband) cell.dataset.contraband = 'true';
-    cell.setAttribute('title', `${stack.displayName}　${stack.summary}`);
-    cell.setAttribute(
-      'aria-label',
-      `${stack.categoryLabel} ${stack.displayName}，${stack.quantity} 个，上限 ${stack.stackLimit}`
-      + (stack.holdable ? '，点击打开动作菜单，也可以拖到物品栏' : ''),
-    );
-
-    const swatch = document.createElement('span');
-    swatch.className = 'inventory__swatch';
-    // 物品自己的颜色画在底衬上，图标保持描边跟随文字色，选中态不用换图。
-    swatch.setAttribute('style', `--item-tint:${stack.tint}`);
-    swatch.append(createItemIcon(stack.iconId, { className: 'inventory__icon' }));
-
-    const name = document.createElement('span');
-    name.className = 'inventory__name';
-    name.textContent = stack.displayName;
-
-    const count = document.createElement('span');
-    count.className = stack.full ? 'inventory__count is-full' : 'inventory__count';
-    count.textContent = stack.stackLimit > 1 ? `${stack.quantity} / ${stack.stackLimit}` : '1';
-
-    cell.append(swatch, name, count);
-
-    if (stack.slotCost > 1) {
-      const cost = document.createElement('span');
-      cost.className = 'inventory__badge';
-      cost.textContent = `${stack.slotCost} 格`;
-      cell.append(cost);
-    } else if (stack.slotCost === 0) {
-      const pooledBadge = document.createElement('span');
-      pooledBadge.className = 'inventory__badge inventory__badge--pooled';
-      pooledBadge.textContent = '不占格';
-      cell.append(pooledBadge);
-    }
-    if (stack.coinValue !== undefined) {
-      const value = document.createElement('span');
-      value.className = 'inventory__badge inventory__badge--coin';
-      value.textContent = `${stack.coinValue} 金币`;
-      cell.append(value);
-    }
-    return cell;
-  }
-
-  private createHotbarCell(slot: HotbarSlotView): HTMLElement {
-    const cell = document.createElement('li');
-    cell.className = 'inventory-hotbar__slot';
-    cell.dataset.state = slot.itemType ? 'ready' : 'empty';
-    cell.dataset.active = String(slot.active);
-    cell.dataset.slotIndex = String(slot.index);
-    this.makeDropZone(cell, () => ({ kind: 'hotbar', slotIndex: slot.index }));
-
-    const shortcut = document.createElement('span');
-    shortcut.className = 'inventory-hotbar__shortcut';
-    shortcut.textContent = String(slot.index + 1);
-    const figure = document.createElement('span');
-    figure.className = 'inventory-hotbar__figure';
-    const quantity = document.createElement('span');
-    quantity.className = 'inventory-hotbar__quantity';
-    quantity.hidden = true;
-
-    if (slot.itemType) {
-      const icon = createItemIcon(slot.iconId ?? '', { className: 'inventory-hotbar__icon' });
-      if (slot.tint) icon.style.color = slot.tint;
-      figure.append(icon);
-      quantity.hidden = false;
-      quantity.textContent = String(slot.quantity);
-      // 装着东西的格子拖得动：往另一格拖是排顺序，往背包里拖是收回。
-      this.makeDraggable(cell, { kind: 'hotbar', slotIndex: slot.index });
-    }
-
-    cell.append(shortcut, figure, quantity);
-    cell.setAttribute(
-      'aria-label',
-      slot.itemType
-        ? `物品栏第 ${slot.index + 1} 格 ${slot.displayName ?? ''} ×${slot.quantity}`
-          + (slot.active ? '，正拿在手上' : '')
-        : `物品栏第 ${slot.index + 1} 格 空`,
-    );
-    return cell;
-  }
-
   /**
-   * 让一格拖得动。
+   * 背包那一整片接得住从物品栏拖回来的东西。
    *
-   * `dragend` 无条件清掉来源：拖到界面外面松手不会触发 `drop`，不清的话下一次
-   * 拖拽会带着上一次的来源落地，搬错一摞货。
+   * `dragover` 必须 `preventDefault`，否则浏览器根本不会派发 `drop`。
    */
-  private makeDraggable(cell: HTMLElement, source: InventoryDragSource): void {
-    cell.draggable = true;
-    cell.dataset.commonUiReceiver = '';
-    cell.addEventListener('dragstart', (event) => {
-      this.dragSource = source;
-      this.itemMenu.close();
-      const transfer = (event as DragEvent).dataTransfer;
-      if (transfer) transfer.effectAllowed = 'move';
-    });
-    cell.addEventListener('dragend', () => { this.dragSource = undefined; });
-  }
-
-  /**
-   * 让一片区域接得住。
-   *
-   * `dragover` 必须 `preventDefault`，否则浏览器根本不会派发 `drop`——这是 HTML
-   * 拖放里最容易漏、漏了之后表现为「拖过去没反应」的一步。
-   */
-  private makeDropZone(zone: HTMLElement, resolve: () => InventoryDragTarget): void {
+  private makeGridDropZone(zone: HTMLElement): void {
     zone.addEventListener('dragover', (event) => {
       if (!this.dragSource) return;
       event.preventDefault();
@@ -439,16 +359,28 @@ export class InventoryPage extends ModalWindow {
       this.dragSource = undefined;
       if (!source) return;
       event.preventDefault();
-      this.dragHandler?.(source, resolve());
+      this.dragHandler?.(source, { kind: 'backpack' });
     });
   }
 }
 
-/** 「使用」那一条说什么，取决于这件东西按一下还是按住。 */
-function useHint(stack: InventoryStackView): string {
-  if (!stack.usable) return '这件东西没有用法';
-  if (stack.useMode === 'hold') {
-    return `关掉背包，按住使用键 ${stack.holdSeconds} 秒`;
-  }
-  return '关掉背包，按一下使用键';
+function sameSlot(left: InventorySlotRef | undefined, right: InventorySlotRef): boolean {
+  if (!left || left.kind !== right.kind) return false;
+  return left.kind === 'backpack' && right.kind === 'backpack'
+    ? left.itemType === right.itemType
+    : left.kind === 'hotbar' && right.kind === 'hotbar' && left.slotIndex === right.slotIndex;
+}
+
+/** 「使用」那一条说什么，取决于这件东西按一下还是按住、又在哪本账上。 */
+function describeUse(
+  usable: boolean,
+  useMode: 'tap' | 'hold' | undefined,
+  holdSeconds: number,
+  onHotbar: boolean,
+): string {
+  if (!usable) return '这件东西没有用法';
+  const press = useMode === 'hold' && holdSeconds > 0
+    ? `按住使用键 ${holdSeconds} 秒`
+    : '按一下使用键';
+  return onHotbar ? `切到这一格并关掉背包，${press}` : `关掉背包，${press}`;
 }

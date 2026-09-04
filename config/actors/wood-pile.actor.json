@@ -5,12 +5,12 @@
   "components": {
     "interactable": {
       "action": "pickup-stack",
-      "label": "木材",
+      "label": "木头",
       "maximumDistance": 2.4
     },
     "itemStack": {
       "itemType": "wood",
-      "displayName": "木材",
+      "displayName": "木头",
       "defaultQuantity": 1,
       "maximumQuantity": 999,
       "compatibilityKey": "wood-standard"
@@ -22,32 +22,35 @@
     },
     "dropMotion": {
       "gravity": 9.8,
-      "drag": 5,
-      "settleSpeed": 0.08
+      "drag": 0.65,
+      "groundDrag": 3.1,
+      "restitution": 0.18,
+      "radius": 0.12,
+      "settleSpeed": 0.07
     },
     "lifetime": { "lifetimeSeconds": 900 },
     "replicationPolicy": { "mode": "aoi", "radiusChunks": 2 },
     "temperature": {
       "initialTemperature": 20,
       "ambientTemperature": 20,
-      "heatCapacity": 8,
-      "coolingRate": 0.18
+      "heatCapacity": 5,
+      "coolingRate": 0.2
     },
     "combustible": {
       "ignitionTemperature": 260,
       "extinguishTemperature": 180,
-      "fuel": 90,
+      "fuel": 45,
       "burnRate": 1.2,
-      "heatOutput": 110,
-      "heatRadius": 2.2
+      "heatOutput": 80,
+      "heatRadius": 1.8
     },
     "render": {
       "model": "line-art-wood-pile",
       "woodColor": "#B98558",
       "cutColor": "#E6C89C",
       "inkColor": "#51463E",
-      "radius": 0.55,
-      "height": 0.38
+      "radius": 0.12,
+      "length": 0.7
     }
   }
 }

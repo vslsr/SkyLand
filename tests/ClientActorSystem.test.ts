@@ -245,13 +245,15 @@ const woodPileArchetype: SceneDefinition['actorArchetypes'][number] = {
   schemaVersion: 1,
   id: 'wood-pile',
   components: {
-    interactable: { action: 'pickup-stack', label: '木材', maximumDistance: 2.4 },
+    interactable: { action: 'pickup-stack', label: '木头', maximumDistance: 2.4 },
     itemStack: {
-      itemType: 'wood', displayName: '木材', defaultQuantity: 1,
+      itemType: 'wood', displayName: '木头', defaultQuantity: 1,
       maximumQuantity: 999, compatibilityKey: 'wood-standard',
     },
     actorResidency: { sleepDelaySeconds: 1, dormantDelaySeconds: 3, dormantEligible: true },
-    dropMotion: { gravity: 9.8, drag: 5, settleSpeed: 0.08 },
+    dropMotion: {
+      gravity: 9.8, drag: 0.65, groundDrag: 3.1, restitution: 0.18, radius: 0.12, settleSpeed: 0.07,
+    },
     lifetime: { lifetimeSeconds: 900 },
     replicationPolicy: { mode: 'aoi', radiusChunks: 2 },
     temperature: { initialTemperature: 20, ambientTemperature: 20, heatCapacity: 8, coolingRate: 0.18 },
@@ -261,7 +263,7 @@ const woodPileArchetype: SceneDefinition['actorArchetypes'][number] = {
     },
     render: {
       model: 'line-art-wood-pile', woodColor: '#b98558', cutColor: '#e6c89c',
-      inkColor: '#51463e', radius: 0.55, height: 0.38,
+      inkColor: '#51463e', radius: 0.12, length: 0.7,
     },
   },
 };
@@ -284,33 +286,6 @@ const guidePathArchetype: SceneDefinition['actorArchetypes'][number] = {
       autoAdvance: true,
       loop: false,
       enabled: true,
-    },
-  },
-};
-
-const woodLogArchetype: SceneDefinition['actorArchetypes'][number] = {
-  schemaVersion: 1,
-  id: 'wood-log',
-  components: {
-    interactable: { action: 'pickup-stack', label: '圆木', maximumDistance: 2.4 },
-    itemStack: {
-      itemType: 'wood-log', displayName: '圆木', defaultQuantity: 1,
-      maximumQuantity: 999, compatibilityKey: 'wood-log',
-    },
-    actorResidency: { sleepDelaySeconds: 1, dormantDelaySeconds: 3, dormantEligible: true },
-    dropMotion: {
-      gravity: 9.8,
-      drag: 0.65,
-      groundDrag: 3.1,
-      restitution: 0.18,
-      radius: 0.11,
-      settleSpeed: 0.07,
-    },
-    lifetime: { lifetimeSeconds: 900 },
-    replicationPolicy: { mode: 'aoi', radiusChunks: 2 },
-    render: {
-      model: 'line-art-wood-log', woodColor: '#d6bea3', cutColor: '#eadbc8',
-      inkColor: '#51463e', radius: 0.11, length: 0.88,
     },
   },
 };
@@ -387,7 +362,6 @@ const definition = {
     campfireArchetype,
     dryHayArchetype,
     woodPileArchetype,
-    woodLogArchetype,
     generatedPropArchetype,
     stonePileArchetype,
     generatedRockArchetype,
@@ -2023,8 +1997,8 @@ test('高数量物品 Actor 保留交互与碰撞身份，但用批次绘制而�
     archetypeId: 'wood-pile',
     revision: 2,
     transform: { x: 1, y: 0, z: 2, yaw: 0.2 },
-    interactable: { action: 'pickup-stack', label: '木材', enabled: true, revision: 0 },
-    itemStack: { itemType: 'wood', displayName: '木材', quantity: 12, maximumQuantity: 999, revision: 1 },
+    interactable: { action: 'pickup-stack', label: '木头', enabled: true, revision: 0 },
+    itemStack: { itemType: 'wood', displayName: '木头', quantity: 12, maximumQuantity: 999, revision: 1 },
     residency: { state: 'sleeping', revision: 1 },
     thermal: { temperature: 20, burning: false, fuelRatio: 1, revision: 0 },
   };
@@ -2066,7 +2040,7 @@ test('手持表现体只画模型：不挡人、不被准星扫到、不参与�
     parentActorId: 'player-a',
     revision: 1,
     transform: { x: 0, y: 0.3, z: -3, yaw: 0 },
-    itemStack: { itemType: 'wood', displayName: '木材', quantity: 1, maximumQuantity: 999, revision: 1 },
+    itemStack: { itemType: 'wood', displayName: '木头', quantity: 1, maximumQuantity: 999, revision: 1 },
   };
   system.syncSnapshots([held], 1_000, 1_000);
   stepActorFrame(system, 0, 0);
@@ -2096,19 +2070,20 @@ test('准星也拾得到合批掉落物——它们没有 proxy，但有碰撞�
     archetypeId: 'wood-pile',
     revision: 2,
     transform: { x: 0, y: 0, z: -3, yaw: 0 },
-    interactable: { action: 'pickup-stack', label: '木材', enabled: true, revision: 0 },
-    itemStack: { itemType: 'wood', displayName: '木材', quantity: 12, maximumQuantity: 999, revision: 1 },
+    interactable: { action: 'pickup-stack', label: '木头', enabled: true, revision: 0 },
+    itemStack: { itemType: 'wood', displayName: '木头', quantity: 12, maximumQuantity: 999, revision: 1 },
     residency: { state: 'sleeping', revision: 1 },
   };
   system.syncSnapshots([wood], 1_000, 1_000);
   stepActorFrame(system, 0, 0);
   assert.equal(system.getActor('drop-wood')?.getComponent(RENDER_PROXY_COMPONENT), undefined);
+  // 准星高度贴着这根木头：它躺在地上，只有直径那么高。
   assert.equal(
-    system.pickInteractableActor([0, 0.2, 2], [0, 0, -1])?.actorId,
+    system.pickInteractableActor([0, 0.1, 2], [0, 0, -1])?.actorId,
     'drop-wood',
   );
   // 打偏了同样不算：合批物走的是同一条求交，不是「离得近就算」。
-  assert.equal(system.pickInteractableActor([3, 0.2, 2], [0, 0, -1]), undefined);
+  assert.equal(system.pickInteractableActor([3, 0.1, 2], [0, 0, -1]), undefined);
   system.dispose();
 });
 
@@ -2126,8 +2101,8 @@ test('木堆与石堆各自成批：合批系统按渲染模型分派模板，�
     archetypeId: 'wood-pile',
     revision: 2,
     transform: { x: 1, y: 0, z: 2, yaw: 0.2 },
-    interactable: { action: 'pickup-stack', label: '木材', enabled: true, revision: 0 },
-    itemStack: { itemType: 'wood', displayName: '木材', quantity: 12, maximumQuantity: 999, revision: 1 },
+    interactable: { action: 'pickup-stack', label: '木头', enabled: true, revision: 0 },
+    itemStack: { itemType: 'wood', displayName: '木头', quantity: 12, maximumQuantity: 999, revision: 1 },
     residency: { state: 'sleeping', revision: 1 },
   };
   const stone: SnapshotActor = {
@@ -2154,7 +2129,7 @@ test('木堆与石堆各自成批：合批系统按渲染模型分派模板，�
   assert.notEqual(
     vertexCounts[0],
     vertexCounts[1],
-    '圆木与石块的模板顶点数应该不同，相同说明分派没生效',
+    '木头与石块的模板顶点数应该不同，相同说明分派没生效',
   );
 
   // 两种堆都保留各自的交互身份。
@@ -2163,7 +2138,7 @@ test('木堆与石堆各自成批：合批系统按渲染模型分派模板，�
   system.dispose();
 });
 
-test('圆木使用参考项目的八边形单根模型，并按权威位移滚动', () => {
+test('单个木头是一根六棱柱，并按权威位移滚动', () => {
   let now = 1_000;
   const system = createTestActorSystem({
     definition,
@@ -2174,13 +2149,13 @@ test('圆木使用参考项目的八边形单根模型，并按权威位移滚�
     spawnBudgetMilliseconds: Number.POSITIVE_INFINITY,
   });
   const snapshot = (x: number): SnapshotActor => ({
-    id: 'drop-wood-log-roll',
-    archetypeId: 'wood-log',
+    id: 'drop-wood-roll',
+    archetypeId: 'wood-pile',
     revision: 0,
-    transform: { x, y: 0.11, z: 0, yaw: 0 },
-    interactable: { action: 'pickup-stack', label: '圆木', enabled: true, revision: 0 },
+    transform: { x, y: 0.12, z: 0, yaw: 0 },
+    interactable: { action: 'pickup-stack', label: '木头', enabled: true, revision: 0 },
     itemStack: {
-      itemType: 'wood-log', displayName: '圆木', quantity: 1, maximumQuantity: 999, revision: 0,
+      itemType: 'wood', displayName: '木头', quantity: 1, maximumQuantity: 999, revision: 0,
     },
     residency: { state: 'active', revision: 0 },
   });
@@ -2188,13 +2163,13 @@ test('圆木使用参考项目的八边形单根模型，并按权威位移滚�
   system.syncSnapshots([snapshot(0)], 1_000, now);
   stepActorFrame(system, 0, 0);
   const fill = renderRootOf(system).getObjectByName(
-    'wood-log:active:normal:single-fill',
+    'wood-pile:active:normal:single-fill',
   ) as THREE.InstancedMesh;
-  assert.ok(fill, '单根圆木应进入独立的高数量合批');
+  assert.ok(fill, '单个木头应进入独立的高数量合批');
   fill.geometry.computeBoundingBox();
   const size = new THREE.Vector3();
   fill.geometry.boundingBox!.getSize(size);
-  assert.ok(size.x > size.y * 3, '参考模型应保持细长的八边形圆柱比例');
+  assert.ok(size.x > size.y * 3, '木头应保持细长的六棱柱比例');
 
   const matrix = new THREE.Matrix4();
   const position = new THREE.Vector3();
@@ -2210,7 +2185,7 @@ test('圆木使用参考项目的八边形单根模型，并按权威位移滚�
   const after = new THREE.Quaternion();
   fill.getMatrixAt(0, matrix);
   matrix.decompose(position, after, scale);
-  assert.ok(before.angleTo(after) > 0.1, '权威水平位移应转换为圆木的滚动角');
+  assert.ok(before.angleTo(after) > 0.1, '权威水平位移应转换为木头的滚动角');
   system.dispose();
 });
 

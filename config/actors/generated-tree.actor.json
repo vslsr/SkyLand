@@ -12,11 +12,14 @@
       "maximumHealth": 3,
       "harvestDamage": 1,
       "drop": {
-        "archetypeId": "wood-log",
+        "archetypeId": "wood-pile",
         "quantity": 5,
         "spawnPattern": "center-scatter"
       }
     },
-    "replicationPolicy": { "mode": "aoi", "radiusChunks": 2 }
+    "replicationPolicy": {
+      "mode": "aoi",
+      "radiusChunks": 2
+    }
   }
 }

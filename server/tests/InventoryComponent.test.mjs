@@ -6,28 +6,61 @@ import {
 } from '../../shared/actor/index.mjs';
 import { itemCatalog } from '../../shared/items/index.mjs';
 
+/**
+ * 一份**加料的物品目录**：四件正式物品之外，再补两条只在这个文件里存在的定义。
+ *
+ * 目录现在只有木头、石头、果子、蘑菇，四件都占一格、都能堆叠。而「一件吃掉三个
+ * 货位」和「不占货位的独立池」是账本本来就守的规则，不该因为目录里暂时没有这样
+ * 的物品就没人钉住——那样等这类物品回到目录时，规则已经在某次重构里悄悄没了。
+ */
+const EXTRA_ITEMS = new Map([
+  ['crown-relic', Object.freeze({
+    id: 'crown-relic', displayName: '王冠遗物', category: 'valuable',
+    stackLimit: 1, slotCost: 3, pooled: false,
+  })],
+  ['ancient-coin-case', Object.freeze({
+    id: 'ancient-coin-case', displayName: '古币匣', category: 'valuable',
+    stackLimit: 1, slotCost: 2, pooled: false,
+  })],
+  ['light-ammo', Object.freeze({
+    id: 'light-ammo', displayName: '普通弹药', category: 'ammunition',
+    stackLimit: 240, slotCost: 0, pooled: true,
+  })],
+]);
+
+const extendedCatalog = {
+  get: (itemType) => EXTRA_ITEMS.get(itemType) ?? itemCatalog.get(itemType),
+  has: (itemType) => EXTRA_ITEMS.has(itemType) || itemCatalog.has(itemType),
+  require: (itemType) => {
+    const definition = EXTRA_ITEMS.get(itemType) ?? itemCatalog.get(itemType);
+    if (!definition) throw new Error(`物品目录里没有登记：${itemType}`);
+    return definition;
+  },
+};
+
 test('同类物品先填满已有堆叠，再另开货位', () => {
   const inventory = new InventoryComponent({ slotCapacity: 4 });
   const stackLimit = itemCatalog.require('wood').stackLimit;
 
-  assert.equal(inventory.add('wood', 10), 10);
+  assert.equal(inventory.add('wood', 3), 3);
   assert.equal(inventory.slots.length, 1, '第二次拾取不该另开一格');
-  assert.equal(inventory.add('wood', 5), 5);
+  assert.equal(inventory.add('wood', 2), 2);
   assert.equal(inventory.slots.length, 1);
-  assert.equal(inventory.quantityOf('wood'), 15);
+  assert.equal(inventory.quantityOf('wood'), 5);
   assert.equal(inventory.usedSlots, 1);
 
   // 一格堆到上限之后才开新格。
   assert.equal(inventory.add('wood', stackLimit), stackLimit);
   assert.equal(inventory.slots.length, 2);
   assert.equal(inventory.slots[0].quantity, stackLimit);
-  assert.equal(inventory.quantityOf('wood'), 15 + stackLimit);
+  assert.equal(inventory.quantityOf('wood'), 5 + stackLimit);
 });
 
 test('货位装满后拒收，剩下的留在世界里', () => {
   const inventory = new InventoryComponent({ slotCapacity: 2 });
-  assert.equal(inventory.add('spice-bundle', 1), 1);
-  assert.equal(inventory.add('spice-bundle', 1), 1, '不堆叠的货物各占一格');
+  const limit = itemCatalog.require('mushroom').stackLimit;
+  assert.equal(inventory.add('mushroom', limit), limit);
+  assert.equal(inventory.add('mushroom', limit), limit, '堆到上限就另开一格');
   assert.equal(inventory.slots.length, 2);
   assert.equal(inventory.freeSlots, 0);
   assert.equal(inventory.isFull, true);
@@ -38,28 +71,25 @@ test('货位装满后拒收，剩下的留在世界里', () => {
 });
 
 test('大件货物按 slotCost 吃掉多个货位', () => {
-  const inventory = new InventoryComponent({ slotCapacity: 4 });
-  assert.equal(itemCatalog.require('crown-relic').slotCost, 3);
+  const inventory = new InventoryComponent({ slotCapacity: 4 }, extendedCatalog);
+  assert.equal(extendedCatalog.require('crown-relic').slotCost, 3);
 
   assert.equal(inventory.add('crown-relic', 1), 1);
   assert.equal(inventory.usedSlots, 3);
   assert.equal(inventory.freeSlots, 1);
   assert.equal(inventory.add('ancient-coin-case', 1), 0, '剩一格装不下两格的箱子');
-  assert.equal(inventory.add('stone', 30), 30, '一格的东西还塞得进去');
+  assert.equal(inventory.add('stone', 3), 3, '一格的东西还塞得进去');
   assert.equal(inventory.usedSlots, 4);
 });
 
-test('弹药与基础工具不吃货位，但各自有上限', () => {
-  const inventory = new InventoryComponent({ slotCapacity: 1 });
-  const limit = itemCatalog.require('light-ammo').stackLimit;
+test('不占货位的物品走独立池，但各自有上限', () => {
+  const inventory = new InventoryComponent({ slotCapacity: 1 }, extendedCatalog);
+  const limit = extendedCatalog.require('light-ammo').stackLimit;
 
   assert.equal(inventory.add('light-ammo', limit + 50), limit, '超过上限的部分不拾取');
   assert.equal(inventory.usedSlots, 0, '弹药不该挤压货位');
   assert.equal(inventory.freeSlots, 1);
   assert.equal(inventory.pooled.length, 1);
-  assert.equal(inventory.add('harvest-hammer', 1), 1);
-  assert.equal(inventory.pooled.length, 2);
-  assert.equal(inventory.usedSlots, 0);
 
   // 货位还能照常收占格的东西。
   assert.equal(inventory.add('wood', 5), 5);
@@ -67,14 +97,14 @@ test('弹药与基础工具不吃货位，但各自有上限', () => {
 });
 
 test('取出物品会清空空掉的货位，未登记的物品收不下', () => {
-  const inventory = new InventoryComponent({ slotCapacity: 4 });
-  inventory.add('stone', 30);
+  const inventory = new InventoryComponent({ slotCapacity: 4 }, extendedCatalog);
+  inventory.add('stone', 8);
   inventory.add('light-ammo', 40);
 
-  assert.equal(inventory.remove('stone', 12), 12);
-  assert.equal(inventory.quantityOf('stone'), 18);
+  assert.equal(inventory.remove('stone', 5), 5);
+  assert.equal(inventory.quantityOf('stone'), 3);
   assert.equal(inventory.slots.length, 1);
-  assert.equal(inventory.remove('stone', 999), 18, '取多了只取得到剩下的');
+  assert.equal(inventory.remove('stone', 999), 3, '取多了只取得到剩下的');
   assert.equal(inventory.slots.length, 0, '空掉的货位要还回去');
   assert.equal(inventory.remove('light-ammo', 40), 40);
   assert.equal(inventory.pooled.length, 0);
@@ -85,18 +115,18 @@ test('取出物品会清空空掉的货位，未登记的物品收不下', () =>
 });
 
 test('快照按货位顺序发，客户端镜像能原样还原', () => {
-  const authority = new InventoryComponent({ slotCapacity: 6 });
-  authority.add('wood-log', 4);
+  const authority = new InventoryComponent({ slotCapacity: 6 }, extendedCatalog);
+  authority.add('wood', 4);
   authority.add('stone', 7);
   authority.add('light-ammo', 30);
 
   assert.deepEqual(authority.snapshot(), [
-    { itemType: 'wood-log', quantity: 4 },
+    { itemType: 'wood', quantity: 4 },
     { itemType: 'stone', quantity: 7 },
     { itemType: 'light-ammo', quantity: 30 },
   ]);
 
-  const mirror = new InventoryComponent({ slotCapacity: 6 });
+  const mirror = new InventoryComponent({ slotCapacity: 6 }, extendedCatalog);
   assert.equal(mirror.applySnapshot(authority.snapshot(), authority.revision), true);
   assert.deepEqual(mirror.snapshot(), authority.snapshot());
   assert.equal(mirror.revision, authority.revision);

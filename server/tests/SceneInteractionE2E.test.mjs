@@ -182,7 +182,7 @@ test('真实 WebSocket 贯通接管、装货、航行撞礁、损伤和卸货', 
   assert.equal(actorFrom(unloaded, 'demo-raft-01').buoyancy.lastEvent.type, 'cargo:remove');
 });
 
-test('真实 WebSocket 贯通史莱姆叼取、移动拉伸和自动脱离', async (context) => {
+test('真实 WebSocket 贯通史莱姆叼取、移动拉伸和拔进物品栏', async (context) => {
   const sceneCatalog = await SceneCatalog.load();
   const roomManager = new RoomProcessManager({ sceneCatalog });
   const room = await roomManager.createRoom('弹性蘑菇闭环测试', 'grassland');
@@ -232,11 +232,11 @@ test('真实 WebSocket 贯通史莱姆叼取、移动拉伸和自动脱离', asy
   const grabbed = await grabbedState;
   assert.equal(actorFrom(grabbed, 'elastic-mushroom-01').interactable.enabled, false);
 
-  const releasedState = waitForJson(socket, (message) => {
+  // 拔断的那一刻它就不再是世界里的一个物件了：它变成物品栏里的一朵蘑菇。
+  const pulledState = waitForJson(socket, (message) => {
     if (message.type !== 'room:snapshot') return false;
-    const mushroom = actorFrom(message, 'elastic-mushroom-01');
-    return mushroom?.elasticTether.holderPlayerId === null
-      && mushroom.elasticTether.releaseRevision >= 1;
+    const own = message.snapshot.players.find((player) => player.id === joined.player.id);
+    return own?.hotbar?.slots?.some((slot) => slot?.itemType === 'mushroom') === true;
   });
   let inputTick = 0;
   const movement = setInterval(() => {
@@ -251,21 +251,20 @@ test('真实 WebSocket 贯通史莱姆叼取、移动拉伸和自动脱离', asy
       inputs,
     }));
   }, 50);
-  const released = await releasedState.finally(() => clearInterval(movement));
-  const mushroom = actorFrom(released, 'elastic-mushroom-01');
-  assert.equal(mushroom.interactable.enabled, false);
-  assert.equal(mushroom.elasticDetach.detached, true);
+  const pulled = await pulledState.finally(() => clearInterval(movement));
+  const own = pulled.snapshot.players.find((player) => player.id === joined.player.id);
   assert.equal(
-    released.snapshot.players.find((player) => player.id === joined.player.id)?.heldActorId,
-    mushroom.id,
+    actorFrom(pulled, 'elastic-mushroom-01'),
+    undefined,
+    '拔出来之后世界里那一株就没了',
   );
-  assert.equal(mushroom.parentActorId, joined.player.id);
-  assert.equal(mushroom.transform, undefined, '被拾取 Actor 不应继续同步世界位置');
-  assert.ok(mushroom.elasticDetach.rotation, '被拾取 Actor 的非位置姿态仍需同步');
-  assert.equal(mushroom.elasticTether.releaseRevision, 1);
+  const slotIndex = own.hotbar.slots.findIndex((slot) => slot?.itemType === 'mushroom');
+  assert.equal(own.hotbar.slots[slotIndex].quantity, 1);
+  assert.equal(own.hotbar.activeIndex, slotIndex, '拔完就握在手上，不用再按数字键');
+  assert.ok(own.heldActorId, '手上应该挂着一个手持表现体');
 });
 
-test('真实 WebSocket 贯通流式树砍伐、偏离态快照和圆木掉落', async (context) => {
+test('真实 WebSocket 贯通流式树砍伐、偏离态快照和木头掉落', async (context) => {
   const sceneCatalog = await SceneCatalog.load();
   const roomManager = new RoomProcessManager({ sceneCatalog });
   const room = await roomManager.createRoom('流式树闭环测试', 'open-world');
@@ -367,7 +366,7 @@ test('真实 WebSocket 贯通流式树砍伐、偏离态快照和圆木掉落', 
     const tree = actorFrom(message, target.id);
     return tree?.propState.removed === true
       && message.snapshot.actors.some((actor) => (
-        actor.archetypeId === 'wood-log' && actor.itemStack?.itemType === 'wood-log'
+        actor.archetypeId === 'wood-pile' && actor.itemStack?.itemType === 'wood'
       ));
   });
   for (let sequence = 1; sequence <= 3; sequence += 1) {

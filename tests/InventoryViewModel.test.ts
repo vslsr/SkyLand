@@ -22,45 +22,33 @@ test('分类标签覆盖物品目录里的每一种分类', () => {
   );
 });
 
-test('视图把货位、独立池和空格分开摆出来', () => {
+test('视图把货位和空格分开摆出来', () => {
   const view = buildInventoryView(inventoryWith(6, [
-    ['wood', 12],
-    ['light-ammo', 40],
-    ['harvest-hammer', 1],
+    ['wood', 4],
+    ['fruit', 2],
   ]));
 
   assert.equal(view.slotCapacity, 6);
-  assert.equal(view.usedSlots, 1);
-  assert.equal(view.freeSlots, 5, '界面按这个数量补空格');
-  assert.deepEqual(view.slots.map((slot) => slot.itemType), ['wood']);
-  assert.deepEqual(view.pooled.map((slot) => slot.itemType), ['light-ammo', 'harvest-hammer']);
+  assert.equal(view.usedSlots, 2);
+  assert.equal(view.freeSlots, 4, '界面按这个数量补空格');
+  assert.deepEqual(view.slots.map((slot) => slot.itemType), ['wood', 'fruit']);
+  assert.deepEqual(view.pooled, [], '四件物品都占货位，独立池是空的');
 
   const wood = view.slots[0];
-  assert.equal(wood.displayName, '木材');
+  assert.equal(wood.displayName, '木头');
   assert.equal(wood.categoryLabel, '材料');
-  assert.equal(wood.quantity, 12);
+  assert.equal(wood.quantity, 4);
   assert.equal(wood.stackLimit, itemCatalog.require('wood').stackLimit);
   assert.equal(wood.slotCost, 1);
   assert.equal(wood.full, false);
   assert.equal(wood.contraband, false);
   assert.equal(wood.coinValue, undefined);
-  // 不占货位的东西在视图里 slotCost 恒为 0，界面因此不会给它画「几格」的角标。
-  assert.equal(view.pooled[0].slotCost, 0);
-});
+  assert.equal(wood.usable, false, '木头不能使用');
 
-test('价值货物汇总成待兑现金币，违禁品单独计数', () => {
-  const view = buildInventoryView(inventoryWith(8, [
-    ['spice-bundle', 1],
-    ['crown-relic', 1],
-  ]));
-
-  const spice = itemCatalog.require('spice-bundle').coinValue;
-  const crown = itemCatalog.require('crown-relic').coinValue;
-  assert.equal(view.cargoValue, spice + crown);
-  assert.equal(view.contrabandCount, 1);
-  assert.equal(view.usedSlots, 4, '王冠遗物一件就吃掉三格');
-  assert.equal(view.freeSlots, 4);
-  assert.deepEqual(view.slots.map((slot) => slot.slotCost), [1, 3]);
+  const fruit = view.slots[1];
+  assert.equal(fruit.usable, true);
+  assert.equal(fruit.useMode, 'hold', '果子要按住嚼完那一段才吃下去');
+  assert.ok(fruit.holdSeconds > 0);
 });
 
 test('堆到上限的格子标成 full，装满时没有空格', () => {

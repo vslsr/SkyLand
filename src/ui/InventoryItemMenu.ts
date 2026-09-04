@@ -1,5 +1,13 @@
-/** 菜单上那三条。语义由 `InventoryController` 兑现，这里只负责说出意图。 */
-export type InventoryItemAction = 'use' | 'equip' | 'drop';
+import type { InventorySlotRef } from './InventorySlotCell';
+
+/**
+ * 菜单上那三条。语义由 `InventoryController` 兑现，这里只负责说出意图。
+ *
+ * 三条对两本账各有一种读法：背包那一格是「使用 / 装配 / 丢弃」，物品栏那一格是
+ * 「使用 / 收回背包 / 丢弃」。中间那条方向相反，所以它是两个动词而不是一个开关
+ * ——`equip` 往物品栏搬，`unequip` 往背包搬。
+ */
+export type InventoryItemAction = 'use' | 'equip' | 'unequip' | 'drop';
 
 export interface InventoryItemMenuEntry {
   readonly action: InventoryItemAction;
@@ -33,8 +41,8 @@ export class InventoryItemMenu {
   public readonly element: HTMLElement;
   private readonly list: HTMLElement;
   private readonly titleElement: HTMLElement;
-  private selectHandler?: (action: InventoryItemAction, itemType: string) => void;
-  private openItemType?: string;
+  private selectHandler?: (action: InventoryItemAction, slot: InventorySlotRef) => void;
+  private openSlot?: InventorySlotRef;
   private disposeDismiss?: () => void;
 
   public constructor(private readonly host: HTMLElement) {
@@ -54,27 +62,27 @@ export class InventoryItemMenu {
   }
 
   public get isOpen(): boolean {
-    return this.openItemType !== undefined;
+    return this.openSlot !== undefined;
   }
 
-  /** 当前挂着菜单的那一格是哪种物品；没开时是 undefined。 */
-  public get itemType(): string | undefined {
-    return this.openItemType;
+  /** 当前挂着菜单的是哪一格；没开时是 undefined。 */
+  public get slot(): InventorySlotRef | undefined {
+    return this.openSlot;
   }
 
-  public onSelect(handler: (action: InventoryItemAction, itemType: string) => void): void {
+  public onSelect(handler: (action: InventoryItemAction, slot: InventorySlotRef) => void): void {
     this.selectHandler = handler;
   }
 
   public open(
     anchor: HTMLElement,
-    itemType: string,
+    slot: InventorySlotRef,
     title: string,
     entries: readonly InventoryItemMenuEntry[],
   ): void {
-    this.openItemType = itemType;
+    this.openSlot = slot;
     this.titleElement.textContent = title;
-    this.list.replaceChildren(...entries.map((entry) => this.createEntry(entry, itemType)));
+    this.list.replaceChildren(...entries.map((entry) => this.createEntry(entry, slot)));
     this.element.hidden = false;
     this.position(anchor);
     this.listenForDismiss();
@@ -82,7 +90,7 @@ export class InventoryItemMenu {
 
   public close(): void {
     if (!this.isOpen) return;
-    this.openItemType = undefined;
+    this.openSlot = undefined;
     this.element.hidden = true;
     this.list.replaceChildren();
     this.disposeDismiss?.();
@@ -94,7 +102,7 @@ export class InventoryItemMenu {
     this.element.remove();
   }
 
-  private createEntry(entry: InventoryItemMenuEntry, itemType: string): HTMLElement {
+  private createEntry(entry: InventoryItemMenuEntry, slot: InventorySlotRef): HTMLElement {
     const button = document.createElement('button');
     button.type = 'button';
     button.className = 'inventory-menu__entry';
@@ -111,7 +119,7 @@ export class InventoryItemMenu {
     button.addEventListener('click', () => {
       // 先收菜单再兑现：动作会改背包，改完那一格会被重画，菜单挂着的锚点就没了。
       this.close();
-      this.selectHandler?.(entry.action, itemType);
+      this.selectHandler?.(entry.action, slot);
     });
     return button;
   }

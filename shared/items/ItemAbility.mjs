@@ -22,6 +22,7 @@ export const ITEM_USE_ABILITY_SLOT = 'item-use';
 export const ITEM_USE_STATE_TAG = 'State.Item.Using';
 
 const USE_VERBS = Object.freeze({
+  eat: '吃下',
   tool: '敲击',
   throw: '投掷',
 });

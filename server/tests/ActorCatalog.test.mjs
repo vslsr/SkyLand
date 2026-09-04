@@ -137,17 +137,15 @@ test('ActorCatalog 加载并净化木筏原型', async () => {
   assert.equal(wood.components.replicationPolicy.mode, 'aoi');
   assert.equal(wood.components.render.model, 'line-art-wood-pile');
 
-  const woodLog = catalog.require('wood-log');
-  assert.equal(woodLog.components.itemStack.itemType, 'wood-log');
-  assert.equal(woodLog.components.itemStack.displayName, '圆木');
-  assert.equal(woodLog.components.itemStack.compatibilityKey, 'wood-log');
-  assert.equal(woodLog.components.render.model, 'line-art-wood-log');
-  assert.deepEqual(woodLog.components.dropMotion, {
+  assert.equal(wood.components.itemStack.displayName, '木头');
+  assert.equal(wood.components.itemStack.compatibilityKey, 'wood-standard');
+  // 木头躺在地上是一根会滚的六棱柱，所以它有掉落半径与滚动阻尼。
+  assert.deepEqual(wood.components.dropMotion, {
     gravity: 9.8,
     drag: 0.65,
     groundDrag: 3.1,
     restitution: 0.18,
-    radius: 0.11,
+    radius: 0.12,
     settleSpeed: 0.07,
   });
 
@@ -155,7 +153,7 @@ test('ActorCatalog 加载并净化木筏原型', async () => {
   // 原型只描述「它是什么」，承载哪一种物件由场景的 gameplay.worldProps 决定。
   assert.equal(tree.components.generatedProp.kind, undefined);
   assert.deepEqual(tree.components.generatedProp.drop, {
-    archetypeId: 'wood-log',
+    archetypeId: 'wood-pile',
     quantity: 5,
     spawnPattern: 'center-scatter',
   });

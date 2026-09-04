@@ -33,7 +33,7 @@ test('worldProps 把绑定关系交给场景，原型与掉落一并被带进场
   });
   const ids = scene.actorArchetypes.map((archetype) => archetype.id);
   for (const id of [
-    'generated-tree', 'wood-log', 'fruit-tree', 'fruit-pile', 'large-rock', 'stone-pile',
+    'generated-tree', 'wood-pile', 'fruit-tree', 'fruit-pile', 'large-rock', 'stone-pile',
     'elastic-mushroom',
   ]) {
     assert.ok(ids.includes(id), `${id} 应该被自动带进场景`);

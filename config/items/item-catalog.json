@@ -5,275 +5,57 @@
   "items": [
     {
       "id": "wood",
-      "displayName": "木材",
+      "displayName": "木头",
       "category": "material",
-      "stackLimit": 99,
+      "stackLimit": 10,
       "slotCost": 1,
       "iconId": "item-wood",
       "tint": "#B98558",
-      "summary": "建造与修理的基础材料。",
-      "use": {
-        "action": "throw",
-        "input": "primary",
-        "mode": "hold",
-        "holdSeconds": 0.7,
-        "value": 60
-      }
-    },
-    {
-      "id": "wood-log",
-      "displayName": "圆木",
-      "category": "material",
-      "stackLimit": 99,
-      "slotCost": 1,
-      "iconId": "item-wood-log",
-      "tint": "#D6BEA3",
-      "summary": "未加工的原木，可在工位拆成木材。",
-      "use": {
-        "action": "throw",
-        "input": "primary",
-        "mode": "hold",
-        "holdSeconds": 0.7,
-        "value": 45
-      }
+      "summary": "砍树得到的一段木头，建造与修理的基础材料。"
     },
     {
       "id": "stone",
-      "displayName": "石料",
+      "displayName": "石头",
       "category": "material",
-      "stackLimit": 99,
+      "stackLimit": 10,
       "slotCost": 1,
       "iconId": "item-stone",
       "tint": "#B9B4A8",
-      "summary": "加固船体与地面工事的基础材料。",
-      "use": {
-        "action": "throw",
-        "input": "primary",
-        "mode": "hold",
-        "holdSeconds": 0.7,
-        "value": 70
-      }
+      "summary": "敲岩石得到的一块石头，加固与铺设的基础材料。"
     },
     {
-      "id": "rope",
-      "displayName": "绳索",
-      "category": "material",
-      "stackLimit": 99,
+      "id": "fruit",
+      "displayName": "果子",
+      "category": "supply",
+      "stackLimit": 10,
       "slotCost": 1,
-      "iconId": "item-rope",
-      "tint": "#C8A96E",
-      "summary": "索具、登船绳与打捞装置的通用材料。",
+      "iconId": "item-fruit",
+      "tint": "#D4694F",
+      "summary": "从果树上掉下来的果子，能吃。",
       "use": {
-        "action": "throw",
+        "action": "eat",
         "input": "primary",
         "mode": "hold",
-        "holdSeconds": 0.7,
-        "value": 55
-      }
-    },
-    {
-      "id": "gunpowder",
-      "displayName": "火药",
-      "category": "material",
-      "stackLimit": 99,
-      "slotCost": 1,
-      "iconId": "item-gunpowder",
-      "tint": "#6E6A63",
-      "summary": "补弹与爆破制作共用，产量决定火力上限。",
-      "use": {
-        "action": "throw",
-        "input": "primary",
-        "mode": "hold",
-        "holdSeconds": 0.7,
-        "value": 55
+        "holdSeconds": 1.2,
+        "value": 1
       }
     },
     {
       "id": "mushroom",
-      "displayName": "弹弹菇",
-      "category": "material",
-      "stackLimit": 99,
+      "displayName": "蘑菇",
+      "category": "supply",
+      "stackLimit": 3,
       "slotCost": 1,
       "iconId": "item-mushroom",
       "tint": "#C97868",
-      "summary": "从地里拔出来的弹弹菇，可揣进背包带走。",
+      "summary": "空手从地里拔出来的蘑菇，能吃。",
       "use": {
-        "action": "throw",
+        "action": "eat",
         "input": "primary",
         "mode": "hold",
-        "holdSeconds": 0.6,
-        "value": 60
+        "holdSeconds": 1,
+        "value": 1
       }
-    },
-    {
-      "id": "fruit",
-      "displayName": "果实",
-      "category": "supply",
-      "stackLimit": 3,
-      "slotCost": 1,
-      "iconId": "item-fruit",
-      "tint": "#D4694F",
-      "summary": "交战间隙的快速恢复，用时可低速移动。",
-      "use": {
-        "action": "throw",
-        "input": "primary",
-        "mode": "hold",
-        "holdSeconds": 0.6,
-        "value": 65
-      }
-    },
-    {
-      "id": "bandage",
-      "displayName": "绷带",
-      "category": "supply",
-      "stackLimit": 3,
-      "slotCost": 1,
-      "iconId": "item-bandage",
-      "tint": "#E4DCCB",
-      "summary": "1.5–2 秒快速恢复，受伤会打断。"
-    },
-    {
-      "id": "medkit",
-      "displayName": "医疗包",
-      "category": "supply",
-      "stackLimit": 2,
-      "slotCost": 1,
-      "iconId": "item-medkit",
-      "tint": "#C4534B",
-      "summary": "2.5–3 秒持续使用，恢复较多但明显减速。"
-    },
-    {
-      "id": "armor-patch",
-      "displayName": "护甲补片",
-      "category": "supply",
-      "stackLimit": 2,
-      "slotCost": 1,
-      "iconId": "item-armor-patch",
-      "tint": "#8A93A0",
-      "summary": "恢复护甲耐久，不恢复生命。"
-    },
-    {
-      "id": "firebomb",
-      "displayName": "燃烧瓶",
-      "category": "throwable",
-      "stackLimit": 2,
-      "slotCost": 1,
-      "iconId": "item-firebomb",
-      "tint": "#D2762F",
-      "summary": "逼迫离开掩体；不能越过墙体落到墙后。",
-      "use": {
-        "action": "throw",
-        "input": "primary",
-        "mode": "hold",
-        "holdSeconds": 1.1,
-        "value": 90
-      }
-    },
-    {
-      "id": "net-shell",
-      "displayName": "渔网弹",
-      "category": "throwable",
-      "stackLimit": 3,
-      "slotCost": 1,
-      "iconId": "item-net-shell",
-      "tint": "#6F8E7A",
-      "summary": "减速与打断重武器操作，创造登船窗口。",
-      "use": {
-        "action": "throw",
-        "input": "primary",
-        "mode": "hold",
-        "holdSeconds": 0.9,
-        "value": 85
-      }
-    },
-    {
-      "id": "smoke-canister",
-      "displayName": "烟雾罐",
-      "category": "throwable",
-      "stackLimit": 3,
-      "slotCost": 1,
-      "iconId": "item-smoke-canister",
-      "tint": "#9AA0A6",
-      "summary": "切断视线掩护抢修，不消除实体弹道碰撞。",
-      "use": {
-        "action": "throw",
-        "input": "primary",
-        "mode": "hold",
-        "holdSeconds": 0.9,
-        "value": 85
-      }
-    },
-    {
-      "id": "light-ammo",
-      "displayName": "普通弹药",
-      "category": "ammunition",
-      "stackLimit": 240,
-      "slotCost": 0,
-      "iconId": "item-light-ammo",
-      "tint": "#A98F5E",
-      "summary": "多数轻型武器共用；自动拾取到上限，不占货位。",
-      "holdable": false
-    },
-    {
-      "id": "special-ammo",
-      "displayName": "特殊弹药",
-      "category": "ammunition",
-      "stackLimit": 60,
-      "slotCost": 0,
-      "iconId": "item-special-ammo",
-      "tint": "#7C74C0",
-      "summary": "高控制或元素轻型武器专用，携带上限更低。",
-      "holdable": false
-    },
-    {
-      "id": "harvest-hammer",
-      "displayName": "采集锤",
-      "category": "tool",
-      "stackLimit": 1,
-      "slotCost": 0,
-      "iconId": "item-harvest-hammer",
-      "tint": "#8C7B62",
-      "summary": "面对资源与受损结构自动调用，不占战斗栏。",
-      "use": {
-        "action": "tool",
-        "input": "primary",
-        "mode": "tap",
-        "value": 2
-      }
-    },
-    {
-      "id": "spice-bundle",
-      "displayName": "香料包",
-      "category": "valuable",
-      "stackLimit": 1,
-      "slotCost": 1,
-      "iconId": "item-spice-bundle",
-      "tint": "#C98A3C",
-      "summary": "海滩营地常见的低价值货物，运到贸易点出售。",
-      "coinValue": 30
-    },
-    {
-      "id": "ancient-coin-case",
-      "displayName": "古币匣",
-      "category": "valuable",
-      "stackLimit": 1,
-      "slotCost": 2,
-      "iconId": "item-ancient-coin-case",
-      "tint": "#B8A15A",
-      "summary": "遗迹封闭仓库的中价值货物，占两个货位。",
-      "coinValue": 70
-    },
-    {
-      "id": "crown-relic",
-      "displayName": "王冠遗物",
-      "category": "valuable",
-      "stackLimit": 1,
-      "slotCost": 3,
-      "iconId": "item-crown-relic",
-      "tint": "#D8B44A",
-      "summary": "公开广播的顶级战利品，携带时暴露自身位置。",
-      "coinValue": 200,
-      "contraband": true
     }
   ]
 }

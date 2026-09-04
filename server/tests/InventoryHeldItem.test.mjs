@@ -11,6 +11,7 @@ import {
   resolveActorAction,
   resolveHeldItemAction,
 } from '../../shared/actor/index.mjs';
+import { itemCatalog } from '../../shared/items/index.mjs';
 import {
   dropHeldObject,
   dropInventoryItem,
@@ -22,61 +23,81 @@ const player = (inventory) => ({ id: 'p1', getComponent: (name) => (name === 'in
 const chest = (container) => ({ getComponent: (name) => (name === 'container' ? container : undefined) });
 
 test('账本按货位记账，背包与容器共用同一套规则', () => {
+  const limit = itemCatalog.require('wood').stackLimit;
   const ledger = new ItemLedger(2);
-  // 王冠占 3 格，2 格的账本一件都放不下。
-  assert.equal(ledger.add('crown-relic', 1), 0);
-  assert.equal(ledger.add('wood', 150), 150);
+  // 一格堆到上限就另开一格：两格装满之后这本账就满了。
+  assert.equal(ledger.add('wood', limit * 2), limit * 2);
   assert.equal(ledger.usedSlots, 2);
   assert.equal(ledger.isFull, true);
   // 满了还想收：收下 0，剩下的留在世界里而不是被吞掉。
   assert.equal(ledger.add('stone', 5), 0);
 });
 
-test('不占货位的物品不吃背包格数', () => {
-  const ledger = new ItemLedger(1);
-  assert.equal(ledger.add('light-ammo', 200), 200);
-  assert.equal(ledger.usedSlots, 0);
-  assert.equal(ledger.add('wood', 1), 1);
-});
-
 test('装配是一次转移：那一摞从背包搬进物品栏，背包里就没有了', () => {
+  const limit = itemCatalog.require('wood').stackLimit;
   const inventory = new InventoryComponent({ slotCapacity: 8, hotbarCapacity: 9 });
-  inventory.add('wood', 120);
+  inventory.add('wood', limit + 4);
 
   assert.equal(inventory.assignHotbarSlot(0, 'wood'), true);
   // 一格一摞，最多堆到 stackLimit；剩下的留在背包里。
-  assert.deepEqual(inventory.hotbar[0], { itemType: 'wood', quantity: 99 });
-  assert.equal(inventory.quantityOf('wood'), 21, '背包里只剩没搬走的那些');
-  assert.equal(inventory.totalQuantityOf('wood'), 120, '身上一共还是这么多');
+  assert.deepEqual(inventory.hotbar[0], { itemType: 'wood', quantity: limit });
+  assert.equal(inventory.quantityOf('wood'), 4, '背包里只剩没搬走的那些');
+  assert.equal(inventory.totalQuantityOf('wood'), limit + 4, '身上一共还是这么多');
 
   inventory.setActiveHotbarSlot(0);
   assert.equal(inventory.heldItemType, 'wood');
-  assert.equal(inventory.heldQuantity, 99);
+  assert.equal(inventory.heldQuantity, limit);
 
   // 用掉的是物品栏那一格；用光了那一格直接空出来，不留一个「配置还在」的壳。
-  assert.equal(inventory.consumeHeldItem(99), 99);
+  assert.equal(inventory.consumeHeldItem(limit), limit);
   assert.equal(inventory.hotbar[0], null);
   assert.equal(inventory.heldItemType, undefined);
-  assert.equal(inventory.quantityOf('wood'), 21, '背包那 21 个不受影响');
+  assert.equal(inventory.quantityOf('wood'), 4, '背包那 4 个不受影响');
 });
 
 test('收回背包也是一次转移；背包满了就原样留在物品栏', () => {
+  const woodLimit = itemCatalog.require('wood').stackLimit;
+  const stoneLimit = itemCatalog.require('stone').stackLimit;
   const inventory = new InventoryComponent({ slotCapacity: 1, hotbarCapacity: 9 });
-  inventory.add('wood', 99);
+  inventory.add('wood', woodLimit);
   inventory.assignHotbarSlot(0, 'wood');
   assert.equal(inventory.quantityOf('wood'), 0);
 
-  // 唯一那个货位被石料占住：整摞放不回去，就一个都不放。
-  inventory.add('stone', 99);
+  // 唯一那个货位被石头占住：整摞放不回去，就一个都不放。
+  inventory.add('stone', stoneLimit);
   assert.equal(inventory.clearHotbarSlot(0), false);
-  assert.deepEqual(inventory.hotbar[0], { itemType: 'wood', quantity: 99 });
+  assert.deepEqual(inventory.hotbar[0], { itemType: 'wood', quantity: woodLimit });
   assert.equal(inventory.quantityOf('wood'), 0, '撤销要撤干净，不能塞进去半摞');
-  assert.equal(inventory.quantityOf('stone'), 99);
+  assert.equal(inventory.quantityOf('stone'), stoneLimit);
 
-  inventory.remove('stone', 99);
+  inventory.remove('stone', stoneLimit);
   assert.equal(inventory.clearHotbarSlot(0), true);
   assert.equal(inventory.hotbar[0], null);
-  assert.equal(inventory.quantityOf('wood'), 99);
+  assert.equal(inventory.quantityOf('wood'), woodLimit);
+});
+
+test('空手拔出来的东西直接进物品栏，落点是空着的选中格', () => {
+  // 「拔出来就在手上」的账本这一半：不经过背包，落进空着的那一格。
+  const inventory = new InventoryComponent({ slotCapacity: 8, hotbarCapacity: 9 });
+  inventory.setActiveHotbarSlot(3);
+
+  assert.equal(inventory.equipToHotbar('mushroom', 1), 3, '空着的选中格优先');
+  assert.deepEqual(inventory.hotbar[3], { itemType: 'mushroom', quantity: 1 });
+  assert.equal(inventory.quantityOf('mushroom'), 0, '它没有在背包里中转过');
+
+  // 同一种再拔一朵就堆在那一格上，直到堆满才另找一格。
+  assert.equal(inventory.equipToHotbar('mushroom', 1), 3);
+  assert.equal(inventory.hotbar[3].quantity, 2);
+
+  // 选中格被占住时落到第一个空格。
+  inventory.setActiveHotbarSlot(3);
+  assert.equal(inventory.equipToHotbar('wood', 1), 0);
+
+  // 一格都腾不出来时收不下：调用方据此退回「叼在嘴上」，而不是把它删掉。
+  const full = new InventoryComponent({ slotCapacity: 8, hotbarCapacity: 1 });
+  full.add('wood', 1);
+  full.assignHotbarSlot(0, 'wood');
+  assert.equal(full.equipToHotbar('mushroom', 1), NO_HOTBAR_SLOT);
 });
 
 test('同一种物品只占物品栏一格：装到新格是把它挪过去', () => {
@@ -138,9 +159,9 @@ test('快照带上物品栏（含数量），客户端镜像跟着重建', () =>
 });
 
 test('手上那件不管本来是什么，交互键一律是放下', () => {
-  const held = { actorId: 'a', label: '木材', action: 'pickup-stack', enabled: false, pickupHolderActorId: 'p1' };
+  const held = { actorId: 'a', label: '木头', action: 'pickup-stack', enabled: false, pickupHolderActorId: 'p1' };
   assert.deepEqual(resolveActorAction(held, { playerId: 'p1' }), {
-    id: 'drop-held', verb: '放下「木材」', blocked: false,
+    id: 'drop-held', verb: '放下「木头」', blocked: false,
   });
   // 别人手上那件不给动。
   assert.equal(resolveActorAction({ ...held, pickupHolderActorId: 'p2' }, { playerId: 'p1' }), undefined);
@@ -156,22 +177,21 @@ test('装卸的前置条件由动作表挡下，两端读的是同一份判定',
   );
 });
 
-test('使用方式来自物品目录：长按有倒计时，点按没有', () => {
-  const bomb = resolveHeldItemAction('firebomb');
-  assert.equal(bomb.action, 'throw');
-  assert.equal(bomb.input, 'primary');
-  assert.equal(bomb.mode, 'hold');
-  assert.equal(bomb.id, 'Ability.Item.firebomb', '一件物品的用法就是一条能力');
+test('使用方式来自物品目录：吃东西是一段按住', () => {
+  const fruit = resolveHeldItemAction('fruit');
+  assert.equal(fruit.action, 'eat');
+  assert.equal(fruit.input, 'primary');
+  assert.equal(fruit.mode, 'hold', '吃要嚼一会儿，所以是按住');
+  assert.equal(fruit.verb, '吃下「果子」');
+  assert.equal(fruit.id, 'Ability.Item.fruit', '一件物品的用法就是一条能力');
   // 圈满那一刻就是激活那一刻：两端跑同一个 holdRatio。
-  assert.equal(holdRatio(bomb.holdSeconds / 2, bomb.holdSeconds), 0.5);
-  assert.equal(holdRatio(99, bomb.holdSeconds), 1);
+  assert.equal(holdRatio(fruit.holdSeconds / 2, fruit.holdSeconds), 0.5);
+  assert.equal(holdRatio(99, fruit.holdSeconds), 1);
 
-  const hammer = resolveHeldItemAction('harvest-hammer');
-  assert.equal(hammer.mode, 'tap');
-  // tap 没有倒计时，点一下就激活，不需要单独一条支路。
-  assert.equal(holdRatio(0, hammer.holdSeconds), 1);
-
-  assert.equal(resolveHeldItemAction('medkit'), undefined);
+  assert.equal(resolveHeldItemAction('mushroom').action, 'eat');
+  // 材料没有用法：按键在它身上就该没有反应。
+  assert.equal(resolveHeldItemAction('wood'), undefined);
+  assert.equal(resolveHeldItemAction('stone'), undefined);
 });
 
 test('两个人同时掏最后一摞：先到的拿走，后到的拿到 0', () => {
@@ -206,15 +226,17 @@ test('没开着容器的人搬不动它，内容也不发给他', () => {
 });
 
 test('目标装满时差额留在来源，不会凭空消失', () => {
+  const limit = itemCatalog.require('wood').stackLimit;
   const container = new ContainerComponent({ slotCapacity: 1, label: '储物箱', reach: 3 });
   const inventory = new InventoryComponent({ slotCapacity: 8 });
-  inventory.add('wood', 150);
+  const carried = inventory.add('wood', limit * 3);
   container.openFor('p1');
-  // 1 格只装得下一摞 99，剩下的 51 必须还在背包里。
+  // 箱子只有一格：装得下一摞，剩下的必须还在背包里。
   const moved = transferItems(player(inventory), chest(container), {
-    itemType: 'wood', quantity: 150, direction: 'store',
+    itemType: 'wood', quantity: carried, direction: 'store',
   });
-  assert.equal(moved + inventory.quantityOf('wood'), 150);
+  assert.equal(moved, limit);
+  assert.equal(moved + inventory.quantityOf('wood'), carried);
   assert.equal(container.quantityOf('wood'), moved);
 });
 
