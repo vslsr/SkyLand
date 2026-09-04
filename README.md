@@ -85,6 +85,35 @@ npm start
 }
 ```
 
+### Docker 容器部署
+
+镜像跑的就是上面这套生产形态：两段式构建先 `npm run build`，运行阶段只留 `dist/`、
+`server/`、`shared/`、`config/` 和运行时依赖，以非 root 的 `node` 用户监听 3090。
+
+```bash
+docker compose up -d --build          # 构建并启动
+curl http://127.0.0.1:3090/api/health # {"ok":true,...,"webReady":true}
+docker compose logs -f skyland
+```
+
+不用 Compose 时：
+
+```bash
+docker build -t skyland:latest .
+docker run -d --name skyland --restart unless-stopped --init \
+  -p 3090:3090 -v skyland-logs:/app/logs skyland:latest
+```
+
+`--init` 不能省——房间 DS 是 `node` 的子进程，PID 1 不是 init 时会留下僵尸进程。
+
+公网部署必须配 HTTPS：`SharedArrayBuffer` 只在安全上下文里可用，走
+`http://<公网 IP>:3090` 时 COOP/COEP 发得再对，`crossOriginIsolated` 也是 `false`，
+渲染 Worker 与物理会掉到降级路径。反代要转发 WebSocket 升级、放长读超时，并且不要
+覆盖服务端发的 COOP/COEP 头。
+
+完整的构建参数、跨架构构建、Nginx/Caddy 配置、更新回滚和排查表见
+[`doc/docker-deployment.md`](doc/docker-deployment.md)。
+
 ### 开发模式：Vite 热更新 + Node.js DS
 
 当前项目不需要额外开启“联机模式”。开发时同时启动 Node.js 服务器和 Vite
