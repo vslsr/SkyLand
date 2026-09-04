@@ -1345,3 +1345,30 @@ GAS `Movement.Speed` 的 CurrentValue；涉水 GameplayEffect 因此同时约束
 - `shared/collision/`：均匀网格空间划分、场景碰撞世界与扫掠球求交
 - `native/chunkgen/`：编译为 WebAssembly 的 Rust 生成与合批实现
 - `tests/`：不依赖浏览器的客户端逻辑测试
+
+
+# Deploy
+
+```
+cd /path/to/SkyLand
+git pull
+
+# 1. 停掉一直在重试 Let's Encrypt 的 Caddy，并清掉它的配置
+docker compose --profile tls down
+rm -f .env
+
+# 2. 腾出 80/443（h5sgame 站点会下线）
+docker stop h5sgame-prod-nginx-1
+
+# 3. 生成自签证书
+./deploy/generate-self-signed-cert.sh 111.229.172.59
+
+# 4. 起 nginx + skyland
+docker compose --profile nginx-tls up -d
+
+# 5. 确认两个都在
+docker ps
+docker compose logs nginx
+```
+
+然后开 https://111.229.172.59.sslip.io/。
