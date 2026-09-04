@@ -30,6 +30,9 @@
       "maximumFallSpeed": 20,
       "airControl": 0.85
     },
+    "health": {
+      "maximum": 100
+    },
     "pickupDrop": {
       "mouthLocalX": 0,
       "mouthLocalY": 0.5,

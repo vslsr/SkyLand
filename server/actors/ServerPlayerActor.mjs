@@ -1,6 +1,8 @@
 import {
   Actor,
   BiteComponent,
+  HEALTH_COMPONENT,
+  HealthComponent,
   BuoyancyComponent,
   InventoryComponent,
   PickupDropComponent,
@@ -24,6 +26,7 @@ import {
   GAME_ABILITY_COMPONENT,
   GameAbilityComponent,
   WaterMovementEffectController,
+  createHealthAttributes,
   createPlayerMovementAttributes,
 } from '../../shared/abilities/index.mjs';
 
@@ -43,9 +46,21 @@ export class ServerPlayerActor extends Actor {
       archetype.components.playerMovement,
     ));
     this.addComponent(new PlayerJumpComponent(archetype.components.playerJump));
+    // 玩家的 GAS 一次装齐：移动速度和生命值是同一个 AbilitySystem 上的两条属性，
+    // 分成两个 Component 会让「涉水减速」和「受伤」落在不同的实体上。
     const gameAbility = this.addComponent(new GameAbilityComponent({
-      attributes: createPlayerMovementAttributes(movement.walkSpeed),
+      attributes: [
+        ...createPlayerMovementAttributes(movement.walkSpeed),
+        ...(archetype.components.health
+          ? createHealthAttributes(archetype.components.health.maximum)
+          : []),
+      ],
     }));
+    // 玩家的尸体不会自己消失（`corpseSeconds` 恒为 0）：人还连着，这具身体是他
+    // 变成自由视角之后仍然看得见的那一个。
+    if (archetype.components.health) {
+      this.addComponent(new HealthComponent({ ...archetype.components.health, corpseSeconds: 0 }));
+    }
     this.waterMovementEffect = new WaterMovementEffectController(gameAbility.abilitySystem);
     // applyPlayerMovement 读取这份复用对象；每次输入只更新 GAS CurrentValue，避免热路径分配。
     this.effectiveMovement = {
@@ -117,6 +132,16 @@ export class ServerPlayerActor extends Actor {
 
   get gameAbility() {
     return this.requireComponent(GAME_ABILITY_COMPONENT);
+  }
+
+  /** 生命值的复制面；没配 health 的玩家原型返回 undefined。 */
+  get health() {
+    return this.getComponent(HEALTH_COMPONENT);
+  }
+
+  /** 死了的人不再产生任何权威改动：不移动、不交互、不建造。 */
+  get dead() {
+    return this.health?.dead === true;
   }
 
   get jump() {

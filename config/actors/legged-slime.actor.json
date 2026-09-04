@@ -18,6 +18,9 @@
       "maximumFallSpeed": 20,
       "airControl": 0.85
     },
+    "health": {
+      "maximum": 100
+    },
     "inventory": {
       "slotCapacity": 8
     },

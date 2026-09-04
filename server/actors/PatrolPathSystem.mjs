@@ -1,4 +1,5 @@
 import {
+  HEALTH_COMPONENT,
   PATROL_PATH_COMPONENT,
   TRANSFORM_COMPONENT,
 } from '../../shared/actor/index.mjs';
@@ -22,6 +23,8 @@ export class PatrolPathSystem {
     if (step <= 0) return;
     const pose = { x: 0, y: 0, z: 0, yaw: 0, hasHeading: false, moving: false };
     for (const actor of world.query(PATROL_PATH_COMPONENT, TRANSFORM_COMPONENT)) {
+      // 死了就不走了。尸体留在倒下的那一格，直到 `HealthSystem` 收走它。
+      if (actor.getComponent(HEALTH_COMPONENT)?.dead) continue;
       const patrol = actor.requireComponent(PATROL_PATH_COMPONENT);
       const transform = actor.requireComponent(TRANSFORM_COMPONENT);
       // 出生点只抓一次：路线相对它解算，而 Actor 自己正被这条路线推着走。

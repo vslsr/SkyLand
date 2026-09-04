@@ -27,6 +27,7 @@ import {
   ELASTIC_DETACH_COMPONENT,
   ELASTIC_TETHER_COMPONENT,
   GENERATED_PROP_COMPONENT,
+  HEALTH_COMPONENT,
   INTERACTABLE_COMPONENT,
   INVENTORY_COMPONENT,
   ITEM_STACK_COMPONENT,
@@ -59,6 +60,7 @@ import {
   grabElasticTether,
   releaseElasticTether,
 } from '../actors/ElasticTetherMutations.mjs';
+import { applyDamage, applyHeal } from '../actors/HealthMutations.mjs';
 import { dropPickedActor, pickupActor } from '../actors/PickupDropMutations.mjs';
 import { placeBuildPiece, removeBuildPiece } from '../actors/BuildMutations.mjs';
 import {
@@ -112,6 +114,9 @@ const HOTBAR_COMMAND_KINDS = new Set([
   'hotbar:stow',
   'drop:hotbar',
 ]);
+
+/** 调试伤害指令够得到多远的生物，米。和交互距离同量级，不是远程打击。 */
+const DEBUG_HEALTH_RANGE = 6;
 
 function roundCoordinate(value) {
   return Math.round(value * 1000) / 1000;
@@ -689,6 +694,7 @@ export class ServerScene {
   applyBuildCommand(playerId, message) {
     const player = this.players.get(playerId);
     if (!player) return false;
+    if (player.dead) return false;
     const sequence = Math.floor(toFiniteNumber(message?.sequence, 0));
     if (sequence <= player.buildCommandSequence) return false;
     player.buildCommandSequence = sequence;
@@ -772,6 +778,8 @@ export class ServerScene {
   applyInventoryCommand(playerId, message) {
     const player = this.players.get(playerId);
     if (!player) return false;
+    // 物品栏命令连着物品使用能力（长按、投掷），所以死亡后整条一起停。
+    if (player.dead) return false;
     const sequence = Math.floor(toFiniteNumber(message?.sequence, 0));
     if (sequence <= player.inventoryCommandSequence) return false;
     const command = message?.command;
@@ -897,6 +905,7 @@ export class ServerScene {
   interactWithActor(playerId, message) {
     const player = this.players.get(playerId);
     if (!player) return false;
+    if (player.dead) return false;
     const sequence = Math.floor(toFiniteNumber(message?.sequence, 0));
     if (sequence <= player.actorInteractionSequence) return false;
     const target = this.actorWorld.getActor(sanitizeActorId(message?.actorId));
@@ -1072,6 +1081,7 @@ export class ServerScene {
   editTerrain(playerId, message) {
     const player = this.players.get(playerId);
     if (!player || !this.terrainEditor) return [];
+    if (player.dead) return [];
     const sequence = Math.floor(toFiniteNumber(message?.sequence, 0));
     if (sequence <= player.terrainEditSequence) return [];
 
@@ -1142,6 +1152,86 @@ export class ServerScene {
     return this.terrainPatches.entries();
   }
 
+  /**
+   * 权威伤害 / 治疗的唯一入口。
+   *
+   * 数值本身在 `HealthMutations` 里走 GAS Effect，这里只负责**死亡的连带后果**：
+   * 死掉的人松口、放下手里的东西、取消正在进行的长按。伤害来源今天只有下面那条
+   * 调试指令；工具与武器落地后，它们的 EffectDefinition 接的是同一个方法。
+   *
+   * `amount` 为负是伤害、为正是治疗，和飘字读到的 `lastDelta` 同号。
+   */
+  applyHealthChange(actorId, amount, options = {}) {
+    const actor = this.actorWorld.getActor(actorId);
+    if (!actor) return undefined;
+    const nowSeconds = this.now() / 1000;
+    const change = amount < 0
+      ? applyDamage(actor, -amount, { ...options, nowSeconds })
+      : applyHeal(actor, amount, { ...options, nowSeconds });
+    if (change?.died) this.onActorDied(actor);
+    return change;
+  }
+
+  /**
+   * 一次死亡的连带后果。玩家死了要松开他叼着的一切——尸体不该继续拖着一株蘑菇
+   * 满地走；生物死了要让咬着它的人松口，否则那份形变会一直挂在尸体上。
+   */
+  onActorDied(actor) {
+    const player = this.players.get(actor.id);
+    if (player) {
+      this.#clearBitesOf(player.id);
+      cancelItemUse(player);
+      this.dropCarriedActorsOf(player.id);
+      syncHeldItemActor(this, player);
+      return;
+    }
+    for (const other of this.players.values()) {
+      const bite = other.getComponent(BITE_COMPONENT);
+      if (bite?.targetActorId === actor.id) this.#releaseBite(other, bite);
+    }
+  }
+
+  /**
+   * 调试用的伤害 / 治疗指令。**这是工具武器落地之前的临时验证入口**：
+   * 生命值系统要能被看见（飘字、死亡动画、自由视角）才算跑通，而今天仓库里
+   * 还没有任何一件能打人的东西（设计稿 `@w` 的 `D` 尚无承接系统）。
+   *
+   * 目标只有两种：自己，或身边最近的那只带血的生物。客户端不指定任意 Actor id，
+   * 也就无从拿它当远程打击。
+   */
+  applyHealthDebugCommand(playerId, message) {
+    const player = this.players.get(playerId);
+    if (!player) return undefined;
+    const amount = toFiniteNumber(message?.amount, 0);
+    if (amount === 0) return undefined;
+    const target = message?.target === 'self'
+      ? player
+      : this.findDamageableActorNear(player, DEBUG_HEALTH_RANGE);
+    if (!target) return undefined;
+    return this.applyHealthChange(target.id, amount, { source: player.gameAbility?.abilitySystem });
+  }
+
+  /**
+   * 身边最近的、还活着的带血生物。玩家自己不算在内。
+   *
+   * 遍历的是「带生命值的 Actor」这一条索引，不是全世界：场景常驻 Actor 由 Schema
+   * 限制在 256 个以内，所以它不随流式世界的面积增长。
+   */
+  findDamageableActorNear(player, range) {
+    let best;
+    let bestDistance = range;
+    for (const actor of this.actorWorld.query(HEALTH_COMPONENT, TRANSFORM_COMPONENT)) {
+      if (this.players.has(actor.id)) continue;
+      if (actor.requireComponent(HEALTH_COMPONENT).dead) continue;
+      const transform = actor.requireComponent(TRANSFORM_COMPONENT);
+      const distance = Math.hypot(transform.x - player.x, transform.z - player.z);
+      if (distance > bestDistance) continue;
+      best = actor;
+      bestDistance = distance;
+    }
+    return best;
+  }
+
   /** 按 tick 重放客户端实际执行过的 60Hz 输入步；协议不接受客户端 dt。 */
   /**
    * 记录一名玩家自己上报的鼠标拖拽形变。服务端不模拟它，只净化数值、判断是不是
@@ -1149,6 +1239,7 @@ export class ServerScene {
    * 时候这份让位——一块外壳只有一个形变来源。
    */
   applySlimeDrag(playerId, drag) {
+    if (this.players.get(playerId)?.dead) return;
     const deformation = this.players.get(playerId)?.getComponent(
       SOFT_BODY_DEFORMATION_COMPONENT,
     );
@@ -1207,6 +1298,7 @@ export class ServerScene {
     const bite = player?.getComponent(BITE_COMPONENT);
     const pickupDrop = player?.getComponent(PICKUP_DROP_COMPONENT);
     if (!player || !bite || !pickupDrop) return false;
+    if (player.dead) return false;
     if (bite.targetActorId) {
       this.#releaseBite(player, bite);
       return true;
@@ -1364,6 +1456,11 @@ export class ServerScene {
    */
   stepPlayerOnce(player, input) {
     player.stepBudget -= 1;
+    // 死了的人不再驱动自己。输入照常消耗（ackTick 必须跟上，否则客户端会一直
+    // 重发同一批步），但方向、加速与跳跃都被丢掉：尸体只剩重力和外力。
+    if (player.dead) {
+      input = { ...input, move: { x: 0, z: 0 }, sprint: false, jump: false, yaw: player.yaw };
+    }
     // 缰绳走共享固定步，权威与客户端预测因此算的是同一件事。
     player.characterParams.leash = this.activeLeash(player);
     player.yaw = normalizeAngle(toFiniteNumber(input.yaw, player.yaw));
@@ -1667,6 +1764,10 @@ export class ServerScene {
             inventoryRevision: player.requireComponent(INVENTORY_COMPONENT).revision,
             hotbar: player.requireComponent(INVENTORY_COMPONENT).hotbarSnapshot(),
           } : {}),
+          // 血量是公开信息：别人头上的飘字和倒下那一下，所有人都该看见。
+          ...(player.getComponent(HEALTH_COMPONENT)
+            ? { health: player.requireComponent(HEALTH_COMPONENT).snapshot() }
+            : {}),
           heldActorId: player.getComponent(PICKUP_DROP_COMPONENT)?.heldActorId ?? null,
           pickupDropRevision: player.getComponent(PICKUP_DROP_COMPONENT)?.revision ?? 0,
           ...(slimeDrag ? { slimeDrag } : {}),

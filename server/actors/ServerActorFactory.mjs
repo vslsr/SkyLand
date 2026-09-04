@@ -23,6 +23,8 @@ import {
   ElasticDetachComponent,
   HAZARD_COMPONENT,
   HazardComponent,
+  HEALTH_COMPONENT,
+  HealthComponent,
   HEAT_EMITTER_COMPONENT,
   HeatEmitterComponent,
   GENERATED_PROP_COMPONENT,
@@ -61,12 +63,17 @@ import { createSimpleCollisionFromRender } from '../../shared/actor/simpleCollis
 import { ActorColliderIndex } from './ActorColliderIndex.mjs';
 import { ActorSimpleCollisionSystem } from './ActorSimpleCollisionSystem.mjs';
 import { BuoyancySystem } from './BuoyancySystem.mjs';
-import { GameAbilitySystem } from '../../shared/abilities/index.mjs';
+import {
+  GameAbilityComponent,
+  GameAbilitySystem,
+  createHealthAttributes,
+} from '../../shared/abilities/index.mjs';
 import { VesselHazardSystem } from './VesselHazardSystem.mjs';
 import { VesselMotorSystem } from './VesselMotorSystem.mjs';
 import { ElasticTetherSystem } from './ElasticTetherSystem.mjs';
 import { SoftBodyBiteSystem } from './SoftBodyBiteSystem.mjs';
 import { ElasticDetachSystem } from './ElasticDetachSystem.mjs';
+import { HealthSystem } from './HealthSystem.mjs';
 import { TemperatureSystem } from './TemperatureSystem.mjs';
 import { HighCountActorSystem } from './HighCountActorSystem.mjs';
 import { GuidePathSystem } from './GuidePathSystem.mjs';
@@ -99,6 +106,14 @@ export function createServerActor(spawn, archetype, runtime = {}) {
     }));
   }
   if (archetype.components.hazard) actor.addComponent(new HazardComponent(archetype.components.hazard));
+  // 有生命值就得有 GAS：权威血量是 `Health` 属性，Component 只是它的复制面。
+  // 玩家 Actor 自己带 GAS（见 ServerPlayerActor），走不到这里。
+  if (archetype.components.health) {
+    actor.addComponent(new GameAbilityComponent({
+      attributes: createHealthAttributes(archetype.components.health.maximum),
+    }));
+    actor.addComponent(new HealthComponent(archetype.components.health));
+  }
   if (archetype.components.temperature) actor.addComponent(new TemperatureComponent(archetype.components.temperature));
   if (archetype.components.combustible) actor.addComponent(new CombustibleComponent(archetype.components.combustible));
   if (archetype.components.heatEmitter) actor.addComponent(new HeatEmitterComponent(archetype.components.heatEmitter));
@@ -215,6 +230,9 @@ export function createServerActorWorld(sceneDefinition, options = {}) {
   world.addSystem(elasticDetachSystem);
   // 父 Actor 的玩法移动先完成，再统一按拓扑解算所有子 Actor。
   world.addSystem(new AttachmentSystem());
+  // 排在温度之前没有讲究，但必须在 tick 里：尸体到点销毁是世界的事，
+  // 不是某一次伤害的事。
+  world.addSystem(new HealthSystem());
   world.addSystem(new TemperatureSystem());
   world.addSystem(new GuidePathSystem());
   const highCountActors = new HighCountActorSystem(options.highCountActors);
@@ -281,6 +299,7 @@ export function createActorSnapshots(world, options = {}) {
     const isPickedUp = holderPickupDrop?.heldActorId === actor.id;
     const dropMotion = actor.getComponent(DROP_MOTION_COMPONENT);
     const hazard = actor.getComponent(HAZARD_COMPONENT);
+    const health = actor.getComponent(HEALTH_COMPONENT);
     const temperature = actor.getComponent(TEMPERATURE_COMPONENT);
     const combustible = actor.getComponent(COMBUSTIBLE_COMPONENT);
     const container = actor.getComponent(CONTAINER_COMPONENT);
@@ -319,6 +338,7 @@ export function createActorSnapshots(world, options = {}) {
         elasticTether?.revision ?? 0,
         elasticDetach?.revision ?? 0,
         isPickedUp ? holderPickupDrop.revision : 0,
+        health?.revision ?? 0,
         temperature?.revision ?? 0,
         combustible?.revision ?? 0,
         itemStack?.revision ?? 0,
@@ -398,6 +418,9 @@ export function createActorSnapshots(world, options = {}) {
           radius: hazard.radius,
         },
       } : {}),
+      // 血量、死亡计数与最近一次变化量一起过网：飘字和死亡动画都是一次性表现，
+      // 靠计数变化触发，所以它们必须和血量在同一条快照里，不能各发各的。
+      ...(health ? { health: health.snapshot() } : {}),
       ...(temperature ? {
         thermal: {
           temperature: Math.round(temperature.temperature * 10) / 10,

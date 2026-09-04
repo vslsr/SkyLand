@@ -296,6 +296,12 @@ export class RoomProcessManager extends EventEmitter {
     record.child.send({ type: 'actor:event', playerId, event });
   }
 
+  sendHealthDebugCommand(roomId, playerId, command) {
+    const record = this.rooms.get(roomId);
+    if (!record || !record.players.has(playerId)) return;
+    record.child.send({ type: 'debug:health', playerId, command });
+  }
+
   editTerrain(roomId, playerId, edit) {
     const record = this.rooms.get(roomId);
     if (!record?.child?.connected) return;

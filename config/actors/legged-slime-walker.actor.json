@@ -12,6 +12,10 @@
       "waitSeconds": 0.6,
       "mode": "ping-pong"
     },
+    "health": {
+      "maximum": 100,
+      "corpseSeconds": 8
+    },
     "render": {
       "model": "line-art-legged-slime",
       "radius": 0.44,

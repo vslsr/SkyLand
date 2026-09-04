@@ -203,6 +203,10 @@ process.on('message', (message) => {
       if (!scene) break;
       scene.applyBuildCommand(message.playerId, message.command ?? {});
       break;
+    case 'debug:health':
+      if (!scene) break;
+      scene.applyHealthDebugCommand(message.playerId, message.command ?? {});
+      break;
     case 'terrain:edit': {
       if (!scene) break;
       // 没通过校验就是空数组，不广播任何东西——请求方也不会收到确认。

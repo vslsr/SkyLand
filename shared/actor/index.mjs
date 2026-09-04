@@ -42,6 +42,10 @@ export {
   HazardComponent,
 } from './components/HazardComponent.mjs';
 export {
+  HEALTH_COMPONENT,
+  HealthComponent,
+} from './components/HealthComponent.mjs';
+export {
   HEAT_EMITTER_COMPONENT,
   HeatEmitterComponent,
 } from './components/HeatEmitterComponent.mjs';

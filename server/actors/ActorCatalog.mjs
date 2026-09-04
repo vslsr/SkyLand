@@ -211,6 +211,22 @@ function validateHazard(raw, filename) {
   };
 }
 
+/**
+ * 实体生命值。上限之外只有一个尸体停留时长——权威血量住在 GAS 属性里
+ * （见 `shared/abilities/healthEffects.mjs`），配置不描述运行态。
+ */
+function validateHealth(raw, filename) {
+  const path = `${filename}.components.health`;
+  const definition = requireObject(raw, path);
+  const corpseSeconds = definition.corpseSeconds === undefined
+    ? 0
+    : requireNumber(definition.corpseSeconds, `${path}.corpseSeconds`, 0, 600);
+  return {
+    maximum: requireNumber(definition.maximum, `${path}.maximum`, Number.EPSILON, 100_000),
+    corpseSeconds,
+  };
+}
+
 function validateTemperature(raw, filename) {
   const path = `${filename}.components.temperature`;
   const definition = requireObject(raw, path);
@@ -1063,6 +1079,7 @@ function validateActorArchetype(raw, filename) {
     'elasticDetach',
     'pickupDrop',
     'hazard',
+    'health',
     'temperature',
     'combustible',
     'heatEmitter',
@@ -1158,6 +1175,7 @@ function validateActorArchetype(raw, filename) {
   if (slimeSurfaceDrag && render?.model !== 'line-art-pbf-slime') {
     throw new TypeError(`${filename}.components.slimeSurfaceDrag 需要 line-art-pbf-slime render`);
   }
+  const health = components.health ? validateHealth(components.health, filename) : undefined;
   const temperature = components.temperature
     ? validateTemperature(components.temperature, filename)
     : undefined;
@@ -1281,6 +1299,7 @@ function validateActorArchetype(raw, filename) {
       ...(elasticDetach ? { elasticDetach } : {}),
       ...(pickupDrop ? { pickupDrop } : {}),
       ...(components.hazard ? { hazard: validateHazard(components.hazard, filename) } : {}),
+      ...(health ? { health } : {}),
       ...(temperature ? { temperature } : {}),
       ...(combustible ? { combustible } : {}),
       ...(heatEmitter ? { heatEmitter } : {}),

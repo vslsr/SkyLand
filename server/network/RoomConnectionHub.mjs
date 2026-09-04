@@ -130,6 +130,13 @@ export class RoomConnectionHub {
             this.roomManager.toggleBite(session.roomId, session.playerId);
           }
           break;
+        case 'debug:health':
+          // 工具武器落地前的临时验证入口，见 ServerScene.applyHealthDebugCommand。
+          // 和其它输入共用令牌桶：连点不会绕过限流。
+          if (session.roomId && session.playerId && this.consumeInputToken(session)) {
+            this.roomManager.sendHealthDebugCommand(session.roomId, session.playerId, message);
+          }
+          break;
         case 'debug:transform-log:start':
           this.startPlayerTransformLog(session);
           break;

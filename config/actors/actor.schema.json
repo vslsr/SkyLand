@@ -601,6 +601,28 @@
             }
           }
         },
+        "health": {
+          "description": "实体生命值。权威数值住在同一个 Actor 的 GAS Health 属性里，这里只声明上限与尸体停留时长。",
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "maximum"
+          ],
+          "properties": {
+            "maximum": {
+              "description": "生命值上限，出生时的血量。",
+              "type": "number",
+              "exclusiveMinimum": 0,
+              "maximum": 100000
+            },
+            "corpseSeconds": {
+              "description": "死后尸体停留多少秒再销毁。0 或不写表示留在世界里（玩家用 0：人还连着）。",
+              "type": "number",
+              "minimum": 0,
+              "maximum": 600
+            }
+          }
+        },
         "temperature": {
           "type": "object",
           "additionalProperties": false,
