@@ -50,6 +50,7 @@ import {
   resolvePlayerVisualShape,
   type PlayerVisualShape,
 } from './playerVisualShape';
+import { chewBodyOffset } from './chewAnimation';
 import { PlayerReconciler } from './PlayerReconciler';
 import { GameAbilityComponent } from '../abilities/index';
 import {
@@ -66,13 +67,6 @@ import {
   MAXIMUM_PENDING_INPUT_STEPS,
   SIMULATION_STEP_SECONDS,
 } from '../../shared/networkTuning.mjs';
-
-/** 嚼一口多快，弧度每秒。约每秒两口，快到看得出在嚼，慢到不像发抖。 */
-const CHEW_RATE = 12;
-/** 每一口抬多高，米。 */
-const CHEW_RISE = 0.035;
-/** 每一口左右晃多少，米。比抬起来小一半：吃东西是上下的动作。 */
-const CHEW_SWAY = 0.018;
 
 export interface PlayerTransformDebugState {
   logic: { x: number; y: number; z: number };
@@ -146,13 +140,13 @@ export class PlayerEntity extends Actor {
   private readonly unsubscribeTerrainChanges?: () => void;
   private readonly pendingInputSteps: PlayerInputStep[] = [];
   /**
-   * 正在吃东西的那一段有多久了，秒；没在吃时是 undefined。
+   * 这次吃走到 [0, 1] 的哪里；没在吃时是 undefined。
    *
    * 它**只改这一帧写出去的渲染坐标**，不碰玩法 transform：抖动是表现，不是位移。
    * 写进玩法坐标的话，预测与和解会把这几厘米当成真的走了几厘米，然后每一帧都
    * 被服务端拉回来。
    */
-  private chewingSeconds?: number;
+  private chewingRatio?: number;
 
   public constructor(
     playerId: string,
@@ -397,22 +391,17 @@ export class PlayerEntity extends Actor {
   }
 
   /**
-   * 吃东西那段抖动的开关，由 `HotbarController` 那次按住驱动。
+   * 吃东西那段抖动，由 `HotbarController` 那次按住驱动；传 undefined 是没在吃。
    *
-   * 「抖着嚼 → 咽下去」和「圈在走 → 圈满激活」是同一段时间：按住开始时抖起来，
-   * 倒计时走完（服务端在同一刻扣账）时停下。所以这里不需要第二个计时器，也不
-   * 需要服务端多发一个状态——它没有任何权威含义。
+   * 参数是**比例**而不是秒数：「抖着嚼 → 咽下去」和「圈在走 → 圈满激活」是同一段
+   * 时间，读同一个比例，长按多久都自动对齐。手上那件食物读的也是它（经由
+   * `ClientActorSystem.setChewingItem`），所以两边嚼在同一拍上。
    */
-  public setChewing(chewing: boolean): void {
-    if (!chewing) {
-      this.chewingSeconds = undefined;
-      return;
-    }
-    this.chewingSeconds ??= 0;
+  public setChewing(ratio: number | undefined): void {
+    this.chewingRatio = ratio;
   }
 
   public update(deltaSeconds: number): void {
-    if (this.chewingSeconds !== undefined) this.chewingSeconds += deltaSeconds;
     this.pendingInputSteps.push(...this.controller.drainInputSteps());
     if (this.pendingInputSteps.length > MAXIMUM_PENDING_INPUT_STEPS) {
       this.pendingInputSteps.splice(
@@ -442,17 +431,15 @@ export class PlayerEntity extends Actor {
    * 所以软体读到的速度和它被摆到的位置永远是同一帧的。
    */
   private publishRenderState(): void {
-    const chew = this.chewingSeconds;
-    // 嚼的那一下是「上下一顿一顿、左右跟着晃一点」：竖直用取绝对值的正弦，
-    // 每半个周期一顿；水平错开半拍，免得整只史莱姆变成一条直线上的往返。
-    const chewY = chew === undefined ? 0 : Math.abs(Math.sin(chew * CHEW_RATE)) * CHEW_RISE;
-    const chewX = chew === undefined ? 0 : Math.sin(chew * CHEW_RATE * 2) * CHEW_SWAY;
-    const chewZ = chew === undefined ? 0 : Math.cos(chew * CHEW_RATE * 2 + 1.1) * CHEW_SWAY;
+    // 嚼的那一下只加在写出去的这一帧上：玩法坐标不动，预测与和解看不见它。
+    const chew = this.chewingRatio === undefined
+      ? undefined
+      : chewBodyOffset(this.chewingRatio);
     this.transforms.write(
       this.proxyId,
-      this.transform.position.x + chewX,
-      this.transform.position.y + chewY,
-      this.transform.position.z + chewZ,
+      this.transform.position.x + (chew?.x ?? 0),
+      this.transform.position.y + (chew?.y ?? 0),
+      this.transform.position.z + (chew?.z ?? 0),
       this.transform.rotation.y,
     );
     writeSlimeMotionParams(this.transforms, this.proxyId, this.motion);

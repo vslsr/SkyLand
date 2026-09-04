@@ -132,7 +132,8 @@ export class HighCountActorSystem {
     const stack = actor?.getComponent(ITEM_STACK_COMPONENT);
     const inventory = player?.getComponent('inventory');
     if (!actor || !stack || !inventory || stack.quantity <= 0) return 0;
-    const quantity = inventory.add(stack.itemType, stack.quantity);
+    // 捡起来的东西先上手、再进物品栏、最后才落背包，见 `InventoryComponent.receive`。
+    const quantity = inventory.receive(stack.itemType, stack.quantity);
     if (quantity <= 0) return 0;
     stack.remove(quantity);
     if (stack.quantity === 0) this.removeResident(world, actor.id);

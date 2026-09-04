@@ -363,10 +363,9 @@ test('同一个玩家采树和采石得到两种不同的物品', async () => {
     sequence += 1;
   }
 
-  // 快照按货位顺序发，不排序：格子位置本身是玩家记得住的信息。
-  // 这里先采树后采石，所以木头在前。
+  // 捡起来的东西先进物品栏：先采树后采石，所以木头在前一格、石头在后一格。
   assert.deepEqual(
-    inventory.snapshot().map((entry) => entry.itemType),
+    inventory.hotbar.filter((slot) => slot !== null).map((slot) => slot.itemType),
     ['wood', 'stone'],
     '两种物品分别入账，没有被当成同一种堆叠',
   );

@@ -20,6 +20,7 @@ import {
   PROP_SINGLE,
   residencyCode,
 } from '../../render/propInstanceLayout';
+import { chewBodyOffset, chewFoodScale } from '../../player/chewAnimation';
 import {
   InstanceIdTable,
   type RenderInstanceBuffer,
@@ -37,8 +38,16 @@ export interface ActorInstanceCatalog {
   readonly archetypeIndex: ReadonlyMap<string, number>;
   /** 这个原型走不走合批。 */
   isBatched(archetypeId: string): boolean;
-  /** 数量为 1 时是否换成「单个」模板（果子与原木有，木堆和石堆没有）。 */
+  /** 数量为 1 时是否换成「单个」模板（四件物品都有：一个就是一个）。 */
   supportsSingle(archetypeId: string): boolean;
+  /**
+   * 这个 Actor 正被吃到哪一步（[0, 1]）；没在被吃就是 undefined。
+   *
+   * 「谁正被吃」是玩法事实，所以由这一侧给出；这里只把它翻成一个位置偏移和一个
+   * 缩放倍率。手上那件食物因此和嘴一起抖、一口口变小——两样都读
+   * `chewAnimation` 那一份曲线，所以嚼在同一拍上。
+   */
+  chewRatioOf?(actorId: string): number | undefined;
 }
 
 /**
@@ -72,6 +81,12 @@ export class ActorInstanceSystem {
       ) as CombustibleComponent | undefined;
       const motion = actor.getComponent(DROP_MOTION_COMPONENT) as DropMotionComponent | undefined;
       const single = this.catalog.supportsSingle(actor.archetypeId) && stack.quantity === 1;
+      const chewRatio = this.catalog.chewRatioOf?.(actor.id);
+      // 嘴上那件食物的世界坐标是权威给的，抖动是纯表现——所以抖动只加在写出去的
+      // 这一帧上，不回写 Transform。
+      const chew = chewRatio === undefined
+        ? undefined
+        : { offset: chewBodyOffset(chewRatio), scale: chewFoodScale(chewRatio) };
       this.live.add(actor.id);
       const integers = [0, 0, 0, 0, 0];
       integers[PROP_ARCHETYPE] = archetypeIndex;
@@ -80,13 +95,14 @@ export class ActorInstanceSystem {
       integers[PROP_SINGLE] = single ? 1 : 0;
       integers[PROP_ID] = this.ids.acquire(actor.id);
       this.instances.push(integers, [
-        transform.x,
-        transform.y,
-        transform.z,
+        transform.x + (chew?.offset.x ?? 0),
+        transform.y + (chew?.offset.y ?? 0),
+        transform.z + (chew?.offset.z ?? 0),
         transform.yaw,
         stack.quantity,
         // 只有「单个」形态才滚：一堆果子没有刚体姿态可言。
         single ? (motion?.radius ?? 0) : 0,
+        chew?.scale ?? 1,
       ]);
     }
     // 离开视野的把号码还回去，下一个 Actor 复用——渲染侧的滚动状态按号码记账，

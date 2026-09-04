@@ -229,6 +229,11 @@ export class SceneWorld implements GrassInteractionTarget {
     this.actorSnapshotTarget?.setHoveredActorId(actorId);
   }
 
+  /** 吃东西那一段：手上那件食物一口口变小，见 `chewAnimation`。 */
+  public setChewingItem(actorId: string | undefined, ratio: number): void {
+    this.actorSnapshotTarget?.setChewingItem?.(actorId, ratio);
+  }
+
   public setInteractionMarkerActorId(
     actorId?: string,
     inputLabel?: string,

@@ -214,6 +214,10 @@ export class InventoryComponent extends ActorComponent {
    * 落点顺序是「已经装着同种且装得下的那一格 → 空着的选中格 → 第一个空格」：
    * 玩家说的「空手对应的那一格」就是选中的那一格，它空着时优先用它。
    *
+   * 和拾取用的 `receive` 是两条政策，区别在**收不下的时候**：拾取收不下就把剩下的
+   * 留在世界里那一堆上，而从世界里拔出来的这一株没有「那一堆」可留——所以它要么
+   * 整份进物品栏，要么整件事不做，由调用方退回「叼在嘴上」。
+   *
    * @returns {number} 收进了哪一格；一格都腾不出来时是 `NO_HOTBAR_SLOT`。
    */
   equipToHotbar(itemType, quantity = 1) {
@@ -230,6 +234,67 @@ export class InventoryComponent extends ActorComponent {
     else this.hotbar[index] = { itemType: definition.id, quantity: wanted };
     this.revision += 1;
     return index;
+  }
+
+  /**
+   * 收下一批刚捡起来的东西：**先手上，再物品栏空位，最后背包**。
+   *
+   * 拾取的第一去处是手上那一格，而不是背包：捡起来的东西十有八九是马上要用的，
+   * 落进背包等于要求玩家每捡一次就开一次背包、装配一次、再切一次格。
+   *
+   * 落点顺序：
+   *
+   * 1. **已经装着同种、还装得下的物品栏格**——手上正拿着同一种东西时，这一步就是
+   *    「堆在手上那一摞上」；
+   * 2. **空着的选中格**（空手），没选中格时是第一个空格，并顺手切过去：空手捡起
+   *    一块石头，石头就该出现在手上；
+   * 3. 其余物品栏空格；
+   * 4. **背包**：物品栏也满了才轮到它。
+   *
+   * 每一步都按堆叠上限**部分收下**，收不完的继续往下走；一个都收不下时返回 0，
+   * 剩下的留在世界里（`ItemLedger.add` 的老规矩：满额时不吞货）。
+   *
+   * @returns 实际收下的数量
+   */
+  receive(itemType, quantity) {
+    const definition = this.catalog.get(itemType);
+    let remaining = requestedQuantity(quantity);
+    if (!definition || remaining === 0) return 0;
+    const wasEmptyHanded = !this.hotbar[this.activeHotbarIndex];
+    let accepted = 0;
+
+    const fill = (slotIndex) => {
+      if (remaining === 0 || !this.isHotbarSlot(slotIndex)) return;
+      const slot = this.hotbar[slotIndex];
+      if (slot && slot.itemType !== definition.id) return;
+      const room = definition.stackLimit - (slot?.quantity ?? 0);
+      const taken = Math.min(remaining, room);
+      if (taken <= 0) return;
+      if (slot) slot.quantity += taken;
+      else this.hotbar[slotIndex] = { itemType: definition.id, quantity: taken };
+      remaining -= taken;
+      accepted += taken;
+      // 空手捡起来的那一格顺手切过去，东西直接到手上。已经握着别的东西时不换手：
+      // 玩家没有要求换，一次拾取不该把手上那件顶掉。
+      if (wasEmptyHanded && this.activeHotbarIndex !== slotIndex && !this.heldItemType) {
+        this.activeHotbarIndex = slotIndex;
+      }
+    };
+
+    for (let index = 0; index < this.hotbarCapacity; index += 1) {
+      if (this.hotbar[index]?.itemType === definition.id) fill(index);
+    }
+    if (this.isHotbarSlot(this.activeHotbarIndex)) fill(this.activeHotbarIndex);
+    for (let index = 0; index < this.hotbarCapacity; index += 1) {
+      if (!this.hotbar[index]) fill(index);
+    }
+    if (remaining > 0) {
+      const stored = this.ledger.add(definition.id, remaining);
+      remaining -= stored;
+      accepted += stored;
+    }
+    if (accepted > 0) this.revision += 1;
+    return accepted;
   }
 
   /** 空着的选中格优先，没有再找第一个空格；全满时是 `NO_HOTBAR_SLOT`。 */

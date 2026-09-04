@@ -7,7 +7,8 @@ import type { InventoryCommand } from '../src/network/messages.ts';
 import { ItemUseInputTags, PlayerInputTags } from '../src/input/config/playerInput.ts';
 
 /** 只保留交互键那一条绑定的输入替身：这一层测的是按住时序。 */
-function harness(heldActorId: string | undefined) {
+function harness(initialHeldActorId: string | undefined) {
+  let heldActorId = initialHeldActorId;
   const handlers = new Map<unknown, (event: { phase: string }) => void>();
   const input = {
     enabled: true,
@@ -37,6 +38,8 @@ function harness(heldActorId: string | undefined) {
     progress,
     press,
     use,
+    /** 快照到账：服务端换手时手持表现体会换一个新 id。 */
+    setHeldActorId: (next: string | undefined) => { heldActorId = next; },
     advance: (ms: number) => { clock += ms; },
   };
 }
@@ -186,5 +189,51 @@ test('背包里点出来的那件优先，而且它的圈不画在物品栏上',
   // 换手会撤销它：那条能力已经被服务端换掉了，客户端不该继续替它画圈。
   bar.controller.armItem(undefined);
   bar.use('canceled');
+  assert.deepEqual(bar.sent.at(-1), { kind: 'use:cancel' });
+});
+
+test('点「使用」之后立刻按下：不等快照就认得出用的是哪件东西', () => {
+  // 快照 10Hz。菜单里点完「使用」到下一帧快照回来有 100 毫秒，玩家在这一段里按下
+  // 的那一下，如果要等「物品栏账上有没有」才认，会被整条忽略——表现就是「点了使用，
+  // 按下去没反应」。所以界面在点的同一刻就把这件东西交给输入层。
+  const bar = harness(undefined);
+  bar.controller.armItem('fruit', { onHotbar: true });
+
+  bar.use('started');
+  assert.deepEqual(bar.sent, [{ kind: 'use:begin' }]);
+  bar.advance(600);
+  bar.controller.update();
+  const halfway = bar.progress.at(-1);
+  assert.equal(halfway?.action, 'eat');
+  assert.equal(halfway?.onHotbar, true, '属于物品栏的那次，圈画在那一格上');
+
+  // 快照到了：手上多了一个新的手持表现体。这次按住说的还是同一件东西，不该作废。
+  bar.setHeldActorId('held-2');
+  bar.inventory.add('fruit', 1);
+  bar.inventory.assignHotbarSlot(0, 'fruit');
+  bar.inventory.setActiveHotbarSlot(0);
+  bar.advance(300);
+  bar.controller.update();
+  assert.deepEqual(bar.sent, [{ kind: 'use:begin' }], '换了个表现体不是换手');
+  assert.ok((bar.progress.at(-1)?.ratio ?? 0) > 0.7, '倒计时应当接着走');
+
+  bar.advance(400);
+  bar.controller.update();
+  assert.equal(bar.progress.at(-1), undefined, '圈满就结束');
+});
+
+test('按住途中真的换了东西，这次使用才作废', () => {
+  const bar = harness('held-1');
+  bar.inventory.add('fruit', 1);
+  bar.inventory.add('mushroom', 1);
+  bar.inventory.assignHotbarSlot(0, 'fruit');
+  bar.inventory.assignHotbarSlot(1, 'mushroom');
+  bar.inventory.setActiveHotbarSlot(0);
+
+  bar.use('started');
+  bar.advance(300);
+  // 玩家自己按了数字键：手上换成了另一件东西，这次按住指向的已经不在手上了。
+  bar.inventory.setActiveHotbarSlot(1);
+  bar.controller.update();
   assert.deepEqual(bar.sent.at(-1), { kind: 'use:cancel' });
 });

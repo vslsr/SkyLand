@@ -259,7 +259,9 @@ test('物品栏那一格也点得开菜单：使用是切到它，收回与丢�
 
   harness.view.selectAction?.('use', { kind: 'hotbar', slotIndex: 1 });
   assert.deepEqual(harness.sent, [{ kind: 'select', slotIndex: 1 }]);
-  assert.deepEqual(harness.armed, [undefined], '手持那条能力由服务端按选中格授予');
+  // 输入层不能等快照：10Hz 的快照回来之前玩家就可能按下使用键，那一下必须认得出
+  // 说的是这件东西，否则它会因为「手上还是空的」被整条忽略。
+  assert.deepEqual(harness.armed, [undefined, 'fruit']);
   assert.equal(harness.open, false, '激活要按使用键，所以先让开画面');
 
   harness.controller.open();
@@ -280,5 +282,6 @@ test('已经握在手上的那一格点「使用」不再发 select：再切一�
 
   harness.view.selectAction?.('use', { kind: 'hotbar', slotIndex: 0 });
   assert.deepEqual(harness.sent, [], '它已经在手上了，什么都不用发');
+  assert.deepEqual(harness.armed, [undefined, 'mushroom'], '接下来那一下说的是它');
   assert.equal(harness.open, false, '仍然让开画面，等玩家按使用键');
 });

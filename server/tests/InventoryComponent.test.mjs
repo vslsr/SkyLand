@@ -156,3 +156,43 @@ test('原型没写货位数时用默认容量', () => {
   assert.equal(new InventoryComponent({ slotCapacity: 0 }).slotCapacity, DEFAULT_SLOT_CAPACITY);
   assert.equal(new InventoryComponent({ slotCapacity: 3 }).slotCapacity, 3);
 });
+
+test('拾取的落点顺序：先手上、再物品栏空位、最后背包', () => {
+  const limit = itemCatalog.require('wood').stackLimit;
+  const inventory = new InventoryComponent({ slotCapacity: 2, hotbarCapacity: 3 });
+
+  // 空手捡起来的东西直接到手上：落进空着的那一格，并且当场就握着。
+  assert.equal(inventory.receive('wood', 2), 2);
+  assert.deepEqual(inventory.hotbar[0], { itemType: 'wood', quantity: 2 });
+  assert.equal(inventory.heldItemType, 'wood', '空手捡东西就该拿在手上');
+  assert.deepEqual(inventory.snapshot(), [], '物品栏装得下就轮不到背包');
+
+  // 同一种先堆在已经装着它的那一格上，堆满才另找空格。
+  assert.equal(inventory.receive('wood', limit), limit);
+  assert.equal(inventory.hotbar[0].quantity, limit);
+  assert.equal(inventory.hotbar[1].quantity, 2);
+
+  // 手上握着别的东西时不换手：一次拾取不该把玩家正拿着的那件顶掉。
+  assert.equal(inventory.receive('stone', 1), 1);
+  assert.equal(inventory.heldItemType, 'wood');
+  assert.equal(inventory.hotbar[2].itemType, 'stone');
+
+  // 物品栏满了才落背包。
+  assert.equal(inventory.receive('fruit', 3), 3);
+  assert.deepEqual(inventory.snapshot(), [{ itemType: 'fruit', quantity: 3 }]);
+});
+
+test('拾取收不下的部分留在世界里，两本账都满时一个都不收', () => {
+  const limit = itemCatalog.require('stone').stackLimit;
+  const inventory = new InventoryComponent({ slotCapacity: 1, hotbarCapacity: 1 });
+
+  // 物品栏一格 + 背包一格，一共装得下两摞；多出来的那一个收不下。
+  assert.equal(inventory.receive('stone', limit * 2 + 1), limit * 2);
+  assert.equal(inventory.hotbar[0].quantity, limit);
+  assert.equal(inventory.quantityOf('stone'), limit);
+
+  const revision = inventory.revision;
+  assert.equal(inventory.receive('stone', 5), 0, '两本账都满了就一个都收不下');
+  assert.equal(inventory.revision, revision, '没收下东西不该产生复制修订');
+  assert.equal(inventory.receive('no-such-item', 3), 0);
+});

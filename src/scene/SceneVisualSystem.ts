@@ -83,6 +83,12 @@ export interface ActorSnapshotTarget {
   /** 服务端认为我正开着哪个容器；开合不是本地状态，见 ContainerController。 */
   findOpenContainerActorId?(): string | undefined;
   setHoveredActorId(actorId?: string): void;
+  /**
+   * 谁正被吃、吃到哪一步（[0, 1]）。传 undefined 表示没人在吃。
+   *
+   * 纯表现：手上那件食物据此一口口变小、跟着嘴一起抖，不改任何权威状态。
+   */
+  setChewingItem?(actorId: string | undefined, ratio: number): void;
   setInteractionMarkerActorId(actorId?: string, inputLabel?: string, opacity?: number): void;
   getVesselHudState(playerId: string): VesselHudState | undefined;
   /** 把 Actor 当前的碰撞盒登记进场景碰撞世界。查询前调用，每帧最多兑现一次。 */

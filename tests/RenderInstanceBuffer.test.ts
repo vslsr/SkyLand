@@ -8,6 +8,7 @@ import {
   PROP_QUANTITY,
   PROP_RESIDENCY,
   PROP_ROLL_RADIUS,
+  PROP_SCALE,
   PROP_X,
   residencyCode,
   residencyName,
@@ -43,11 +44,13 @@ const floats = (
   x: number,
   quantity = 1,
   radius = 0,
+  scale = 1,
 ): number[] => {
-  const record = [0, 0, 0, 0, 0, 0];
+  const record = new Array(PROP_FLOAT_STRIDE).fill(0);
   record[PROP_X] = x;
   record[PROP_QUANTITY] = quantity;
   record[PROP_ROLL_RADIUS] = radius;
+  record[PROP_SCALE] = scale;
   return record;
 };
 
@@ -75,6 +78,7 @@ test('beginFrame 之后重新铺一遍，读出来的就是这一帧写进去的
   assert.equal(buffer.readFloat(0, PROP_X), 1.5);
   assert.equal(buffer.readFloat(0, PROP_QUANTITY), 12);
   assert.ok(Math.abs(buffer.readFloat(0, PROP_ROLL_RADIUS) - 0.14) < 1e-6);
+  assert.equal(buffer.readFloat(0, PROP_SCALE), 1, '不缩放的那些每帧写 1，不是 0');
   assert.equal(buffer.readInt(1, PROP_ARCHETYPE), 3);
   assert.equal(buffer.readFloat(1, PROP_X), -4);
 
@@ -104,7 +108,7 @@ test('两段字节的步长就是字段个数——布局说错了这条会先�
   buffer.push(ints(2, 0, 2), floats(2, 2, 2));
   // 第二条记录的起点必须落在一整个 stride 之后，混用下标会读到第一条的尾巴。
   assert.equal(PROP_INT_STRIDE, 5);
-  assert.equal(PROP_FLOAT_STRIDE, 6);
+  assert.equal(PROP_FLOAT_STRIDE, 7);
   assert.equal(buffer.readInt(1, PROP_ARCHETYPE), 2);
   assert.equal(buffer.readFloat(1, PROP_X), 2);
 });
