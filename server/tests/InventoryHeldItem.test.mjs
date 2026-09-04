@@ -6,7 +6,6 @@ import {
   InventoryComponent,
   ItemLedger,
   NO_HOTBAR_SLOT,
-  StowableComponent,
   holdRatio,
   resolveActorAction,
   resolveHeldItemAction,
@@ -15,7 +14,6 @@ import { itemCatalog } from '../../shared/items/index.mjs';
 import {
   dropHeldObject,
   dropInventoryItem,
-  stowHeldItem,
   transferItems,
 } from '../actors/InventoryMutations.mjs';
 
@@ -238,100 +236,6 @@ test('目标装满时差额留在来源，不会凭空消失', () => {
   assert.equal(moved, limit);
   assert.equal(moved + inventory.quantityOf('wood'), carried);
   assert.equal(container.quantityOf('wood'), moved);
-});
-
-/** 手持表现体的替身：只有模型该有的那些，没有掉落物理、没有生命期。 */
-function heldItemHarness(inventory, { id = 'held-1' } = {}) {
-  const actor = {
-    id,
-    parent: { id: 'p1' },
-    getComponent: (name) => (name === 'itemStack' ? { itemType: 'wood', quantity: 1 } : undefined),
-  };
-  const pickupDrop = { heldActorId: id, drop() { this.heldActorId = null; return true; } };
-  const player = { id: 'p1', getComponent: (name) => ({ inventory, pickupDrop }[name]) };
-  const removed = [];
-  const scene = {
-    actorWorld: {
-      getActor: (candidate) => (candidate === id ? actor : undefined),
-      setActorParent: () => { actor.parent = undefined; },
-    },
-    removeHeldItemActor: (candidate) => removed.push(candidate),
-  };
-  return { actor, pickupDrop, player, scene, removed };
-}
-
-test('收回背包把整摞搬回去，并清掉选中格——否则长按等于没发生', () => {
-  const inventory = new InventoryComponent({ slotCapacity: 8, hotbarCapacity: 9 });
-  inventory.add('wood', 3);
-  inventory.assignHotbarSlot(0, 'wood');
-  inventory.setActiveHotbarSlot(0);
-  // 账全程在物品栏那一格上：手上挂的那个只是模型，不额外记一份。
-  assert.equal(inventory.quantityOf('wood'), 0);
-
-  const { player, scene, removed } = heldItemHarness(inventory);
-
-  assert.equal(stowHeldItem(scene, player), true);
-  assert.equal(inventory.quantityOf('wood'), 3, '整摞回到背包');
-  assert.equal(inventory.hotbar[0], null, '物品栏那一格空出来');
-  assert.equal(inventory.activeHotbarIndex, NO_HOTBAR_SLOT, '收回之后是空手');
-  assert.deepEqual(removed, ['held-1'], '表现体跟着消失');
-});
-
-test('背包满了收不回来时，那一摞留在物品栏而不是消失', () => {
-  const inventory = new InventoryComponent({ slotCapacity: 1, hotbarCapacity: 9 });
-  inventory.add('wood', 1);
-  inventory.assignHotbarSlot(0, 'wood');
-  inventory.setActiveHotbarSlot(0);
-  // 唯一那个货位这时被石料占住了。
-  inventory.add('stone', 99);
-
-  const { player, scene, removed, pickupDrop } = heldItemHarness(inventory, { id: 'held-2' });
-
-  assert.equal(stowHeldItem(scene, player), false);
-  assert.deepEqual(removed, [], '收不回来就不删表现体');
-  assert.equal(pickupDrop.heldActorId, 'held-2', '还拿在手上');
-  assert.deepEqual(inventory.hotbar[0], { itemType: 'wood', quantity: 1 });
-});
-
-test('叼着的世界物件也能收进背包，按它自己声明的物品回账', () => {
-  const inventory = new InventoryComponent({ slotCapacity: 8, hotbarCapacity: 9 });
-  // 蘑菇不是物品堆：它没有 itemStack，只有 stowable 说明「装进包里算什么」。
-  const stowable = new StowableComponent({ itemType: 'mushroom' });
-  const mushroom = {
-    id: 'm1',
-    parent: { id: 'p1' },
-    getComponent: (name) => (name === 'stowable' ? stowable : undefined),
-  };
-  const pickupDrop = { heldActorId: 'm1', drop() { this.heldActorId = null; return true; } };
-  const player = { id: 'p1', getComponent: (name) => ({ inventory, pickupDrop }[name]) };
-  const removed = [];
-  const scene = {
-    actorWorld: {
-      getActor: () => mushroom,
-      setActorParent: () => { mushroom.parent = undefined; },
-      removeActor: (id) => removed.push(id),
-    },
-    removeHeldItemActor: () => { throw new Error('世界物件不该走手持表现体的删除'); },
-  };
-
-  assert.equal(stowHeldItem(scene, player), true);
-  assert.equal(inventory.quantityOf('mushroom'), 1);
-  assert.deepEqual(removed, ['m1'], '世界物件走 ActorWorld 的删除');
-  assert.equal(pickupDrop.heldActorId, null, '收完是空手');
-});
-
-test('没声明 stowable 的世界物件揣不走，长按由调用方回退成放下', () => {
-  const inventory = new InventoryComponent({ slotCapacity: 8 });
-  const rock = { id: 'r1', parent: { id: 'p1' }, getComponent: () => undefined };
-  const pickupDrop = { heldActorId: 'r1', drop() { this.heldActorId = null; return true; } };
-  const player = { id: 'p1', getComponent: (name) => ({ inventory, pickupDrop }[name]) };
-  const scene = {
-    actorWorld: { getActor: () => rock, setActorParent: () => {}, removeActor: () => {} },
-    removeItemStackActor: () => {},
-  };
-
-  assert.equal(stowHeldItem(scene, player), false);
-  assert.equal(pickupDrop.heldActorId, 'r1', '收不了就原样留在手上');
 });
 
 test('放下分派：物品堆走物品的落法，世界物件走它自己的', () => {

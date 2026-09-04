@@ -39,8 +39,7 @@
     },
     "inventory": {
       "slotCapacity": 8,
-      "hotbarCapacity": 9,
-      "stowHoldSeconds": 0.6
+      "hotbarCapacity": 9
     },
     "pickupDrop": {
       "mouthLocalX": 0,

@@ -1,9 +1,7 @@
 import {
   CONTAINER_COMPONENT,
-  STOWABLE_COMPONENT,
   INVENTORY_COMPONENT,
   ITEM_STACK_COMPONENT,
-  NO_HOTBAR_SLOT,
   PICKUP_DROP_COMPONENT,
 } from '../../shared/actor/index.mjs';
 import { itemCatalog } from '../../shared/items/index.mjs';
@@ -195,46 +193,6 @@ function spawnDropInFront(scene, player, archetypeId, quantity) {
     quantity,
     yaw: player.yaw,
   });
-}
-
-/**
- * 把手上那件收回背包。
- *
- * 两种手持物都能收：物品栏那一格整摞搬回背包；叼着的世界物件（蘑菇）按它
- * `stowable` 上声明的物品回账——「这个世界物件装进包里算哪种物品」是那个物件自己
- * 的属性，不是背包该知道的事。没声明就收不了，交给调用方回退成放下。
- *
- * 收回之后**必须清掉选中格**，否则 `syncHeldItemActor` 会立刻再挂一个出来，长按
- * 等于没发生。「收回背包」的语义就是空手。
- *
- * @returns 是否真的收回了
- */
-export function stowHeldItem(scene, player) {
-  const world = scene.actorWorld;
-  const inventory = player?.getComponent(INVENTORY_COMPONENT);
-  const heldId = player?.getComponent(PICKUP_DROP_COMPONENT)?.heldActorId;
-  const actor = heldId ? world.getActor(heldId) : undefined;
-  if (!actor || !inventory) return false;
-
-  if (actor.getComponent(ITEM_STACK_COMPONENT)) {
-    // 背包正好满了就收不回来：这时不该把那一摞删掉，留在物品栏比凭空消失好。
-    if (!inventory.clearHotbarSlot(inventory.activeHotbarIndex)) return false;
-    dropPickedActor(world, player);
-    scene.removeHeldItemActor(actor.id);
-    inventory.setActiveHotbarSlot(NO_HOTBAR_SLOT);
-    revokeItemAbility(player);
-    return true;
-  }
-
-  const stowable = actor.getComponent(STOWABLE_COMPONENT);
-  const itemType = stowable?.itemType;
-  const quantity = stowable?.quantity ?? 0;
-  if (!itemType || quantity <= 0) return false;
-  if (inventory.add(itemType, quantity) !== quantity) return false;
-  dropPickedActor(world, player);
-  // 世界物件（蘑菇）走 ActorWorld 的删除，它本来就登记在场景里。
-  world.removeActor(actor.id);
-  return true;
 }
 
 /**

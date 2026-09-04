@@ -63,7 +63,6 @@ import {
   dropHeldObject,
   dropHotbarItem,
   dropInventoryItem,
-  stowHeldItem,
   syncHeldItemActor,
   transferItems,
 } from '../actors/InventoryMutations.mjs';
@@ -732,28 +731,6 @@ export class ServerScene {
         // 那件东西，不该顺手把手上握着的换掉。
         changed = dropInventoryItem(this, player, sanitizeItemType(command.itemType), 1);
         break;
-      case 'stow:begin':
-        // 交互键按住的起点。和使用一样记在服务端：客户端那圈圆形倒计时转满那一刻，
-        // 就是这里判定长按那一刻，但判定用的是自己的计时。
-        player.heldItemStowStartedAt = this.now();
-        changed = true;
-        break;
-      case 'stow:cancel':
-        player.heldItemStowStartedAt = undefined;
-        changed = true;
-        break;
-      case 'stow:release': {
-        const startedAt = player.heldItemStowStartedAt;
-        player.heldItemStowStartedAt = undefined;
-        if (startedAt === undefined) return false;
-        // 短按放下、长按收回背包，分界来自玩家原型，两端读同一份。
-        // 长按收不进去（背包满了，或这件东西根本揣不走）就回退成放下——按住半秒
-        // 之后什么都不发生，玩家只会以为键失灵了。
-        changed = (this.now() - startedAt) / 1000 >= inventory.stowHoldSeconds
-          && stowHeldItem(this, player);
-        if (!changed) changed = dropHeldObject(this, player);
-        break;
-      }
       case 'container:open':
       case 'container:close':
       case 'container:transfer':

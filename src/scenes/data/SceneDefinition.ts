@@ -337,8 +337,6 @@ export interface ActorArchetypeDefinition {
     inventory?: {
       slotCapacity: number;
       hotbarCapacity?: number;
-      /** 交互键按住多久算「收回背包」；客户端的转盘用同一个数。 */
-      stowHoldSeconds?: number;
     };
     /** 可存取的容器：箱子、船舱。和背包共用同一套堆叠与货位规则。 */
     container?: {

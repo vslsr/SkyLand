@@ -192,7 +192,7 @@ test('牌子平时写手上拿的是什么，按住时改写这次按住', () =>
     assert.equal(plate.hidden, false);
     assert.equal(plate.textContent, '火把');
 
-    bar.setProgress({ kind: 'use', ratio: 0.5, label: '投掷「火把」', onHotbar: true });
+    bar.setProgress({ action: 'throw', ratio: 0.5, label: '投掷「火把」', onHotbar: true });
     assert.equal(plate.textContent, '投掷「火把」');
     assert.equal(plate.dataset.progress, 'true');
 
@@ -209,11 +209,11 @@ test('圆形倒计时盖在手持那一格上，换手时旧格子上的圈被�
       slot(0, { itemType: 'wood', displayName: '木头', quantity: 4, active: true }),
       slot(1, { itemType: 'torch', displayName: '火把', quantity: 2 }),
     ]);
-    bar.setProgress({ kind: 'stow', ratio: 0.25, label: '收回背包', onHotbar: true });
+    bar.setProgress({ action: 'eat', ratio: 0.25, label: '吃下「果子」', onHotbar: true });
 
     const buttons = slotsOf(bar);
     const dials = dialsOf(bar);
-    assert.equal(buttons[0].dataset.progress, 'stow');
+    assert.equal(buttons[0].dataset.progress, 'eat');
     assert.equal(dials[0].hidden, false);
     assert.equal(dials[0].style['--hotbar-progress'], '25%');
     assert.equal(dials[1].hidden, true, '没拿在手上的那一格不画圈');
@@ -234,8 +234,8 @@ test('不属于物品栏的那次按住不在格子上画圈：同一件事不�
   withFakeDocument(() => {
     const bar = new HotbarBar();
     bar.setSlots([slot(0, { itemType: 'wood', displayName: '木头', quantity: 4, active: true })]);
-    // 叼着的蘑菇、背包里点出来的用法都没有格子，它们的圈在准星下方那块牌子上。
-    bar.setProgress({ kind: 'stow', ratio: 0.9, label: '收进背包', onHotbar: false });
+    // 背包里点出来的用法没有格子，它的圈在准星下方那块牌子上。
+    bar.setProgress({ action: 'eat', ratio: 0.9, label: '吃下「果子」', onHotbar: false });
 
     assert.equal(slotsOf(bar)[0].dataset.progress, undefined);
     assert.equal(dialsOf(bar)[0].hidden, true);
@@ -247,7 +247,7 @@ test('空格拿不到手上，没有圈也没有牌子', () => {
   withFakeDocument(() => {
     const bar = new HotbarBar();
     bar.setSlots([slot(0, { itemType: 'stone', displayName: '石头', quantity: 0, active: true })]);
-    bar.setProgress({ kind: 'use', ratio: 0.9, label: '吃下「果子」', onHotbar: true });
+    bar.setProgress({ action: 'eat', ratio: 0.9, label: '吃下「果子」', onHotbar: true });
 
     const button = slotsOf(bar)[0];
     assert.equal(button.dataset.state, 'empty');

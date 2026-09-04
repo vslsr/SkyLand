@@ -9,17 +9,20 @@ import type { InventoryCommand } from '../network/messages';
 import type { TagLike } from '../tags';
 import { holdRatio, resolveHeldItemAction } from '../../shared/actor/index.mjs';
 
-/** 界面要画的那圈圆形倒计时；没有正在进行的按住时是 undefined。 */
+/**
+ * 界面要画的那圈圆形倒计时；没有正在进行的按住时是 undefined。
+ *
+ * 圈只有一种来源：**长按使用一件物品**。交互键那条「按住收进背包」已经删掉了——
+ * 手上有东西时按交互键就是放下，一按就掉，没有第二层含义要靠计时区分。
+ */
 export interface HeldItemProgress {
-  /** `use` 是物品能力的长按激活，`stow` 是交互键长按收回背包。 */
-  readonly kind: 'use' | 'stow';
   /**
-   * 这次按住在用哪一种用法（`kind: 'use'` 才有）。
+   * 这次按住在用哪一种用法。
    *
    * 界面按它挑表现：`eat` 那一段是角色在嚼，模型要抖起来。表现读的是**同一次
    * 按住**，所以抖动的起止和圈的起止是同一件事，不需要另一条状态。
    */
-  readonly action?: 'eat' | 'tool' | 'throw';
+  readonly action: 'eat' | 'tool' | 'throw';
   /** [0, 1]。到 1 表示服务端也认为倒计时走完了。 */
   readonly ratio: number;
   readonly label: string;
@@ -72,20 +75,11 @@ export interface HotbarPort {
   setProgress(progress: HeldItemProgress | undefined): void;
 }
 
-/** 一次还没结束的按住。 */
+/** 一次还没结束的按住（长按使用）。 */
 interface PendingHold {
-  readonly kind: 'use' | 'stow';
-  /** 用法动作；`stow` 没有。 */
-  readonly action?: 'eat' | 'tool' | 'throw';
-  /** 用的是哪件东西；`stow` 没有。它变了这次按住就作废。 */
-  readonly itemType?: string;
-  /**
-   * 按住开始那一刻手上是哪个 Actor。
-   *
-   * 记在这次按住上，而不是靠「和上一帧比」：按下可能发生在第一次 `update()` 之前，
-   * 那时上一帧的记录还是空的，换手就检测不出来。
-   */
-  readonly heldActorId: string | undefined;
+  readonly action: 'eat' | 'tool' | 'throw';
+  /** 用的是哪件东西。它变了这次按住就作废。 */
+  readonly itemType: string;
   readonly startedAt: number;
   /** 倒计时多长。0 表示这是一次点按，没有圈可画，松手即结算。 */
   readonly durationSeconds: number;
@@ -127,7 +121,7 @@ export class HotbarController {
     private readonly now: () => number = () => performance.now(),
   ) {
     const triggered = { phases: ['triggered'] } as const;
-    // 按住要的是明确的按下与释放，忽略 triggered/ongoing：多设备 Action 在持续阶段
+    // 长按要的是明确的按下与释放，忽略 triggered/ongoing：多设备 Action 在持续阶段
     // 切换来源时，会把一次有效的按住误判成结束。
     const held = { phases: ['started', 'completed', 'canceled'] } as const;
 
@@ -137,13 +131,9 @@ export class HotbarController {
     this.disposers.push(
       this.input.bind(PlayerInputTags.HotbarPrevious, () => this.cycle(-1), triggered),
       this.input.bind(PlayerInputTags.HotbarNext, () => this.cycle(1), triggered),
-      // 交互键的按住语义只在手上有东西时成立；空手时它仍然是就近拾取，
+      // 手上有东西时交互键就是放下，按下即掉；空手时它仍然是就近拾取，
       // 那条路走 ActorInteractionController，不经过这里。
-      this.input.bind(
-        PlayerInputTags.WorldInteract,
-        (event) => this.handleStow(event.phase),
-        held,
-      ),
+      this.input.bind(PlayerInputTags.WorldInteract, () => this.dropHeld(), triggered),
       this.input.bind(
         ItemUseInputTags.primary,
         (event) => this.handleUse('primary', event.phase),
@@ -166,13 +156,10 @@ export class HotbarController {
 
   /** 每帧调用：推进倒计时，并在这次按住指向的东西变了时作废它。 */
   public update(): void {
-    if (this.pending?.kind === 'use') {
-      // 一次使用认的是**用的哪件东西**，不是嘴上那个 Actor：点「使用」之后手持
-      // 表现体会换一个新 id（服务端换手时重新生成），按 id 判断会把刚开始的这次
-      // 按住当成「换手了」立刻取消掉。
-      if (this.currentUseItemType() !== this.pending.itemType) this.cancelPending();
-    } else if (this.pending && this.port.getHeldActorId() !== this.pending.heldActorId) {
-      // 收进背包那次认的就是嘴上那个 Actor：它不在了，这次按住也就没有对象了。
+    // 一次使用认的是**用的哪件东西**，不是嘴上那个 Actor：点「使用」之后手持
+    // 表现体会换一个新 id（服务端换手时重新生成），按 id 判断会把刚开始的这次
+    // 按住当成「换手了」立刻取消掉。
+    if (this.pending && this.currentUseItemType() !== this.pending.itemType) {
       this.cancelPending();
     }
     if (!this.pending || this.pending.completed || this.pending.durationSeconds <= 0) {
@@ -182,7 +169,7 @@ export class HotbarController {
     }
     const elapsed = (this.now() - this.pending.startedAt) / 1000;
     const ratio = holdRatio(elapsed, this.pending.durationSeconds);
-    if (ratio >= 1 && this.pending.kind === 'use') {
+    if (ratio >= 1) {
       // 圈满即激活：服务端在同一刻自己动手，客户端不再发任何东西，也不再画圈。
       this.pending.completed = true;
       this.port.setProgress(undefined);
@@ -190,7 +177,6 @@ export class HotbarController {
       return;
     }
     this.port.setProgress({
-      kind: this.pending.kind,
       action: this.pending.action,
       ratio,
       label: this.pending.label,
@@ -226,40 +212,19 @@ export class HotbarController {
   }
 
   /**
-   * 交互键：手上有东西时短按放下、长按收回背包；空手时这里不参与。
+   * 交互键：手上有东西时放下它。空手时这里不参与。
    *
-   * 「手上有东西」按嘴上那个 Actor 判，不按物品栏：叼着的蘑菇也要走这条计时，
-   * 否则它会落回 `ActorInteractionController` 的按下即触发，一按就掉。
+   * **按下即掉，没有第二层含义。** 这里以前是一条按住计时：短按放下、按住走完
+   * 一圈倒计时是「收进背包」。删掉的理由是它把一个常用动作压在了一个不常用动作
+   * 下面——玩家想放下手上那件东西，得先学会「别按太久」；而真想把东西收回背包，
+   * 打开背包在那一格上点「收回背包」是更直接、也能看见结果的一条路。
+   *
+   * 「手上有东西」按嘴上那个 Actor 判，不按物品栏：叼着的蘑菇也是手上那件，
+   * 它同样该被这一下放下。
    */
-  private handleStow(phase: string): void {
-    const inventory = this.port.getInventory();
-    if (!this.port.isActive() || !inventory || !this.port.getHeldActorId()) {
-      if (phase !== 'started') this.cancelPending();
-      return;
-    }
-    if (phase === 'started') {
-      this.begin({
-        kind: 'stow',
-        heldActorId: this.port.getHeldActorId(),
-        startedAt: this.now(),
-        durationSeconds: inventory.stowHoldSeconds ?? 0.6,
-        label: '收进背包',
-        // 手上那件来自物品栏时圈画在那一格上；叼着的蘑菇没有格子。
-        onHotbar: inventory.heldItemType !== undefined,
-        inputLabel: this.port.getInputLabel(PlayerInputTags.WorldInteract),
-        completed: false,
-      }, { kind: 'stow:begin' });
-      return;
-    }
-    if (phase === 'canceled') {
-      this.cancelPending();
-      return;
-    }
-    // 松手了：短按还是长按由服务端按自己的计时判定，这里不预判。
-    if (this.pending?.kind !== 'stow') return;
-    this.pending = undefined;
-    this.port.setProgress(undefined);
-    this.port.send({ kind: 'stow:release' });
+  private dropHeld(): void {
+    if (!this.port.isActive() || !this.port.getHeldActorId()) return;
+    this.port.send({ kind: 'drop' });
   }
 
   /**
@@ -278,9 +243,7 @@ export class HotbarController {
     }
     if (phase === 'started') {
       this.begin({
-        kind: 'use',
         action: use.action as HeldItemProgress['action'],
-        heldActorId: this.port.getHeldActorId(),
         startedAt: this.now(),
         // 点按没有倒计时；长按的圈满那一刻就是服务端激活那一刻。
         durationSeconds: use.mode === 'hold' ? use.holdSeconds : 0,
@@ -297,7 +260,7 @@ export class HotbarController {
       this.cancelPending();
       return;
     }
-    if (this.pending?.kind !== 'use') return;
+    if (!this.pending) return;
     const completed = this.pending.completed;
     this.pending = undefined;
     this.port.setProgress(undefined);
@@ -317,8 +280,8 @@ export class HotbarController {
   }
 
   private begin(pending: PendingHold, command: InventoryCommand): void {
-    // 两次按住不能重叠：交互键按着再按使用键，服务端每种只有一个起始时刻，
-    // 后到的那次会把前一次的计时抢走。先取消，语义才是确定的。
+    // 两次按住不能重叠：服务端只记一个起始时刻，后到的那次会把前一次的计时抢走。
+    // 先取消，语义才是确定的。
     this.cancelPending();
     this.pending = pending;
     this.port.send(command);
@@ -326,12 +289,12 @@ export class HotbarController {
 
   private cancelPending(): void {
     if (!this.pending) return;
-    const { kind, completed } = this.pending;
+    const { completed } = this.pending;
     this.pending = undefined;
     this.port.setProgress(undefined);
-    if (kind === 'use') this.armed = undefined;
+    this.armed = undefined;
     // 已经结算过的那次没有什么可取消的，再发一条只会打断下一次按住。
     if (completed) return;
-    this.port.send({ kind: kind === 'use' ? 'use:cancel' : 'stow:cancel' });
+    this.port.send({ kind: 'use:cancel' });
   }
 }

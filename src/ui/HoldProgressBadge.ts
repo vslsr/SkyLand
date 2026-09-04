@@ -12,15 +12,14 @@ const KEY_CAP_MAX_LENGTH = 3;
 /**
  * 按住时的键位与圆形倒计时。
  *
- * 按住 E 收进背包这类动作，按下去之后画面上原本什么都不剩：交互提示那条
- * 「E · 收进背包」在按键落下的一瞬间就开始淡出（`InteractionPromptFade` 把
- * 「正在操作」当成让开画面的信号），而物品栏那圈倒计时只画在当前手持的那一格上，
- * 叼着的蘑菇是个世界物件、根本没有格子，连圈都没有。于是玩家按住之后既不知道
- * 手该按着什么，也不知道还要按多久。
+ * 从背包里点「使用」再按住使用键，按下去之后画面上原本什么都不剩：交互提示在按键
+ * 落下的一瞬间就开始淡出（`InteractionPromptFade` 把「正在操作」当成让开画面的
+ * 信号），而物品栏那圈倒计时只画在当前手持的那一格上——从背包里点出来的那次根本
+ * 不经过手，连格子都没有。于是玩家按住之后既不知道手该按着什么，也不知道还要按多久。
  *
  * 这个牌子补的就是这段空窗：按住期间贴在准星下方，键帽写着当前绑定的那个键，
  * 外圈是顺时针扫过去的倒计时环，圈满就是服务端激活那一刻（两端跑同一个
- * `holdRatio`）。物品能力的长按走同一条路，只是换个颜色。
+ * `holdRatio`）。
  *
  * **它只画没有格子的那些**：手持物品的长按已经在物品栏那一格上画了一圈，同一件
  * 事再在玩家上方画一次，玩家的眼睛要在画面两端来回找。谁该画由
@@ -70,9 +69,9 @@ export class HoldProgressBadge {
     }
     this.element.hidden = false;
 
-    if (progress.kind !== this.renderedKind) {
-      this.renderedKind = progress.kind;
-      this.element.dataset.kind = progress.kind;
+    if (progress.action !== this.renderedKind) {
+      this.renderedKind = progress.action;
+      this.element.dataset.kind = progress.action;
     }
     // 没绑定键位时只留圈：与其画一个空键帽，不如让进度自己说话。
     const inputLabel = progress.inputLabel ?? '';

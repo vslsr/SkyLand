@@ -719,12 +719,6 @@
               "type": "integer",
               "minimum": 1,
               "maximum": 9
-            },
-            "stowHoldSeconds": {
-              "description": "交互键按住多久算「收回背包」而不是「放下」。客户端那圈圆形倒计时用同一个数。",
-              "type": "number",
-              "minimum": 0.1,
-              "maximum": 5
             }
           }
         },

@@ -6,7 +6,7 @@ import type { HeldItemProgress } from '../src/controllers/HotbarController.ts';
 import type { InventoryCommand } from '../src/network/messages.ts';
 import { ItemUseInputTags, PlayerInputTags } from '../src/input/config/playerInput.ts';
 
-/** 只保留交互键那一条绑定的输入替身：这一层测的是按住时序。 */
+/** 输入替身：这一层测的是按住时序和「这一下说的是哪件东西」。 */
 function harness(initialHeldActorId: string | undefined) {
   let heldActorId = initialHeldActorId;
   const handlers = new Map<unknown, (event: { phase: string }) => void>();
@@ -20,7 +20,7 @@ function harness(initialHeldActorId: string | undefined) {
   const sent: InventoryCommand[] = [];
   const progress: (HeldItemProgress | undefined)[] = [];
   let clock = 0;
-  const inventory = new InventoryComponent({ slotCapacity: 8, hotbarCapacity: 9, stowHoldSeconds: 0.6 });
+  const inventory = new InventoryComponent({ slotCapacity: 8, hotbarCapacity: 9 });
   const controller = new HotbarController(input, {
     getInventory: () => inventory,
     getHeldActorId: () => heldActorId,
@@ -44,78 +44,42 @@ function harness(initialHeldActorId: string | undefined) {
   };
 }
 
-test('叼着世界物件时，交互键也走按住计时——按下不结算，松手才发', () => {
-  // 蘑菇不在快捷栏里，heldItemType 是 undefined。按 itemType 判断「手上有没有东西」
-  // 会让它整条漏掉计时，落回按下即触发，表现就是一按就掉。
-  const { sent, press, advance } = harness('mushroom-1');
+test('手上有东西时，交互键按下即放下——没有第二层含义要靠计时区分', () => {
+  // 这里以前是一条按住计时：短按放下、按住走完一圈是「收进背包」。那把一个常用
+  // 动作压在了不常用动作下面——想放下的人得先学会「别按太久」。收回背包现在只在
+  // 背包界面里那一格上点。
+  const { sent, press } = harness('mushroom-1');
 
-  press('started');
-  assert.deepEqual(sent, [{ kind: 'stow:begin' }], '按下只开始计时');
+  press('triggered');
+  assert.deepEqual(sent, [{ kind: 'drop' }]);
 
-  advance(120);
-  press('completed');
-  assert.deepEqual(
-    sent,
-    [{ kind: 'stow:begin' }, { kind: 'stow:release' }],
-    '松手才结算；短按还是长按由服务端按自己的计时判定',
-  );
+  press('triggered');
+  assert.deepEqual(sent, [{ kind: 'drop' }, { kind: 'drop' }], '每按一次放下一件');
 });
 
-test('空手时交互键不进按住路径，让就近拾取按下即触发', () => {
+test('空手时交互键不进这条路径，让就近拾取按下即触发', () => {
   const { sent, press } = harness(undefined);
-  press('started');
-  press('completed');
+  press('triggered');
   assert.deepEqual(sent, [], '空手时这条路径完全不参与');
 });
 
-test('按住中途手上那件没了，这次按住作废', () => {
-  let held: string | undefined = 'mushroom-1';
-  const handlers = new Map<unknown, (event: { phase: string }) => void>();
-  const input = {
-    enabled: true,
-    bind: (tag: unknown, handler: (event: { phase: string }) => void) => {
-      handlers.set(tag, handler);
-      return () => handlers.delete(tag);
-    },
-  } as never;
-  const sent: InventoryCommand[] = [];
-  const controller = new HotbarController(input, {
-    getInventory: () => new InventoryComponent({ slotCapacity: 8 }),
-    getHeldActorId: () => held,
-    isActive: () => true,
-    getInputLabel: () => 'E',
-    send: (command) => sent.push(command),
-    setProgress: () => undefined,
-  }, () => 0);
-
-  handlers.get(PlayerInputTags.WorldInteract)?.({ phase: 'started' });
-  assert.deepEqual(sent, [{ kind: 'stow:begin' }]);
-
-  // 别人抢走了、或者服务端把它掉了：这次按住指向的东西已经不在手上。
-  held = undefined;
-  controller.update();
-  assert.deepEqual(sent, [{ kind: 'stow:begin' }, { kind: 'stow:cancel' }]);
-});
-
 test('按住期间把要按着的那个键交给界面：提示这时正在淡出，圈旁边得自己写', () => {
-  const { controller, progress, press, advance } = harness('mushroom-1');
+  const bar = harness('held-1');
+  bar.inventory.add('fruit', 1);
+  bar.inventory.assignHotbarSlot(0, 'fruit');
+  bar.inventory.setActiveHotbarSlot(0);
 
-  press('started');
-  advance(300);
-  controller.update();
-  const halfway = progress.at(-1);
-  assert.equal(halfway?.kind, 'stow');
-  assert.equal(halfway?.onHotbar, false, '叼着的蘑菇没有格子，圈画在准星下方');
+  bar.use('started');
+  bar.advance(300);
+  bar.controller.update();
+  const halfway = bar.progress.at(-1);
+  assert.equal(halfway?.action, 'eat');
   assert.equal(halfway?.inputLabel, 'E');
-  assert.equal(halfway?.label, '收进背包');
+  assert.equal(halfway?.label, '吃下「果子」');
   assert.ok(halfway!.ratio > 0 && halfway!.ratio < 1, `进度应当在中途，实际 ${halfway?.ratio}`);
 
-  advance(400);
-  controller.update();
-  assert.equal(progress.at(-1)?.ratio, 1, '按满之后圈应当满');
-
-  press('completed');
-  assert.equal(progress.at(-1), undefined, '松手立刻收掉圈');
+  bar.use('canceled');
+  assert.equal(bar.progress.at(-1), undefined, '打断立刻收掉圈');
 });
 
 test('长按物品：圈满那一刻就结束，松手不再发第二条命令', () => {
@@ -132,7 +96,6 @@ test('长按物品：圈满那一刻就结束，松手不再发第二条命令',
   bar.advance(600);
   bar.controller.update();
   const halfway = bar.progress.at(-1);
-  assert.equal(halfway?.kind, 'use');
   assert.equal(halfway?.action, 'eat', '这一段是在嚼，界面据此让模型抖起来');
   assert.equal(halfway?.onHotbar, true, '手持物品的圈画在物品栏那一格上');
   assert.ok(halfway!.ratio > 0.4 && halfway!.ratio < 0.6, `圈应当在中途，实际 ${halfway?.ratio}`);
