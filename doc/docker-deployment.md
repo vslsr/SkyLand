@@ -123,8 +123,9 @@ docker compose down              # 停止并删除容器（保留 skyland-logs �
 docker compose down -v           # 连日志卷一起删
 ```
 
-默认把宿主机 80 直接映射到容器的 3090，前面不放反代——还没有域名时最省事。
-代价见 4.1：没有 HTTPS 就没有跨源隔离，渲染会走降级路径。
+默认把宿主机 80 直接映射到容器的 3090，前面不放反代。注意这个默认值只够验证
+`/api/health` 和静态资源是否正常——**浏览器里游戏起不来**，因为纯 HTTP 没有跨源隔离，
+见 4.1。真要能玩，按 4.2 拿到安全上下文。
 
 要换发布方式，用 `SKYLAND_PUBLISH` 覆盖，不用改文件（改了会和 `git pull` 冲突）：
 
@@ -167,13 +168,102 @@ docker run -d --name skyland --init \
 `https://` 或 `http://localhost`。用 `http://<公网 IP>:3090` 访问，
 COOP/COEP 头发得再对，`crossOriginIsolated` 仍然是 `false`。
 
-`src/platform/threading.ts` 拿不到 SAB 时会**静默**回落成普通 `ArrayBuffer`——
-不报错，只是主线程和渲染线程之间从共享内存变成逐帧拷贝。所以这个坑不会以异常的形式
-暴露出来，只会表现为线上比本地卡。
+**拿不到跨源隔离，客户端直接起不来**，页面上会是这一行：
 
-所以公网部署请务必配好域名和 TLS。局域网内自测可以走 IP，但那时的能力集和线上不一样。
+> 客户端初始化失败：拿不到 SharedArrayBuffer（页面没有跨源隔离？），渲染循环搬不进线程
 
-### 4.2 Nginx
+`src/platform/threading.ts` 里的 `allocateSharedBytes` 确实会回落成普通 `ArrayBuffer`，
+但根本走不到那一步：`src/render/worker/connectRenderWorldInWorker.ts` 在装配渲染线程时
+就抛了异常，而 `GrasslandScene` 只有这一条渲染路径，没有主线程回退分支。
+
+所以「先用 HTTP 跑起来，以后再上 HTTPS」是行不通的——安全上下文是能不能玩的前提，
+不是性能优化。下一节是没有域名时怎么拿到它。
+
+### 4.2 没有域名时怎么拿到安全上下文
+
+**先说清楚：光加一层反代是修不好的。** 根因是协议不是 HTTPS，跟前面有没有 nginx 无关。
+反代必须**终止 TLS**，也就是它得有证书。仓库里备了三个可选 profile：
+
+| 方案 | 证书 | 浏览器警告 | 需要入站端口 | 适合 |
+| --- | --- | --- | --- | --- |
+| `--profile quicktunnel` | Cloudflare 签发 | 无 | 不需要 | 境内服务器、没备案、想马上试玩 |
+| `--profile nginx-tls` | 自己准备（自签或已有的） | 自签会弹一次 | 443 | 纯 IP 访问、内网、离线、已有证书 |
+| `--profile tls`（Caddy） | Let's Encrypt 自动签发续期 | 无 | 80 + 443 | 已备案域名，或服务器在境外 |
+
+启用任一 profile 时 skyland 自己不要再占 80，保持默认的只发布到回环即可。
+`nginx-tls` 和 `tls` 都占 80/443，不能同时起；`quicktunnel` 不占任何端口，可以并存。
+
+> **境内服务器的坑：`<IP>.sslip.io` + Let's Encrypt 走不通。** 云厂商会在入口拦截
+> 未备案域名走 80/443 的请求，返回一个 webblock 页。Let's Encrypt 是多视角校验，
+> 只要有一个节点拿到拦截页整单就失败，日志长这样：
+>
+> ```
+> Invalid response from https://dnspod.qcloud.com/static/webblock.html?d=<域名>: 566
+> ```
+>
+> 这跟配置无关，改不好。境内没备案就走 `quicktunnel` 或 `nginx-tls`。别让它一直重试
+> ——Let's Encrypt 对失败校验有频率限制（同一域名每小时 5 次），确认是这个错就
+> `docker compose --profile tls down`。
+
+#### 方案 A：Cloudflare 快速隧道，不需要任何入站端口
+
+`cloudflared` 只建立**出站**连接到 Cloudflare，再由 Cloudflare 把流量送回来。
+所以它同时绕开了未备案拦截、安全组和端口占用，而且拿到的是正式证书，没有警告。
+
+```bash
+docker compose --profile quicktunnel up -d
+docker compose logs cloudflared | grep trycloudflare.com
+# https://<随机字符>.trycloudflare.com
+```
+
+地址是随机的，**容器一重启就换一个**，带宽也有限制。适合自己试玩和临时分享给几个人，
+不适合当正式入口。流量会经过 Cloudflare，内容敏感时要考虑这一点。
+
+#### 方案 B：nginx + 自签证书，纯 IP 访问
+
+不依赖外部 CA，也不涉及域名，所以不受备案拦截影响。代价是浏览器首访要点一次
+「继续访问」。点过之后就是安全上下文，`crossOriginIsolated` 为 `true`，功能完整。
+
+```bash
+./deploy/generate-self-signed-cert.sh 111.229.172.59   # 换成你的公网 IP
+docker compose --profile nginx-tls up -d
+# 浏览器开 https://111.229.172.59/
+```
+
+证书写在 `deploy/tls/`（已在 `.gitignore` 里）。已经有正式证书时，把 `cert.pem` /
+`key.pem` 放进这个目录即可，不用跑脚本。需要放行安全组的 443 入站。
+
+`deploy/nginx-tls.conf` 里刻意没有任何 `add_header` / `proxy_hide_header`：
+COOP/COEP/CORP 由 Node 服务端统一发，nginx 默认透传，一旦覆盖就前功尽弃。
+
+#### 方案 C：Caddy + Let's Encrypt（需要已备案域名，或服务器在境外）
+
+```bash
+echo 'SKYLAND_SITE=skyland.example.com' > .env
+docker compose --profile tls up -d
+docker compose logs -f caddy                # 等 certificate obtained
+```
+
+没有域名但服务器在境外时，可以用 `<公网IP>.sslip.io` —— 这个泛解析服务把该名字
+解析回同一个 IP，Let's Encrypt 能正常签发。境内服务器见上面那条警告。
+
+签发走 HTTP-01 挑战，**80 和 443 都必须能从公网访问**，签完 80 会 301 到 443。
+证书存在 `caddy-data` 卷里，别删。
+
+#### 方案 D：只有自己试玩，SSH 隧道
+
+服务器什么都不用改，容器保持只监听回环。`http://localhost` 是安全上下文，
+性能和正式部署完全一致。
+
+```bash
+# 在你自己的电脑上执行
+ssh -N -L 3090:127.0.0.1:3090 root@<服务器IP>
+# 浏览器开 http://localhost:3090/
+```
+
+必须用 `localhost` 或 `127.0.0.1`——局域网 IP 同样不算安全上下文。
+
+### 4.3 Nginx
 
 Node 服务端自己会发 `Cross-Origin-Opener-Policy: same-origin` 和
 `Cross-Origin-Embedder-Policy: require-corp`，反代**不要**覆盖或删掉它们。
@@ -219,7 +309,7 @@ server {
 
 改完 `nginx -t && systemctl reload nginx`。
 
-### 4.3 Caddy（自动签证书，配置更短）
+### 4.4 Caddy（自动签证书，配置更短）
 
 ```caddy
 skyland.example.com {
@@ -229,7 +319,7 @@ skyland.example.com {
 
 Caddy 默认就转发 WebSocket 升级，也不会动上游的 COOP/COEP 头。
 
-### 4.4 防火墙
+### 4.5 防火墙
 
 容器端口只绑到回环时，对外只需要放行 80/443：
 
@@ -268,7 +358,7 @@ docker run -d --name skyland --init -p 127.0.0.1:3090:3090 skyland:0.1.0
 | `/api/health` 返回 `"webReady": false`，页面 503 | 镜像里没有 `dist/`。看 `docker build` 输出里 `vite build` 是否失败 |
 | 容器 STATUS 一直 `(unhealthy)` | `docker logs skyland` 看启动报错；或 `SKYLAND_SERVER_PORT` 改了但健康检查还打 3090 |
 | 页面能开，进房间就断线 | 反代没转发 WebSocket 升级，或 `proxy_read_timeout` 太短 |
-| 帧率明显低于本地，但没有任何报错 | 跨源隔离没打开。`src/platform/threading.ts` 会静默回落到普通 `ArrayBuffer`，不抛异常。在控制台查 `crossOriginIsolated`，`false` 就是这条。原因见 4.1 |
+| 页面报「客户端初始化失败：拿不到 SharedArrayBuffer」 | 不是安全上下文（走了 http），或反代删掉了 COOP/COEP。控制台查 `crossOriginIsolated`，`false` 就是这条。见 4.1、4.2 |
 | 加载卡在 wasm，控制台报跨源资源被拒 | 引入了不带 `Cross-Origin-Resource-Policy` 的跨源资源（CDN 字体/图片），COEP 会静默拦掉 |
 | 构建时 OOM 被杀 | 构建机内存不足。加 swap，或在别处构建好推镜像 |
 | 日志目录写入报 EACCES | `/app/logs` 没挂卷或属主不对。用 `-v skyland-logs:/app/logs` |
