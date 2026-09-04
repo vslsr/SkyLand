@@ -338,7 +338,8 @@ test('ActorCatalog 净化骨骼腿史莱姆并要求腿够得到站姿落脚点'
   assert.equal(legged.components.render.model, 'line-art-legged-slime');
   assert.equal(legged.components.render.legCount, 2);
   assert.equal(legged.components.render.hipHeight, 0.66);
-  assert.equal(legged.components.render.legColor, '#141210');
+  // 腿属于角色墨记层：纯黑，见 src/materials/createCharacterInkMaterial.ts。
+  assert.equal(legged.components.render.legColor, '#000000');
   assert.equal(legged.components.render.footShadowColor, '#6f6f6f');
   // 长腿外壳也是一种玩家外壳，所以它必须带 playerMovement。
   assert.ok(legged.components.playerMovement);

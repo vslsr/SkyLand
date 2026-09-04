@@ -45,9 +45,9 @@ const LEGGED_SLIME = {
   middleColor: '#b6e9f4',
   coreColor: '#3ea9c6',
   bubbleColor: '#eafaff',
-  inkColor: '#152c36',
+  inkColor: '#000000',
   shadowColor: '#1e4a5a',
-  legColor: '#141210',
+  legColor: '#000000',
   footShadowColor: '#6f6f6f',
 } as const satisfies Extract<ActorRenderDefinition, { model: 'line-art-legged-slime' }>;
 
@@ -268,6 +268,27 @@ function bonesOf(harness: LegHarness): { name: string; length: number }[] {
   });
   return bones;
 }
+
+test('腿是角色墨记层：纯黑，且不参与雾与色调映射', () => {
+  const harness = createLegHarness();
+  harness.step(1 / 60, { x: 0, z: 0 });
+  const proxy = harness.scene.resolve(harness.id)!;
+
+  const bones: THREE.Mesh<THREE.CylinderGeometry, THREE.MeshBasicMaterial>[] = [];
+  proxy.root.traverse((object) => {
+    if (!/^legged-slime-(thigh|shin|foot)-\d+$/.test(object.name)) return;
+    bones.push(object as THREE.Mesh<THREE.CylinderGeometry, THREE.MeshBasicMaterial>);
+  });
+  assert.equal(bones.length, LEGGED_SLIME.legCount * 3);
+
+  for (const bone of bones) {
+    // 雾开着的话，雾天与入夜时腿会被混向雾色，在沉下去的纸面上淡成看不清的浅痕。
+    assert.equal(bone.material.fog, false, `${bone.name} 不该参与距离雾`);
+    assert.equal(bone.material.toneMapped, false, `${bone.name} 不该参与色调映射`);
+    assert.equal(bone.material.color.getHexString(), '000000');
+  }
+  harness.scene.dispose();
+});
 
 test('站立时两只脚踩在采样出来的地面上，膝盖是两节骨头之间的一个折角', () => {
   const harness = createLegHarness();

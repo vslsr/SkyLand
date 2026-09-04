@@ -1,4 +1,9 @@
 import * as THREE from 'three';
+import {
+  CHARACTER_INK_COLOR,
+  createCharacterInkLineMaterial,
+  createCharacterInkMaterial,
+} from '../materials/createCharacterInkMaterial';
 
 /**
  * `line-art-player-slime` 的软体外壳，从 `playerSlime.ts` 里抽出来。
@@ -19,6 +24,10 @@ export interface SlimePalette {
   middle: SlimeColor;
   core: SlimeColor;
   bubble: SlimeColor;
+  /**
+   * 脸上那层墨（眼睛与嘴）。它是角色墨记层，不参与昼夜、雾与色调映射，
+   * 现有配置一律给纯黑——见 `createCharacterInkMaterial` 里的理由。
+   */
   ink: SlimeColor;
   shadow: SlimeColor;
 }
@@ -51,7 +60,7 @@ export const LOCAL_SLIME_PALETTE: SlimePalette = {
   middle: 0x8ce8b6,
   core: 0x2fbb7c,
   bubble: 0xeafff2,
-  ink: 0x173a2b,
+  ink: CHARACTER_INK_COLOR,
   shadow: 0x1e5a40,
 };
 
@@ -79,7 +88,8 @@ export function createSlimePalette(playerId: string): SlimePalette {
     middle: hsl(hue, 0.62, 0.73),
     core: hsl(hue, 0.6, 0.46),
     bubble: hsl(hue, 0.55, 0.95),
-    ink: hsl(hue, 0.4, 0.16),
+    // 墨记层不参与配色：眼睛和嘴永远是纯黑，见 createCharacterInkMaterial。
+    ink: CHARACTER_INK_COLOR,
     shadow: hsl(hue, 0.5, 0.24),
   };
 }
@@ -93,13 +103,9 @@ const BUBBLE_LAYOUT = [
 
 export function createSlimeFace(radius: number, palette: SlimePalette): THREE.Group {
   const face = new THREE.Group();
-  // 眼睛是角色识别层，不参与昼夜光照、雾或色调映射；夜晚也必须保持原始墨色。
-  const ink = new THREE.MeshBasicMaterial({
-    color: palette.ink,
-    depthWrite: false,
-    fog: false,
-    toneMapped: false,
-  });
+  // 眼睛与嘴是角色墨记层：不参与昼夜光照、雾与色调映射，任何时刻都是同一道
+  // 纯黑。见 createCharacterInkMaterial。
+  const ink = createCharacterInkMaterial(palette.ink, { depthWrite: false });
   const eyeGeometry = new THREE.SphereGeometry(radius * 0.075, 10, 8);
 
   for (const [index, x] of [-radius * 0.27, radius * 0.27].entries()) {
@@ -118,7 +124,7 @@ export function createSlimeFace(radius: number, palette: SlimePalette): THREE.Gr
   ];
   const smile = new THREE.Line(
     new THREE.BufferGeometry().setFromPoints(smilePoints),
-    new THREE.LineBasicMaterial({ color: palette.ink }),
+    createCharacterInkLineMaterial(palette.ink),
   );
   smile.renderOrder = 5;
   face.add(smile);

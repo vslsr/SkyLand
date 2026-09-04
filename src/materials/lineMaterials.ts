@@ -14,6 +14,9 @@ import { renderAssets } from '../render/renderAssets';
  *
  * 基线引用计数在模块加载时取一次、永不释放：单页应用里它们的生命周期就是
  * 进程的生命周期。场景与 chunk 只要不去 dispose 它们即可，不必再 acquire。
+ *
+ * 这里画的是**环境**的墨。角色身上的腿、眼睛、嘴是另一回事：它们不参与这套
+ * 换墨，也不参与雾，永远是同一道纯黑，见 `createCharacterInkMaterial`。
  */
 const BASE_OUTLINE_COLOR = new THREE.Color(0x171614);
 const BASE_GROUND_GRID_COLOR = new THREE.Color(0x9d9a90);
