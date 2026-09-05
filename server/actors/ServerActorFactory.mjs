@@ -47,6 +47,7 @@ import {
   PLAYER_MOVEMENT_COMPONENT,
   PlayerMovementComponent,
   PlayerJumpComponent,
+  NavigationComponent,
   PatrolPathComponent,
   ProjectileComponent,
   PICKUP_DROP_COMPONENT,
@@ -81,6 +82,7 @@ import { HealthSystem } from './HealthSystem.mjs';
 import { TemperatureSystem } from './TemperatureSystem.mjs';
 import { HighCountActorSystem } from './HighCountActorSystem.mjs';
 import { GuidePathSystem } from './GuidePathSystem.mjs';
+import { NavigationSystem } from './NavigationSystem.mjs';
 import { PatrolPathSystem } from './PatrolPathSystem.mjs';
 import { ProjectileSystem } from './ProjectileSystem.mjs';
 import { WeaponUserSystem } from './WeaponUserSystem.mjs';
@@ -178,6 +180,14 @@ export function createServerActor(spawn, archetype, runtime = {}) {
   if (archetype.components.patrolPath) {
     actor.addComponent(new PatrolPathComponent(archetype.components.patrolPath));
   }
+  // 足迹半径默认取模型半径：寻路问的「这一格塞不塞得下」和碰撞推出用的是同一个
+  // 圆，两处各写一个数就会出现「走得进去但被推出来」。
+  if (archetype.components.navigation) {
+    actor.addComponent(new NavigationComponent({
+      radius: archetype.components.render?.radius,
+      ...archetype.components.navigation,
+    }));
+  }
   // 弧、蓄力比例、射手、哪件武器打的都由射出它的那一下给（`runtime.projectile`）；
   // 原型只说这一类箭怎么飞。
   if (archetype.components.projectile) {
@@ -223,6 +233,21 @@ export function createServerActor(spawn, archetype, runtime = {}) {
   return actor;
 }
 
+/**
+ * 这张图上最远能想多远。
+ *
+ * 没有会寻路的 Actor 时返回 undefined，`NavigationSystem` 于是退回默认值——
+ * 而它的工作数组本来就是懒分配的，一张没有生物的图一个字节都不占。
+ */
+function maximumNavigationSearchRadius(sceneDefinition) {
+  let maximum = 0;
+  for (const archetype of sceneDefinition.actorArchetypes ?? []) {
+    const radius = archetype.components?.navigation?.searchRadiusCells;
+    if (Number.isFinite(radius) && radius > maximum) maximum = radius;
+  }
+  return maximum > 0 ? maximum : undefined;
+}
+
 export function createServerActorWorld(sceneDefinition, options = {}) {
   const world = new ActorWorld({
     seaLevel: sceneDefinition.gameplay?.water?.seaLevel ?? 0,
@@ -248,6 +273,12 @@ export function createServerActorWorld(sceneDefinition, options = {}) {
   // 排在巡逻**之前**：它决定这只弓手这一刻站不站定，巡逻据此放手。反过来的话
   // 巡逻会在同一 tick 里把刚转过去的脸又转回路线上，弓手永远瞄不准。
   if (options.scene) world.addSystem(new WeaponUserSystem(options.scene));
+  // 排在巡逻**之前**：它决定这只生物这一刻是不是正被导航推着走，巡逻据此让位。
+  // 搜索窗口按这张图上最大的那一只开一次——它是整套寻路的常驻内存，所以它的
+  // 大小必须由场景数据决定，而不是由运行时最先寻路的那一只碰巧决定。
+  world.addSystem(new NavigationSystem({
+    searchRadiusCells: maximumNavigationSearchRadius(sceneDefinition),
+  }));
   world.addSystem(new PatrolPathSystem());
   // 弹药和巡逻同理排在 colliderIndex 之前：它写的是权威 Transform，而它这一 tick
   // 的扫掠要打在**已经更新过**的目标位置上，不是上一帧的位置上。

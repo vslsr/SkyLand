@@ -96,6 +96,8 @@ import {
 } from '../../shared/world/fruitDrop.mjs';
 import { toWorldSeed } from '../../shared/world/worldConfig.mjs';
 import { SceneEnvironmentDirector } from './SceneEnvironmentDirector.mjs';
+import { SceneCreatureSpawner } from './SceneCreatureSpawner.mjs';
+import { SceneNavigation } from './SceneNavigation.mjs';
 import { TERRAIN_CELL_SIZE, TERRAIN_SURFACE } from '../../shared/world/terrainConfig.mjs';
 import { sampleTerrain, terrainCellSurface } from '../../shared/world/terrainContent.mjs';
 import { terrainCellTopHeight } from '../../shared/world/terrainSupport.mjs';
@@ -311,6 +313,11 @@ export class ServerScene {
         ? (x, z) => sampleTerrain(this.worldSeed, x, z, {}, this.terrainCellCodeAt).groundY
         : undefined,
     });
+    // AI 寻路看的地形、建造件与障碍全部是场景已有的那几份权威数据，这里只是
+    // 把它们接上（`SceneNavigation`）。System 只认识 world，所以和下面几条一样
+    // 挂在 context 上。
+    this.navigation = new SceneNavigation(this);
+    this.actorWorld.context.navigation = this.navigation;
     // 拔出来的世界物件怎么进物品栏，只有场景知道（它要删 Actor、要重挂手持
     // 表现体）。ElasticDetachSystem 只认识 world，所以这一步从 context 上问。
     this.actorWorld.context.stowPulledActor = (actor, player) => (
@@ -337,6 +344,11 @@ export class ServerScene {
       terrainPatches: this.terrainPatches,
       onTerrainChanged: () => this.liftPlayersAboveTerrain(),
     });
+    // 自然刷新的生物。和生成物件不同，它们**不是**世界的确定性产物：什么时候
+    // 出、出在哪儿由房间自己掷骰子决定，走远了还会消失。所以它只认场景的权威
+    // 数据，不参与任何跨端推导。
+    this.nextSpawnedCreatureId = 0;
+    this.creatureSpawner = new SceneCreatureSpawner(this, definition.gameplay?.creatureSpawns ?? []);
     // 生成物件和静态碰撞一样跟着玩家滑动，房间启动时一个都不建。
     // 哪些种类真的产生 Actor、同 kind 如何分配原型，由 gameplay.worldProps 决定。
     this.generatedProps = new ServerGeneratedPropActors({
@@ -1695,6 +1707,9 @@ export class ServerScene {
     this.chunkColliders.sync(this.players.values());
     this.terrainColliders.sync(this.players.values());
     this.generatedProps.sync(this.players.values());
+    // 刷新排在常驻同步**之后**：新刷出来的生物要落在已经就位的碰撞体之间，
+    // 否则「塞不塞得下」这一问会在一片空的碰撞世界上得到「哪儿都行」。
+    this.creatureSpawner.advance(elapsedSeconds);
     // 走远的人自动退出容器界面；不依赖客户端自觉发关闭。
     this.updateContainerViewers();
     // 长按倒计时在**服务端**走完，不等客户端报「我按满了」：玩家看到的圈满和这里

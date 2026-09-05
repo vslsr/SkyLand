@@ -331,6 +331,32 @@
             "mushroom": { "$ref": "#/$defs/worldPropVariants" }
           }
         },
+        "creatureSpawns": {
+          "type": "array",
+          "description": "生物自然刷新。规则照 Minecraft 的自然刷新：按周期在玩家周围的圆环里试着落一小群，有配额、有刷新区块、走远了会消失。只能用在带 renderer.world 的流式场景上。",
+          "maxItems": 8,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["archetype", "capPerPlayer"],
+            "properties": {
+              "archetype": {
+                "description": "刷出来的是哪种 Actor。原型会自动进入场景原型表，不必在 runtimeActorArchetypes 里重复写。",
+                "type": "string",
+                "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+              },
+              "capPerPlayer": { "description": "每名在场玩家给这种生物的配额。房间里没有人时配额是 0。", "type": "integer", "minimum": 1, "maximum": 32 },
+              "maximumPerRoom": { "description": "全房间的硬上限，压过按人头算出来的配额。", "type": "integer", "minimum": 1, "maximum": 256 },
+              "cycleSeconds": { "description": "隔多少秒跑一次刷新周期。不是每 tick 都刷。", "type": "number", "exclusiveMinimum": 0, "maximum": 600 },
+              "attemptsPerCycle": { "description": "一个周期最多试几个候选点。地形不合适就放弃，不重试到成功。", "type": "integer", "minimum": 1, "maximum": 32 },
+              "packMaximum": { "description": "一次成群刷出来的上限。1 就是一次一只。", "type": "integer", "minimum": 1, "maximum": 8 },
+              "minimumDistance": { "description": "离玩家这么近以内不刷，米。", "type": "number", "minimum": 2, "maximum": 256 },
+              "maximumDistance": { "description": "刷新圆环的外径，米。它同时决定消失距离：出了这个范围随机消失，出了一倍半立刻消失。必须大于 minimumDistance。", "type": "number", "minimum": 4, "maximum": 512 },
+              "chunkOneIn": { "description": "几分之一的 chunk 会出这种生物。像 Minecraft 的史莱姆区块一样由世界种子决定，写 1 表示到处都出。", "type": "integer", "minimum": 1, "maximum": 64 },
+              "nightOnly": { "description": "只在夜里刷。需要场景开启 environment.dayNight。", "type": "boolean" }
+            }
+          }
+        },
         "bounds": {
           "type": "object",
           "description": "玩法平面的活动范围。renderer.world 的流式场景可以省略，玩家便可一直走下去（范围取世界的精度护栏）；固定尺寸场景必须写。",

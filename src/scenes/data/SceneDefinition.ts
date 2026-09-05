@@ -303,6 +303,39 @@ export interface ActorArchetypeDefinition {
       mode: 'ping-pong' | 'loop';
     };
     /**
+     * 会自己寻路的 AI。搜索、跟随与重寻路全在服务端（`shared/navigation` +
+     * `NavigationSystem`），客户端不读它——位置整段由快照插值而来——列在这里
+     * 和 `patrolPath` 同一个理由：让原型的形状在两侧对得上。
+     */
+    navigation?: {
+      speed: number;
+      turnSpeed?: number;
+      radius?: number;
+      height?: number;
+      stepUp?: number;
+      maxDrop?: number;
+      nodeRadius?: number;
+      arriveRadius?: number;
+      repathSeconds?: number;
+      goalTolerance?: number;
+      searchRadiusCells?: number;
+      maxVisitedNodes?: number;
+      swim?: boolean;
+      malus?: {
+        walkable?: number;
+        slope?: number;
+        deck?: number;
+        waterEdge?: number;
+        water?: number;
+        danger?: number;
+      };
+      chase?: {
+        senseRadius: number;
+        giveUpRadius?: number;
+        keepDistance?: number;
+      };
+    };
+    /**
      * 会飞的弹药。整条弧、蓄力比例、射手都是运行期状态，由服务端在射出那一刻
      * 交给 Component；原型只说这一类箭怎么飞。客户端不模拟它——位置整段由快照
      * 插值而来——列在这里是为了让原型的形状在两侧对得上，并且让副本知道

@@ -6,6 +6,11 @@ import {
   MAX_PATROL_LOCAL_COORDINATE,
   MAX_PATROL_WAYPOINTS,
 } from '../../shared/actor/components/PatrolPathComponent.mjs';
+import {
+  MAX_NAV_MALUS,
+  MAX_NAV_SEARCH_RADIUS_CELLS,
+  MAX_NAV_VISITED_NODES,
+} from '../../shared/navigation/index.mjs';
 import { itemCatalog } from '../../shared/items/index.mjs';
 import {
   BUILD_CELL_SIZE,
@@ -692,6 +697,98 @@ function validateWeaponUser(raw, filename) {
   };
 }
 
+/**
+ * 会自己寻路的 AI。
+ *
+ * 这里校验的是**这一只生物**：体型多大、抬得多高、怕不怕水、想得多远。寻路
+ * 算法本身没有任何配置项，因为它不该有——一张地图不能改 A* 的行为，只能改
+ * 走它的那只生物。
+ *
+ * `searchRadiusCells` 与 `maxVisitedNodes` 上限来自 `shared/navigation`，不在这里
+ * 另写一份数字：它们是大世界的成本封顶（窗口是定长数组，节点数是最坏耗时），
+ * 抄第二遍就会有两条账。
+ */
+function validateNavigation(raw, filename) {
+  const path = `${filename}.components.navigation`;
+  const definition = requireObject(raw, path);
+  const knownKeys = new Set([
+    'speed', 'turnSpeed', 'radius', 'height', 'stepUp', 'maxDrop',
+    'nodeRadius', 'arriveRadius', 'repathSeconds', 'goalTolerance',
+    'searchRadiusCells', 'maxVisitedNodes', 'swim', 'malus', 'chase',
+  ]);
+  for (const key of Object.keys(definition)) {
+    if (!knownKeys.has(key)) throw new TypeError(`${path} 包含未知字段：${key}`);
+  }
+  const optionalNumber = (key, minimum, maximum) => (definition[key] === undefined
+    ? {}
+    : { [key]: requireNumber(definition[key], `${path}.${key}`, minimum, maximum) });
+  const optionalInteger = (key, minimum, maximum) => {
+    if (definition[key] === undefined) return {};
+    const value = requireNumber(definition[key], `${path}.${key}`, minimum, maximum);
+    if (!Number.isInteger(value)) throw new TypeError(`${path}.${key} 必须是整数`);
+    return { [key]: value };
+  };
+  if (definition.swim !== undefined && typeof definition.swim !== 'boolean') {
+    throw new TypeError(`${path}.swim 必须是布尔值`);
+  }
+
+  let malus;
+  if (definition.malus !== undefined) {
+    const malusPath = `${path}.malus`;
+    const raws = requireObject(definition.malus, malusPath);
+    const malusKeys = new Set(['walkable', 'slope', 'deck', 'waterEdge', 'water', 'danger']);
+    malus = {};
+    for (const [key, value] of Object.entries(raws)) {
+      if (!malusKeys.has(key)) throw new TypeError(`${malusPath} 包含未知字段：${key}`);
+      // 下界是 -1 而不是 0：-1 是「走不了」这个语义本身，不是一个被夹掉的负数。
+      malus[key] = requireNumber(value, `${malusPath}.${key}`, -1, MAX_NAV_MALUS);
+    }
+  }
+
+  let chase;
+  if (definition.chase !== undefined) {
+    const chasePath = `${path}.chase`;
+    const raws = requireObject(definition.chase, chasePath);
+    const chaseKeys = new Set(['senseRadius', 'giveUpRadius', 'keepDistance']);
+    for (const key of Object.keys(raws)) {
+      if (!chaseKeys.has(key)) throw new TypeError(`${chasePath} 包含未知字段：${key}`);
+    }
+    const senseRadius = requireNumber(raws.senseRadius, `${chasePath}.senseRadius`, 0.01, 64);
+    const giveUpRadius = raws.giveUpRadius === undefined
+      ? undefined
+      : requireNumber(raws.giveUpRadius, `${chasePath}.giveUpRadius`, 0.01, 128);
+    // 放弃距离不大于察觉距离时，目标站在边界上会让它一步一犹豫地抖动。
+    if (giveUpRadius !== undefined && giveUpRadius <= senseRadius) {
+      throw new TypeError(`${chasePath}.giveUpRadius 必须大于 senseRadius`);
+    }
+    chase = {
+      senseRadius,
+      ...(giveUpRadius === undefined ? {} : { giveUpRadius }),
+      ...(raws.keepDistance === undefined
+        ? {}
+        : { keepDistance: requireNumber(raws.keepDistance, `${chasePath}.keepDistance`, 0, 64) }),
+    };
+  }
+
+  return {
+    speed: requireNumber(definition.speed, `${path}.speed`, Number.EPSILON, 20),
+    ...optionalNumber('turnSpeed', Number.EPSILON, 24),
+    ...optionalNumber('radius', Number.EPSILON, 4),
+    ...optionalNumber('height', Number.EPSILON, 8),
+    ...optionalNumber('stepUp', 0, 4),
+    ...optionalNumber('maxDrop', 0, 16),
+    ...optionalNumber('nodeRadius', Number.EPSILON, 4),
+    ...optionalNumber('arriveRadius', Number.EPSILON, 16),
+    ...optionalNumber('repathSeconds', Number.EPSILON, 30),
+    ...optionalNumber('goalTolerance', Number.EPSILON, 32),
+    ...optionalInteger('searchRadiusCells', 1, MAX_NAV_SEARCH_RADIUS_CELLS),
+    ...optionalInteger('maxVisitedNodes', 8, MAX_NAV_VISITED_NODES),
+    ...(definition.swim === undefined ? {} : { swim: definition.swim }),
+    ...(malus ? { malus } : {}),
+    ...(chase ? { chase } : {}),
+  };
+}
+
 function validatePatrolPath(raw, filename) {
   const path = `${filename}.components.patrolPath`;
   const definition = requireObject(raw, path);
@@ -1181,6 +1278,7 @@ function validateActorArchetype(raw, filename) {
     'generatedProp',
     'guidePath',
     'patrolPath',
+    'navigation',
     'weaponUser',
     'buildPiece',
     'buildGrid',
@@ -1200,6 +1298,9 @@ function validateActorArchetype(raw, filename) {
     : undefined;
   const patrolPath = components.patrolPath
     ? validatePatrolPath(components.patrolPath, filename)
+    : undefined;
+  const navigation = components.navigation
+    ? validateNavigation(components.navigation, filename)
     : undefined;
   const projectile = components.projectile
     ? validateProjectile(components.projectile, filename)
@@ -1264,6 +1365,15 @@ function validateActorArchetype(raw, filename) {
   // 服务端推着走的生物（见 patrolPath）。所以这里**不**强制要 playerMovement。
   if (patrolPath && playerMovement) {
     throw new TypeError(`${filename}.components.patrolPath 不能与 playerMovement 并存`);
+  }
+  // 导航和巡逻一样是服务端推着走的移动，和玩家控制器是两套写 Transform 的权威。
+  if (navigation && playerMovement) {
+    throw new TypeError(`${filename}.components.navigation 不能与 playerMovement 并存`);
+  }
+  // 会走路却看不见的东西不是生物，是一次看不见的位移。足迹半径也默认取自
+  // render.radius——没有 render 就没有体型可言。
+  if (navigation && !render) {
+    throw new TypeError(`${filename}.components.navigation 需要 render`);
   }
   // 弹药是**飞在世界里被人看见**的东西：没有 render 的话它只是一次看不见的判定，
   // 而那正是它取代掉的旧做法。
@@ -1418,6 +1528,7 @@ function validateActorArchetype(raw, filename) {
       ...(generatedProp ? { generatedProp } : {}),
       ...(guidePath ? { guidePath } : {}),
       ...(patrolPath ? { patrolPath } : {}),
+      ...(navigation ? { navigation } : {}),
       ...(weaponUser ? { weaponUser } : {}),
       ...(buildPiece ? { buildPiece } : {}),
       ...(buildGrid ? { buildGrid } : {}),

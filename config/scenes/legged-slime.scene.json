@@ -22,7 +22,32 @@
       "dayLengthSeconds": 900
     }
   },
-  "actors": [],
+  "actors": [
+    {
+      "id": "legged-slime-hunter-01",
+      "archetype": "legged-slime-hunter",
+      "localTransform": {
+        "position": [
+          -8,
+          0,
+          -8
+        ],
+        "yaw": 0.7853982
+      }
+    },
+    {
+      "id": "legged-slime-hunter-02",
+      "archetype": "legged-slime-hunter",
+      "localTransform": {
+        "position": [
+          8,
+          0,
+          -6
+        ],
+        "yaw": -1.5707963
+      }
+    }
+  ],
   "renderer": {
     "type": "line-art",
     "background": "#fdfbf6",
@@ -42,6 +67,19 @@
   },
   "gameplay": {
     "playerActor": { "archetype": "legged-slime" },
+    "creatureSpawns": [
+      {
+        "archetype": "green-legged-slime",
+        "capPerPlayer": 5,
+        "maximumPerRoom": 20,
+        "cycleSeconds": 4,
+        "attemptsPerCycle": 12,
+        "packMaximum": 3,
+        "minimumDistance": 14,
+        "maximumDistance": 40,
+        "chunkOneIn": 4
+      }
+    ],
     "worldProps": {
       "tree": [
         { "archetype": "generated-tree", "weight": 1 }

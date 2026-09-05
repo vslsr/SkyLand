@@ -19,6 +19,15 @@ export class BuildSiteIndex {
     this.countsByBuilder = new Map();
     /** @type {Map<string, number>} 表面 → 件数 */
     this.countsBySurface = new Map();
+    /**
+     * 占位表改了几次。
+     *
+     * 给「按格问建造件」的消费方用：AI 寻路手上那条路是照着某一个版本算的，
+     * 版本一变（有人在它面前放下一堵墙）那条穿墙而过的路当场作废，而不是等
+     * 下一个重寻路周期。存一个整数比让每个消费方各自订阅增删事件便宜得多，
+     * 也不会漏掉一次。
+     */
+    this.revision = 0;
   }
 
   get size() {
@@ -51,6 +60,7 @@ export class BuildSiteIndex {
       );
     }
     this.countsBySurface.set(record.surfaceKey, (this.countsBySurface.get(record.surfaceKey) ?? 0) + 1);
+    this.revision += 1;
     return true;
   }
 
@@ -70,6 +80,7 @@ export class BuildSiteIndex {
       if (count <= 0) this.countsBySurface.delete(record.surfaceKey);
       else this.countsBySurface.set(record.surfaceKey, count);
     }
+    if (record) this.revision += 1;
     return record;
   }
 
@@ -78,6 +89,7 @@ export class BuildSiteIndex {
     this.keysByActor.clear();
     this.countsByBuilder.clear();
     this.countsBySurface.clear();
+    this.revision += 1;
   }
 
   getByActor(actorId) {
