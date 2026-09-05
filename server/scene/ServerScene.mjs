@@ -1775,7 +1775,8 @@ export class ServerScene {
           projectile.impactZ - projectile.originZ,
         ),
       },
-    }, archetype, { projectile });
+      // 出发时刻随弧一起复制：客户端拿它自己算这一箭飞到哪儿了，不靠位置插值。
+    }, archetype, { projectile: { ...projectile, startedAt: this.now() / 1000 } });
     this.actorWorld.addActor(actor);
     return actor;
   }

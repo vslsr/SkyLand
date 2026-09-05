@@ -403,3 +403,58 @@ test('没有冲量的事件把计数一起写 0：玩家、远端玩家与 Repli
   assert.equal(params.revision, 0);
   assert.equal(params.impulse, 0);
 });
+
+/**
+ * 坑最深的那个顶点在球面上的高度（局部 y，按半径归一化）。
+ *
+ * 这一条才是「斜着扎下来」看得见的地方：平射的坑压在赤道上，吊射的一箭以二十来度
+ * 扎下来，坑就该偏在迎箭那一侧的上方。
+ */
+function deepestDentHeight(geometry: THREE.BufferGeometry, original: Float32Array): number {
+  const positions = (geometry.getAttribute('position') as THREE.BufferAttribute)
+    .array as Float32Array;
+  let deepest = 0;
+  let height = 0;
+  for (let offset = 0; offset < original.length; offset += 3) {
+    const dx = positions[offset] - original[offset];
+    const dy = positions[offset + 1] - original[offset + 1];
+    const dz = positions[offset + 2] - original[offset + 2];
+    // 朝球心方向的位移才算凹：外鼓那一圈不参与。
+    const inward = -(
+      dx * original[offset] + dy * original[offset + 1] + dz * original[offset + 2]
+    );
+    if (inward <= deepest) continue;
+    deepest = inward;
+    height = original[offset + 1] / LEGGED_SLIME.radius;
+  }
+  return height;
+}
+
+test('斜着扎下来的一箭，坑偏在迎箭那一侧的上方，不是齐着赤道压一圈', () => {
+  const model = (yDirection: number) => {
+    const harness = createLeggedHarness();
+    const animator = harness.scene.resolveSlimeAnimator(harness.proxyId)!;
+    const geometry = (animator as unknown as { model: { geometry: THREE.BufferGeometry;
+      originalPositions: Float32Array } }).model;
+    harness.step(2);
+    // 从 -Z 那一侧打进来（directionZ 是箭飞的方向，所以指向 +Z）。
+    harness.impact.revision = 1;
+    harness.impact.directionX = 0;
+    harness.impact.directionY = yDirection;
+    harness.impact.directionZ = Math.sqrt(Math.max(0, 1 - yDirection * yDirection));
+    harness.impact.impulse = 1;
+    harness.step(6, 2);
+    return deepestDentHeight(geometry.geometry, geometry.originalPositions);
+  };
+
+  // 平射：坑压在赤道上。
+  const flat = model(0);
+  assert.ok(Math.abs(flat) < 0.25, `平射该压在赤道附近，实际 ${flat.toFixed(3)}`);
+
+  // 拉满那一箭以二十来度扎下来（lastHitY ≈ -0.38）：坑抬到迎箭那一侧的上半边。
+  const plunging = model(-0.38);
+  assert.ok(
+    plunging > flat + 0.15,
+    `扎下来的一箭坑该更高，实际 ${plunging.toFixed(3)} vs 平射 ${flat.toFixed(3)}`,
+  );
+});

@@ -42,6 +42,15 @@ export class ProjectileComponent extends ActorComponent {
     this.ownerActorId = definition.ownerActorId ?? undefined;
     /** 命中那一刻用来结算伤害：哪件武器 + 刚才那份蓄力。 */
     this.weaponItemType = definition.weaponItemType ?? undefined;
+    /**
+     * 出发那一刻的绝对服务端秒数。
+     *
+     * 客户端拿它**自己算这一箭飞到哪儿了**，不靠插值那条位置。34 米每秒的小东西
+     * 是快照插值最坏的情况：20 Hz 下每份快照隔着 1.7 米，缓冲一空就原地冻住、
+     * 下一份到了再跳过去——那就是画面上那阵抖。整条弧是一条写得出来的曲线，
+     * 出发时刻加速度就够两端各自求点，谁都不用猜。
+     */
+    this.startedAt = finite(definition.startedAt);
 
     /** 已经走完弧的百分之多少。 */
     this.travel = 0;
@@ -49,6 +58,8 @@ export class ProjectileComponent extends ActorComponent {
     this.stopped = false;
     /** 停下的那一刻（服务端秒）。`Number.POSITIVE_INFINITY` 表示还在飞。 */
     this.stoppedAt = Number.POSITIVE_INFINITY;
+    /** 权威下发的飞行时长；0 表示这一份是自己算的（服务端那一侧）。 */
+    this.replicatedFlightSeconds = 0;
   }
 
   /** 这条弧水平方向有多长。飞行时长按它和速度算。 */
@@ -56,8 +67,14 @@ export class ProjectileComponent extends ActorComponent {
     return Math.hypot(this.impactX - this.originX, this.impactZ - this.originZ);
   }
 
-  /** 走完整条弧要多久，秒。 */
+  /**
+   * 走完整条弧要多久，秒。
+   *
+   * 收到的那一份优先：速度写在原型上，而原型是两端各读一份配置——万一哪天两边
+   * 的版本不同，画出来的箭会比权威那支快或慢。权威说多久就是多久。
+   */
   get flightSeconds() {
+    if (this.replicatedFlightSeconds > 0) return this.replicatedFlightSeconds;
     return Math.max(this.minimumFlightSeconds, this.horizontalDistance / this.speed);
   }
 
@@ -66,6 +83,46 @@ export class ProjectileComponent extends ActorComponent {
     this.travel = clamp01(travel);
     this.stopped = true;
     this.stoppedAt = Number(nowSeconds) || 0;
+  }
+
+  /**
+   * 复制面：**整条弧加一个出发时刻**，不是每 tick 一个点。
+   *
+   * 这几个数在射出那一刻就定死了（`stopped` / `travel` 除外），所以它们其实是
+   * spawn 时的事实；每份快照都带着是为了让中途进 AOI 的人也能把这一箭接上。
+   * 加起来仍然比逐 tick 复制一个抖动的位置便宜，而且画出来是光滑的。
+   */
+  snapshot() {
+    return {
+      originX: round(this.originX),
+      originY: round(this.originY),
+      originZ: round(this.originZ),
+      impactX: round(this.impactX),
+      impactY: round(this.impactY),
+      impactZ: round(this.impactZ),
+      ratio: Math.round(this.ratio * 1000) / 1000,
+      startedAt: Math.round(this.startedAt * 1000) / 1000,
+      flightSeconds: Math.round(this.flightSeconds * 1000) / 1000,
+      travel: Math.round(this.travel * 10000) / 10000,
+      stopped: this.stopped,
+    };
+  }
+
+  /** 收到的那一份。弧本身不会变，但重复写一遍比判断「变没变」便宜。 */
+  applySnapshot(snapshot) {
+    if (!snapshot) return false;
+    this.originX = finite(snapshot.originX);
+    this.originY = finite(snapshot.originY);
+    this.originZ = finite(snapshot.originZ);
+    this.impactX = finite(snapshot.impactX);
+    this.impactY = finite(snapshot.impactY);
+    this.impactZ = finite(snapshot.impactZ);
+    this.ratio = clamp01(snapshot.ratio);
+    this.startedAt = finite(snapshot.startedAt);
+    this.replicatedFlightSeconds = positive(snapshot.flightSeconds, this.flightSeconds);
+    this.travel = clamp01(snapshot.travel);
+    this.stopped = snapshot.stopped === true;
+    return true;
   }
 }
 
@@ -77,6 +134,10 @@ function finite(value, fallback = 0) {
 function positive(value, fallback) {
   const number = Number(value);
   return Number.isFinite(number) && number > 0 ? number : fallback;
+}
+
+function round(value) {
+  return Math.round(finite(value) * 1000) / 1000;
 }
 
 function clamp01(value) {

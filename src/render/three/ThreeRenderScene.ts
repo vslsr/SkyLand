@@ -220,8 +220,6 @@ export class ThreeRenderScene implements RenderScene {
    * 这一侧要做的只剩「把它摆成它正在去的方向」。
    */
   private readonly projectiles = new Map<ProxyId, ThreeProjectileVisual>();
-  /** 求俯仰时逐帧复用的读出缓冲。 */
-  private readonly projectileWorld: RenderTransform = { x: 0, y: 0, z: 0, yaw: 0 };
   /**
    * 能力实验室的表现（引擎迁移路线图 第 3 步）。
    *
@@ -532,6 +530,9 @@ export class ThreeRenderScene implements RenderScene {
     // 悬停盒跟着目标走。放在最前是因为它读的是上一帧摆好的世界矩阵，
     // 和玩法侧原来在 sim-colliders 里调 hoverHelper.update() 的时机等价。
     this.hoverHelper?.update();
+    // 那条白线画多长自己追一下：起手那 8.4 米不是一帧蹦出来的，见
+    // `ThreeBallisticPreviewVisual.advance`。
+    this.ballisticPreview?.advance(deltaSeconds);
     // 合批内容排在最前：它读的是玩法侧刚写完的那段实例记录，和 transform 翻面
     // 是同一个 tick 的。挂载按需——没有合批内容的地图不会多出两层空节点。
     if (this.propInstances && this.fruitInstances) {
@@ -587,10 +588,8 @@ export class ThreeRenderScene implements RenderScene {
     for (const guide of this.guidePaths.values()) guide.update(deltaSeconds);
     // 飘字和别的表现一样按渲染帧走：玩法侧只在血量变的那一帧发一条命令。
     this.healthPopups?.update(deltaSeconds);
-    // 箭的俯仰跟着它这一帧真的走了多少：位置是权威复制过来的，切线在这一侧求。
-    for (const projectile of this.projectiles.values()) {
-      projectile.update(transforms, this.projectileWorld);
-    }
+    // 箭的俯仰：玩法侧从整条弧上解析求出来的切线，这一侧只负责把它摆上去。
+    for (const projectile of this.projectiles.values()) projectile.update(transforms);
     // 权威 yaw 取的是 submitTransforms 刚摆好的 root 角度：外壳要抵消的正是
     // 「root 这一级实际被转了多少」，父子情况下那已经是相对 yaw。
     for (const [id, slime] of this.slimeVisuals) {

@@ -197,5 +197,16 @@ export const PARAM_SLIME_IMPACT_DIRECTION_Z = 54;
 /** 这一下有多重 [0, 1]。0 表示没有冲击。 */
 export const PARAM_SLIME_IMPACT_IMPULSE = 55;
 
+/**
+ * 飞在空中那支箭的俯仰（弧度）。
+ *
+ * 玩法侧算而不是渲染侧差分：这一侧手上有整条弧（`ClientProjectileSystem`），切线
+ * 是解析求得的。拿两帧位移去差分的那一版有两个毛病——落后一帧，而且**停住之后
+ * 会跟着载体乱转**：插在走动的史莱姆身上时，箭会随着它走路慢慢摆平。
+ *
+ * 0 是水平。抬头是**负**角：模型沿 +Z 躺着，绕 X 的正旋转把 +Z 压向下方。
+ */
+export const PARAM_PROJECTILE_PITCH = 56;
+
 /** 每个 proxy 槽位的参数个数。新增参数就在上面加常量并把这里加一。 */
-export const RENDER_VISUAL_PARAM_COUNT = 56;
+export const RENDER_VISUAL_PARAM_COUNT = 57;
