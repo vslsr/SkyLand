@@ -6,6 +6,7 @@ import {
   ACTOR_CREATURE_TAG,
   ACTOR_PLAYER_TAG,
   HEALTH_COMPONENT,
+  PICKUP_DROP_COMPONENT,
   INVENTORY_COMPONENT,
   PATROL_PATH_COMPONENT,
   PROJECTILE_COMPONENT,
@@ -341,4 +342,49 @@ test('没有方向的伤害照常结算，只是没有那一下凹陷', async ()
   assert.equal(health.current, 90);
   assert.equal(health.lastHitImpulse, 0);
   assert.equal(health.snapshot().lastHitX, undefined);
+});
+
+test('一箭把叼着东西的人射死，不会在 tick 里炸掉房间', async () => {
+  // 这一条守的是时机，不是伤害。伤害现在落在**箭真的到了**那一刻，也就是弹药
+  // System 的 tick 中途；那时 `ActorWorld` 正在迭代，`addActor` 会排队。死亡的
+  // 连带后果里要重挂手持表现体（「先建出来、再挂上去」两步），中间夹一次排队
+  // 的话第二步就找不到第一步建的那个 Actor，房间进程直接抛「不存在 Actor」倒下。
+  const context = await createScene();
+  const { scene } = context;
+  equipBow(scene);
+
+  scene.addPlayer({ id: 'victim', name: '靶子', slot: 1 });
+  const victim = scene.players.get('victim');
+  // 靶子手上也拿着一件东西：死亡那一下要对齐的就是它。
+  scene.applyInventoryCommand('victim', {
+    sequence: 1,
+    command: { kind: 'assign', slotIndex: 0, itemType: 'wood-bow' },
+  });
+  scene.applyInventoryCommand('victim', {
+    sequence: 2,
+    command: { kind: 'select', slotIndex: 0 },
+  });
+  scene.update();
+  const held = victim.requireComponent(PICKUP_DROP_COMPONENT);
+  const heldBefore = held.heldActorId;
+  assert.ok(heldBefore, '靶子手上确实叼着一件东西');
+
+  // 一箭就得打死，死亡才会落在飞行结算那一刻。
+  // 权威血量在 GAS 上，`health.current` 只是复制面的镜像——直接写它不算数，
+  // 得走同一个入口把人先打到只剩一口气。
+  const health = victim.requireComponent(HEALTH_COMPONENT);
+  scene.applyHealthChange('victim', -(health.maximum - 1));
+  assert.equal(health.current, 1, '靶子只剩一口气');
+  victim.setPosition(0, 20);
+  scene.update();
+  fire(context, 1.2, victim);
+  assert.equal(flyOut(context), 0, '箭飞完了');
+
+  assert.equal(health.dead, true, '这一箭把人射死了');
+  // 走到这里就说明没抛：那次对齐排到了本轮 System 之后，而不是在迭代中途
+  // 「建一个排队的 Actor、下一行就去挂它」。
+  assert.notEqual(held.heldActorId, heldBefore, '死亡的连带对齐真的做了');
+  const rebuilt = scene.actorWorld.getActor(held.heldActorId);
+  assert.ok(rebuilt, '重挂的那件手持表现体确实在世界里');
+  assert.equal(rebuilt.parent?.id, 'victim', '而且挂在了它的主人身上');
 });
