@@ -72,6 +72,7 @@ import { ThreeSlimeLegVisual } from './ThreeSlimeLegVisual';
 import { ThreeAttachmentVisual } from './ThreeAttachmentVisual';
 import { ThreeBuildPreviewVisual } from './ThreeBuildPreviewVisual';
 import { ThreeContainerLidVisual } from './ThreeContainerLidVisual';
+import { ThreeWoodBowVisual } from './ThreeWoodBowVisual';
 import { ThreeDropRollVisual } from './ThreeDropRollVisual';
 import { ThreeElasticTetherVisual } from './ThreeElasticTetherVisual';
 import { ThreeMeshProxy } from './ThreeMeshProxy';
@@ -190,6 +191,8 @@ export class ThreeRenderScene implements RenderScene {
   private readonly elasticTethers = new Map<ProxyId, ThreeElasticTetherVisual>();
   private readonly dropRolls = new Map<ProxyId, ThreeDropRollVisual>();
   private readonly containerLids = new Map<ProxyId, ThreeContainerLidVisual>();
+  /** proxyId → 拉弓的形变。只有手上那把木弓有：地上那把不会被拉开。 */
+  private readonly woodBows = new Map<ProxyId, ThreeWoodBowVisual>();
   private readonly attachmentVisual = new ThreeAttachmentVisual();
   /** 建造幽灵。不是 proxy：没有槽位，只是一个跟着指针走的半透明模型。 */
   private readonly buildPreview = new ThreeBuildPreviewVisual();
@@ -330,6 +333,9 @@ export class ThreeRenderScene implements RenderScene {
     if (model.containerLidRig) {
       this.containerLids.set(proxy.id, new ThreeContainerLidVisual(proxy.id, model.containerLidRig));
     }
+    if (model.woodBowRig) {
+      this.woodBows.set(proxy.id, new ThreeWoodBowVisual(proxy.id, model.woodBowRig));
+    }
   }
 
   /**
@@ -436,6 +442,7 @@ export class ThreeRenderScene implements RenderScene {
     this.elasticTethers.delete(id);
     this.dropRolls.delete(id);
     this.containerLids.delete(id);
+    this.woodBows.delete(id);
     this.attachmentVisual.forget(id);
     proxy.dispose();
   }
@@ -552,6 +559,7 @@ export class ThreeRenderScene implements RenderScene {
     }
     for (const drop of this.dropRolls.values()) drop.update(transforms);
     for (const lid of this.containerLids.values()) lid.update(transforms, deltaSeconds);
+    for (const bow of this.woodBows.values()) bow.update(transforms, deltaSeconds);
     this.fireVisual.update(live, transforms, deltaSeconds, elapsedSeconds);
     // 光紧跟着火焰：两者读的是同一帧的字节，用的是同一条平滑时间常数，
     // 所以火苗矮下去的同时地面上的光晕也跟着收。
@@ -891,6 +899,7 @@ export class ThreeRenderScene implements RenderScene {
     this.elasticTethers.clear();
     this.dropRolls.clear();
     this.containerLids.clear();
+    this.woodBows.clear();
     for (const proxy of this.proxies) proxy?.dispose();
     this.proxies.length = 0;
   }

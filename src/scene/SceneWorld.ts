@@ -333,6 +333,16 @@ export class SceneWorld implements GrassInteractionTarget {
     this.actorSnapshotTarget?.setChewingItem?.(actorId, ratio);
   }
 
+  /** 拉弓那一段：手上那把弓弯下去、弦拉成 V 形，见 `RenderBowDraw`。 */
+  public setBowDraw(actorId: string | undefined, charge: number): void {
+    this.actorSnapshotTarget?.setBowDraw?.(actorId, charge);
+  }
+
+  /** 撒手那一下：弦回弹抖两下。一次性事件。 */
+  public releaseHeldBow(actorId: string): void {
+    this.actorSnapshotTarget?.releaseHeldBow?.(actorId);
+  }
+
   public setInteractionMarkerActorId(
     actorId?: string,
     inputLabel?: string,

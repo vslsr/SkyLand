@@ -13,6 +13,8 @@ import {
   writeSlimeGroundProbeParams,
 } from '../../render/RenderSlimeLegs';
 import {
+  PARAM_BOW_CHARGE,
+  PARAM_BOW_RELEASE_REVISION,
   PARAM_BUOYANCY_DRAFT,
   PARAM_BUOYANCY_STATIC_PITCH,
   PARAM_BUOYANCY_STATIC_ROLL,
@@ -81,8 +83,22 @@ import {
  *
  * 必须排在 `RenderTransformSyncSystem` 之前——参数要和 transform 同一次翻面。
  */
+/**
+ * 手上那把弓这一帧拉了几成、撒过几次手。
+ *
+ * 「谁在拉弓」是玩法事实（本地那次按住），所以由外面给出——和「谁正被吃」
+ * （`ActorInstanceCatalog.chewRatioOf`）是同一个形状。**只有本地玩家有**：别人
+ * 那把弓要过网才知道拉到哪儿，现在还没有那条事件。
+ */
+export interface BowDrawSource {
+  bowDrawOf(actorId: string): { charge: number; releaseRevision: number } | undefined;
+}
+
 export class ActorVisualParamSystem {
-  public constructor(private readonly transforms: RenderTransformBuffer) {}
+  public constructor(
+    private readonly transforms: RenderTransformBuffer,
+    private readonly bows?: BowDrawSource,
+  ) {}
 
   public update(world: ActorWorld, _deltaSeconds: number, _elapsedSeconds: number): void {
     for (const actor of world.query(RENDER_PROXY_COMPONENT) as Actor[]) {
@@ -129,6 +145,15 @@ export class ActorVisualParamSystem {
       // 摆动。运动参数由玩家实体自己写（它们不是 Replica，不经过这个 System），
       // 所以这里写的是静止值，而不是「跳过不写」：槽位会被复用，上一个玩家
       // 留下的速度会让新 proxy 一出生就在滑行。
+      // 拉弓：没在拉的写 0，和别的参数一样每帧写满——槽位会被复用，留着上一把弓
+      // 的拉弓量会让新 proxy 一出生就是拉满的。
+      const bow = this.bows?.bowDrawOf(actor.id);
+      this.transforms.writeParam(proxy.proxyId, PARAM_BOW_CHARGE, bow?.charge ?? 0);
+      this.transforms.writeParam(
+        proxy.proxyId,
+        PARAM_BOW_RELEASE_REVISION,
+        bow?.releaseRevision ?? 0,
+      );
       writeSlimeMotionParams(this.transforms, proxy.proxyId, SLIME_MOTION_AT_REST);
       this.writeGroundProbe(actor, proxy);
       this.writeBuoyancy(actor, proxy);

@@ -167,4 +167,15 @@ export const PARAM_POINT_LIGHT_INTENSITY = 47;
 export const PARAM_HEALTH_DEATH_REVISION = 48;
 
 /** 每个 proxy 槽位的参数个数。新增参数就在上面加常量并把这里加一。 */
-export const RENDER_VISUAL_PARAM_COUNT = 49;
+/**
+ * 手上那把弓拉了几成（[0, 1]），以及撒手那一下的自增计数。
+ *
+ * 蓄力是**比例**驱动：和物品栏那圈倒计时读同一个 ratio，所以圈画到哪、弓就拉到哪。
+ * 撒手是**一次性**，靠计数变化触发（和 `PARAM_ELASTIC_RELEASE_REVISION`、
+ * `PARAM_HEALTH_DEATH_REVISION` 是同一套）——一个 bool 有可能在同一帧里立起来
+ * 又倒下去，那一下就丢了。
+ */
+export const PARAM_BOW_CHARGE = 49;
+export const PARAM_BOW_RELEASE_REVISION = 50;
+
+export const RENDER_VISUAL_PARAM_COUNT = 51;

@@ -413,13 +413,20 @@ export class GrasslandScene extends Scene {
         const chewing = progress?.action === 'eat' ? progress.ratio : undefined;
         this.player?.setChewing(chewing);
         this.world.setChewingItem(chewing === undefined ? undefined : this.heldActorId(), chewing ?? 0);
+        // 拉弓读的也是这同一个比例：物品栏那圈画到哪，弓就拉到哪。
+        const drawing = progress?.action === 'shoot' ? progress.ratio : undefined;
+        this.world.setBowDraw(drawing === undefined ? undefined : this.heldActorId(), drawing ?? 0);
       },
       // 松手那一下才射箭。收圈的路子不止这一条（换手、盖界面、进建造模式都收），
       // 那几下不该有箭飞出去，所以这一条和 setProgress 分开走。
       // 冷却圈和长按那圈是同一个环，反着走。
       setCooldown: (cooldown) => this.hotbarBar.setCooldown(cooldown),
       onUseRelease: (action, ratio) => {
-        if (action === 'shoot') this.weaponAim.fire(ratio);
+        if (action !== 'shoot') return;
+        this.weaponAim.fire(ratio);
+        // 撒手那一下：弦回弹。箭飞出去和弦抖回来是同一刻的两件事。
+        const heldActorId = this.heldActorId();
+        if (heldActorId) this.world.releaseHeldBow(heldActorId);
       },
     });
     this.weaponAim = new WeaponAimController({
