@@ -10,6 +10,28 @@ import type { InventoryCommand } from '../src/network/messages.ts';
 import type { BallisticPreviewState } from '../src/render/RenderScene.ts';
 import { ThreeRenderScene } from '../src/render/three/ThreeRenderScene.ts';
 import { ItemUseInputTags } from '../src/input/config/playerInput.ts';
+import { ballisticArcApex, ballisticArcPoint } from '../src/render/ballisticArc.ts';
+import { createWoodBowModel } from '../src/models/actors/createWoodBowModel.ts';
+import { ThreeWoodBowVisual } from '../src/render/three/ThreeWoodBowVisual.ts';
+import {
+  BOW_LIMB_BEND_RADIANS,
+  BOW_RELEASE_SECONDS,
+  BOW_STRING_PULL,
+  bowReleaseLimbBend,
+  bowReleaseStringPull,
+} from '../src/render/RenderBowDraw.ts';
+import {
+  PARAM_BOW_CHARGE,
+  PARAM_BOW_RELEASE_REVISION,
+} from '../src/render/RenderVisualParams.ts';
+
+/** 只够 `ThreeWoodBowVisual` 读两个参数的替身。 */
+class StubTransforms {
+  private readonly params = new Map<number, number>();
+  public set(param: number, value: number): void { this.params.set(param, value); }
+  public readParam(_id: number, param: number): number { return this.params.get(param) ?? 0; }
+}
+import { ThreeArrowShotVisual } from '../src/render/three/ThreeArrowShotVisual.ts';
 import {
   createWoodBowLimbGeometry,
   woodBowStringOffset,
@@ -21,14 +43,29 @@ interface AimHarness {
   controller: WeaponAimController;
   facing: Array<{ x: number; z: number } | undefined>;
   previews: Array<BallisticPreviewState | undefined>;
+  arrows: BallisticPreviewState[];
   setHeld(itemType: string | undefined): void;
   setPointer(ray: { origin: [number, number, number]; direction: [number, number, number] } | undefined): void;
+  /** 假装玩家把瞄准摇杆推到了这个方向（屏幕空间，y 向上为正）。 */
+  pushAim(x: number, y: number): void;
   player: { x: number; y: number; z: number; yaw: number };
 }
 
 function aimHarness(): AimHarness {
+  /** 只够 `WeaponAimController` 订阅一条输入的替身。 */
+  const listeners: Array<(event: { phase: string; value: unknown }) => void> = [];
+  const input = {
+    bind: (_tag: unknown, handler: (event: { phase: string; value: unknown }) => void) => {
+      listeners.push(handler);
+      return () => {};
+    },
+  } as never;
+  const pushAim = (x: number, y: number): void => {
+    for (const listener of listeners) listener({ phase: 'triggered', value: { x, y } });
+  };
   const facing: AimHarness['facing'] = [];
   const previews: AimHarness['previews'] = [];
+  const arrows: AimHarness['arrows'] = [];
   const player = { x: 0, y: 1, z: 0, yaw: 0 };
   let held: string | undefined = 'wood-bow';
   let ray: Parameters<AimHarness['setPointer']>[0] = {
@@ -46,12 +83,16 @@ function aimHarness(): AimHarness {
     sampleGroundHeight: () => 0,
     setFacingTarget: (target) => facing.push(target),
     setPreview: (state) => previews.push(state),
-  });
+    spawnArrow: (state) => arrows.push(state),
+    cameraAxes: () => ({ forwardX: 0, forwardZ: 1, rightX: 1, rightZ: 0 }),
+  }, input);
   return {
     controller,
     facing,
     previews,
+    arrows,
     player,
+    pushAim,
     setHeld: (itemType) => { held = itemType; },
     setPointer: (next) => { ray = next; },
   };
@@ -266,4 +307,155 @@ test('弓面垂直于射向：立在 YZ 上，弓臂鼓向 +Z、弦落在射手�
   // 鼓向目标、弦贴着射手：射手拉的是弦，弓背朝前。
   assert.ok(box.max.z > definition.length * 0.4, '弓臂鼓向 +Z');
   assert.ok(woodBowStringOffset(definition) < 0, '弦落在 -Z，也就是射手这一边');
+});
+
+test('松手射出一支箭：它走的是刚才那条预览线的同一条弧', () => {
+  const harness = aimHarness();
+  harness.controller.setChargeRatio(1);
+  harness.controller.update();
+  const preview = harness.previews.at(-1)!;
+
+  harness.controller.fire(1);
+  assert.equal(harness.arrows.length, 1);
+  // 弹道在松手那一刻就算完了，用的是同一份 `weaponStrike` 换算，所以它和玩家
+  // 刚才看着的那条线是同一条——差一点点都会变成「明明瞄准了」。
+  assert.deepEqual(harness.arrows[0], preview);
+});
+
+test('空放不射箭：那一箭本来就没出去', () => {
+  const harness = aimHarness();
+  // 远低于 0.15 的空放阈值。
+  harness.controller.fire(0.05);
+  assert.deepEqual(harness.arrows, []);
+});
+
+test('收圈不等于松手：换手、进建造模式都不该有箭飞出去', () => {
+  const harness = aimHarness();
+  harness.controller.setChargeRatio(0.8);
+  harness.controller.update();
+  harness.controller.reset();
+  assert.equal(harness.previews.at(-1), undefined, '线收起来了');
+  assert.deepEqual(harness.arrows, [], '但没有箭');
+});
+
+test('弧是一条：预览线上的点和箭在同一 t 处重合，两端就是出手点与落点', () => {
+  const arc = {
+    originX: 0, originY: 1.6, originZ: 0,
+    impactX: 0, impactY: 0, impactZ: 20,
+    ratio: 0.5,
+  };
+  const point = { x: 0, y: 0, z: 0 };
+  ballisticArcPoint(arc, 0, point);
+  assert.deepEqual({ ...point }, { x: 0, y: 1.6, z: 0 }, 't=0 是出手点');
+  ballisticArcPoint(arc, 1, point);
+  assert.deepEqual({ ...point }, { x: 0, y: 0, z: 20 }, 't=1 正好落在落点上');
+  // 中间抬起来：抬多高由蓄力比例收，但一定在两端连线之上。
+  ballisticArcPoint(arc, 0.5, point);
+  assert.ok(point.y > 1.6, '弧顶在出手点之上');
+  assert.ok(Math.abs(point.z - 10) < 1e-9, '水平方向匀速推进');
+  // 拉得越满弧越平：同一段距离，满蓄力的弧顶低于半蓄力。
+  const flat = { ...arc, ratio: 1 };
+  const flatApex = ballisticArcApex(flat);
+  assert.ok(flatApex < ballisticArcApex(arc), '拉满时弧最平');
+  assert.ok(flatApex > 0, '再平也还是一条弧');
+});
+
+test('箭沿弧飞完就停在落点上，池子不会随射击次数长', () => {
+  const visual = new ThreeArrowShotVisual({ fogColor: '#ffffff', fogNear: 10, fogFar: 100 });
+  const arc = {
+    originX: 0, originY: 1.6, originZ: 0,
+    impactX: 0, impactY: 0, impactZ: 20,
+    ratio: 1,
+  };
+  visual.spawn(arc);
+  const arrow = visual.root.children[0]!;
+  assert.ok(arrow.visible);
+  assert.ok(Math.abs(arrow.position.z) < 1e-6, '刚射出去时还在出手点');
+
+  // 20 米、34 米每秒 ≈ 0.59 秒。飞到一半时，人在半路上、且已经离开地面高度。
+  for (let frame = 0; frame < 18; frame += 1) visual.update(1 / 60);
+  assert.ok(arrow.position.z > 5 && arrow.position.z < 15, '半路上');
+  assert.ok(arrow.position.y > 0, '还在空中');
+
+  // 飞完之后停在落点上插着，不会越过去。
+  for (let frame = 0; frame < 30; frame += 1) visual.update(1 / 60);
+  assert.ok(Math.abs(arrow.position.z - 20) < 1e-6, '停在落点上');
+  assert.ok(Math.abs(arrow.position.y) < 1e-6);
+
+  // 再射一支：这一支飞完早就收走了，所以复用同一个对象，而不是又建一个。
+  for (let frame = 0; frame < 60; frame += 1) visual.update(1 / 60);
+  assert.equal(arrow.visible, false, '留够那一会儿就收走');
+  visual.spawn(arc);
+  assert.equal(visual.root.children.length, 1, '池子复用，不随射击次数长');
+});
+
+test('摇杆推着的时候它说了算：朝向跟着推杆方向，不再听指针', () => {
+  const harness = aimHarness();
+  // 指针指着身后（+Z 的反向），摇杆推向右（屏幕 +x → 世界 +x）。
+  harness.setPointer({ origin: [0, 9, 8], direction: [0, -1, -1] });
+  harness.pushAim(1, 0);
+  harness.controller.update();
+
+  const target = harness.facing.at(-1)!;
+  assert.ok(target.x > harness.player.x, '朝向对准了摇杆推的那一侧');
+  assert.ok(Math.abs(target.z - harness.player.z) < 1e-9, '推正右时不该带上前后分量');
+});
+
+test('松开摇杆之后朝向交回指针，不定在最后一次推的方向上', () => {
+  const harness = aimHarness();
+  // 先记下纯指针时对准的是哪儿。
+  harness.controller.update();
+  const pointerOnly = harness.facing.at(-1)!;
+
+  harness.pushAim(1, 0);
+  harness.controller.update();
+  assert.notDeepEqual(harness.facing.at(-1), pointerOnly, '推着杆时听杆的');
+
+  harness.pushAim(0, 0);
+  harness.controller.update();
+  assert.deepEqual(harness.facing.at(-1), pointerOnly, '松开就交回指针，不定在推杆那一侧');
+});
+
+test('拉弓：弓梢向后转、弦中点后移成 V 形，两者都跟着同一个比例', () => {
+  const definition = { model: 'line-art-wood-bow', length: 1, thickness: 0.03 } as never;
+  const model = createWoodBowModel({ fogColor: '#fff', fogNear: 10, fogFar: 100 }, definition);
+  const rig = model.woodBowRig!;
+  const visual = new ThreeWoodBowVisual(0 as never, rig);
+  const transforms = new StubTransforms();
+
+  transforms.set(PARAM_BOW_CHARGE, 0);
+  visual.update(transforms as never, 1 / 60);
+  assert.ok(Math.abs(rig.upperLimb.rotation.x) < 1e-9, '没拉的时候弓是直的');
+  const rest = rig.string.geometry.getAttribute('position').getZ(1);
+  // 顶点是 float32，所以比的是「同一处」而不是同一个双精度数。
+  assert.ok(Math.abs(rest - rig.stringOffsetZ) < 1e-6, '弦中点贴在两梢那条线上');
+
+  transforms.set(PARAM_BOW_CHARGE, 1);
+  visual.update(transforms as never, 1 / 60);
+  // 16°，上下反号：两条弓臂在原点两侧，同样是「向后」。
+  assert.ok(Math.abs(rig.upperLimb.rotation.x + BOW_LIMB_BEND_RADIANS) < 1e-9);
+  assert.ok(Math.abs(rig.lowerLimb.rotation.x - BOW_LIMB_BEND_RADIANS) < 1e-9);
+  const pulled = rig.string.geometry.getAttribute('position');
+  assert.ok(
+    Math.abs(pulled.getZ(1) - (rig.stringOffsetZ - BOW_STRING_PULL)) < 1e-6,
+    '弦中点后移 0.18 米',
+  );
+  assert.ok(pulled.getZ(1) < pulled.getZ(0), '中点比两梢更靠后——这就是那个 V');
+});
+
+test('撒手：弦从当时的后移量回弹过冲，弓梢比弦先回正', () => {
+  // 曲线本身是纯函数，所以直接问它，不必摆一把弓出来。
+  assert.ok(Math.abs(bowReleaseStringPull(BOW_STRING_PULL, 0) - BOW_STRING_PULL) < 1e-9,
+    '撒手那一刻正接在拉满的位置上，不跳');
+  // 中途越过 0 往前过冲：这就是「弹回去」那一下。
+  const samples = [];
+  for (let step = 1; step <= 12; step += 1) {
+    samples.push(bowReleaseStringPull(BOW_STRING_PULL, (step / 12) * BOW_RELEASE_SECONDS));
+  }
+  assert.ok(samples.some((value) => value < 0), '过冲到弦的前面去了');
+  assert.ok(Math.abs(samples.at(-1)!) < 0.005, '这一下结束时基本收住了');
+
+  // 弓梢在前 1/3 就回正：木头比弦硬，一起抖会让整把弓看上去是软的。
+  assert.ok(bowReleaseLimbBend(1, BOW_RELEASE_SECONDS * 0.2) > 0);
+  assert.equal(bowReleaseLimbBend(1, BOW_RELEASE_SECONDS * 0.34), 0);
 });

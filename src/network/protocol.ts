@@ -107,6 +107,16 @@ export interface SnapshotPlayer {
   };
   /** 生命值与死亡状态。血量是公开信息：别人头上的飘字大家都该看见。 */
   health?: SnapshotHealth;
+  /**
+   * 正在蓄的那一次（`charge` 模式）。带的是起止而不是算好的比例：两端跑同一个
+   * `holdRatio`，接收方用自己的时钟推进，掉几帧也不会让弓卡在半路上。
+   */
+  charge?: { startedAt: number; holdSeconds: number };
+  /**
+   * 最近射出去的那一发。**留着不撤**，接收方按 `revision` 变化去重——只在开火
+   * 那一帧下发的话，那一帧丢了这支箭就永远不会出现。
+   */
+  weaponShot?: SnapshotWeaponShot;
   /** PickupDrop Component 的运行态；口部挂点来自玩家 Actor 原型。 */
   heldActorId?: string | null;
   pickupDropRevision?: number;
@@ -116,6 +126,25 @@ export interface SnapshotPlayer {
   bitingPlayerId?: string;
   /** 正被外力拴着；客户端预测必须用同一份，否则会持续橡皮筋。 */
   leash?: SnapshotLeash;
+}
+
+/**
+ * 一发已经打出去的箭。
+ *
+ * 带落点而不是「往哪个方向射多远」：落点是判定用的那一个，所有人因此画的是同一条
+ * 弧。方向加距离要接收方再算一次，而那一次算错了没人会发现。
+ */
+export interface SnapshotWeaponShot {
+  /** 自增计数。一次性事件靠它的变化触发，不靠一个 bool。 */
+  revision: number;
+  /** 出手时射手站在哪儿（脚下）。 */
+  x: number;
+  y: number;
+  z: number;
+  impactX: number;
+  impactZ: number;
+  /** 松手那一刻的蓄力比例。弧的形状按它取。 */
+  ratio: number;
 }
 
 export type ActorFloatState = 'afloat' | 'overloaded' | 'flooding' | 'sinking';

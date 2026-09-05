@@ -80,6 +80,22 @@ export interface HotbarPort {
   send(command: InventoryCommand): void;
   /** 每帧把进度交给界面；undefined 表示收掉那圈。 */
   setProgress(progress: HeldItemProgress | undefined): void;
+  /**
+   * 每帧把冷却交给界面；undefined 表示没有哪件东西在冷却里。
+   *
+   * 冷却时长写在物品目录上，起点是**这一侧看到的那次激活**（松手 / 圈满），跑的
+   * 是和服务端同一份数据、同一个公式——和长按那圈「两端跑同一个 holdRatio」是
+   * 同一条规矩，所以圈退空那一刻就是那边冷却好的那一刻。
+   */
+  setCooldown?(cooldown: { itemType: string; remainingRatio: number } | undefined): void;
+  /**
+   * 松手那一下（只有蓄力这一类有）。
+   *
+   * 和 `setProgress(undefined)` 分开，是因为**取消也会收圈**：换手上那件东西、
+   * 界面盖上来、进建造模式，圈都会没，但那几下不该射出一支箭。这一条只在
+   * 「按住的这一次以松手告终」时发一次，带上松手那一刻的比例。
+   */
+  onUseRelease?(action: ItemUseAction, ratio: number): void;
 }
 
 /** 物品目录里那几个使用动词。`shoot` 由武器系统兑现，圈和提示仍归这里画。 */
@@ -171,8 +187,16 @@ export class HotbarController {
       : { itemType, onHotbar: options.onHotbar === true };
   }
 
+  /**
+   * 正在冷却的那一件。冷却记在**物品种类**上，和服务端那边按物品分组的冷却
+   * （`itemCooldownGroup`）是同一个粒度：冷却途中把弓拖到另一格并不会让它立刻
+   * 又能射，所以这里也不记格号。
+   */
+  private cooling?: { itemType: string; startedAt: number; durationSeconds: number };
+
   /** 每帧调用：推进倒计时，并在这次按住指向的东西变了时作废它。 */
   public update(): void {
+    this.updateCooldown();
     // 一次使用认的是**用的哪件东西**，不是嘴上那个 Actor：点「使用」之后手持
     // 表现体会换一个新 id（服务端换手时重新生成），按 id 判断会把刚开始的这次
     // 按住当成「换手了」立刻取消掉。
@@ -189,6 +213,7 @@ export class HotbarController {
     if (ratio >= 1 && this.pending.mode !== 'charge') {
       // 圈满即激活：服务端在同一刻自己动手，客户端不再发任何东西，也不再画圈。
       this.pending.completed = true;
+      this.beginCooldown(this.pending.itemType);
       this.port.setProgress(undefined);
       this.armed = undefined;
       return;
@@ -207,6 +232,40 @@ export class HotbarController {
   public reset(): void {
     this.cancelPending();
     this.armed = undefined;
+  }
+
+  /**
+   * 推进冷却圈。
+   *
+   * 冷却**不随取消而清掉**：界面盖上来、进建造模式都会 reset 这个控制器，但那边
+   * 的冷却仍在走——清掉只会让圈骗人。
+   */
+  private updateCooldown(): void {
+    const cooling = this.cooling;
+    if (!cooling) {
+      this.port.setCooldown?.(undefined);
+      return;
+    }
+    const elapsed = (this.now() - cooling.startedAt) / 1000;
+    const remainingRatio = 1 - holdRatio(elapsed, cooling.durationSeconds);
+    if (remainingRatio <= 0) {
+      this.cooling = undefined;
+      this.port.setCooldown?.(undefined);
+      return;
+    }
+    this.port.setCooldown?.({ itemType: cooling.itemType, remainingRatio });
+  }
+
+  /**
+   * 记下一次激活，冷却从这一刻开始走。
+   *
+   * 冷却记在「按下去用了一次」上，不记在「做没做成」上——空放的那一箭同样要等
+   * （见 `WeaponRuntime`），所以这里不问执行器成没成。
+   */
+  private beginCooldown(itemType: string): void {
+    const seconds = resolveHeldItemAction(itemType)?.cooldownSeconds ?? 0;
+    if (!(seconds > 0)) return;
+    this.cooling = { itemType, startedAt: this.now(), durationSeconds: seconds };
   }
 
   public dispose(): void {
@@ -283,13 +342,17 @@ export class HotbarController {
       return;
     }
     if (!this.pending) return;
-    const completed = this.pending.completed;
+    const { completed, action, startedAt, durationSeconds, itemType } = this.pending;
     this.pending = undefined;
     this.port.setProgress(undefined);
     // 倒计时已经走完的那一次，服务端在圈满那一刻就结算了，松手不再有含义。
     if (completed) return;
     this.armed = undefined;
     this.port.send({ kind: 'use:release' });
+    this.beginCooldown(itemType);
+    // 表现跟着这一下走。比例和圈读的是同一份计时，所以飞出去的那一箭落在
+    // 刚才那条线的末端上；服务端算的是它自己那一份，两边用的是同一个公式。
+    this.port.onUseRelease?.(action, holdRatio((this.now() - startedAt) / 1000, durationSeconds));
   }
 
   /**

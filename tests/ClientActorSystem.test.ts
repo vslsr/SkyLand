@@ -292,6 +292,22 @@ const woodPileArchetype: SceneDefinition['actorArchetypes'][number] = {
   },
 };
 
+const woodBowArchetype: SceneDefinition['actorArchetypes'][number] = {
+  schemaVersion: 1,
+  id: 'wood-bow-pile',
+  components: {
+    itemStack: {
+      itemType: 'wood-bow', displayName: '木弓', defaultQuantity: 1,
+      maximumQuantity: 1, compatibilityKey: 'wood-bow-standard',
+    },
+    replicationPolicy: { mode: 'aoi', radiusChunks: 2 },
+    render: {
+      model: 'line-art-wood-bow', length: 0.92, thickness: 0.035,
+      woodColor: '#9a6b3f', stringColor: '#e8dcc0', inkColor: '#2f2419',
+    },
+  },
+};
+
 const guidePathArchetype: SceneDefinition['actorArchetypes'][number] = {
   schemaVersion: 1,
   id: 'guide-path',
@@ -390,6 +406,7 @@ const definition = {
     stonePileArchetype,
     generatedRockArchetype,
     pbfSlimeArchetype,
+    woodBowArchetype,
     guidePathArchetype,
   ],
   renderer: {
@@ -2630,3 +2647,42 @@ test('流式树按 Chunk 构造无网格 Actor，偏离态可在无 Transform �
   system.dispose();
 });
 
+
+test('拿在手上会形变的那把弓不进合批：它有自己的 proxy，两边不会都画', () => {
+  // 合批把一件东西烘成一段共享几何，一把能拉开的弓在里面没有地方放它的两条弓臂。
+  // 所以手持的木弓走的是 proxy 那条路——而既然它有了 proxy，就必须离开合批，
+  // 否则同一把弓会被画两次，一把拉着、一把直着。
+  const system = createTestActorSystem({
+    definition,
+    environment: { fogColor: '#ffffff', fogNear: 20, fogFar: 60 },
+    now: () => 1_000,
+    spawnBudgetMilliseconds: Number.POSITIVE_INFINITY,
+  });
+  const heldBow: SnapshotActor = {
+    id: 'held-player-a-bow',
+    archetypeId: 'wood-bow-pile',
+    parentActorId: 'player-a',
+    revision: 1,
+    transform: { x: 0, y: 0.3, z: -3, yaw: 0 },
+    itemStack: {
+      itemType: 'wood-bow', displayName: '木弓', quantity: 1, maximumQuantity: 1, revision: 1,
+    },
+  };
+  const heldWood: SnapshotActor = {
+    id: 'held-player-a-wood',
+    archetypeId: 'wood-pile',
+    parentActorId: 'player-a',
+    revision: 1,
+    transform: { x: 1, y: 0.3, z: -3, yaw: 0 },
+    itemStack: { itemType: 'wood', displayName: '木头', quantity: 1, maximumQuantity: 999, revision: 1 },
+  };
+  system.syncSnapshots([heldBow, heldWood], 1_000, 1_000);
+  stepActorFrame(system, 0, 0);
+
+  const bow = system.getActor(heldBow.id)!;
+  const wood = system.getActor(heldWood.id)!;
+  assert.ok(bow.getComponent(RENDER_PROXY_COMPONENT), '弓有自己的 proxy');
+  // 手上那根木头不形变，照旧走合批——这条路没有被顺手改宽。
+  assert.equal(wood.getComponent(RENDER_PROXY_COMPONENT), undefined, '木头仍然只是合批里的一个实例');
+  system.dispose();
+});

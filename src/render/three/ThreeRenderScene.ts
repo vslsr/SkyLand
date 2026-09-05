@@ -66,6 +66,7 @@ import {
 import { ThreeFireVisual } from './ThreeFireVisual';
 import { ThreePointLightVisual } from './ThreePointLightVisual';
 import { ThreeGuidePathVisual } from './ThreeGuidePathVisual';
+import { ThreeArrowShotVisual } from './ThreeArrowShotVisual';
 import { ThreeBallisticPreviewVisual } from './ThreeBallisticPreviewVisual';
 import { ThreeHealthPopupVisual } from './ThreeHealthPopupVisual';
 import { ThreeHybridSlimeVisual } from './ThreeHybridSlimeVisual';
@@ -76,6 +77,7 @@ import { ThreeSlimeLegVisual } from './ThreeSlimeLegVisual';
 import { ThreeAttachmentVisual } from './ThreeAttachmentVisual';
 import { ThreeBuildPreviewVisual } from './ThreeBuildPreviewVisual';
 import { ThreeContainerLidVisual } from './ThreeContainerLidVisual';
+import { ThreeWoodBowVisual } from './ThreeWoodBowVisual';
 import { ThreeDropRollVisual } from './ThreeDropRollVisual';
 import { ThreeElasticTetherVisual } from './ThreeElasticTetherVisual';
 import { ThreeMeshProxy } from './ThreeMeshProxy';
@@ -195,6 +197,8 @@ export class ThreeRenderScene implements RenderScene {
   private readonly elasticTethers = new Map<ProxyId, ThreeElasticTetherVisual>();
   private readonly dropRolls = new Map<ProxyId, ThreeDropRollVisual>();
   private readonly containerLids = new Map<ProxyId, ThreeContainerLidVisual>();
+  /** proxyId → 拉弓的形变。只有手上那把木弓有：地上那把不会被拉开。 */
+  private readonly woodBows = new Map<ProxyId, ThreeWoodBowVisual>();
   private readonly attachmentVisual = new ThreeAttachmentVisual();
   /** 建造幽灵。不是 proxy：没有槽位，只是一个跟着指针走的半透明模型。 */
   private readonly buildPreview = new ThreeBuildPreviewVisual();
@@ -208,6 +212,8 @@ export class ThreeRenderScene implements RenderScene {
   private healthPopups?: ThreeHealthPopupVisual;
   /** 蓄力时那条白色抛物线。同样按需建，见 `setBallisticPreview`。 */
   private ballisticPreview?: ThreeBallisticPreviewVisual;
+  /** 飞在空中的那几支箭。第一箭射出去才建，见 `spawnArrowShot`。 */
+  private arrowShots?: ThreeArrowShotVisual;
   /**
    * 能力实验室的表现（引擎迁移路线图 第 3 步）。
    *
@@ -264,6 +270,14 @@ export class ThreeRenderScene implements RenderScene {
       this.root.add(this.ballisticPreview.root);
     }
     this.ballisticPreview.setState(state);
+  }
+
+  public spawnArrowShot(state: BallisticPreviewState): void {
+    if (!this.arrowShots) {
+      this.arrowShots = new ThreeArrowShotVisual(this.environment);
+      this.root.add(this.arrowShots.root);
+    }
+    this.arrowShots.spawn(state);
   }
 
   public spawnHealthPopup(x: number, y: number, z: number, amount: number): void {
@@ -324,6 +338,9 @@ export class ThreeRenderScene implements RenderScene {
     }
     if (model.containerLidRig) {
       this.containerLids.set(proxy.id, new ThreeContainerLidVisual(proxy.id, model.containerLidRig));
+    }
+    if (model.woodBowRig) {
+      this.woodBows.set(proxy.id, new ThreeWoodBowVisual(proxy.id, model.woodBowRig));
     }
   }
 
@@ -431,6 +448,7 @@ export class ThreeRenderScene implements RenderScene {
     this.elasticTethers.delete(id);
     this.dropRolls.delete(id);
     this.containerLids.delete(id);
+    this.woodBows.delete(id);
     this.attachmentVisual.forget(id);
     proxy.dispose();
   }
@@ -547,6 +565,7 @@ export class ThreeRenderScene implements RenderScene {
     }
     for (const drop of this.dropRolls.values()) drop.update(transforms);
     for (const lid of this.containerLids.values()) lid.update(transforms, deltaSeconds);
+    for (const bow of this.woodBows.values()) bow.update(transforms, deltaSeconds);
     this.fireVisual.update(live, transforms, deltaSeconds, elapsedSeconds);
     // 光紧跟着火焰：两者读的是同一帧的字节，用的是同一条平滑时间常数，
     // 所以火苗矮下去的同时地面上的光晕也跟着收。
@@ -563,6 +582,8 @@ export class ThreeRenderScene implements RenderScene {
     for (const guide of this.guidePaths.values()) guide.update(deltaSeconds);
     // 飘字和别的表现一样按渲染帧走：玩法侧只在血量变的那一帧发一条命令。
     this.healthPopups?.update(deltaSeconds);
+    // 箭同理：弹道在射出去那一刻就定了，这里只是按渲染帧把它走完。
+    this.arrowShots?.update(deltaSeconds);
     // 权威 yaw 取的是 submitTransforms 刚摆好的 root 角度：外壳要抵消的正是
     // 「root 这一级实际被转了多少」，父子情况下那已经是相对 yaw。
     for (const [id, slime] of this.slimeVisuals) {
@@ -869,6 +890,8 @@ export class ThreeRenderScene implements RenderScene {
     this.healthPopups = undefined;
     this.ballisticPreview?.dispose();
     this.ballisticPreview = undefined;
+    this.arrowShots?.dispose();
+    this.arrowShots = undefined;
     this.pointLights.dispose();
     this.buildPreview.dispose();
     this.highCountBatches.dispose();
@@ -893,6 +916,7 @@ export class ThreeRenderScene implements RenderScene {
     this.elasticTethers.clear();
     this.dropRolls.clear();
     this.containerLids.clear();
+    this.woodBows.clear();
     for (const proxy of this.proxies) proxy?.dispose();
     this.proxies.length = 0;
   }

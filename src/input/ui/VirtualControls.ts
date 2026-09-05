@@ -4,6 +4,7 @@ import type {
   VirtualControlsDefinition,
 } from '../config/InputSchemeTypes';
 import { VirtualInputDevice } from '../devices/VirtualInputDevice';
+import { VirtualAimStick } from './VirtualAimStick';
 import {
   clampVirtualJoystickCenter,
   sampleVirtualJoystick,
@@ -32,6 +33,8 @@ export class VirtualControls {
   private readonly joystick: HTMLElement;
   private readonly knob: HTMLElement;
   private readonly buttonCluster: HTMLElement;
+  /** 右手边那根瞄准摇杆。输入方案没配就没有——键鼠端本来就用指针瞄。 */
+  private readonly aimStick?: VirtualAimStick;
   private readonly buttons: readonly DigitalButtonBinding[];
   private readonly eventAbortController = new AbortController();
   private readonly portraitQuery = window.matchMedia('(orientation: portrait)');
@@ -50,6 +53,13 @@ export class VirtualControls {
     this.buttonCluster = document.createElement('div');
     this.buttonCluster.className = 'virtual-buttons';
     this.buttons = this.config.buttons.map((definition) => this.createButton(definition));
+    this.aimStick = this.config.aimJoystick
+      ? new VirtualAimStick(
+        this.config.aimJoystick,
+        this.device,
+        this.eventAbortController.signal,
+      )
+      : undefined;
 
     const guide = document.createElement('span');
     guide.className = 'virtual-stick__guide';
@@ -57,7 +67,12 @@ export class VirtualControls {
     this.joystick.append(guide, this.knob);
     this.joystickZone.append(this.joystick);
     this.buttonCluster.append(...this.buttons.map((binding) => binding.element));
-    this.container.replaceChildren(this.joystickZone, this.buttonCluster);
+    // 瞄准摇杆排在按钮簇之前：按钮压在它上面，落在按钮上的那一指由按钮消耗。
+    this.container.replaceChildren(
+      this.joystickZone,
+      ...(this.aimStick ? [this.aimStick.zone] : []),
+      this.buttonCluster,
+    );
     this.container.classList.toggle(
       'is-desktop-debug',
       options.desktopDebug ?? this.readDesktopDebugFlag(),
@@ -71,6 +86,7 @@ export class VirtualControls {
     this.setKnobOffset(0, 0);
     this.joystickZone.classList.remove('is-active');
     if (this.config.joystick.mode === 'floating') this.resetFloatingBasePosition();
+    this.aimStick?.reset();
     for (const binding of this.buttons) {
       binding.pointerId = undefined;
       binding.element.classList.remove('is-active');
@@ -214,7 +230,11 @@ export class VirtualControls {
   };
 
   private readonly handleLayoutChange = (): void => {
-    if (this.joystickPointerId !== undefined || this.buttons.some((button) => button.pointerId !== undefined)) {
+    if (
+      this.joystickPointerId !== undefined
+      || this.aimStick?.active
+      || this.buttons.some((button) => button.pointerId !== undefined)
+    ) {
       this.reset();
     }
     this.applyLayout();
@@ -256,6 +276,7 @@ export class VirtualControls {
       : this.config.layouts.landscape;
     this.layoutScale = layout.scale;
     this.applyJoystickLayout(layout);
+    this.aimStick?.applyLayout(layout);
     this.applyButtonLayout(layout);
   }
 

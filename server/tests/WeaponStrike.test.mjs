@@ -198,6 +198,44 @@ test('武器不消耗自己：射完手上那把弓还在', async () => {
   assert.equal(resolveItemUse('wood-bow').mode, 'charge');
 });
 
+test('拉弓和射出去那一发都进快照：别人也看得见', async () => {
+  const context = await createScene();
+  const { scene, player } = context;
+  const walker = scene.actorWorld.getActor('legged-slime-walker-01');
+  equipBow(scene);
+  const viewerSnapshot = () => scene.createSnapshot('watcher')
+    .players.find((entry) => entry.id === 'archer');
+
+  // 没按住的时候两条都不下发：快照里不带一条恒为空的字段。
+  assert.equal(viewerSnapshot().charge, undefined);
+  assert.equal(viewerSnapshot().weaponShot, undefined);
+
+  scene.applyInventoryCommand('archer', { sequence: 500, command: { kind: 'use:begin' } });
+  const charging = viewerSnapshot().charge;
+  // 带的是起点和总时长，不是算好的比例：两端跑同一个 holdRatio，接收方用自己的
+  // 时钟推进，中间掉几帧也不会让弓卡在半路上。
+  assert.equal(charging.startedAt, player.itemUseStartedAt);
+  assert.ok(charging.holdSeconds > 0);
+
+  aimAt(player, walker, 1.5);
+  context.advance(1.5);
+  aimAt(player, walker, 1.5);
+  scene.applyInventoryCommand('archer', { sequence: 504, command: { kind: 'use:release' } });
+
+  assert.equal(viewerSnapshot().charge, undefined, '松手之后就不再蓄了');
+  const shot = viewerSnapshot().weaponShot;
+  assert.equal(shot.revision, 1);
+  assert.equal(shot.ratio, 1, '拉满');
+  // 带的是**落点**：判定用的就是这一点，所有人因此画的是同一条弧。
+  const transform = walker.requireComponent(TRANSFORM_COMPONENT);
+  assert.ok(Math.abs(shot.impactZ - transform.z) < 1.5);
+  assert.ok(Math.abs(shot.x - player.x) < 1e-6);
+
+  // 留着不撤：只在开火那一帧下发的话，那一帧丢了这支箭就永远不会出现。
+  context.advance(1);
+  assert.equal(viewerSnapshot().weaponShot.revision, 1);
+});
+
 test('来袭方向是「射手 → 这一个目标」，两人重合时退回权威 yaw', () => {
   // 正北打过去：+Z。方向是**弹药飞进去的方向**，也就是蒙皮该被压凹的方向。
   const north = weaponHitDirection(0, 0, 0, 6, 0);

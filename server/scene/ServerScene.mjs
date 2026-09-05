@@ -224,6 +224,19 @@ function resolvePlayerActorArchetype(definition) {
  * 位置一律由这里用 shared/playerMovement 推进，所以速度上限、活动范围
  * 和朝向范围都握在服务端手上。
  */
+/**
+ * 这名玩家正在蓄的那一次（`charge` 模式的按住）。
+ *
+ * 带的是**起始时刻与总时长**，不是算好的比例：两端跑同一个 `holdRatio`，接收方
+ * 用自己的时钟推进，中间掉几帧也不会让弓卡在半路上——和物品栏那圈倒计时是同一条
+ * 规矩。不在蓄力（或手上那件不是蓄力用法）时返回 undefined，快照里就没有这一条。
+ */
+function chargeSnapshot(player) {
+  const use = player.itemAbility?.use;
+  if (use?.mode !== 'charge' || player.itemUseStartedAt === undefined) return undefined;
+  return { startedAt: player.itemUseStartedAt, holdSeconds: use.holdSeconds };
+}
+
 export class ServerScene {
   constructor(sceneDefinition = { id: 'grassland' }, options = {}) {
     const definition = typeof sceneDefinition === 'string' ? { id: sceneDefinition } : sceneDefinition;
@@ -1829,6 +1842,10 @@ export class ServerScene {
           ...(player.getComponent(HEALTH_COMPONENT)
             ? { health: player.requireComponent(HEALTH_COMPONENT).snapshot() }
             : {}),
+          // 拉弓和射出去那一发都是公开的：别人手上那把弓弯没弯、箭飞到哪儿，
+          // 屋里每个人都该看见。两条都只带**权威的那几个数**，怎么画归客户端。
+          ...(chargeSnapshot(player) ? { charge: chargeSnapshot(player) } : {}),
+          ...(player.weaponShot ? { weaponShot: player.weaponShot } : {}),
           heldActorId: player.getComponent(PICKUP_DROP_COMPONENT)?.heldActorId ?? null,
           pickupDropRevision: player.getComponent(PICKUP_DROP_COMPONENT)?.revision ?? 0,
           ...(slimeDrag ? { slimeDrag } : {}),

@@ -288,6 +288,13 @@ export interface RenderScene extends RenderCommandSink {
   /** 蓄力时那条白色抛物线。传 undefined 收起。见 `BallisticPreviewState`。 */
   setBallisticPreview(state: BallisticPreviewState | undefined): void;
   /**
+   * 射出去一支箭。**一次性事件**，不是每帧状态：弹道在松手那一刻就算完了，
+   * 玩法侧发这一条之后不再管它，剩下的半秒由渲染世界自己走完。
+   *
+   * 参数就是预览那条线的同一份端点与比例，所以箭走的是玩家刚才瞄的那条弧。
+   */
+  spawnArrowShot(state: BallisticPreviewState): void;
+  /**
    * 能力实验室的三条命令（只有开发用的实验室地图会发）。
    *
    * 这三条曾经是玩法侧最后一处**递出活对象**：`AbilityLabSceneComponent` 先

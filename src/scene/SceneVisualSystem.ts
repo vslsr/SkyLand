@@ -92,6 +92,16 @@ export interface ActorSnapshotTarget {
    * 纯表现：手上那件食物据此一口口变小、跟着嘴一起抖，不改任何权威状态。
    */
   setChewingItem?(actorId: string | undefined, ratio: number): void;
+  /**
+   * 手上那把弓拉到哪一步（[0, 1]）。传 undefined 表示没人在拉。
+   *
+   * 纯表现：弓臂弯多少、弦拉多开都由渲染侧按这个比例算，不改任何权威状态。
+   */
+  setBowDraw?(actorId: string | undefined, charge: number): void;
+  /** 这把弓松了：拉弓量归零，不触发回弹。 */
+  clearBowDraw?(actorId: string | undefined): void;
+  /** 撒手了。一次性事件，渲染侧靠它踢一次回弹。 */
+  releaseHeldBow?(actorId: string): void;
   setInteractionMarkerActorId(actorId?: string, inputLabel?: string, opacity?: number): void;
   getVesselHudState(playerId: string): VesselHudState | undefined;
   /** 把 Actor 当前的碰撞盒登记进场景碰撞世界。查询前调用，每帧最多兑现一次。 */

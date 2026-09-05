@@ -31,12 +31,14 @@ import { VesselControlController } from '../controllers/VesselControlController'
 import { RoomClient, type JoinedRoom, type RoomSummary } from '../network/RoomClient';
 import { SnapshotBuffer } from '../network/SnapshotBuffer';
 import type { InterpolatedPlayerState, RoomSnapshot } from '../network/protocol';
+import { RemoteBowSync } from '../weapons/RemoteBowSync';
 import {
   HealthPopupEmitter,
   healthPopupAnchorY,
 } from '../health/HealthPopupEmitter';
 import {
   WEAPON_AIM_SHARPNESS,
+  WEAPON_MUZZLE_HEIGHT,
   WeaponAimController,
 } from '../controllers/WeaponAimController';
 import { frameTimeline } from '../platform/index';
@@ -123,6 +125,18 @@ export class GrasslandScene extends Scene {
   private readonly inventoryPage = new InventoryPage();
   private readonly inventory: InventoryController;
   private readonly hotbarBar = new HotbarBar();
+  /**
+   * 别人手上那把弓与他们射出去的箭。自己那一份不走它：本地按住直接驱动，等一趟
+   * 网络回来会让弓比物品栏那圈慢半拍。
+   */
+  private readonly remoteBows = new RemoteBowSync({
+    localPlayerId: () => this.joinedRoom?.player.id,
+    setBowDraw: (actorId, charge) => this.world.setBowDraw(actorId, charge),
+    clearBowDraw: (actorId) => this.world.clearBowDraw(actorId),
+    releaseBow: (actorId) => this.world.releaseHeldBow(actorId),
+    sampleGroundHeight: (x, z) => this.world.sampleGroundHeight(x, z),
+    spawnArrow: (state) => this.renderer.spawnArrowShot(state),
+  }, { muzzleHeight: WEAPON_MUZZLE_HEIGHT });
   private readonly holdProgress = new HoldProgressBadge();
 
   /**
@@ -413,6 +427,23 @@ export class GrasslandScene extends Scene {
         const chewing = progress?.action === 'eat' ? progress.ratio : undefined;
         this.player?.setChewing(chewing);
         this.world.setChewingItem(chewing === undefined ? undefined : this.heldActorId(), chewing ?? 0);
+        // 拉弓读的也是这同一个比例：物品栏那圈画到哪，弓就拉到哪。
+        const drawing = progress?.action === 'shoot' ? progress.ratio : undefined;
+        // 松开 / 取消要显式归零：`setBowDraw(undefined)` 什么都不做，那把弓会一直
+        // 拉着——这张表是按 Actor 记的，没人替它清。
+        if (drawing === undefined) this.world.clearBowDraw(this.heldActorId());
+        else this.world.setBowDraw(this.heldActorId(), drawing);
+      },
+      // 松手那一下才射箭。收圈的路子不止这一条（换手、盖界面、进建造模式都收），
+      // 那几下不该有箭飞出去，所以这一条和 setProgress 分开走。
+      // 冷却圈和长按那圈是同一个环，反着走。
+      setCooldown: (cooldown) => this.hotbarBar.setCooldown(cooldown),
+      onUseRelease: (action, ratio) => {
+        if (action !== 'shoot') return;
+        this.weaponAim.fire(ratio);
+        // 撒手那一下：弦回弹。箭飞出去和弦抖回来是同一刻的两件事。
+        const heldActorId = this.heldActorId();
+        if (heldActorId) this.world.releaseHeldBow(heldActorId);
       },
     });
     this.weaponAim = new WeaponAimController({
@@ -434,6 +465,17 @@ export class GrasslandScene extends Scene {
         return { x: render.x, y: render.y, z: render.z, yaw: this.player!.controller.facing.yaw };
       },
       pointerRay: () => this.pointerRay.resolve(this.renderer.getCameraView()),
+      // 和移动摇杆读的是同一份相机基：推杆推向屏幕上的哪儿，人就朝世界里的哪儿。
+      cameraAxes: () => {
+        const axes = this.controls.frame.axes;
+        const forwardLength = Math.hypot(axes.forward[0], axes.forward[2]) || 1;
+        return {
+          forwardX: axes.forward[0] / forwardLength,
+          forwardZ: axes.forward[2] / forwardLength,
+          rightX: axes.right[0],
+          rightZ: axes.right[2],
+        };
+      },
       sampleGroundHeight: (x, z) => this.world.sampleGroundHeight(x, z),
       setFacingTarget: (target) => {
         this.player?.controller.setFacingRequest(
@@ -441,7 +483,8 @@ export class GrasslandScene extends Scene {
         );
       },
       setPreview: (state) => this.renderer.setBallisticPreview(state),
-    });
+      spawnArrow: (state) => this.renderer.spawnArrowShot(state),
+    }, this.input);
     this.container = new ContainerController(this.containerPage, {
       getInventory: () => this.player?.getComponent(INVENTORY_COMPONENT) as
         InventoryComponent | undefined,
@@ -861,6 +904,7 @@ export class GrasslandScene extends Scene {
     this.debugMenuPage?.setWeather(snapshot.weather);
     this.debugMenuPage?.setTimeOfDay(snapshot.timeOfDay, snapshot.dayLength);
     this.world.syncActors(snapshot.actors, snapshot.players, snapshot.serverTime);
+    this.remoteBows.apply(snapshot.players, snapshot.serverTime);
     this.snapshots.push(snapshot);
 
     // 自己的那条不走插值：直接交给和解，把预测拉回服务器的结论。
@@ -1031,6 +1075,7 @@ export class GrasslandScene extends Scene {
     this.slimeSurfaceDrag?.dispose();
     this.performanceOverlay?.dispose();
     this.hotbar.dispose();
+    this.weaponAim.dispose();
     this.hotbarBar.dispose();
     this.holdProgress.dispose();
     this.slimeSurfaceDrag = undefined;

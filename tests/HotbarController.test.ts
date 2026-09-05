@@ -19,6 +19,7 @@ function harness(initialHeldActorId: string | undefined) {
   } as never;
   const sent: InventoryCommand[] = [];
   const progress: (HeldItemProgress | undefined)[] = [];
+  const cooldowns: ({ itemType: string; remainingRatio: number } | undefined)[] = [];
   let clock = 0;
   const inventory = new InventoryComponent({ slotCapacity: 8, hotbarCapacity: 9 });
   const controller = new HotbarController(input, {
@@ -28,6 +29,7 @@ function harness(initialHeldActorId: string | undefined) {
     getInputLabel: () => 'E',
     send: (command) => sent.push(command),
     setProgress: (next) => progress.push(next),
+    setCooldown: (next) => cooldowns.push(next),
   }, () => clock);
   const press = (phase: string) => handlers.get(PlayerInputTags.Drop)?.({ phase });
   const use = (phase: string) => handlers.get(ItemUseInputTags.primary)?.({ phase });
@@ -36,6 +38,7 @@ function harness(initialHeldActorId: string | undefined) {
     inventory,
     sent,
     progress,
+    cooldowns,
     press,
     use,
     /** 快照到账：服务端换手时手持表现体会换一个新 id。 */
@@ -228,4 +231,49 @@ test('蓄力：圈满停在满圈上等松手，松手才发出那一下', () =>
     [{ kind: 'use:begin' }, { kind: 'use:release' }],
     '松手那一下要发出去：蓄了几成由服务端按自己记的时刻算',
   );
+});
+
+test('冷却圈：松手那一刻开始退，走完就没了', () => {
+  const bar = harness('held-1');
+  bar.inventory.add('wood-bow', 1);
+  bar.inventory.assignHotbarSlot(0, 'wood-bow');
+  bar.inventory.setActiveHotbarSlot(0);
+
+  bar.use('started');
+  bar.advance(400);
+  bar.controller.update();
+  bar.cooldowns.length = 0;
+  bar.use('completed');
+
+  // 木弓的 CD 是 0.1 秒，松手那一刻开始走。
+  bar.controller.update();
+  const first = bar.cooldowns.at(-1);
+  assert.equal(first?.itemType, 'wood-bow');
+  assert.ok(first!.remainingRatio > 0.9, '刚松手时几乎是满的');
+
+  bar.advance(60);
+  bar.controller.update();
+  const middle = bar.cooldowns.at(-1);
+  assert.ok(middle!.remainingRatio > 0 && middle!.remainingRatio < first!.remainingRatio, '在退');
+
+  bar.advance(60);
+  bar.controller.update();
+  assert.equal(bar.cooldowns.at(-1), undefined, '走完就没有圈了');
+});
+
+test('冷却不随取消清掉：界面盖上来，那边的 CD 照样在走', () => {
+  const bar = harness('held-1');
+  bar.inventory.add('wood-bow', 1);
+  bar.inventory.assignHotbarSlot(0, 'wood-bow');
+  bar.inventory.setActiveHotbarSlot(0);
+
+  bar.use('started');
+  bar.advance(400);
+  bar.controller.update();
+  bar.use('completed');
+
+  bar.controller.reset();
+  bar.controller.update();
+  // 清掉只会让圈骗人：服务端那边并不因为界面盖上来就不冷却了。
+  assert.equal(bar.cooldowns.at(-1)?.itemType, 'wood-bow');
 });

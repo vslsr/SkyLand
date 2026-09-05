@@ -246,6 +246,15 @@ function resolveExternalAttachmentTransforms(
  * 曾经有一个，但那只是 `renderScene.root` 的转手——一个玩法类没有理由拿得到
  * 场景图的节点。渲染世界的根现在只有渲染世界自己知道。
  */
+/**
+ * 拿在手上会形变的模型。
+ *
+ * 它们不进合批：合批把一件东西烘成一段共享几何，形变没地方放。这张表短得刺眼是
+ * 对的——一件东西要么是一段静止的几何（进合批、便宜），要么有自己的 proxy 与
+ * 表现系统，中间没有第三种。
+ */
+const HAND_DEFORMED_MODELS = new Set<string>(['line-art-wood-bow']);
+
 export class ClientActorSystem implements SceneFrameSystem {
   /**
    * Game World 与 Render World 之间那条边界（路线图 §2 / 第 1 步）。
@@ -292,6 +301,14 @@ export class ClientActorSystem implements SceneFrameSystem {
   private readonly instances = new RenderInstanceBuffer(PROP_INT_STRIDE, PROP_FLOAT_STRIDE);
   /** 正被吃的那件食物（手持表现体）和它吃到哪一步；没人在吃时是 undefined。 */
   private chewingItem?: { actorId: string; ratio: number };
+  /**
+   * 每把正被拉着的弓拉到哪一步。
+   *
+   * 是一张表而不是一个值：屋里可能好几个人同时在拉弓，本地那把由按住直接驱动、
+   * 别人那几把由快照驱动，但到了这一层它们是同一件事——「哪个 Actor 拉了几成」。
+   */
+  private readonly bowDraws = new Map<string, { charge: number; releaseRevision: number }>();
+  private bowReleaseRevision = 0;
   /** 树上果子走另一条通道：它的记录里没有原型、没有驻留态，形状不一样。 */
   private readonly fruitInstances = new RenderInstanceBuffer(FRUIT_INT_STRIDE, FRUIT_FLOAT_STRIDE);
   private readonly archetypeOrder: readonly string[];
@@ -380,7 +397,9 @@ export class ClientActorSystem implements SceneFrameSystem {
     // 已经摆好位置的 matrixWorld，所以这两个必须排在最前且相邻。
     this.world.addSystem(new ActorTransformSystem(this.transforms));
     // 参数要和 transform 同一次翻面，所以必须夹在写入与 publish 之间。
-    this.world.addSystem(new ActorVisualParamSystem(this.transforms));
+    this.world.addSystem(new ActorVisualParamSystem(this.transforms, {
+      bowDrawOf: (actorId) => this.bowDraws.get(actorId),
+    }));
     // 合批内容走自己那条通道，但同样是「写字节」，所以和 SoA 写入排在一起、
     // 都在 publish 之前。这条现在还没有双缓冲（同一帧写完就读），排在这里是为了
     // 等它也跨线程时不用再挪一次。
@@ -603,6 +622,11 @@ export class ClientActorSystem implements SceneFrameSystem {
       this.colliderInstances.delete(actorId);
       this.collision.removeDynamic(actorId);
       this.physics?.removeActorCollider(actorId);
+    }
+    // 换一次手就是一个新的手持表现体，旧的那把弓不会再有人问起它拉了几成。
+    // 不清的话这张表会随换手次数一直长。
+    for (const actorId of Array.from(this.bowDraws.keys())) {
+      if (!this.world.getActor(actorId)) this.bowDraws.delete(actorId);
     }
   }
 
@@ -925,6 +949,41 @@ export class ClientActorSystem implements SceneFrameSystem {
     this.chewingItem = actorId === undefined ? undefined : { actorId, ratio };
   }
 
+  /**
+   * 手上那把弓拉到哪一步。
+   *
+   * 和「谁正被吃」同一个形状：场景在按住的那一段每帧推进（读的是物品栏那圈倒计时
+   * 的同一个比例），弓据此拉开。撒手那一下不走这条——它是一次性事件，见
+   * `releaseHeldBow`。
+   */
+  public setBowDraw(actorId: string | undefined, charge: number): void {
+    if (actorId === undefined) return;
+    const current = this.bowDraws.get(actorId);
+    this.bowDraws.set(actorId, {
+      charge,
+      releaseRevision: current?.releaseRevision ?? 0,
+    });
+  }
+
+  /** 这把弓松了：拉弓量归零，回弹由撒手那一下自己走。 */
+  public clearBowDraw(actorId: string | undefined): void {
+    if (actorId === undefined) return;
+    const current = this.bowDraws.get(actorId);
+    if (!current || current.charge === 0) return;
+    this.bowDraws.set(actorId, { charge: 0, releaseRevision: current.releaseRevision });
+  }
+
+  /**
+   * 撒手了。
+   *
+   * 计数自增而不是立一个 bool：连着两箭之间那个 bool 有可能在同一帧里立起来又
+   * 倒下去，那一下就丢了。渲染侧靠计数变化踢一次回弹（`ThreeWoodBowVisual`）。
+   */
+  public releaseHeldBow(actorId: string): void {
+    this.bowReleaseRevision += 1;
+    this.bowDraws.set(actorId, { charge: 0, releaseRevision: this.bowReleaseRevision });
+  }
+
   /** 这个原型的飘字从多高飞出来。按模型算一次，之后查表。 */
   private healthPopupAnchor(archetypeId: string): number {
     const cached = this.healthPopupAnchors.get(archetypeId);
@@ -987,6 +1046,15 @@ export class ClientActorSystem implements SceneFrameSystem {
       quantity: snapshot.itemStack?.quantity,
     }));
     actor.addComponent(new ReplicationComponent());
+    // 拿在手上会形变的那几件东西给一个自己的 proxy：合批把整件东西烘成一段共享
+    // 几何，一把能拉开的弓在里面没有地方放它的两条弓臂。地上那把仍然走合批——
+    // 它不会被拉开，一件东西一段几何更省。
+    const render = archetype.components.render;
+    if (render && HAND_DEFORMED_MODELS.has(render.model)) {
+      const proxyId = this.proxyIds.acquire();
+      this.renderScene.createMeshProxy(proxyId, { name: `held-${snapshot.id}`, render });
+      actor.addComponent(new RenderProxyComponent(proxyId, this.proxyIds));
+    }
     this.world.addActor(actor);
     return actor;
   }
