@@ -91,9 +91,17 @@ npm start
 `server/`、`shared/`、`config/` 和运行时依赖，以非 root 的 `node` 用户监听 3090。
 
 ```bash
-docker compose up -d --build          # 构建并启动
-curl http://127.0.0.1:3090/api/health # {"ok":true,...,"webReady":true}
-docker compose logs -f skyland
+docker compose up -d --build           # 构建并启动，默认只监听 127.0.0.1:3090
+curl http://127.0.0.1:3090/api/health  # {"ok":true,...,"webReady":true}
+
+# 对外提供服务需要 HTTPS，三选一：
+docker compose --profile quicktunnel up -d   # Cloudflare 隧道，不占端口，无警告
+
+./deploy/generate-self-signed-cert.sh <公网IP>
+docker compose --profile nginx-tls up -d     # nginx + 自签证书，有一次警告
+
+echo 'SKYLAND_SITE=<已备案域名>' > .env
+docker compose --profile tls up -d           # Caddy + Let's Encrypt，无警告
 ```
 
 不用 Compose 时：
@@ -106,13 +114,18 @@ docker run -d --name skyland --restart unless-stopped --init \
 
 `--init` 不能省——房间 DS 是 `node` 的子进程，PID 1 不是 init 时会留下僵尸进程。
 
-公网部署必须配 HTTPS：`SharedArrayBuffer` 只在安全上下文里可用，走
-`http://<公网 IP>:3090` 时 COOP/COEP 发得再对，`crossOriginIsolated` 也是 `false`，
-渲染 Worker 与物理会掉到降级路径。反代要转发 WebSocket 升级、放长读超时，并且不要
-覆盖服务端发的 COOP/COEP 头。
+**必须是安全上下文，否则游戏根本起不来。** `SharedArrayBuffer` 只在
+`https://` 或 `http://localhost` 下可用，走 `http://<公网 IP>/` 时 COOP/COEP 发得再对，
+`crossOriginIsolated` 也是 `false`，`connectRenderWorldInWorker` 会直接抛
+「拿不到 SharedArrayBuffer」——没有主线程回退分支。没有域名时的三条替代路径
+（SSH 隧道 / 自签证书 / 域名签证书）见 `doc/deploy/build-and-run.md` 4.2。
 
-完整的构建参数、跨架构构建、Nginx/Caddy 配置、更新回滚和排查表见
-[`doc/docker-deployment.md`](doc/docker-deployment.md)。
+反代要转发 WebSocket 升级、放长读超时，并且不要覆盖服务端发的 COOP/COEP 头。
+
+部署文档在 [`doc/deploy/`](doc/deploy/)：[`build-and-run.md`](doc/deploy/build-and-run.md)
+讲第一次部署（构建参数、跨架构构建、四种拿到 HTTPS 的方案、Nginx/Caddy 配置），
+[`operations.md`](doc/deploy/operations.md) 讲跑起来之后（发版、回滚、证书续期、
+后续演进、备份、分层排查）。
 
 ### 开发模式：Vite 热更新 + Node.js DS
 
@@ -1342,3 +1355,30 @@ GAS `Movement.Speed` 的 CurrentValue；涉水 GameplayEffect 因此同时约束
 - `shared/collision/`：均匀网格空间划分、场景碰撞世界与扫掠球求交
 - `native/chunkgen/`：编译为 WebAssembly 的 Rust 生成与合批实现
 - `tests/`：不依赖浏览器的客户端逻辑测试
+
+
+# Deploy
+
+```
+cd /path/to/SkyLand
+git pull
+
+# 1. 停掉一直在重试 Let's Encrypt 的 Caddy，并清掉它的配置
+docker compose --profile tls down
+rm -f .env
+
+# 2. 腾出 80/443（h5sgame 站点会下线）
+docker stop h5sgame-prod-nginx-1
+
+# 3. 生成自签证书
+./deploy/generate-self-signed-cert.sh 111.229.172.59
+
+# 4. 起 nginx + skyland
+docker compose --profile nginx-tls up -d
+
+# 5. 确认两个都在
+docker ps
+docker compose logs nginx
+```
+
+然后开 https://111.229.172.59.sslip.io/。

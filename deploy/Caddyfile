@@ -1,0 +1,21 @@
+# Caddy 只做一件事：终止 TLS，然后把请求原样交给 skyland 容器的 3090。
+#
+# 站点地址由 SKYLAND_SITE 决定：
+#   - 有域名：skyland.example.com
+#   - 没域名：<公网IP>.sslip.io —— sslip.io 把这个名字解析回同一个 IP，
+#     Let's Encrypt 能正常签发，浏览器不会报警告。
+#   - 内网自签：把 SKYLAND_SITE 写成 https://<IP>，Caddy 用内部 CA 出证书，
+#     浏览器会弹一次警告，点继续之后同样是安全上下文。
+{$SKYLAND_SITE} {
+	# reverse_proxy 默认就转发 WebSocket 升级，/ws 不需要额外配置。
+	#
+	# 不要在这里加 header 操作：COOP/COEP/CORP 由 server/http/crossOriginIsolation.mjs
+	# 统一发，任何覆盖都会让页面丢掉 crossOriginIsolated，客户端直接起不来。
+	reverse_proxy skyland:3090 {
+		# 游戏会话是长连接，别让代理按默认超时把闲置连接掐了。
+		transport http {
+			read_timeout 1h
+			write_timeout 1h
+		}
+	}
+}
