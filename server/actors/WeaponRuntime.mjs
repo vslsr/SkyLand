@@ -73,7 +73,14 @@ export function fireWeapon({ scene, player, use, chargeRatio }) {
     weaponItemType: use.itemType,
   });
   // 射不出弹药的武器不算射出去了：悄悄退回「松手即判定」会把穿墙那条路重新接上。
-  return Boolean(projectile);
+  if (!projectile) return false;
+  // 记下这一发，快照带出去：**别人那把弓也该抖一下弦**。
+  //
+  // 只带一个自增计数：飞出去那支箭是复制过来的 Actor，落在哪儿由它自己说了算，
+  // 接收方不需要（也不该）按落点再画一支——那样一发箭会变成两支，而本地画的那支
+  // 不认识墙。一次性事件靠计数变化触发，bool 有可能在同一帧里立起来又倒下去。
+  player.weaponShot = { revision: (player.weaponShot?.revision ?? 0) + 1 };
+  return true;
 }
 
 /**

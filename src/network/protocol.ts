@@ -107,6 +107,16 @@ export interface SnapshotPlayer {
   };
   /** 生命值与死亡状态。血量是公开信息：别人头上的飘字大家都该看见。 */
   health?: SnapshotHealth;
+  /**
+   * 正在蓄的那一次（`charge` 模式）。带的是起止而不是算好的比例：两端跑同一个
+   * `holdRatio`，接收方用自己的时钟推进，掉几帧也不会让弓卡在半路上。
+   */
+  charge?: { startedAt: number; holdSeconds: number };
+  /**
+   * 最近撒手的那一发。**留着不撤**，接收方按 `revision` 变化去重——只在开火那一帧
+   * 下发的话，那一帧丢了别人的弓就永远不会抖那一下。
+   */
+  weaponShot?: SnapshotWeaponShot;
   /** PickupDrop Component 的运行态；口部挂点来自玩家 Actor 原型。 */
   heldActorId?: string | null;
   pickupDropRevision?: number;
@@ -116,6 +126,22 @@ export interface SnapshotPlayer {
   bitingPlayerId?: string;
   /** 正被外力拴着；客户端预测必须用同一份，否则会持续橡皮筋。 */
   leash?: SnapshotLeash;
+}
+
+/**
+ * 撒手那一下。
+ *
+ * **只有一个计数**：飞出去那支箭是复制过来的 Actor（`ProjectileComponent`），自己飞、
+ * 自己撞、撞上了才结算伤害，落在哪儿由它自己说了算。这条因此只回答「他刚才松手了没有」
+ * ——接收方拿它抖一下别人那把弓的弦。
+ *
+ * 带落点的那一版是箭还只是客户端画的一段动画时留下的：那时每一端都要按同一个落点
+ * 自己画一支。箭成了真东西之后，再按落点画一支会让一发箭变成两支，而本地画的那支
+ * 还不认识墙。
+ */
+export interface SnapshotWeaponShot {
+  /** 自增计数。一次性事件靠它的变化触发，不靠一个 bool。 */
+  revision: number;
 }
 
 export type ActorFloatState = 'afloat' | 'overloaded' | 'flooding' | 'sinking';

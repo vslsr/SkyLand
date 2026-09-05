@@ -414,6 +414,24 @@ body.has-interaction-target .crosshair {
   will-change: transform;
 }
 
+/* 瞄准摇杆：内层那一圈画出来，玩家才看得见「推到哪儿开始蓄力」。 */
+.virtual-stick__inner-ring {
+  position: absolute;
+  border: 1px dashed rgba(28, 26, 23, 0.28);
+  border-radius: 50%;
+}
+
+/* 推进外层就变成蓄力中：整根杆换成弓那一侧的暖色，和物品栏那圈是同一件事。 */
+.virtual-aim-zone.is-charging .virtual-stick {
+  border-color: #1c1a17;
+  background: rgba(242, 219, 178, 0.94);
+}
+
+.virtual-aim-zone.is-charging .virtual-stick__inner-ring {
+  border-style: solid;
+  border-color: rgba(28, 26, 23, 0.5);
+}
+
 .virtual-joystick-zone.is-active .virtual-stick,
 .virtual-button.is-active {
   border-color: #1c1a17;
@@ -1357,6 +1375,21 @@ body.is-topdown .virtual-controls.is-desktop-debug {
 
 .hotbar__slot[data-progress] {
   --hotbar-progress-color: rgba(201, 120, 104, 0.92);
+}
+
+/*
+ * 冷却中（设计稿「CD效果 · 轻型工具CD」）。
+ *
+ * 和长按那圈是同一个环，只是反着走：长按是攒满，冷却是退空。颜色压成墨灰——
+ * 它说的是「现在按不动」，不该和「正在做一件事」抢同一种注意力；格子本身同时
+ * 压暗一点，好让「这一格暂时用不了」在余光里也读得出来。
+ */
+.hotbar__slot[data-progress='cooldown'] {
+  --hotbar-progress-color: rgba(60, 54, 46, 0.55);
+}
+
+.hotbar__slot[data-progress='cooldown'] .hotbar__figure {
+  opacity: 0.55;
 }
 
 /*

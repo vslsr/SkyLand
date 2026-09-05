@@ -67,3 +67,29 @@ export function sampleVirtualJoystick(
 function clamp(value: number, minimum: number, maximum: number): number {
   return Math.min(maximum, Math.max(minimum, value));
 }
+
+/**
+ * 瞄准摇杆的两层判定（设计稿「工具、武器使用流程」的移动端那一条）。
+ *
+ * 摇杆分两层：**内层只管朝向**，推到外层那一圈才开始蓄力，松手就是发射。两层
+ * 之间要有一道回滞（`RELEASE_MARGIN`）——没有它，手指停在分界线上会让蓄力一帧
+ * 一开一关，玩家看到的是圈在闪，而每一次开关都是一次真的 `use:begin` / `cancel`。
+ *
+ * @param normalizedLength 当前行程占满行程的比例 [0, 1]（`sampleVirtualJoystick`
+ *   给的 `value` 的长度就是它）。
+ * @param innerRatio 内层占满行程的比例。超过它就进外层。
+ * @param charging 上一帧在不在蓄力。回滞要看这个。
+ */
+export function isVirtualAimCharging(
+  normalizedLength: number,
+  innerRatio: number,
+  charging: boolean,
+): boolean {
+  const enter = Math.min(1, Math.max(0, innerRatio));
+  // 已经在蓄力了就要缩回内层一小截才松开：分界线上抖一下不该打断这一次。
+  const threshold = charging ? Math.max(0, enter - RELEASE_MARGIN) : enter;
+  return normalizedLength > threshold;
+}
+
+/** 退出蓄力要比进入多缩回这么多行程。 */
+const RELEASE_MARGIN = 0.06;

@@ -30,6 +30,7 @@ export function createPlayerInputScheme(
 
 export const PlayerInputActionIds = {
   Move: 'IA_Player_Move',
+  Aim: 'IA_Player_Aim',
   VesselMove: 'IA_Vessel_Move',
   Sprint: 'IA_Player_Sprint',
   Jump: 'IA_Player_Jump',
@@ -71,6 +72,7 @@ const tagForAction = (actionId: string): string => {
 
 export const PlayerInputTags = {
   Move: defineTag(tagForAction(PlayerInputActionIds.Move)),
+  Aim: defineTag(tagForAction(PlayerInputActionIds.Aim)),
   VesselMove: defineTag(tagForAction(PlayerInputActionIds.VesselMove)),
   Sprint: defineTag(tagForAction(PlayerInputActionIds.Sprint)),
   Jump: defineTag(tagForAction(PlayerInputActionIds.Jump)),

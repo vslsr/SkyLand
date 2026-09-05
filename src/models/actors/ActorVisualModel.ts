@@ -40,6 +40,28 @@ export interface ActorVisualModel {
   readonly pbfSlimeVisualRig?: PbfSlimeVisualRig;
   /** 由骨骼腿撑起来的软体史莱姆；步态与 IK 由 `ThreeSlimeLegVisual` 驱动。 */
   readonly slimeLegVisualRig?: SlimeLegVisualRig;
+  /** 仅木弓提供；拉弓的形变与撒手那一下的回弹由 `ThreeWoodBowVisual` 驱动。 */
+  readonly woodBowRig?: WoodBowVisualRig;
+}
+
+/**
+ * 拉弓那一下动的三样东西（设计稿 `@i 木弓` 的 `A`）。
+ *
+ * 上下弓臂各自绕**弓握中点**转，所以它们是两个独立的枢轴而不是一整块；弦是三段
+ * 折线（上梢 → 弦中点 → 下梢），拉开时中点后移成 V 形。三样都在 visualRoot 下，
+ * 位置由渲染侧每帧写，几何本身不重建。
+ */
+export interface WoodBowVisualRig {
+  /** 上弓臂的枢轴，绕 X 向后转。 */
+  readonly upperLimb: THREE.Group;
+  /** 下弓臂的枢轴，绕 X 向后转（方向与上臂相反）。 */
+  readonly lowerLimb: THREE.Group;
+  /** 弦那三段折线。拉开时中间那个点沿 -Z 后移。 */
+  readonly string: THREE.Line;
+  /** 弦静止时两梢之间的半跨度，米。 */
+  readonly stringHalfSpan: number;
+  /** 弦贴着弓的哪一处（局部 Z）。 */
+  readonly stringOffsetZ: number;
 }
 
 /** 一条腿的全部节点。两节骨头是圆柱——WebGL 忽略 `LineBasicMaterial.linewidth`。 */

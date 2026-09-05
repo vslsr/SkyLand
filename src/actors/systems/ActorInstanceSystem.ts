@@ -20,6 +20,7 @@ import {
   PROP_SINGLE,
   residencyCode,
 } from '../../render/propInstanceLayout';
+import { RENDER_PROXY_COMPONENT } from '../components/RenderProxyComponent';
 import { chewBodyOffset, chewFoodScale } from '../../player/chewAnimation';
 import {
   InstanceIdTable,
@@ -71,6 +72,10 @@ export class ActorInstanceSystem {
     for (const actor of world.query(TRANSFORM_COMPONENT, ITEM_STACK_COMPONENT) as Actor[]) {
       const archetypeIndex = this.catalog.archetypeIndex.get(actor.archetypeId);
       if (archetypeIndex === undefined || !this.catalog.isBatched(actor.archetypeId)) continue;
+      // 已经有 proxy 的不再进合批：一个 Actor 要么是合批里的一个实例，要么是渲染
+      // 世界里的一棵模型，两边都画就会看见两把弓叠在一起。会形变的手持物走的正是
+      // 后一条（见 `ClientActorSystem` 的 `HAND_DEFORMED_MODELS`）。
+      if (actor.getComponent(RENDER_PROXY_COMPONENT)) continue;
       const transform = actor.requireComponent(TRANSFORM_COMPONENT) as TransformComponent;
       const stack = actor.requireComponent(ITEM_STACK_COMPONENT) as ItemStackComponent;
       const residency = actor.getComponent(

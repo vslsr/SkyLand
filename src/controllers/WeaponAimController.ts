@@ -1,4 +1,6 @@
 import type { WorldRay } from '../camera/cameraRay';
+import { PlayerInputTags } from '../input/config/playerInput';
+import type { InputSubsystem } from '../input/core/InputSubsystem';
 import type { BallisticPreviewState } from '../render/RenderScene';
 import {
   resolveWeaponStrike,
@@ -11,8 +13,10 @@ import { MUZZLE_HEIGHT } from '../../shared/ballistics/index.mjs';
  *
  * 两件事，一个来源：
  *
- * - **朝向**：拿着武器时，角色面朝指针在地面上的投影点（PC）或摇杆方向（移动端）。
- *   转身仍然归 `TopDownController.setFacingRequest`——这里只说「对准哪儿」。
+ * - **朝向**：拿着武器时，角色面朝指针在地面上的投影点（PC）或**瞄准摇杆**推的那
+ *   个方向（移动端 / 手柄右摇杆）。转身仍然归 `TopDownController.setFacingRequest`
+ *   ——这里只说「对准哪儿」。摇杆推着的时候它说了算：手指正按在上面，那是玩家
+ *   当下的意图，而触屏上那条「指针射线」多半是上一次点击留下的。
  * - **抛物线**：蓄力那一段画一条白线，落点用的是**和服务端同一份共享换算**
  *   （`shared/items/weaponStrike.mjs`），再由**同一份沿弧扫掠**在墙、地形、实体
  *   处截断（`shared/ballistics/projectileSweep.mjs`）。两边各写一套的话，玩家瞄
@@ -36,6 +40,12 @@ export interface WeaponAimPort {
   getPlayer(): { x: number; y: number; z: number; yaw: number } | undefined;
   /** 指针射线；触屏/手柄没有指针时是 undefined，这时朝向交回移动方向。 */
   pointerRay(): WorldRay | undefined;
+  /**
+   * 相机的水平前 / 右向量。摇杆推的是**屏幕上的方向**，要落到世界里得过这一层，
+   * 和移动摇杆走的是同一套换算（`TopDownController`）——两处不一致的话，同一个
+   * 推杆方向会让人走一个方向、瞄另一个方向。
+   */
+  cameraAxes(): { forwardX: number; forwardZ: number; rightX: number; rightZ: number };
   /** 落点那一格的地面高度，画线的末端要落在地上。 */
   sampleGroundHeight(x: number, z: number): number;
   /** 让角色对准这一点；传 undefined 把朝向交回移动方向。 */
@@ -65,12 +75,40 @@ export interface WeaponAimTarget {
 
 /** 朝向跟随指针的收敛速度。比默认快一些：瞄准要跟手。 */
 const AIM_SHARPNESS = 14;
+/**
+ * 摇杆瞄准时那个对准点摆在身前多远。
+ *
+ * 多远都行——朝向只取这一点的方位角，射程另由蓄力比例决定。取一个中等距离是为了
+ * 数值稳定：太近时角色自身的移动会把方位角搅乱。
+ */
+const AIM_STICK_DISTANCE = 8;
 
 export class WeaponAimController {
   private charging = false;
   private chargeRatio = 0;
 
-  public constructor(private readonly port: WeaponAimPort) {}
+  /** 瞄准摇杆这一帧推到哪儿。没推（或没有摇杆）时是零向量。 */
+  private readonly stick = { x: 0, y: 0 };
+  private readonly disposers: Array<() => void> = [];
+
+  public constructor(private readonly port: WeaponAimPort, input?: InputSubsystem) {
+    if (!input) return;
+    this.disposers.push(input.bind(PlayerInputTags.Aim, (event) => {
+      const value = event.value;
+      if (event.phase === 'completed' || event.phase === 'canceled' || typeof value === 'boolean') {
+        this.stick.x = 0;
+        this.stick.y = 0;
+        return;
+      }
+      this.stick.x = value.x;
+      this.stick.y = value.y;
+    }));
+  }
+
+  /** 解绑输入。场景销毁时调。 */
+  public dispose(): void {
+    for (const dispose of this.disposers.splice(0)) dispose();
+  }
 
   /**
    * 这一帧的蓄力比例。由物品栏那圈倒计时喂进来——圈和线读同一个比例，
@@ -141,12 +179,34 @@ export class WeaponAimController {
   }
 
   /**
+   * 摇杆推的方向落到世界里的那一点。
+   *
+   * 没推杆时返回 undefined，朝向就交回指针 / 移动方向——**推着才算意图**，松开
+   * 之后角色不该一直定在最后一次推的方向上。
+   */
+  private resolveStickAimPoint(): { x: number; z: number } | undefined {
+    const length = Math.hypot(this.stick.x, this.stick.y);
+    if (length <= 0) return undefined;
+    const player = this.port.getPlayer();
+    if (!player) return undefined;
+    const axes = this.port.cameraAxes();
+    const normalizedX = this.stick.x / length;
+    const normalizedY = this.stick.y / length;
+    return {
+      x: player.x + (axes.rightX * normalizedX + axes.forwardX * normalizedY) * AIM_STICK_DISTANCE,
+      z: player.z + (axes.rightZ * normalizedX + axes.forwardZ * normalizedY) * AIM_STICK_DISTANCE,
+    };
+  }
+
+  /**
    * 指针射线与「角色脚下那个水平面」的交点。
    *
    * 用玩家的高度而不是 y=0：站在地基或山坡上时，射线打在 0 平面上的那一点会
    * 偏出去一大截，角色因此永远转不到指针指着的地方。
    */
   private resolveAimPoint(planeY: number): { x: number; z: number } | undefined {
+    const stick = this.resolveStickAimPoint();
+    if (stick) return stick;
     const ray = this.port.pointerRay();
     if (!ray) return undefined;
     const directionY = ray.direction[1];
@@ -161,5 +221,11 @@ export class WeaponAimController {
   }
 }
 
+/**
+ * 摇杆推的方向落到世界里的那一点（设计稿移动端那一条）。
+ *
+ * 没推杆时返回 undefined，朝向就交回指针 / 移动方向——**推杆才算意图**，松开之后
+ * 角色不该一直定在最后一次推的方向上。
+ */
 /** 朝向请求的收敛速度，导出给场景层复用。 */
 export const WEAPON_AIM_SHARPNESS = AIM_SHARPNESS;
