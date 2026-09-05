@@ -48,6 +48,37 @@ export function weaponDamage(weapon, strike, targetTags = []) {
   return weapon.attack * strike.damageScale * tagMultiplier(weapon, targetTags);
 }
 
+/**
+ * 这一发打在蒙皮上的**向内冲量** [0, 1]。
+ *
+ * 只按蓄力比例走，不按伤害：伤害要乘目标标签的倍率，而「箭扎进身体有多深」是箭的
+ * 事，不是挨打的是谁的事——同一发箭射木墙和射史莱姆，凹的深浅该是一样的。
+ *
+ * 有下限：最轻的一发也得看得见，否则「明明打中了却什么都没动」看上去就是没打中。
+ */
+export function weaponHitImpulse(strike) {
+  if (!strike) return 0;
+  return MINIMUM_HIT_IMPULSE + (1 - MINIMUM_HIT_IMPULSE) * clamp01(strike.ratio);
+}
+
+/** 最轻的一发也留这么多冲量。 */
+export const MINIMUM_HIT_IMPULSE = 0.35;
+
+/**
+ * 弹药**顺着哪个方向**扎进目标：出手位置 → 目标，水平面上的单位向量。
+ *
+ * 取的是「射手到这一个目标」而不是权威 yaw：一次落点半径里可能站着好几个东西，
+ * 打在侧面那一只身上的箭该从它的侧面进去。两者重合时（目标正好在脚下）退回 yaw，
+ * 因为零向量没有方向可言。
+ */
+export function weaponHitDirection(originX, originZ, targetX, targetZ, yaw) {
+  const deltaX = targetX - originX;
+  const deltaZ = targetZ - originZ;
+  const length = Math.hypot(deltaX, deltaZ);
+  if (!(length > 1e-4)) return { x: Math.sin(yaw), z: Math.cos(yaw) };
+  return { x: deltaX / length, z: deltaZ / length };
+}
+
 /** 目标标签对应的倍率；没命中任何一条就是 1。 */
 export function tagMultiplier(weapon, targetTags = []) {
   for (const entry of weapon?.tagMultipliers ?? []) {

@@ -12,7 +12,10 @@ export {
   weaponChargeRatioForDistance,
   tagMultiplier,
   weaponDamage,
+  weaponHitDirection,
+  weaponHitImpulse,
   weaponImpactPoint,
+  MINIMUM_HIT_IMPULSE,
 } from './weaponStrike.mjs';
 export {
   createItemUseAbility,

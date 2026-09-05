@@ -26,6 +26,7 @@ A source can have either half or both. The player's own mouse drag has only the 
 | the player's own mouse drag | pointer → `ThreeSlimeSurfaceDrag` → solver, in-render | render world, never leaves it |
 | an external grab (bite today, snags/grabbers later) | snapshot `bitingPlayerId` → `slimeBiteTip.ts` → `SlimeBiteParams` → solver rest shape | each client derives it from both poses |
 | the leash of an external grab | `SoftBodyDeformationComponent` → snapshot `leash` → `params.leash` → `stepCharacter` | shared fixed step, both sides |
+| 被弹药打中的那一记冲量 | 权威结算 `HealthComponent.lastHit*` → 快照 → `RenderSlimeImpact` 参数段 → 求解器 | 服务端定「哪一次、从哪来、多重」 |
 
 The local mouse drag is deliberately *not* a Component. Pointer, camera and shell all live on the render side, so routing it through gameplay would be a boundary crossing that buys nothing. It reaches the network only because the owner uplinks it (`readSlimeSurfaceDrag` → `player:slime-drag`).
 
@@ -51,6 +52,18 @@ A new source of the second kind needs one thing on the client: a way to say wher
 **Length needs a floor, not just geometry.** The shell (0.95m) is nearly twice the character collider (0.52m) and a mouth sits 0.42m in front of its owner, so at ordinary bite range the grip point is *inside* the victim's shell and the geometric protrusion is zero or negative. `gripDepth` is the fold of skin the teeth pull up regardless — a property of the teeth, not of the gap.
 
 **Coordinates are shell space: the Actor's origin with world axes, no yaw.** `ThreeHybridSlimeVisual` counter-rotates the rig by `-yaw` so a turn doesn't fling the soft body around like a rigid body, which leaves the solver's vertices on world axes. Rotate anything by yaw on the way in and the whole deformation is off by that yaw — for two slimes facing each other that is 180°, and the tip comes out of the victim's *back*. Both sides are three f32; nothing but the picture will tell you.
+
+**A one-off impulse** — 中箭、以后的爆炸冲击波。它既不是一段关系，也不是运动的属性：
+它是**一次事件**，权威侧只知道「这一次结算是从哪个方向、多重」，形状照旧在渲染侧长出来
+（`HybridSlimeSimulation.applyProjectileImpact`，长腿那颗身体走 `ThreeSlimeAnimator` 的
+弹性形变弹簧）。三条要点：
+
+- **是冲量，不是静止外形的一项。** 写成静止外形（像咬住的尖那样）的话，坑会一直凹着，
+  直到有人记得清掉它——而「谁负责清」正是这类表现最容易漏的一步。
+- **过网的是方向，不是命中点。** 凹陷是「顶点方向与来袭轴的夹角」的连续函数，没有命中
+  顶点这种离散的东西；命中点还得跟着被击者这一帧插值到哪儿走，方向不用。
+- **触发靠计数**（复用 `HealthComponent.eventRevision`），和死亡摊开、飘字同一套：第一次
+  看见一个计数只记下来不重放，没有冲量的事件（治疗）把计数一起写 0。
 
 **A force that is a property of motion** — a new squash on landing, a lean while sprinting. That is a `SlimeMotionParams` field plus solver code, not a Component: add the param in `RenderVisualParams.ts`, write it from the entity, consume it in the solver's rest-shape rebuild.
 

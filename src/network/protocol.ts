@@ -63,6 +63,15 @@ export interface SnapshotHealth {
   lastDelta: number;
   eventRevision: number;
   revision: number;
+  /**
+   * 最近一次伤害是顺着哪个方向打进来的：弹药的飞行方向，世界轴向的单位向量。
+   * 只有射进身体的东西才带这三个字段，治疗与环境伤害缺省——蒙皮那一下凹陷读它。
+   */
+  lastHitX?: number;
+  lastHitY?: number;
+  lastHitZ?: number;
+  /** 这一下有多重 [0, 1]。缺省或 0 表示这一次事件没有冲击。 */
+  lastHitImpulse?: number;
 }
 
 /** 房间快照里的单名玩家，坐标由服务端权威计算。 */

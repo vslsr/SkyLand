@@ -7,6 +7,8 @@ import {
 import {
   resolveWeaponStrike,
   weaponDamage,
+  weaponHitDirection,
+  weaponHitImpulse,
   weaponImpactPoint,
 } from '../../shared/items/index.mjs';
 import { GAME_ABILITY_COMPONENT } from '../../shared/abilities/index.mjs';
@@ -60,12 +62,19 @@ export function fireWeaponFrom(scene, shooter, weapon, chargeRatio) {
   const source = shooter.getComponent(GAME_ABILITY_COMPONENT)?.abilitySystem;
   const nowSeconds = scene.now() / 1000;
 
+  const impulse = weaponHitImpulse(strike);
+  // 出手时射手站在哪儿：下面那个循环里 `transform` 被目标的那份盖住了，而这两个
+  // 数一直说的是射手。
+  const originX = transform.x;
+  const originZ = transform.z;
+  const originYaw = transform.yaw;
   // 记下这一发，快照带出去：**别人也该看见那支箭**。挂在射手自己身上而不是记在
-  // 玩家的一个裸属性上——AI 射的那一箭要和玩家射的走同一条复制路径。
+  // 玩家的一个裸属性上——AI 射的那一箭要和玩家射的走同一条复制路径。带的是落点
+  // 而不是「往哪个方向射」：落点是判定用的那一个，两边因此画的是同一条弧。
   shooter.getComponent(WEAPON_SHOT_COMPONENT)?.record({
-    x: transform.x,
+    x: originX,
     y: transform.y,
-    z: transform.z,
+    z: originZ,
     impactX: impact.x,
     impactZ: impact.z,
     ratio: strike.ratio,
@@ -75,7 +84,22 @@ export function fireWeaponFrom(scene, shooter, weapon, chargeRatio) {
   for (const target of collectWeaponTargets(scene, shooter, impact, strike.radius)) {
     const damage = weaponDamage(weapon, strike, resolveActorTags(target));
     if (damage <= 0) continue;
-    scene.applyHealthChange(target.id, -damage, { source, nowSeconds });
+    // 箭是从射手那一侧扎进去的：方向随伤害一起过网，客户端拿它把蒙皮朝里砸一下
+    // （见 `src/render/RenderSlimeImpact.ts`）。形状不过网——每个客户端按同一个轴
+    // 自己解，和咬住的那个尖同一个取向。
+    const transform = target.requireComponent(TRANSFORM_COMPONENT);
+    const direction = weaponHitDirection(
+      originX,
+      originZ,
+      transform.x,
+      transform.z,
+      originYaw,
+    );
+    scene.applyHealthChange(target.id, -damage, {
+      source,
+      nowSeconds,
+      impact: { x: direction.x, y: 0, z: direction.z, impulse },
+    });
   }
   return true;
 }

@@ -36,12 +36,15 @@ function sanitizeAmount(amount) {
  * 返回这次变化的描述；没有变化返回 undefined，因此调用方不必自己判断
  * 「打在尸体上」「治疗满血的人」这类空操作。
  */
-function commitHealth(actor, health, abilitySystem, before, nowSeconds) {
+function commitHealth(actor, health, abilitySystem, before, nowSeconds, impact) {
   const after = readHealth(abilitySystem) ?? before;
   const delta = after - before;
   health.current = after;
   if (delta === 0) return undefined;
   health.lastDelta = delta;
+  // 来袭方向和 lastDelta 一样，描述的是**这一次**事件：治疗与没有方向的伤害写零，
+  // 不留上一箭的轴。
+  health.recordHit(impact);
   health.eventRevision += 1;
   health.revision += 1;
   const died = after <= 0 && !health.dead;
@@ -63,6 +66,13 @@ function commitHealth(actor, health, abilitySystem, before, nowSeconds) {
   };
 }
 
+/**
+ * 挨一下。
+ *
+ * `options.impact` 是**弹药的飞行方向**（单位向量的三个分量）加一个 [0, 1] 的冲量，
+ * 只有射进身体的东西才有：客户端拿它把蒙皮朝里砸一下。没有它的伤害（火、跌落、
+ * 调试指令）照常结算，只是没有那一下凹陷。
+ */
 export function applyDamage(actor, amount, options = {}) {
   const target = healthOf(actor);
   const damage = sanitizeAmount(amount);
@@ -73,7 +83,14 @@ export function applyDamage(actor, amount, options = {}) {
     source: options.source,
     parameters: { [HEALTH_AMOUNT_PARAMETER]: damage },
   });
-  return commitHealth(actor, target.health, target.abilitySystem, before, options.nowSeconds);
+  return commitHealth(
+    actor,
+    target.health,
+    target.abilitySystem,
+    before,
+    options.nowSeconds,
+    options.impact,
+  );
 }
 
 export function applyHeal(actor, amount, options = {}) {

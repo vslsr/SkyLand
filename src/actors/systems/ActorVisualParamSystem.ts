@@ -13,6 +13,11 @@ import {
   writeSlimeGroundProbeParams,
 } from '../../render/RenderSlimeLegs';
 import {
+  createSlimeImpactParams,
+  resolveSlimeImpactParams,
+  writeSlimeImpactParams,
+} from '../../render/RenderSlimeImpact';
+import {
   PARAM_BOW_CHARGE,
   PARAM_BOW_RELEASE_REVISION,
   PARAM_BUOYANCY_DRAFT,
@@ -95,6 +100,9 @@ export interface BowDrawSource {
 }
 
 export class ActorVisualParamSystem {
+  /** 逐帧复用，避免每个 Actor 每帧分配一个中箭参数对象。 */
+  private readonly impact = createSlimeImpactParams();
+
   public constructor(
     private readonly transforms: RenderTransformBuffer,
     private readonly bows?: BowDrawSource,
@@ -125,6 +133,10 @@ export class ActorVisualParamSystem {
         PARAM_HEALTH_DEATH_REVISION,
         health?.dead ? health.deathRevision : 0,
       );
+      // 中箭那一下：过去的是「哪一次、从哪来、多重」，凹多深由渲染侧自己积分。
+      // 没有生命值的 Actor 与没有方向的事件（治疗、火）都写静止值——槽位会被回收，
+      // 留着上一位的来袭轴会让新 proxy 一出生就被砸一下。
+      this.writeImpact(health, proxy);
       const temperature = actor.getComponent(
         TEMPERATURE_COMPONENT,
       ) as TemperatureComponent | undefined;
@@ -160,6 +172,17 @@ export class ActorVisualParamSystem {
       this.writeElastic(actor, proxy);
       this.writeDropMotion(actor, proxy);
     }
+  }
+
+  private writeImpact(
+    health: HealthComponent | undefined,
+    proxy: RenderProxyComponent,
+  ): void {
+    writeSlimeImpactParams(
+      this.transforms,
+      proxy.proxyId,
+      resolveSlimeImpactParams(this.impact, health),
+    );
   }
 
   /**

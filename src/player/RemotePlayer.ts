@@ -17,6 +17,11 @@ import {
 } from '../render/RenderSlimeMotion';
 import { PARAM_HEALTH_DEATH_REVISION } from '../render/RenderVisualParams';
 import {
+  createSlimeImpactParams,
+  resolveSlimeImpactParams,
+  writeSlimeImpactParams,
+} from '../render/RenderSlimeImpact';
+import {
   SLIME_DRAG_AT_REST,
   writeSlimeDragParams,
   type SlimeDragParams,
@@ -57,6 +62,8 @@ export class RemotePlayer extends Actor {
   private speed = 0;
   /** 死亡计数，从快照来。0 表示活着；渲染侧靠它变化踢一次倒下动画。 */
   private deathRevision = 0;
+  /** 别人挨的那一箭，同样是复制来的。 */
+  private readonly impact = createSlimeImpactParams();
   private verticalVelocity = 0;
   private grounded = true;
 
@@ -144,6 +151,8 @@ export class RemotePlayer extends Actor {
     this.grounded = state.grounded ?? (state.y === undefined);
     // 死了之后停下来：快照里的速度本来就会归零，但倒下那一段不该还在走路。
     this.deathRevision = state.health?.dead ? state.health.deathRevision : 0;
+    // 中箭那一下：别人身上的凹陷也该看得见，判据同样是事件计数变了。
+    resolveSlimeImpactParams(this.impact, state.health);
     // 松手后快照不再带这个字段，revision 回到 0 就是「没有人在拖」。
     this.drag.revision = state.slimeDrag?.revision ?? 0;
     this.drag.contactX = state.slimeDrag?.contactX ?? 0;
@@ -182,6 +191,7 @@ export class RemotePlayer extends Actor {
     writeSlimeMotionParams(this.transforms, this.proxyId, this.motion);
     // 死亡计数：别人的死同样是复制来的，0 表示还活着。
     this.transforms.writeParam(this.proxyId, PARAM_HEALTH_DEATH_REVISION, this.deathRevision);
+    writeSlimeImpactParams(this.transforms, this.proxyId, this.impact);
     writeSlimeDragParams(this.transforms, this.proxyId, this.drag);
     writeSlimeBiteParams(this.transforms, this.proxyId, this.biteTips);
     const legs = this.legGroundProbe;
