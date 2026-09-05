@@ -12,7 +12,7 @@ import {
   weaponHitImpulse,
   weaponImpactPoint,
 } from '../../shared/items/index.mjs';
-import { MUZZLE_HEIGHT } from '../../shared/ballistics/index.mjs';
+import { MUZZLE_HEIGHT, ballisticArcTangent } from '../../shared/ballistics/index.mjs';
 import { GAME_ABILITY_COMPONENT } from '../../shared/abilities/index.mjs';
 import { registerItemUseAction } from './ItemUseActions.mjs';
 
@@ -129,6 +129,18 @@ export function resolveProjectileImpact(scene, projectile, impact) {
     projectile.impactX - projectile.originX,
     projectile.impactZ - projectile.originZ,
   );
+  // 竖直那一份取这一箭**停住那一点的切线**：拉满的一箭是以二十来度扎下来的，
+  // 不是平着飞进去的。水平方向仍然按目标各自算（上面那段），两者合起来才是
+  // 「从这一侧、以这个角度进来」。
+  //
+  // 用斜率而不是切线的 y 分量：下面交出去的水平分量是单位向量，两者要在同一个
+  // 尺度上才配得起来；`recordHit` 会把合成的向量归一化。
+  const tangent = ballisticArcTangent(projectile, projectile.travel, { x: 0, y: 0, z: 0 });
+  const tangentHorizontal = Math.hypot(tangent.x, tangent.z);
+  const slope = tangentHorizontal > 1e-6
+    ? tangent.y / tangentHorizontal
+    // 几乎垂直落下：水平方向没有意义了，直接按切线的竖直分量给一个陡到底的值。
+    : Math.sign(tangent.y) * 1e3;
 
   let hits = 0;
   const damaged = new Set();
@@ -150,7 +162,7 @@ export function resolveProjectileImpact(scene, projectile, impact) {
     scene.applyHealthChange(target.id, -damage, {
       source,
       nowSeconds,
-      impact: { x: direction.x, y: 0, z: direction.z, impulse },
+      impact: { x: direction.x, y: slope, z: direction.z, impulse },
     });
     hits += 1;
   };

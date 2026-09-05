@@ -129,6 +129,36 @@ export interface SnapshotPlayer {
 }
 
 /**
+ * 一支飞在世界里的弹药。
+ *
+ * 过网的是**整条弧加一个出发时刻**，不是每 tick 一个点。34 米每秒的小东西是快照
+ * 插值最坏的情况：20 Hz 下两份快照隔着 1.7 米，缓冲一空就原地冻住、下一份到了再
+ * 跳过去——那阵抖没法靠调插值参数消掉，因为信息本来就不够。而这条弧是一条写得
+ * 出来的曲线，两端各自求点就都是光滑的，切线也不用拿两帧位移去猜。
+ *
+ * `travel` 与 `stopped` 是**权威的那一半**：撞在哪儿、什么时候停，只有服务端知道。
+ * 客户端按自己的渲染时钟推进，推到不超过权威说的那一点为止。
+ */
+export interface SnapshotProjectile {
+  /** 名义弧的两端：没被挡住时从出手点到落点的那一条。 */
+  readonly originX: number;
+  readonly originY: number;
+  readonly originZ: number;
+  readonly impactX: number;
+  readonly impactY: number;
+  readonly impactZ: number;
+  /** 蓄力比例 [0, 1]。弧顶按它抬。 */
+  readonly ratio: number;
+  /** 出发那一刻的绝对服务端秒数。 */
+  readonly startedAt: number;
+  /** 走完整条弧要多久，秒。权威说多久就是多久，不由客户端按原型速度再算一遍。 */
+  readonly flightSeconds: number;
+  /** 权威进度 [0, 1]；停住之后就是它真正的落点比例。 */
+  readonly travel: number;
+  readonly stopped: boolean;
+}
+
+/**
  * 撒手那一下。
  *
  * **只有一个计数**：飞出去那支箭是复制过来的 Actor（`ProjectileComponent`），自己飞、
@@ -161,6 +191,8 @@ export interface SnapshotActor {
    * 知道射手是玩家还是 AI。
    */
   weaponShot?: SnapshotWeaponShot;
+  /** 飞在世界里的那支箭：整条弧加一个出发时刻，见 `SnapshotProjectile`。 */
+  projectile?: SnapshotProjectile;
   /** 生成物件由自描述 id 里的种类查表得到原型；普通网络 Actor 必填。 */
   archetypeId?: string;
   /** 离散复制状态；切换父节点时不做插值。 */

@@ -308,9 +308,19 @@ test('中箭把来袭方向记进复制面：方向、冲量与事件计数一�
   assert.equal(flyOut(context), 0);
   const hit = health.snapshot();
   assert.equal(hit.lastHitImpulse, 1, '拉满就是满冲量');
-  assert.ok(Math.abs(hit.lastHitZ - 1) < 1e-6, `方向该朝 +Z，实际 ${hit.lastHitZ}`);
+  assert.ok(hit.lastHitZ > 0.9, `水平方向该朝 +Z，实际 ${hit.lastHitZ}`);
   assert.ok(Math.abs(hit.lastHitX) < 1e-6);
-  assert.equal(hit.lastHitY, 0, '今天的箭只有水平方向');
+  // **斜着扎下来**：竖直那一份取的是箭停住那一点的弧切线。拉满一箭飞 22 米，
+  // 落下来大约二十来度——平着飞进去的箭是这条链路上原来那个洞。
+  const pitchDegrees = Math.asin(-hit.lastHitY) * 180 / Math.PI;
+  assert.ok(
+    pitchDegrees > 10 && pitchDegrees < 40,
+    `该以十几到几十度扎下来，实际 ${pitchDegrees.toFixed(1)}°`,
+  );
+  assert.ok(
+    Math.abs(Math.hypot(hit.lastHitX, hit.lastHitY, hit.lastHitZ) - 1) < 1e-3,
+    '过网的是单位向量',
+  );
   assert.ok(hit.lastDelta < 0 && hit.eventRevision > 0, '飘字和这一下读的是同一次事件');
 
   // 治疗也是一次事件，但它没有方向：不清零的话，客户端会拿上一箭的轴再砸一次。

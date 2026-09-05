@@ -65,6 +65,41 @@ export function ballisticArcPoint(arc, t, out) {
 }
 
 /**
+ * 弧在 `t` 处的**切线**：单位向量，也就是这一刻箭尖朝的方向。
+ *
+ * 解析求导，不是拿两帧位移去差分：差分要么被快照率限住（20 Hz 的位置插值是折线，
+ * 每个接缝上切线跳一次），要么在停住那一帧退化成零向量。这条曲线的导数是写得出来的，
+ * 就不该去猜它。
+ *
+ * 水平方向匀速，所以只有竖直那一项随 t 变：`dy/dt = (impactY - originY) + 4·apex·(1 - 2t)`。
+ * 起手时它是正的（往上），过了弧顶变负（扎下去）。
+ *
+ * 退化成零向量（原点与落点重合、且弧顶为 0）时给正前方，不让它变成 NaN。
+ *
+ * @param {BallisticArc} arc
+ * @param {number} t
+ * @param {{ x: number, y: number, z: number }} out
+ * @returns {{ x: number, y: number, z: number }}
+ */
+export function ballisticArcTangent(arc, t, out) {
+  const apex = ballisticArcApex(arc);
+  const dx = arc.impactX - arc.originX;
+  const dz = arc.impactZ - arc.originZ;
+  const dy = (arc.impactY - arc.originY) + apex * 4 * (1 - 2 * t);
+  const length = Math.hypot(dx, dy, dz);
+  if (!(length > 1e-9)) {
+    out.x = 0;
+    out.y = 0;
+    out.z = 1;
+    return out;
+  }
+  out.x = dx / length;
+  out.y = dy / length;
+  out.z = dz / length;
+  return out;
+}
+
+/**
  * 这一箭实际走完弧的百分之多少。没被挡住就是 1。
  *
  * **为什么截断记成一个比例，而不是把落点改小**：被墙挡住的一箭走的是原来那条

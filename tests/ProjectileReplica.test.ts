@@ -1,15 +1,18 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import * as THREE from 'three';
 import {
   HEALTH_COMPONENT,
   SIMPLE_COLLISION_COMPONENT,
 } from '../shared/actor/index.mjs';
-import { PROJECTILE_RADIUS } from '../shared/ballistics/index.mjs';
-import * as THREE from 'three';
+import {
+  PROJECTILE_RADIUS,
+  ballisticArcPoint,
+  ballisticArcTangent,
+} from '../shared/ballistics/index.mjs';
+import { INTERPOLATION_DELAY_MS } from '../shared/networkTuning.mjs';
 import type { SnapshotActor } from '../src/network/protocol';
 import { RenderTransformBuffer } from '../src/render/RenderTransformBuffer';
-import type { ProxyId } from '../src/render/RenderScene';
-import { ThreeProjectileVisual } from '../src/render/three/ThreeProjectileVisual';
 import type { SceneDefinition } from '../src/scenes/data/SceneDefinition';
 import { createTestActorSystem, renderProxyOf, stepActorFrame } from './renderProxyProbe';
 
@@ -17,15 +20,17 @@ import { createTestActorSystem, renderProxyOf, stepActorFrame } from './renderPr
  * 射出去那支箭在客户端这一侧是什么（设计稿 `@w 木弓` 的 `A`）。
  *
  * 它以前是渲染世界池子里的一个对象：判定在松手那一刻早就结算完了，屏幕上那条轨迹
- * 和世界没有关系，所以它穿墙。现在它是一个**复制 Actor**——位置整段由服务端权威
- * 决定，客户端只负责把它画对。这一组锁住画对的两条：
+ * 和世界没有关系，所以它穿墙。现在它是一个**复制 Actor**——撞在哪儿、什么时候停由
+ * 服务端权威决定，而**位置由客户端自己按弧求**。这一组锁住三条：
  *
  * 1. 箭不装碰撞体。一支飞在空中的箭不该挡住走路的人，也不该被准星选中挡在它身后
  *    那只史莱姆前面。这条和服务端 `ServerActorFactory` 里的判断是同一条。
- * 2. 箭尖朝着它正在去的方向。俯仰不过网：渲染侧从连续两帧的位移里求切线，
- *    停下之后保持最后一次的角度（插在墙上的那一支该维持扎进去的姿态）。
+ * 2. 位置不走快照插值。34 米每秒的小东西是插值最坏的情况：20 Hz 下两份快照隔着
+ *    1.7 米，缓冲一空就原地冻住、下一份到了再跳过去。整条弧随快照复制过来，
+ *    于是两份快照之间它照样每帧往前走一点（`ClientProjectileSystem`）。
+ * 3. 箭尖朝着它正在去的方向。断言的是**箭尖在世界里指向哪儿**，不是那个欧拉角
+ *    读数——正负号写反过一次，而对着实现写的断言当时跟着一起反了。
  */
-
 const ARROW_RENDER = {
   model: 'line-art-arrow',
   length: 0.62,
@@ -64,29 +69,87 @@ const definition = {
   },
 } as unknown as SceneDefinition;
 
-function arrowAt(x: number, y: number, z: number): SnapshotActor {
+const ORIGIN = { x: 0, y: 0.62, z: 0 };
+const IMPACT = { x: 0, y: 0, z: 22 };
+/** 出发那一刻的服务端秒数。测试里的服务端时钟和本地时钟对齐，见 `createSystem`。 */
+const STARTED_AT = 0.5;
+const FLIGHT_SECONDS = 1;
+
+function arrow(travel: number, stopped = false): SnapshotActor {
+  const point = ballisticArcPoint(arc(), travel, { x: 0, y: 0, z: 0 });
+  const transform = { x: point.x, y: point.y, z: point.z, yaw: 0 };
   return {
     id: 'projectile-1',
     archetypeId: 'wood-arrow',
     parentActorId: null,
     revision: 1,
-    transform: { x, y, z, yaw: 0 },
-    localTransform: { x, y, z, yaw: 0 },
+    transform,
+    localTransform: transform,
+    projectile: {
+      originX: ORIGIN.x,
+      originY: ORIGIN.y,
+      originZ: ORIGIN.z,
+      impactX: IMPACT.x,
+      impactY: IMPACT.y,
+      impactZ: IMPACT.z,
+      ratio: 1,
+      startedAt: STARTED_AT,
+      flightSeconds: FLIGHT_SECONDS,
+      travel,
+      stopped,
+    },
   } as unknown as SnapshotActor;
 }
 
-function createSystem() {
-  return createTestActorSystem({
+function arc() {
+  return {
+    originX: ORIGIN.x,
+    originY: ORIGIN.y,
+    originZ: ORIGIN.z,
+    impactX: IMPACT.x,
+    impactY: IMPACT.y,
+    impactZ: IMPACT.z,
+    ratio: 1,
+  };
+}
+
+/**
+ * 服务端时钟就是本地时钟：第一份快照的 `serverTime` 取当时的 `now()`，于是
+ * `clockOffset` 为 0，渲染时刻正好是 `now - INTERPOLATION_DELAY_MS`。
+ */
+function createSystem(clock: { now: number }) {
+  const transforms = new RenderTransformBuffer();
+  const system = createTestActorSystem({
     definition,
     environment: { fogColor: '#ffffff', fogNear: 20, fogFar: 60 },
-    now: () => 1_000,
+    now: () => clock.now,
     spawnBudgetMilliseconds: Number.POSITIVE_INFINITY,
+    transforms,
   });
+  return system;
+}
+
+/** 这一帧箭在世界里的位置。 */
+function positionOf(system: ReturnType<typeof createSystem>) {
+  const proxy = renderProxyOf(system, 'projectile-1')!;
+  proxy.root.updateWorldMatrix(true, true);
+  return new THREE.Vector3().setFromMatrixPosition(proxy.root.matrixWorld);
+}
+
+/** 箭尖在世界里指着哪个方向。模型沿 +Z 躺着，箭头在 +Z 那一端。 */
+function tipDirectionOf(system: ReturnType<typeof createSystem>) {
+  const proxy = renderProxyOf(system, 'projectile-1')!;
+  // 弓箭模型的 `visualRoot` 就是 `projectileRig.pitchRoot`（见 `createArrowModel`）。
+  proxy.visualRoot.updateWorldMatrix(true, true);
+  return new THREE.Vector3(0, 0, 1)
+    .transformDirection(proxy.visualRoot.matrixWorld)
+    .normalize();
 }
 
 test('箭的副本不装碰撞体：飞在空中的箭不该挡住走路的人', () => {
-  const system = createSystem();
-  system.syncSnapshots([arrowAt(0, 1.2, 0)], 1_000);
+  const clock = { now: 1_000 };
+  const system = createSystem(clock);
+  system.syncSnapshots([arrow(0)], clock.now);
   stepActorFrame(system, 0, 0);
 
   const actor = system.getActor('projectile-1')!;
@@ -98,35 +161,69 @@ test('箭的副本不装碰撞体：飞在空中的箭不该挡住走路的人',
   assert.equal(system.sweepProjectileTargets([0, 1.2, -3], [0, 1.2, 3], PROJECTILE_RADIUS), 1);
 });
 
-test('箭尖跟着位移走：上升时仰着、下落时扎着，停下之后保持最后那个角度', () => {
-  // 直接喂 transform SoA：俯仰的输入就是「渲染世界这一帧读到的世界坐标」，
-  // 快照插值怎么算出那对坐标由 `SnapshotBuffer` 的用例负责。
-  const transforms = new RenderTransformBuffer();
-  const pitchRoot = new THREE.Group();
-  const id = 3 as ProxyId;
-  const visual = new ThreeProjectileVisual(id, { pitchRoot });
-  const world = { x: 0, y: 0, z: 0, yaw: 0 };
-  // 写面和读面是分开的：`publish()` 翻一次面才是渲染世界读得到的那一帧。
-  const frame = (x: number, y: number, z: number) => {
-    transforms.write(id, x, y, z, 0);
-    transforms.publish();
-    visual.update(transforms, world);
+test('两份快照之间箭照样往前走：位置是从弧上解析求的，不是插出来的', () => {
+  const clock = { now: 1_000 };
+  const system = createSystem(clock);
+  // 只有这一份快照。插值那条路到这里就没有输入了——它会一直交出这一帧、
+  // 箭原地冻住，那正是画面上那阵抖的来源。
+  system.syncSnapshots([arrow(0)], clock.now);
+
+  const seen: number[] = [];
+  for (let frame = 0; frame < 30; frame += 1) {
+    clock.now += 16;
+    stepActorFrame(system, 0.016, frame * 0.016);
+    seen.push(positionOf(system).z);
+  }
+
+  for (let index = 1; index < seen.length; index += 1) {
+    assert.ok(seen[index] > seen[index - 1], `第 ${index} 帧停住了：${seen[index - 1]} → ${seen[index]}`);
+  }
+
+  // 而且落在那条弧上，不是随便往前挪。
+  const elapsed = (clock.now - INTERPOLATION_DELAY_MS) / 1000 - STARTED_AT;
+  const expected = ballisticArcPoint(arc(), elapsed / FLIGHT_SECONDS, { x: 0, y: 0, z: 0 });
+  const actual = positionOf(system);
+  assert.ok(Math.abs(actual.z - expected.z) < 1e-3, `z 偏了：${actual.z} vs ${expected.z}`);
+  assert.ok(Math.abs(actual.y - expected.y) < 1e-3, `y 偏了：${actual.y} vs ${expected.y}`);
+});
+
+test('箭尖指着切线：上升段仰着、下落段扎着', () => {
+  const clock = { now: 1_000 };
+  const system = createSystem(clock);
+  system.syncSnapshots([arrow(0)], clock.now);
+
+  const sampleAt = (travelWanted: number) => {
+    clock.now = (STARTED_AT + travelWanted * FLIGHT_SECONDS) * 1000 + INTERPOLATION_DELAY_MS;
+    stepActorFrame(system, 0.016, 0);
+    return tipDirectionOf(system);
   };
 
-  // 第一帧没有「上一帧」，所以还没有可信的切线：保持水平。
-  frame(0, 1, 0);
-  assert.equal(pitchRoot.rotation.x, 0);
+  for (const travel of [0.1, 0.35, 0.5, 0.8, 0.95]) {
+    const tip = sampleAt(travel);
+    const tangent = ballisticArcTangent(arc(), travel, { x: 0, y: 0, z: 0 });
+    assert.ok(
+      tip.dot(new THREE.Vector3(tangent.x, tangent.y, tangent.z)) > 0.999,
+      `travel=${travel} 箭尖没沿切线：${tip.toArray().join(',')} vs ${tangent.x},${tangent.y},${tangent.z}`,
+    );
+  }
 
-  // 往前上方走一段：抬头，角度就是这一帧位移的切线。
-  frame(0, 1.5, 1);
-  assert.ok(Math.abs(pitchRoot.rotation.x - Math.atan2(0.5, 1)) < 1e-6);
+  assert.ok(sampleAt(0.05).y > 0.2, '刚出手那一段该仰着');
+  assert.ok(sampleAt(0.95).y < -0.2, '落下来那一段该扎着');
+});
 
-  // 往前下方走一段：低头。
-  frame(0, 0.5, 2);
-  const falling = pitchRoot.rotation.x;
-  assert.ok(falling < 0, `下落段该扎下去，实际 ${falling}`);
+test('停住之后不再往前：撞在哪儿是服务端说了算的', () => {
+  const clock = { now: 1_000 };
+  const system = createSystem(clock);
+  system.syncSnapshots([arrow(0.4, true)], clock.now);
+  clock.now += 500;
+  stepActorFrame(system, 0.016, 0);
+  const stopped = positionOf(system);
 
-  // 插在墙上不动了：保持扎进去的姿态，而不是因为不动就弹回水平。
-  frame(0, 0.5, 2);
-  assert.equal(pitchRoot.rotation.x, falling);
+  clock.now += 500;
+  stepActorFrame(system, 0.016, 0);
+  const later = positionOf(system);
+  assert.ok(later.distanceTo(stopped) < 1e-6, `停住的箭动了：${stopped.z} → ${later.z}`);
+
+  const expected = ballisticArcPoint(arc(), 0.4, { x: 0, y: 0, z: 0 });
+  assert.ok(Math.abs(stopped.z - expected.z) < 1e-3, `没停在权威说的地方：${stopped.z} vs ${expected.z}`);
 });

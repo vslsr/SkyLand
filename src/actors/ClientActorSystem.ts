@@ -39,6 +39,8 @@ import {
   PlayerMovementComponent,
   PlayerJumpComponent,
   ReplicationPolicyComponent,
+  PROJECTILE_COMPONENT,
+  ProjectileComponent,
   SIMPLE_COLLISION_COMPONENT,
   SimpleCollisionComponent,
   TEMPERATURE_COMPONENT,
@@ -98,6 +100,7 @@ import {
   RenderProxyComponent,
 } from './components/RenderProxyComponent';
 import { ActorTransformSystem } from './systems/ActorTransformSystem';
+import { ClientProjectileSystem } from './systems/ClientProjectileSystem';
 import { ActorVisualParamSystem } from './systems/ActorVisualParamSystem';
 import { RenderTransformSyncSystem } from './systems/RenderTransformSyncSystem';
 import {
@@ -395,6 +398,12 @@ export class ClientActorSystem implements SceneFrameSystem {
     // 前两个 System 就是那条边界：ActorTransformSystem 只写 SoA 字节，
     // RenderTransformSyncSystem 翻面并交给渲染世界。后面所有表现 System 读的都是
     // 已经摆好位置的 matrixWorld，所以这两个必须排在最前且相邻。
+    // 飞在空中那支箭的位置由它自己按弧解析地求，排在写字节之前：它写的是权威
+    // Transform，下一位再把那份 Transform 送过边界。
+    this.world.addSystem(new ClientProjectileSystem(
+      this.transforms,
+      () => this.snapshots.renderTime,
+    ));
     this.world.addSystem(new ActorTransformSystem(this.transforms));
     // 参数要和 transform 同一次翻面，所以必须夹在写入与 publish 之间。
     this.world.addSystem(new ActorVisualParamSystem(this.transforms, {
@@ -416,7 +425,7 @@ export class ClientActorSystem implements SceneFrameSystem {
     ));
     this.world.addSystem(new RenderTransformSyncSystem(this.transforms, this.renderScene));
     this.world.addSystem(new ActorGuidePathSyncSystem(this.renderScene));
-    // 到这里 Actor 世界里就只剩六个 System 了，而且**一个都不 import three**：
+    // 到这里 Actor 世界里就只剩七个 System 了，而且**一个都不 import three**：
     // 四个写字节、一个发命令、一个翻面。船体波动、货箱浮沉、附着继承、弹性拉伸
     // 与脱落翻滚全部搬进了渲染世界（实现路径文档 §1.75）。
   }
@@ -1287,7 +1296,11 @@ export class ClientActorSystem implements SceneFrameSystem {
       // 那只史莱姆前面。它撞什么由服务端沿弧扫掠说了算（`ProjectileSystem`），
       // 那是查询，不需要它在这一侧的碰撞索引里占一格。这条和服务端
       // `ServerActorFactory` 里的判断是同一条，两侧因此不会一边有一边没有。
-      if (!archetype.components.projectile) {
+      if (archetype.components.projectile) {
+        // 这一侧也要有这份弧：位置和俯仰都由 `ClientProjectileSystem` 从它解析地
+        // 求出来，而不是等快照插值把一串点喂过来。
+        actor.addComponent(new ProjectileComponent(archetype.components.projectile));
+      } else {
         actor.addComponent(new SimpleCollisionComponent(
           createSimpleCollisionFromRender(archetype.components.render),
         ));
@@ -1442,6 +1455,10 @@ export class ClientActorSystem implements SceneFrameSystem {
       // 因此会直接出现在自己的界面上，不需要本地做任何预测。
       const container = actor.requireComponent(CONTAINER_COMPONENT) as ContainerComponent;
       container.applySnapshot(snapshot.container);
+    }
+    if (snapshot.projectile) {
+      const projectile = actor.getComponent(PROJECTILE_COMPONENT) as ProjectileComponent | undefined;
+      projectile?.applySnapshot(snapshot.projectile);
     }
     if (snapshot.itemStack) {
       const stack = actor.requireComponent(ITEM_STACK_COMPONENT) as ItemStackComponent;

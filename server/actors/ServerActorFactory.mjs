@@ -46,6 +46,7 @@ import {
   LifetimeComponent,
   PLAYER_MOVEMENT_COMPONENT,
   PlayerMovementComponent,
+  PROJECTILE_COMPONENT,
   PlayerJumpComponent,
   PatrolPathComponent,
   ProjectileComponent,
@@ -340,6 +341,7 @@ export function createActorSnapshots(world, options = {}) {
     const generatedProp = actor.getComponent(GENERATED_PROP_COMPONENT);
     const guidePath = actor.getComponent(GUIDE_PATH_COMPONENT);
     const buildPiece = actor.getComponent(BUILD_PIECE_COMPONENT);
+    const projectile = actor.getComponent(PROJECTILE_COMPONENT);
     // 生成物件的 id 已经携带种类与位置地址。偏离态只发 id + 状态，
     // 默认 Interactable 与最大生命由两端同一原型提供。
     if (generatedProp) {
@@ -499,6 +501,9 @@ export function createActorSnapshots(world, options = {}) {
         },
       } : {}),
       ...(guidePath ? { guidePath: guidePath.snapshot() } : {}),
+      // 弹药复制的是**整条弧加一个出发时刻**，不是每 tick 一个点：客户端据此自己
+      // 求点，34 米每秒的小东西才不会跟着快照率一顿一顿地走。见 `ProjectileComponent`。
+      ...(projectile ? { projectile: projectile.snapshot() } : {}),
       // 放在哪一格是离散状态：客户端靠它重建占位表，不靠世界坐标反推。
       ...(buildPiece ? {
         buildPiece: {

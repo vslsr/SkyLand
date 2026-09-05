@@ -64,9 +64,23 @@ export class ThreeSlimeAnimator {
   private tiltVelocity = 0;
   private pulse = 2;
   private readonly impact = new SlimeImpactTrigger();
-  /** 来袭轴，**rig 局部**的水平单位向量：身体挂在被 yaw 转过的 root 下面。 */
+  /**
+   * 来袭轴，**rig 局部**的单位向量：身体挂在被 yaw 转过的 root 下面。
+   *
+   * 三维的：拉满的一箭是以二十来度扎下来的，坑因此该偏在迎箭那一侧的**上方**，
+   * 而不是齐着赤道压一圈。把它拍平成水平的话，平射和吊射打出来的坑一模一样。
+   */
   private impactAxisX = 0;
+  private impactAxisY = 0;
   private impactAxisZ = 1;
+  /**
+   * 同一次命中的**水平**那一份，单独留一个单位向量。
+   *
+   * 「整只往后仰」是绕水平轴倒过去，只跟来箭的水平方位有关；用三维那个轴的话，
+   * 越陡的箭仰得越少——而实际上正好相反，扎得越狠该仰得越明显。
+   */
+  private impactLeanX = 0;
+  private impactLeanZ = 1;
   /** 弹簧的位移：正是朝来袭方向凹进去，负是过冲鼓出来。 */
   private impactDent = 0;
   private impactVelocity = 0;
@@ -126,12 +140,12 @@ export class ThreeSlimeAnimator {
     // 挨了一箭整只往后仰一点：坑是局部的，被砸得晃是整只的。顶点朝 +Y，绕 X 正转
     // 把它推向 +Z，绕 Z 正转把它推向 -X，所以横滚那一项取负号。
     const lean = this.impactDent * IMPACT_LEAN;
-    this.model.body.rotation.x = this.tilt + this.wobble * 0.35 + this.impactAxisZ * lean;
+    this.model.body.rotation.x = this.tilt + this.wobble * 0.35 + this.impactLeanZ * lean;
     this.model.body.rotation.z =
       Math.sin(elapsedSeconds * 2.1) * 0.02 +
       Math.sin(this.pulse * 0.5) * 0.035
         * Math.min(movementSpeed / Math.max(0.01, this.referenceSpeed), 1) +
-      this.wobble * 0.55 - this.impactAxisX * lean;
+      this.wobble * 0.55 - this.impactLeanX * lean;
 
     this.deformBody(elapsedSeconds, moving ? 0.02 : 0.007, moving ? 7.5 : 1.5);
     this.animateContents(elapsedSeconds, scaleY);
@@ -156,13 +170,22 @@ export class ThreeSlimeAnimator {
       // 同一对系数，两边必须一致，否则腿和身体各朝一个方向。
       const localX = cosYaw * hit.directionX - sinYaw * hit.directionZ;
       const localZ = sinYaw * hit.directionX + cosYaw * hit.directionZ;
-      const planar = Math.hypot(localX, localZ);
-      // 垂直打下来的（planar 为 0）没有水平轴可言，那一箭只作用在别处，这里跳过。
-      if (planar > 1e-6) {
+      // 竖直那一份不过 yaw：绕 Y 转不动它。
+      const localY = hit.directionY;
+      const length = Math.hypot(localX, localY, localZ);
+      if (length > 1e-6) {
         // 连着挨两箭就换成新那一支的轴：坑跟着最后一下走，晃动累加。两个轴各留一半
         // 的话，得到的是一个谁也没被射中的方向。
-        this.impactAxisX = localX / planar;
-        this.impactAxisZ = localZ / planar;
+        this.impactAxisX = localX / length;
+        this.impactAxisY = localY / length;
+        this.impactAxisZ = localZ / length;
+        // 正上方直直插下来的那一箭没有水平方位，仰的方向保持上一次的——总比
+        // 让它突然倒向 +Z 好。
+        const planar = Math.hypot(localX, localZ);
+        if (planar > 1e-6) {
+          this.impactLeanX = localX / planar;
+          this.impactLeanZ = localZ / planar;
+        }
         this.impactVelocity += hit.impulse * IMPACT_IMPULSE_SPEED;
       }
     }
@@ -195,13 +218,17 @@ export class ThreeSlimeAnimator {
       const wave = Math.sin(phase) * amplitude;
       const crossWave = Math.sin(phase + 1.7) * amplitude * 0.4;
       // 迎着箭的那一侧才凹，背面几乎不动；权重是顶点方向的连续函数，所以侧壁不裂。
-      const facing = -(x * this.impactAxisX + z * this.impactAxisZ) * inverseRadius;
+      // 三个分量都算进去：斜着扎下来的一箭，坑就偏在迎箭那一侧的上方。
+      const facing = -(
+        x * this.impactAxisX + y * this.impactAxisY + z * this.impactAxisZ
+      ) * inverseRadius;
       const impactWeight = facing > 0 ? facing ** IMPACT_FALLOFF_EXPONENT : 0;
       // 挤进去的材料从坑口外面鼓出来：坑最深的地方不鼓，赤道一圈鼓得最多。
       const impactBulge = 1 + bulge * (1 - impactWeight);
       target[offset] = (x * spread - crossWave) * impactBulge
         + this.impactAxisX * dent * impactWeight;
-      target[offset + 1] = y + Math.sin(phase * 0.8 + 0.6) * amplitude * 0.25;
+      target[offset + 1] = y + Math.sin(phase * 0.8 + 0.6) * amplitude * 0.25
+        + this.impactAxisY * dent * impactWeight;
       target[offset + 2] = (z * spread + wave) * impactBulge
         + this.impactAxisZ * dent * impactWeight;
     }
