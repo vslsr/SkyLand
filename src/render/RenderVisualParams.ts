@@ -166,7 +166,6 @@ export const PARAM_POINT_LIGHT_INTENSITY = 47;
  */
 export const PARAM_HEALTH_DEATH_REVISION = 48;
 
-/** 每个 proxy 槽位的参数个数。新增参数就在上面加常量并把这里加一。 */
 /**
  * 手上那把弓拉了几成（[0, 1]），以及撒手那一下的自增计数。
  *
@@ -178,4 +177,25 @@ export const PARAM_HEALTH_DEATH_REVISION = 48;
 export const PARAM_BOW_CHARGE = 49;
 export const PARAM_BOW_RELEASE_REVISION = 50;
 
-export const RENDER_VISUAL_PARAM_COUNT = 51;
+/**
+ * 被弹药打中的那一下（见 `RenderSlimeImpact.ts`）。
+ *
+ * **过边界的是「哪一次、从哪个方向、多重」，不是凹成什么样。** 凹陷的深度、涟漪与
+ * 回弹全在渲染侧积分，和死亡摊开、松手回弹同一个取向：玩法侧只给一次事件。
+ *
+ * 计数用的是血量事件计数（`HealthComponent.eventRevision`），不另开一个：一次事件
+ * 就是一次结算，飘字和这一下凹陷读的本来就是同一件事。**0 表示这条命还没被动过**，
+ * 静止槽位每帧写 0，所以复用来的槽位不会替新主人重放上一位的中箭。
+ *
+ * 方向是**弹药的飞行方向**（世界轴向的单位向量），也就是蒙皮该被压进去的方向；
+ * 没有方向的事件（治疗、火、跌落）写零向量，渲染侧据此不踢这一下动画。
+ */
+export const PARAM_SLIME_IMPACT_REVISION = 51;
+export const PARAM_SLIME_IMPACT_DIRECTION_X = 52;
+export const PARAM_SLIME_IMPACT_DIRECTION_Y = 53;
+export const PARAM_SLIME_IMPACT_DIRECTION_Z = 54;
+/** 这一下有多重 [0, 1]。0 表示没有冲击。 */
+export const PARAM_SLIME_IMPACT_IMPULSE = 55;
+
+/** 每个 proxy 槽位的参数个数。新增参数就在上面加常量并把这里加一。 */
+export const RENDER_VISUAL_PARAM_COUNT = 56;

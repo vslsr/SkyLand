@@ -31,6 +31,11 @@ import {
 } from '../render/RenderSlimeMotion';
 import { PARAM_HEALTH_DEATH_REVISION } from '../render/RenderVisualParams';
 import {
+  createSlimeImpactParams,
+  resolveSlimeImpactParams,
+  writeSlimeImpactParams,
+} from '../render/RenderSlimeImpact';
+import {
   SLIME_DRAG_AT_REST,
   writeSlimeDragParams,
   type SlimeDragParams,
@@ -156,6 +161,8 @@ export class PlayerEntity extends Actor {
    * 服务端说的那个计数，写进参数段之后由渲染侧踢一次倒下动画。
    */
   private deathRevision = 0;
+  /** 自己挨的那一箭：和死亡一样是服务端复制回来的，本地不预测。 */
+  private readonly impact = createSlimeImpactParams();
   private isDead = false;
 
   public constructor(
@@ -306,6 +313,9 @@ export class PlayerEntity extends Actor {
   public setHealth(health: SnapshotHealth | undefined): void {
     this.isDead = health?.dead === true;
     this.deathRevision = health?.dead ? health.deathRevision : 0;
+    // 中箭那一下：计数和方向一起来，渲染侧靠计数变化踢一次凹陷。没有冲量的事件
+    // （治疗、火）连计数一起写 0，规则和 Replica 那一侧共用一份。
+    resolveSlimeImpactParams(this.impact, health);
   }
 
   /** 死了没有。场景据它切自由视角，控制器据它停止驱动角色。 */
@@ -466,6 +476,8 @@ export class PlayerEntity extends Actor {
     writeSlimeMotionParams(this.transforms, this.proxyId, this.motion);
     // 死亡计数：自己的死也是从服务端复制回来的，本地不预测。0 表示活着。
     this.transforms.writeParam(this.proxyId, PARAM_HEALTH_DEATH_REVISION, this.deathRevision);
+    // 中箭同样每帧写：回收来的槽位带着上一位玩家的来袭轴，会让自己一出生就挨一箭。
+    writeSlimeImpactParams(this.transforms, this.proxyId, this.impact);
     // 本地玩家的拖拽整个在渲染侧完成，不经过这条复制通道；但槽位仍要每帧写，
     // 否则回收来的槽位会带着上一位玩家的残留把自己的外壳拉出去。
     // 自己的鼠标拖拽整个在渲染侧完成，不经过这条复制通道；走这里的只有被别人

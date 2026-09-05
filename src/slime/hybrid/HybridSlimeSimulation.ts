@@ -113,6 +113,24 @@ const MAX_BITE_TIP_RADIUS_RATIO = 1.15;
 const MAX_BITE_TIPS = MAX_SOFT_BODY_HOLDERS;
 /** 咬住/松口时尖的生长与回落速率（约 0.15 秒到 90%）。 */
 const BITE_TIP_FOLLOW_RATE = 15;
+/**
+ * 中箭那一下凹陷的张角：权重是 `max(0, -来袭轴·顶点方向)^k`，k 就是这个指数。
+ *
+ * 比咬住的尖（8）钝、比环境接触（约 2）尖：一支箭砸出来的是一个碗口大的坑，不是
+ * 一根针，也不是半边身子塌下去。k=6 时 30° 上还有 0.42、45° 只剩 0.13，外壳一圈
+ * 24 段、一列 16 段，坑里因此有三四圈顶点——侧壁是连续的，不会在某一圈突然归零
+ * 裂开（那正是咬住那条路线踩过的坑）。
+ */
+const IMPACT_FALLOFF_EXPONENT = 6;
+/**
+ * 冲量满格时坑心当场被压进去多深，按半径缩放——形变预算不随世界尺度增长。
+ *
+ * 位置和速度都给：只给速度的话，弹簧要好几帧才把坑压出来，那一下就成了「箭飞过去
+ * 之后皮才慢慢陷下去」；只给位置的话没有余波，凹一下直接弹回，看着像贴了张贴纸。
+ */
+const IMPACT_DENT_RADIUS_RATIO = 0.3;
+/** 冲量满格时坑心额外获得的向内速度，按半径缩放。余波、涟漪和回弹都从它来。 */
+const IMPACT_SPEED_RADIUS_RATIO = 3.4;
 
 function clamp(value: number, minimum: number, maximum: number): number {
   return Math.max(minimum, Math.min(maximum, value));
@@ -501,6 +519,54 @@ export class HybridSlimeSimulation {
       this.collisionCompression + 0.35 + collisionSpeed * 0.12,
     );
     this.collisionActiveSeconds = COLLISION_RESPONSE_SECONDS;
+    this.isActive = true;
+    this.stableSeconds = 0;
+  }
+
+  /**
+   * 被弓箭、别的武器弹药打中的那一下：朝**弹药飞行方向**给蒙皮一个向内的冲力。
+   *
+   * `direction` 是弹药飞进来的方向（世界轴向，外壳坐标和求解器顶点同一套），
+   * `impulse` 是 [0, 1] 的力度。迎面那一侧按夹角连续地凹进去，背面几乎不动；
+   * 之后的涟漪与回弹交给已有的胡克蒙皮和体积流，这里只负责那一记冲量。
+   *
+   * **它是一次冲量，不是静止外形的一项**（对照 `setBiteTips`）：箭扎进去那一下是
+   * 事件，不是一个会一直挂着的状态。写成静止外形的话，坑会一直凹在那儿，直到有人
+   * 记得把它清掉——而「谁负责清」正是这类表现最容易漏的一步。
+   */
+  public applyProjectileImpact(
+    directionX: number,
+    directionY: number,
+    directionZ: number,
+    impulse: number,
+  ): void {
+    if (![directionX, directionY, directionZ, impulse].every(Number.isFinite)) return;
+    const length = Math.hypot(directionX, directionY, directionZ);
+    if (length <= 1e-6 || impulse <= 0) return;
+    const strength = clamp(impulse, 0, 1);
+    const travelX = directionX / length;
+    const travelY = directionY / length;
+    const travelZ = directionZ / length;
+    const dentDepth = this.options.radius * IMPACT_DENT_RADIUS_RATIO * strength;
+    const dentSpeed = this.options.radius * IMPACT_SPEED_RADIUS_RATIO * strength;
+    const directions = this.options.surfaceDirections;
+    for (let offset = 0; offset < directions.length; offset += 3) {
+      // 迎着箭的那一侧才凹：顶点方向与来袭轴反向的分量就是它有多正对着箭。
+      const facing = -(
+        directions[offset] * travelX
+        + directions[offset + 1] * travelY
+        + directions[offset + 2] * travelZ
+      );
+      if (facing <= 0) continue;
+      const weight = facing ** IMPACT_FALLOFF_EXPONENT;
+      this.positions[offset] += travelX * dentDepth * weight;
+      this.positions[offset + 1] += travelY * dentDepth * weight;
+      this.positions[offset + 2] += travelZ * dentDepth * weight;
+      this.velocities[offset] += travelX * dentSpeed * weight;
+      this.velocities[offset + 1] += travelY * dentSpeed * weight;
+      this.velocities[offset + 2] += travelZ * dentSpeed * weight;
+    }
+    // 睡着的史莱姆挨了一箭也得醒过来，否则这一记冲量停在原地不解算。
     this.isActive = true;
     this.stableSeconds = 0;
   }

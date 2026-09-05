@@ -6,6 +6,8 @@ import {
 import {
   resolveWeaponStrike,
   weaponDamage,
+  weaponHitDirection,
+  weaponHitImpulse,
   weaponImpactPoint,
 } from '../../shared/items/index.mjs';
 import { GAME_ABILITY_COMPONENT } from '../../shared/abilities/index.mjs';
@@ -49,6 +51,7 @@ export function fireWeapon({ scene, player, use, chargeRatio }) {
   const source = player.getComponent(GAME_ABILITY_COMPONENT)?.abilitySystem;
   const nowSeconds = scene.now() / 1000;
 
+  const impulse = weaponHitImpulse(strike);
   // 记下这一发，快照带出去：**别人也该看见那支箭**。带的是落点而不是「往哪个方向
   // 射」——落点是判定用的那一个，两边因此画的是同一条弧；方向加距离会让接收方
   // 再算一次，而那一次算错了没人会发现。
@@ -67,7 +70,22 @@ export function fireWeapon({ scene, player, use, chargeRatio }) {
   for (const target of collectWeaponTargets(scene, player, impact, strike.radius)) {
     const damage = weaponDamage(weapon, strike, resolveActorTags(target));
     if (damage <= 0) continue;
-    scene.applyHealthChange(target.id, -damage, { source, nowSeconds });
+    // 箭是从射手那一侧扎进去的：方向随伤害一起过网，客户端拿它把蒙皮朝里砸一下
+    // （见 `src/render/RenderSlimeImpact.ts`）。形状不过网——每个客户端按同一个轴
+    // 自己解，和咬住的那个尖同一个取向。
+    const transform = target.requireComponent(TRANSFORM_COMPONENT);
+    const direction = weaponHitDirection(
+      player.x,
+      player.z,
+      transform.x,
+      transform.z,
+      player.yaw,
+    );
+    scene.applyHealthChange(target.id, -damage, {
+      source,
+      nowSeconds,
+      impact: { x: direction.x, y: 0, z: direction.z, impulse },
+    });
   }
   return true;
 }

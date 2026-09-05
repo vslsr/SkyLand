@@ -52,6 +52,11 @@ import {
   readSlimeGroundProbeParams,
   type SlimeGroundProbeParams,
 } from '../RenderSlimeLegs';
+import {
+  createSlimeImpactParams,
+  readSlimeImpactParams,
+  type SlimeImpactParams,
+} from '../RenderSlimeImpact';
 import type { RenderTransform, RenderTransformBuffer } from '../RenderTransformBuffer';
 import {
   PARAM_HEALTH_DEATH_REVISION,
@@ -182,6 +187,7 @@ export class ThreeRenderScene implements RenderScene {
   private readonly slimeDrag: SlimeDragParams = { ...SLIME_DRAG_AT_REST };
   private readonly slimeBite: SlimeBiteParams = createSlimeBiteParams();
   private readonly slimeGroundProbe: SlimeGroundProbeParams = { ...SLIME_GROUND_PROBE_AT_REST };
+  private readonly slimeImpact: SlimeImpactParams = createSlimeImpactParams();
   /** 腿部步态每帧要读的世界 transform；和 world/parentWorld 一样是复用的读出缓冲。 */
   private readonly legWorld: RenderTransform = { x: 0, y: 0, z: 0, yaw: 0 };
   /** proxyId → 客户端波面浮动的模式。没有海的地图上这张表永远是空的。 */
@@ -597,6 +603,8 @@ export class ThreeRenderScene implements RenderScene {
         readSlimeMotionParams(transforms, id, this.slimeMotion),
         // 死亡计数：变了就踢一次摊开，塌到百分之几由这一侧自己积分。
         transforms.readParam(id, PARAM_HEALTH_DEATH_REVISION),
+        // 中箭：同样只过「哪一次、从哪来、多重」，蒙皮凹成什么样在求解器里长。
+        readSlimeImpactParams(transforms, id, this.slimeImpact),
       );
     }
     // 腿排在身体之前：它解出的水平速率是身体挤压动画的输入。两者写的不是同一个
@@ -616,10 +624,14 @@ export class ThreeRenderScene implements RenderScene {
       // 服务端推着走的 Replica 在参数段里速度是 0（它不复制运动演示），
       // 但腿已经从它被摆到哪儿差分出了速率——身体的挤压该跟着那一个走。
       const legs = this.slimeLegs.get(id);
+      // 身体挂在被 yaw 转过的 root 下面，而参数段里的来袭方向是世界轴向的：
+      // 换算要用的正是 `submitTransforms` 刚摆好的那个角度。
       animator.update(
         deltaSeconds,
         elapsedSeconds,
         legs ? legs.presentationSpeed : transforms.readParam(id, PARAM_SLIME_SPEED),
+        this.resolve(id)?.root.rotation.y ?? 0,
+        readSlimeImpactParams(transforms, id, this.slimeImpact),
       );
     }
   }
@@ -701,6 +713,11 @@ export class ThreeRenderScene implements RenderScene {
   /** 渲染侧查找软体表现（能力实验室与测试用）。 */
   public resolveSlimeVisual(id: ProxyId): ThreeHybridSlimeVisual | undefined {
     return this.slimeVisuals.get(id);
+  }
+
+  /** 渲染侧查找身体挤压表现（长腿史莱姆与贴地玩家史莱姆共用；测试用）。 */
+  public resolveSlimeAnimator(id: ProxyId): ThreeSlimeAnimator | undefined {
+    return this.slimeAnimators.get(id);
   }
 
   /**
