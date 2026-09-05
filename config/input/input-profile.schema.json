@@ -214,6 +214,23 @@
         "activationHeightRatio": { "type": "number", "minimum": 0.25, "maximum": 0.9 }
       }
     },
+    "virtualAimJoystick": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["control", "chargeControl", "baseRadiusPx", "travelRadiusPx", "innerRadiusPx", "knobRadiusPx", "deadZone", "sensitivity", "activationWidthRatio", "activationHeightRatio"],
+      "properties": {
+        "control": { "type": "string", "pattern": "^Virtual\\..+" },
+        "chargeControl": { "type": "string", "pattern": "^Virtual\\..+" },
+        "baseRadiusPx": { "type": "number", "minimum": 32, "maximum": 128 },
+        "travelRadiusPx": { "type": "number", "minimum": 8, "maximum": 128 },
+        "innerRadiusPx": { "type": "number", "minimum": 8, "maximum": 128 },
+        "knobRadiusPx": { "type": "number", "minimum": 8, "maximum": 128 },
+        "deadZone": { "type": "number", "minimum": 0, "maximum": 0.95 },
+        "sensitivity": { "type": "number", "minimum": 0.1, "maximum": 3 },
+        "activationWidthRatio": { "type": "number", "minimum": 0.2, "maximum": 0.8 },
+        "activationHeightRatio": { "type": "number", "minimum": 0.25, "maximum": 0.9 }
+      }
+    },
     "virtualButton": {
       "type": "object",
       "additionalProperties": false,
@@ -236,6 +253,7 @@
       "properties": {
         "desktopDebugQueryParameter": { "type": "string", "minLength": 1 },
         "joystick": { "$ref": "#/$defs/virtualJoystick" },
+        "aimJoystick": { "$ref": "#/$defs/virtualAimJoystick" },
         "buttons": { "type": "array", "items": { "$ref": "#/$defs/virtualButton" } },
         "layouts": {
           "type": "object",

@@ -416,6 +416,8 @@ export class GrasslandScene extends Scene {
       },
       // 松手那一下才射箭。收圈的路子不止这一条（换手、盖界面、进建造模式都收），
       // 那几下不该有箭飞出去，所以这一条和 setProgress 分开走。
+      // 冷却圈和长按那圈是同一个环，反着走。
+      setCooldown: (cooldown) => this.hotbarBar.setCooldown(cooldown),
       onUseRelease: (action, ratio) => {
         if (action === 'shoot') this.weaponAim.fire(ratio);
       },
@@ -439,6 +441,17 @@ export class GrasslandScene extends Scene {
         return { x: render.x, y: render.y, z: render.z, yaw: this.player!.controller.facing.yaw };
       },
       pointerRay: () => this.pointerRay.resolve(this.renderer.getCameraView()),
+      // 和移动摇杆读的是同一份相机基：推杆推向屏幕上的哪儿，人就朝世界里的哪儿。
+      cameraAxes: () => {
+        const axes = this.controls.frame.axes;
+        const forwardLength = Math.hypot(axes.forward[0], axes.forward[2]) || 1;
+        return {
+          forwardX: axes.forward[0] / forwardLength,
+          forwardZ: axes.forward[2] / forwardLength,
+          rightX: axes.right[0],
+          rightZ: axes.right[2],
+        };
+      },
       sampleGroundHeight: (x, z) => this.world.sampleGroundHeight(x, z),
       setFacingTarget: (target) => {
         this.player?.controller.setFacingRequest(
@@ -447,7 +460,7 @@ export class GrasslandScene extends Scene {
       },
       setPreview: (state) => this.renderer.setBallisticPreview(state),
       spawnArrow: (state) => this.renderer.spawnArrowShot(state),
-    });
+    }, this.input);
     this.container = new ContainerController(this.containerPage, {
       getInventory: () => this.player?.getComponent(INVENTORY_COMPONENT) as
         InventoryComponent | undefined,
@@ -1037,6 +1050,7 @@ export class GrasslandScene extends Scene {
     this.slimeSurfaceDrag?.dispose();
     this.performanceOverlay?.dispose();
     this.hotbar.dispose();
+    this.weaponAim.dispose();
     this.hotbarBar.dispose();
     this.holdProgress.dispose();
     this.slimeSurfaceDrag = undefined;

@@ -29,6 +29,20 @@ interface HotbarSlot {
   readonly ammo: HTMLElement;
   /** 长按时盖在这一格上的那圈圆形倒计时。平时是收起来的。 */
   readonly dial: HTMLElement;
+  /** 这一格现在装着什么。冷却圈按物品种类找格子，所以要记住它。 */
+  itemType?: string;
+}
+
+/**
+ * 冷却里的那一件（设计稿「CD效果 · 轻型工具CD」）。
+ *
+ * 记的是**物品种类**而不是格号：冷却记在种类上（服务端那边也是，见
+ * `itemCooldownGroup`），冷却途中把弓拖到另一格并不会让它立刻又能射。
+ */
+export interface HotbarCooldownState {
+  readonly itemType: string;
+  /** 还剩多少没走完，[0, 1]。1 是刚进冷却，0 是好了。 */
+  readonly remainingRatio: number;
 }
 
 function slotState(slot: HotbarSlotView): HotbarSlotState {
@@ -47,6 +61,9 @@ export class HotbarBar {
   private heldSlot: HotbarSlot | undefined;
   private heldName = '';
   private progressLabel: string | undefined;
+  /** 这一帧要画的两种圈。进度圈盖过冷却圈：手上正在做的事比「刚才做完了」重要。 */
+  private progress: HeldItemProgress | undefined;
+  private cooldown: HotbarCooldownState | undefined;
 
   public constructor() {
     this.element = document.createElement('div');
@@ -98,10 +115,11 @@ export class HotbarBar {
     this.heldName = '';
     // 新快照到手，上一次按住的进度就作废了：换手之后那半圈说的是别的东西。
     // 控制器每帧都会再推一次，按住还没松就会立刻重新画上。
-    this.progressLabel = undefined;
+    this.progress = undefined;
     slots.forEach((slot, index) => this.paint(this.slots[index], slot));
     this.element.hidden = slots.length === 0;
-    this.syncPlate();
+    // 冷却不跟着重画清掉：它是一段自己在走的时间，和这一帧的格子内容无关。
+    this.refreshDials();
   }
 
   /**
@@ -116,34 +134,61 @@ export class HotbarBar {
    * 格子，它们的圈在准星下方那块牌子上，这里不重复。
    */
   public setProgress(progress: HeldItemProgress | undefined): void {
-    const held = this.heldSlot;
-    if (!progress || !progress.onHotbar || !held) {
-      this.clearProgress();
-      return;
-    }
-    this.progressLabel = progress.label;
-    held.dial.hidden = false;
-    held.dial.style.setProperty('--hotbar-progress', `${Math.round(progress.ratio * 100)}%`);
-    held.button.dataset.progress = progress.action;
-    // 蓄力拉满之后圈停在满圈上等松手，所以要有一个「已经满了」的记号——
-    // 否则玩家只能靠盯着那一圈还在不在猜这一下已经到顶。
-    held.dial.dataset.charged = String(progress.mode === 'charge' && progress.ratio >= 1);
-    this.syncPlate();
+    this.progress = progress;
+    this.refreshDials();
   }
 
-  public dispose(): void {
-    this.element.remove();
+  /**
+   * 画冷却圈（设计稿「CD效果 · 轻型工具CD」）。
+   *
+   * 和长按那圈是**同一个环**，只是反着走：长按是攒满，冷却是退空。用同一个环
+   * 而不是另画一个记号，是因为玩家问的是同一个问题——「这一格现在能不能按」。
+   *
+   * 冷却时长写在物品目录的 `use.cooldownSeconds` 上，客户端跑的是和服务端同一份
+   * 数据、同一个起点（松手 / 激活那一刻），所以这圈退空那一刻就是那边冷却好的
+   * 那一刻——和长按那圈「两端跑同一个 holdRatio」是同一条规矩。
+   */
+  public setCooldown(cooldown: HotbarCooldownState | undefined): void {
+    this.cooldown = cooldown;
+    this.refreshDials();
   }
 
-  private clearProgress(): void {
-    this.progressLabel = undefined;
+  /** 把两种圈画到各自那一格上。进度圈在后，所以它盖过冷却圈。 */
+  private refreshDials(): void {
     for (const slot of this.slots) {
       slot.dial.hidden = true;
       slot.dial.style.removeProperty('--hotbar-progress');
       delete slot.dial.dataset.charged;
       delete slot.button.dataset.progress;
     }
+    this.progressLabel = undefined;
+
+    const cooling = this.cooldown;
+    if (cooling && cooling.remainingRatio > 0) {
+      for (const slot of this.slots) {
+        if (slot.itemType !== cooling.itemType) continue;
+        slot.dial.hidden = false;
+        slot.dial.style.setProperty('--hotbar-progress', `${Math.round(cooling.remainingRatio * 100)}%`);
+        slot.button.dataset.progress = 'cooldown';
+      }
+    }
+
+    const progress = this.progress;
+    const held = this.heldSlot;
+    if (progress && progress.onHotbar && held) {
+      this.progressLabel = progress.label;
+      held.dial.hidden = false;
+      held.dial.style.setProperty('--hotbar-progress', `${Math.round(progress.ratio * 100)}%`);
+      held.button.dataset.progress = progress.action;
+      // 蓄力拉满之后圈停在满圈上等松手，所以要有一个「已经满了」的记号——
+      // 否则玩家只能靠盯着那一圈还在不在猜这一下已经到顶。
+      held.dial.dataset.charged = String(progress.mode === 'charge' && progress.ratio >= 1);
+    }
     this.syncPlate();
+  }
+
+  public dispose(): void {
+    this.element.remove();
   }
 
   /** 牌子只说一句话：按住的时候说这次按住，其余时候说手上拿的是什么。 */
@@ -204,10 +249,7 @@ export class HotbarBar {
     button.dataset.state = state;
     button.dataset.held = String(view.active);
     button.setAttribute('aria-pressed', String(view.active));
-    slot.dial.hidden = true;
-    slot.dial.style.removeProperty('--hotbar-progress');
-    delete slot.dial.dataset.charged;
-    delete button.dataset.progress;
+    slot.itemType = view.itemType ?? undefined;
     slot.shortcut.textContent = String(view.index + 1);
     slot.ammo.hidden = view.ammo === undefined;
     slot.ammo.textContent = view.ammo ? String(view.ammo.quantity) : '';

@@ -26,10 +26,23 @@ interface AimHarness {
   arrows: BallisticPreviewState[];
   setHeld(itemType: string | undefined): void;
   setPointer(ray: { origin: [number, number, number]; direction: [number, number, number] } | undefined): void;
+  /** 假装玩家把瞄准摇杆推到了这个方向（屏幕空间，y 向上为正）。 */
+  pushAim(x: number, y: number): void;
   player: { x: number; y: number; z: number; yaw: number };
 }
 
 function aimHarness(): AimHarness {
+  /** 只够 `WeaponAimController` 订阅一条输入的替身。 */
+  const listeners: Array<(event: { phase: string; value: unknown }) => void> = [];
+  const input = {
+    bind: (_tag: unknown, handler: (event: { phase: string; value: unknown }) => void) => {
+      listeners.push(handler);
+      return () => {};
+    },
+  } as never;
+  const pushAim = (x: number, y: number): void => {
+    for (const listener of listeners) listener({ phase: 'triggered', value: { x, y } });
+  };
   const facing: AimHarness['facing'] = [];
   const previews: AimHarness['previews'] = [];
   const arrows: AimHarness['arrows'] = [];
@@ -51,13 +64,15 @@ function aimHarness(): AimHarness {
     setFacingTarget: (target) => facing.push(target),
     setPreview: (state) => previews.push(state),
     spawnArrow: (state) => arrows.push(state),
-  });
+    cameraAxes: () => ({ forwardX: 0, forwardZ: 1, rightX: 1, rightZ: 0 }),
+  }, input);
   return {
     controller,
     facing,
     previews,
     arrows,
     player,
+    pushAim,
     setHeld: (itemType) => { held = itemType; },
     setPointer: (next) => { ray = next; },
   };
@@ -352,4 +367,31 @@ test('箭沿弧飞完就停在落点上，池子不会随射击次数长', () =>
   assert.equal(arrow.visible, false, '留够那一会儿就收走');
   visual.spawn(arc);
   assert.equal(visual.root.children.length, 1, '池子复用，不随射击次数长');
+});
+
+test('摇杆推着的时候它说了算：朝向跟着推杆方向，不再听指针', () => {
+  const harness = aimHarness();
+  // 指针指着身后（+Z 的反向），摇杆推向右（屏幕 +x → 世界 +x）。
+  harness.setPointer({ origin: [0, 9, 8], direction: [0, -1, -1] });
+  harness.pushAim(1, 0);
+  harness.controller.update();
+
+  const target = harness.facing.at(-1)!;
+  assert.ok(target.x > harness.player.x, '朝向对准了摇杆推的那一侧');
+  assert.ok(Math.abs(target.z - harness.player.z) < 1e-9, '推正右时不该带上前后分量');
+});
+
+test('松开摇杆之后朝向交回指针，不定在最后一次推的方向上', () => {
+  const harness = aimHarness();
+  // 先记下纯指针时对准的是哪儿。
+  harness.controller.update();
+  const pointerOnly = harness.facing.at(-1)!;
+
+  harness.pushAim(1, 0);
+  harness.controller.update();
+  assert.notDeepEqual(harness.facing.at(-1), pointerOnly, '推着杆时听杆的');
+
+  harness.pushAim(0, 0);
+  harness.controller.update();
+  assert.deepEqual(harness.facing.at(-1), pointerOnly, '松开就交回指针，不定在推杆那一侧');
 });
