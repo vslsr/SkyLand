@@ -34,6 +34,8 @@ export interface WeaponAimPort {
   /** 让角色对准这一点；传 undefined 把朝向交回移动方向。 */
   setFacingTarget(target: { x: number; z: number } | undefined): void;
   setPreview(state: BallisticPreviewState | undefined): void;
+  /** 射出去一支箭。走的弧和刚才那条预览线是同一条。 */
+  spawnArrow(state: BallisticPreviewState): void;
 }
 
 export interface WeaponAimTarget {
@@ -80,14 +82,36 @@ export class WeaponAimController {
       this.port.setPreview(undefined);
       return;
     }
-    const strike = resolveWeaponStrike(held.weapon, this.chargeRatio);
-    // 还没攒过空放阈值：这一箭现在松手也射不出去，所以线也不该出现。
-    if (!strike) {
-      this.port.setPreview(undefined);
-      return;
-    }
+    // 还没攒过空放阈值时 `resolveArc` 给不出弧：这一箭现在松手也射不出去，
+    // 所以线也不该出现。
+    this.port.setPreview(this.resolveArc(player, this.chargeRatio));
+  }
+
+  /**
+   * 松手：把刚才瞄的那条弧交给一支箭。
+   *
+   * **弹道在这一刻就算完了**，箭飞出去之后不再决定任何事——服务端也是在这一刻
+   * 结算的（落点半径内全中）。所以这里不需要一套飞行物理，只需要和预览同一条弧：
+   * 玩家看到的那条线末端，就是这一箭落下去的地方。
+   *
+   * 没过空放阈值的那一下不射：那一箭本来就没出去，画一支箭出来是在撒谎。
+   */
+  public fire(ratio: number): void {
+    const player = this.port.isActive() ? this.port.getPlayer() : undefined;
+    const arc = player ? this.resolveArc(player, ratio) : undefined;
+    if (arc) this.port.spawnArrow(arc);
+  }
+
+  /** 这一份蓄力比例下，从出手点到落点的那条弧。空放时没有。 */
+  private resolveArc(
+    player: { x: number; y: number; z: number; yaw: number },
+    ratio: number,
+  ): BallisticPreviewState | undefined {
+    const weapon = this.port.getHeldWeapon()?.weapon;
+    const strike = weapon ? resolveWeaponStrike(weapon, ratio) : undefined;
+    if (!strike) return undefined;
     const impact = weaponImpactPoint(player.x, player.z, player.yaw, strike.distance);
-    this.port.setPreview({
+    return {
       originX: player.x,
       originY: player.y + MUZZLE_HEIGHT,
       originZ: player.z,
@@ -95,7 +119,7 @@ export class WeaponAimController {
       impactY: this.port.sampleGroundHeight(impact.x, impact.z),
       impactZ: impact.z,
       ratio: strike.ratio,
-    });
+    };
   }
 
   /** 收起瞄准与预览。换成别的东西、进建造模式、界面盖上来都走这里。 */

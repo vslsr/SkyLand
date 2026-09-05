@@ -414,6 +414,11 @@ export class GrasslandScene extends Scene {
         this.player?.setChewing(chewing);
         this.world.setChewingItem(chewing === undefined ? undefined : this.heldActorId(), chewing ?? 0);
       },
+      // 松手那一下才射箭。收圈的路子不止这一条（换手、盖界面、进建造模式都收），
+      // 那几下不该有箭飞出去，所以这一条和 setProgress 分开走。
+      onUseRelease: (action, ratio) => {
+        if (action === 'shoot') this.weaponAim.fire(ratio);
+      },
     });
     this.weaponAim = new WeaponAimController({
       // 建造模式独占主键，界面盖着时也不该继续瞄准。
@@ -441,6 +446,7 @@ export class GrasslandScene extends Scene {
         );
       },
       setPreview: (state) => this.renderer.setBallisticPreview(state),
+      spawnArrow: (state) => this.renderer.spawnArrowShot(state),
     });
     this.container = new ContainerController(this.containerPage, {
       getInventory: () => this.player?.getComponent(INVENTORY_COMPONENT) as

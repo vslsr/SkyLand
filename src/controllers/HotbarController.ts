@@ -80,6 +80,14 @@ export interface HotbarPort {
   send(command: InventoryCommand): void;
   /** 每帧把进度交给界面；undefined 表示收掉那圈。 */
   setProgress(progress: HeldItemProgress | undefined): void;
+  /**
+   * 松手那一下（只有蓄力这一类有）。
+   *
+   * 和 `setProgress(undefined)` 分开，是因为**取消也会收圈**：换手上那件东西、
+   * 界面盖上来、进建造模式，圈都会没，但那几下不该射出一支箭。这一条只在
+   * 「按住的这一次以松手告终」时发一次，带上松手那一刻的比例。
+   */
+  onUseRelease?(action: ItemUseAction, ratio: number): void;
 }
 
 /** 物品目录里那几个使用动词。`shoot` 由武器系统兑现，圈和提示仍归这里画。 */
@@ -283,13 +291,16 @@ export class HotbarController {
       return;
     }
     if (!this.pending) return;
-    const completed = this.pending.completed;
+    const { completed, action, startedAt, durationSeconds } = this.pending;
     this.pending = undefined;
     this.port.setProgress(undefined);
     // 倒计时已经走完的那一次，服务端在圈满那一刻就结算了，松手不再有含义。
     if (completed) return;
     this.armed = undefined;
     this.port.send({ kind: 'use:release' });
+    // 表现跟着这一下走。比例和圈读的是同一份计时，所以飞出去的那一箭落在
+    // 刚才那条线的末端上；服务端算的是它自己那一份，两边用的是同一个公式。
+    this.port.onUseRelease?.(action, holdRatio((this.now() - startedAt) / 1000, durationSeconds));
   }
 
   /**

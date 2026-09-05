@@ -61,6 +61,7 @@ import {
 import { ThreeFireVisual } from './ThreeFireVisual';
 import { ThreePointLightVisual } from './ThreePointLightVisual';
 import { ThreeGuidePathVisual } from './ThreeGuidePathVisual';
+import { ThreeArrowShotVisual } from './ThreeArrowShotVisual';
 import { ThreeBallisticPreviewVisual } from './ThreeBallisticPreviewVisual';
 import { ThreeHealthPopupVisual } from './ThreeHealthPopupVisual';
 import { ThreeHybridSlimeVisual } from './ThreeHybridSlimeVisual';
@@ -202,6 +203,8 @@ export class ThreeRenderScene implements RenderScene {
   private healthPopups?: ThreeHealthPopupVisual;
   /** 蓄力时那条白色抛物线。同样按需建，见 `setBallisticPreview`。 */
   private ballisticPreview?: ThreeBallisticPreviewVisual;
+  /** 飞在空中的那几支箭。第一箭射出去才建，见 `spawnArrowShot`。 */
+  private arrowShots?: ThreeArrowShotVisual;
   /**
    * 能力实验室的表现（引擎迁移路线图 第 3 步）。
    *
@@ -258,6 +261,14 @@ export class ThreeRenderScene implements RenderScene {
       this.root.add(this.ballisticPreview.root);
     }
     this.ballisticPreview.setState(state);
+  }
+
+  public spawnArrowShot(state: BallisticPreviewState): void {
+    if (!this.arrowShots) {
+      this.arrowShots = new ThreeArrowShotVisual(this.environment);
+      this.root.add(this.arrowShots.root);
+    }
+    this.arrowShots.spawn(state);
   }
 
   public spawnHealthPopup(x: number, y: number, z: number, amount: number): void {
@@ -557,6 +568,8 @@ export class ThreeRenderScene implements RenderScene {
     for (const guide of this.guidePaths.values()) guide.update(deltaSeconds);
     // 飘字和别的表现一样按渲染帧走：玩法侧只在血量变的那一帧发一条命令。
     this.healthPopups?.update(deltaSeconds);
+    // 箭同理：弹道在射出去那一刻就定了，这里只是按渲染帧把它走完。
+    this.arrowShots?.update(deltaSeconds);
     // 权威 yaw 取的是 submitTransforms 刚摆好的 root 角度：外壳要抵消的正是
     // 「root 这一级实际被转了多少」，父子情况下那已经是相对 yaw。
     for (const [id, slime] of this.slimeVisuals) {
@@ -852,6 +865,8 @@ export class ThreeRenderScene implements RenderScene {
     this.healthPopups = undefined;
     this.ballisticPreview?.dispose();
     this.ballisticPreview = undefined;
+    this.arrowShots?.dispose();
+    this.arrowShots = undefined;
     this.pointLights.dispose();
     this.buildPreview.dispose();
     this.highCountBatches.dispose();

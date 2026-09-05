@@ -10,6 +10,8 @@ import type { InventoryCommand } from '../src/network/messages.ts';
 import type { BallisticPreviewState } from '../src/render/RenderScene.ts';
 import { ThreeRenderScene } from '../src/render/three/ThreeRenderScene.ts';
 import { ItemUseInputTags } from '../src/input/config/playerInput.ts';
+import { ballisticArcApex, ballisticArcPoint } from '../src/render/ballisticArc.ts';
+import { ThreeArrowShotVisual } from '../src/render/three/ThreeArrowShotVisual.ts';
 import {
   createWoodBowLimbGeometry,
   woodBowStringOffset,
@@ -21,6 +23,7 @@ interface AimHarness {
   controller: WeaponAimController;
   facing: Array<{ x: number; z: number } | undefined>;
   previews: Array<BallisticPreviewState | undefined>;
+  arrows: BallisticPreviewState[];
   setHeld(itemType: string | undefined): void;
   setPointer(ray: { origin: [number, number, number]; direction: [number, number, number] } | undefined): void;
   player: { x: number; y: number; z: number; yaw: number };
@@ -29,6 +32,7 @@ interface AimHarness {
 function aimHarness(): AimHarness {
   const facing: AimHarness['facing'] = [];
   const previews: AimHarness['previews'] = [];
+  const arrows: AimHarness['arrows'] = [];
   const player = { x: 0, y: 1, z: 0, yaw: 0 };
   let held: string | undefined = 'wood-bow';
   let ray: Parameters<AimHarness['setPointer']>[0] = {
@@ -46,11 +50,13 @@ function aimHarness(): AimHarness {
     sampleGroundHeight: () => 0,
     setFacingTarget: (target) => facing.push(target),
     setPreview: (state) => previews.push(state),
+    spawnArrow: (state) => arrows.push(state),
   });
   return {
     controller,
     facing,
     previews,
+    arrows,
     player,
     setHeld: (itemType) => { held = itemType; },
     setPointer: (next) => { ray = next; },
@@ -266,4 +272,84 @@ test('弓面垂直于射向：立在 YZ 上，弓臂鼓向 +Z、弦落在射手�
   // 鼓向目标、弦贴着射手：射手拉的是弦，弓背朝前。
   assert.ok(box.max.z > definition.length * 0.4, '弓臂鼓向 +Z');
   assert.ok(woodBowStringOffset(definition) < 0, '弦落在 -Z，也就是射手这一边');
+});
+
+test('松手射出一支箭：它走的是刚才那条预览线的同一条弧', () => {
+  const harness = aimHarness();
+  harness.controller.setChargeRatio(1);
+  harness.controller.update();
+  const preview = harness.previews.at(-1)!;
+
+  harness.controller.fire(1);
+  assert.equal(harness.arrows.length, 1);
+  // 弹道在松手那一刻就算完了，用的是同一份 `weaponStrike` 换算，所以它和玩家
+  // 刚才看着的那条线是同一条——差一点点都会变成「明明瞄准了」。
+  assert.deepEqual(harness.arrows[0], preview);
+});
+
+test('空放不射箭：那一箭本来就没出去', () => {
+  const harness = aimHarness();
+  // 远低于 0.15 的空放阈值。
+  harness.controller.fire(0.05);
+  assert.deepEqual(harness.arrows, []);
+});
+
+test('收圈不等于松手：换手、进建造模式都不该有箭飞出去', () => {
+  const harness = aimHarness();
+  harness.controller.setChargeRatio(0.8);
+  harness.controller.update();
+  harness.controller.reset();
+  assert.equal(harness.previews.at(-1), undefined, '线收起来了');
+  assert.deepEqual(harness.arrows, [], '但没有箭');
+});
+
+test('弧是一条：预览线上的点和箭在同一 t 处重合，两端就是出手点与落点', () => {
+  const arc = {
+    originX: 0, originY: 1.6, originZ: 0,
+    impactX: 0, impactY: 0, impactZ: 20,
+    ratio: 0.5,
+  };
+  const point = { x: 0, y: 0, z: 0 };
+  ballisticArcPoint(arc, 0, point);
+  assert.deepEqual({ ...point }, { x: 0, y: 1.6, z: 0 }, 't=0 是出手点');
+  ballisticArcPoint(arc, 1, point);
+  assert.deepEqual({ ...point }, { x: 0, y: 0, z: 20 }, 't=1 正好落在落点上');
+  // 中间抬起来：抬多高由蓄力比例收，但一定在两端连线之上。
+  ballisticArcPoint(arc, 0.5, point);
+  assert.ok(point.y > 1.6, '弧顶在出手点之上');
+  assert.ok(Math.abs(point.z - 10) < 1e-9, '水平方向匀速推进');
+  // 拉得越满弧越平：同一段距离，满蓄力的弧顶低于半蓄力。
+  const flat = { ...arc, ratio: 1 };
+  const flatApex = ballisticArcApex(flat);
+  assert.ok(flatApex < ballisticArcApex(arc), '拉满时弧最平');
+  assert.ok(flatApex > 0, '再平也还是一条弧');
+});
+
+test('箭沿弧飞完就停在落点上，池子不会随射击次数长', () => {
+  const visual = new ThreeArrowShotVisual({ fogColor: '#ffffff', fogNear: 10, fogFar: 100 });
+  const arc = {
+    originX: 0, originY: 1.6, originZ: 0,
+    impactX: 0, impactY: 0, impactZ: 20,
+    ratio: 1,
+  };
+  visual.spawn(arc);
+  const arrow = visual.root.children[0]!;
+  assert.ok(arrow.visible);
+  assert.ok(Math.abs(arrow.position.z) < 1e-6, '刚射出去时还在出手点');
+
+  // 20 米、34 米每秒 ≈ 0.59 秒。飞到一半时，人在半路上、且已经离开地面高度。
+  for (let frame = 0; frame < 18; frame += 1) visual.update(1 / 60);
+  assert.ok(arrow.position.z > 5 && arrow.position.z < 15, '半路上');
+  assert.ok(arrow.position.y > 0, '还在空中');
+
+  // 飞完之后停在落点上插着，不会越过去。
+  for (let frame = 0; frame < 30; frame += 1) visual.update(1 / 60);
+  assert.ok(Math.abs(arrow.position.z - 20) < 1e-6, '停在落点上');
+  assert.ok(Math.abs(arrow.position.y) < 1e-6);
+
+  // 再射一支：这一支飞完早就收走了，所以复用同一个对象，而不是又建一个。
+  for (let frame = 0; frame < 60; frame += 1) visual.update(1 / 60);
+  assert.equal(arrow.visible, false, '留够那一会儿就收走');
+  visual.spawn(arc);
+  assert.equal(visual.root.children.length, 1, '池子复用，不随射击次数长');
 });
