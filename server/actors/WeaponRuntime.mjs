@@ -6,6 +6,8 @@ import {
 import {
   resolveWeaponStrike,
   weaponDamage,
+  weaponHitDirection,
+  weaponHitImpulse,
   weaponImpactPoint,
 } from '../../shared/items/index.mjs';
 import { GAME_ABILITY_COMPONENT } from '../../shared/abilities/index.mjs';
@@ -49,11 +51,28 @@ export function fireWeapon({ scene, player, use, chargeRatio }) {
   const source = player.getComponent(GAME_ABILITY_COMPONENT)?.abilitySystem;
   const nowSeconds = scene.now() / 1000;
 
+  const impulse = weaponHitImpulse(strike);
+
   // 打空了也算打出去了：一发射偏的箭同样该进冷却，所以命中数不参与返回值。
   for (const target of collectWeaponTargets(scene, player, impact, strike.radius)) {
     const damage = weaponDamage(weapon, strike, resolveActorTags(target));
     if (damage <= 0) continue;
-    scene.applyHealthChange(target.id, -damage, { source, nowSeconds });
+    // 箭是从射手那一侧扎进去的：方向随伤害一起过网，客户端拿它把蒙皮朝里砸一下
+    // （见 `src/render/RenderSlimeImpact.ts`）。形状不过网——每个客户端按同一个轴
+    // 自己解，和咬住的那个尖同一个取向。
+    const transform = target.requireComponent(TRANSFORM_COMPONENT);
+    const direction = weaponHitDirection(
+      player.x,
+      player.z,
+      transform.x,
+      transform.z,
+      player.yaw,
+    );
+    scene.applyHealthChange(target.id, -damage, {
+      source,
+      nowSeconds,
+      impact: { x: direction.x, y: 0, z: direction.z, impulse },
+    });
   }
   return true;
 }

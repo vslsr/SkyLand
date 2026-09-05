@@ -7,6 +7,7 @@ import {
   deathCollapseEaseOut,
 } from '../RenderDeathCollapse';
 import type { SlimeMotionParams } from '../RenderSlimeMotion';
+import { SlimeImpactTrigger, type SlimeImpactParams } from '../RenderSlimeImpact';
 
 const REFERENCE_FACE_TURN_RESPONSE = 5.27;
 const COLLISION_CONTACT_GRACE_SECONDS = 0.1;
@@ -39,6 +40,7 @@ export class ThreeHybridSlimeVisual {
   private hasMotionPresentation = false;
   private readonly death = new DeathCollapseTimer();
   private deathAmount = 0;
+  private readonly impact = new SlimeImpactTrigger();
 
   public constructor(
     public readonly rig: PbfSlimeVisualRig,
@@ -68,6 +70,7 @@ export class ThreeHybridSlimeVisual {
     authorityYaw: number,
     motion: SlimeMotionParams,
     deathRevision = 0,
+    impact?: SlimeImpactParams,
   ): void {
     const frameSeconds = Math.max(0, Math.min(deltaSeconds, 0.1));
     this.collisionContactSeconds = Math.max(0, this.collisionContactSeconds - frameSeconds);
@@ -77,6 +80,18 @@ export class ThreeHybridSlimeVisual {
     );
     this.simulation.setDeathCollapse(this.deathAmount);
     this.updateMotionPresentation(frameSeconds, authorityYaw, motion);
+    // 中箭的冲量要赶在这一帧求解之前进去，否则那一记砸下去的效果会晚一帧。
+    // 方向不做 yaw 换算：外壳的弹簧坐标是世界轴向的（root 被 -yaw 抵消掉了），
+    // 参数段里的来袭方向也是世界轴向，两边同一套。
+    const hit = this.impact.consume(impact);
+    if (hit) {
+      this.simulation.applyProjectileImpact(
+        hit.directionX,
+        hit.directionY,
+        hit.directionZ,
+        hit.impulse,
+      );
+    }
     if (this.simulation.update(frameSeconds)) this.applySimulationSurface();
     this.updateContents(elapsedSeconds, authorityYaw);
     this.updateDebugState();
