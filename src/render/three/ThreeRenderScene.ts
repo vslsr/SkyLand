@@ -530,6 +530,9 @@ export class ThreeRenderScene implements RenderScene {
     // 悬停盒跟着目标走。放在最前是因为它读的是上一帧摆好的世界矩阵，
     // 和玩法侧原来在 sim-colliders 里调 hoverHelper.update() 的时机等价。
     this.hoverHelper?.update();
+    // 那条白线画多长自己追一下：起手那 8.4 米不是一帧蹦出来的，见
+    // `ThreeBallisticPreviewVisual.advance`。
+    this.ballisticPreview?.advance(deltaSeconds);
     // 合批内容排在最前：它读的是玩法侧刚写完的那段实例记录，和 transform 翻面
     // 是同一个 tick 的。挂载按需——没有合批内容的地图不会多出两层空节点。
     if (this.propInstances && this.fruitInstances) {

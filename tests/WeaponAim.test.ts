@@ -8,6 +8,7 @@ import { WeaponAimController } from '../src/controllers/WeaponAimController.ts';
 import type { HeldItemProgress } from '../src/controllers/HotbarController.ts';
 import type { InventoryCommand } from '../src/network/messages.ts';
 import type { BallisticPreviewState } from '../src/render/RenderScene.ts';
+import { RenderTransformBuffer } from '../src/render/RenderTransformBuffer.ts';
 import { ThreeRenderScene } from '../src/render/three/ThreeRenderScene.ts';
 import { ItemUseInputTags } from '../src/input/config/playerInput.ts';
 import {
@@ -229,6 +230,17 @@ test('蓄力的圈满了也不结算：线和圈都留着，松手才打出去',
   assert.equal(bar.progress.at(-1), undefined, '松手之后圈收起来');
 });
 
+/**
+ * 把「线画多长」那一下追到底。
+ *
+ * 线不是一帧就画满的：起手那一跳被摊成了一小段生长（见
+ * `ThreeBallisticPreviewVisual`）。这些用例问的是**画成什么形状**，
+ * 所以先让它长完。
+ */
+function settlePreview(scene: ThreeRenderScene): void {
+  scene.updateVisuals(new RenderTransformBuffer(), 1, 1);
+}
+
 // --- 渲染侧：那条白色抛物线 -------------------------------------------------
 
 test('抛物线画在两个端点之间，中间抬起来；收起时整条线不可见', () => {
@@ -248,6 +260,7 @@ test('抛物线画在两个端点之间，中间抬起来；收起时整条线�
     impactZ: 12,
     ratio: 0.5,
   });
+  settlePreview(scene);
   const preview = scene.root.children.find((child) => child.name === 'ballistic-preview')!;
   assert.ok(preview, '第一条命令到了才建，建了就挂在渲染世界根下');
   const line = preview.children.find(
@@ -289,6 +302,7 @@ test('拉得越满弧越平：同样的落点，满蓄力的弧顶更低', () =>
     scene.setBallisticPreview({
       originX: 0, originY: 0.6, originZ: 0, impactX: 0, impactY: 0, impactZ: 12, ratio,
     });
+    settlePreview(scene);
     const preview = scene.root.children.find((child) => child.name === 'ballistic-preview')!;
     const line = preview.children.find(
       (child) => child.name === 'ballistic-preview-line',
@@ -347,12 +361,57 @@ test('截断处就是白线的末端：渲染侧画到那里为止，不穿过�
     travel: 0.25,
   };
   visual.setState(arc);
+  visual.advance(1);
   const positions = (visual as unknown as { positions: Float32Array }).positions;
   const lastZ = positions[positions.length - 1];
   assert.ok(Math.abs(lastZ - 5) < 1e-4, `线该停在 5 米处，实际 ${lastZ}`);
   // 同一条弧不截断时画满 20 米：顶点数没变，变的只是末端。
   visual.setState({ ...arc, travel: undefined });
+  visual.advance(1);
   assert.ok(Math.abs(positions[positions.length - 1] - 20) < 1e-4);
+});
+
+test('线是从枪口长出来的，不是一帧蹦出 8.4 米', () => {
+  // 空放阈值 0.15 加上 6 米起跳的射程：圈刚过阈值那一帧，弧从「没有」变成
+  // 8.4 米——占满射程的三分之一还多，屏幕上就是先抖一下才开始逐渐变长。
+  const visual = new ThreeBallisticPreviewVisual();
+  const arc = {
+    originX: 0, originY: 0.62, originZ: 0,
+    impactX: 0, impactY: 0, impactZ: 8.4,
+    ratio: 0.15,
+  };
+  const positions = (visual as unknown as { positions: Float32Array }).positions;
+  const drawnLength = () => positions[positions.length - 1];
+
+  visual.setState(arc);
+  assert.ok(drawnLength() < 0.01, `第一帧还在枪口上，实际 ${drawnLength()}`);
+
+  // 之后一帧一帧长，长度单调不减，且一小段时间内就长满。
+  let previous = drawnLength();
+  for (let frame = 0; frame < 12; frame += 1) {
+    visual.setState(arc);
+    visual.advance(1 / 60);
+    assert.ok(drawnLength() >= previous - 1e-9, `第 ${frame} 帧缩回去了`);
+    previous = drawnLength();
+  }
+  assert.ok(Math.abs(drawnLength() - 8.4) < 1e-4, `五分之一秒内该长满，实际 ${drawnLength()}`);
+});
+
+test('被挡住立刻缩回来：变长可以追，变短不能欠着', () => {
+  const visual = new ThreeBallisticPreviewVisual();
+  const arc = {
+    originX: 0, originY: 0.62, originZ: 0,
+    impactX: 0, impactY: 0, impactZ: 20,
+    ratio: 1,
+  };
+  const positions = (visual as unknown as { positions: Float32Array }).positions;
+  visual.setState(arc);
+  visual.advance(1);
+  assert.ok(Math.abs(positions[positions.length - 1] - 20) < 1e-4);
+
+  // 半路上突然站了个东西：线这一帧就得停在它前面，多画一帧都是在说谎。
+  visual.setState({ ...arc, travel: 0.2 });
+  assert.ok(Math.abs(positions[positions.length - 1] - 4) < 1e-4, '截断立刻生效');
 });
 
 test('收圈就收线：换手、进建造模式都不该留下一条线', () => {
