@@ -1,0 +1,69 @@
+{
+  "$schema": "./actor.schema.json",
+  "schemaVersion": 1,
+  "id": "legged-slime-hunter",
+  "components": {
+    "navigation": {
+      "speed": 2.1,
+      "turnSpeed": 5,
+      "stepUp": 1.05,
+      "maxDrop": 2.2,
+      "arriveRadius": 1,
+      "repathSeconds": 0.9,
+      "goalTolerance": 1.2,
+      "searchRadiusCells": 16,
+      "maxVisitedNodes": 320,
+      "malus": {
+        "danger": 24
+      },
+      "chase": {
+        "senseRadius": 13,
+        "giveUpRadius": 20,
+        "keepDistance": 1.1
+      }
+    },
+    "patrolPath": {
+      "waypoints": [
+        [
+          0,
+          0,
+          0
+        ],
+        [
+          6,
+          0,
+          0
+        ]
+      ],
+      "speed": 0.9,
+      "waitSeconds": 1.4,
+      "mode": "ping-pong"
+    },
+    "health": {
+      "maximum": 80,
+      "corpseSeconds": 10
+    },
+    "render": {
+      "model": "line-art-legged-slime",
+      "radius": 0.44,
+      "hipHeight": 0.7,
+      "legSpread": 0.17,
+      "legCount": 2,
+      "thighLength": 0.44,
+      "shinLength": 0.44,
+      "legThickness": 0.03,
+      "footLength": 0.14,
+      "stepLength": 0.34,
+      "stepHeight": 0.16,
+      "stepDuration": 0.19,
+      "membraneColor": "#c79bb4",
+      "middleColor": "#e8cfdd",
+      "coreColor": "#8a4d70",
+      "bubbleColor": "#fbeef5",
+      "inkColor": "#000000",
+      "shadowColor": "#4a2740",
+      "legColor": "#000000",
+      "footShadowColor": "#6f6f6f"
+    }
+  }
+}

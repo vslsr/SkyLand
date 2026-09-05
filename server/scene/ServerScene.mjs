@@ -96,6 +96,7 @@ import {
 } from '../../shared/world/fruitDrop.mjs';
 import { toWorldSeed } from '../../shared/world/worldConfig.mjs';
 import { SceneEnvironmentDirector } from './SceneEnvironmentDirector.mjs';
+import { SceneNavigation } from './SceneNavigation.mjs';
 import { TERRAIN_CELL_SIZE, TERRAIN_SURFACE } from '../../shared/world/terrainConfig.mjs';
 import { sampleTerrain, terrainCellSurface } from '../../shared/world/terrainContent.mjs';
 import { terrainCellTopHeight } from '../../shared/world/terrainSupport.mjs';
@@ -311,6 +312,11 @@ export class ServerScene {
         ? (x, z) => sampleTerrain(this.worldSeed, x, z, {}, this.terrainCellCodeAt).groundY
         : undefined,
     });
+    // AI 寻路看的地形、建造件与障碍全部是场景已有的那几份权威数据，这里只是
+    // 把它们接上（`SceneNavigation`）。System 只认识 world，所以和下面几条一样
+    // 挂在 context 上。
+    this.navigation = new SceneNavigation(this);
+    this.actorWorld.context.navigation = this.navigation;
     // 拔出来的世界物件怎么进物品栏，只有场景知道（它要删 Actor、要重挂手持
     // 表现体）。ElasticDetachSystem 只认识 world，所以这一步从 context 上问。
     this.actorWorld.context.stowPulledActor = (actor, player) => (

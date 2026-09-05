@@ -1101,6 +1101,157 @@
             }
           }
         },
+        "navigation": {
+          "description": "会自己寻路的 AI。搜索算法在 shared/navigation，这里只写这一只生物的体型、脾气与搜索预算。搜索窗口和节点上限是大世界的成本封顶，不是调优旋钮。",
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "speed"
+          ],
+          "properties": {
+            "speed": {
+              "description": "沿路径行走的速度，米每秒。",
+              "type": "number",
+              "exclusiveMinimum": 0,
+              "maximum": 20
+            },
+            "turnSpeed": {
+              "description": "转身速度，弧度每秒。转得慢的单位过拐角会画出一道弧。",
+              "type": "number",
+              "exclusiveMinimum": 0,
+              "maximum": 24
+            },
+            "radius": {
+              "description": "圆形足迹半径，米。它决定「这一格塞不塞得下」，默认取 render.radius。",
+              "type": "number",
+              "exclusiveMinimum": 0,
+              "maximum": 4
+            },
+            "height": {
+              "description": "站立高度，米。用来问头顶过不过得去。",
+              "type": "number",
+              "exclusiveMinimum": 0,
+              "maximum": 8
+            },
+            "stepUp": {
+              "description": "一步能抬多高，米。台阶地形一层是 1 米。",
+              "type": "number",
+              "minimum": 0,
+              "maximum": 4
+            },
+            "maxDrop": {
+              "description": "一步敢往下走多深，米。超过这个落差的坎在寻路眼里是断崖。",
+              "type": "number",
+              "minimum": 0,
+              "maximum": 16
+            },
+            "nodeRadius": {
+              "description": "走到离节点这么近就算过了这一个节点，米。",
+              "type": "number",
+              "exclusiveMinimum": 0,
+              "maximum": 4
+            },
+            "arriveRadius": {
+              "description": "离目标这么近就算到了，米。",
+              "type": "number",
+              "exclusiveMinimum": 0,
+              "maximum": 16
+            },
+            "repathSeconds": {
+              "description": "隔多久重想一次路，秒。世界会变，一条几秒前的路未必还成立。",
+              "type": "number",
+              "exclusiveMinimum": 0,
+              "maximum": 30
+            },
+            "goalTolerance": {
+              "description": "目标挪出这么远就立刻重想，米。追人时这一条比定时那一条先触发。",
+              "type": "number",
+              "exclusiveMinimum": 0,
+              "maximum": 32
+            },
+            "searchRadiusCells": {
+              "description": "搜索窗口半径，单位是 2 米的导航格。它是这只生物的视野，也是内存上界：窗口是 (2r+1)² 格的定长数组。",
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 48
+            },
+            "maxVisitedNodes": {
+              "description": "一次搜索最多展开多少节点。死路里的最坏情况由它封顶。",
+              "type": "integer",
+              "minimum": 8,
+              "maximum": 1024
+            },
+            "swim": {
+              "description": "会不会游泳。写 true 等于把水的代价从「走不了」调成一个正数；显式写了 malus.water 时以后者为准。",
+              "type": "boolean"
+            },
+            "malus": {
+              "description": "各类地面的代价加成，乘在这一步的距离上。-1 表示走不了。",
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "walkable": {
+                  "type": "number",
+                  "minimum": -1,
+                  "maximum": 64
+                },
+                "slope": {
+                  "type": "number",
+                  "minimum": -1,
+                  "maximum": 64
+                },
+                "deck": {
+                  "type": "number",
+                  "minimum": -1,
+                  "maximum": 64
+                },
+                "waterEdge": {
+                  "type": "number",
+                  "minimum": -1,
+                  "maximum": 64
+                },
+                "water": {
+                  "type": "number",
+                  "minimum": -1,
+                  "maximum": 64
+                },
+                "danger": {
+                  "type": "number",
+                  "minimum": -1,
+                  "maximum": 64
+                }
+              }
+            },
+            "chase": {
+              "description": "追击参数。写了才追人；不写的话这只单位只在别的系统给它设目标时才动。",
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "senseRadius"
+              ],
+              "properties": {
+                "senseRadius": {
+                  "description": "察觉玩家的距离，米。",
+                  "type": "number",
+                  "exclusiveMinimum": 0,
+                  "maximum": 64
+                },
+                "giveUpRadius": {
+                  "description": "追出这么远就放弃，米。必须大于 senseRadius，否则目标站在边界上会让它一步一犹豫。",
+                  "type": "number",
+                  "exclusiveMinimum": 0,
+                  "maximum": 128
+                },
+                "keepDistance": {
+                  "description": "追到这么近就停下来，米。近战贴身写 0，弓手写自己的射程。",
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 64
+                }
+              }
+            }
+          }
+        },
         "patrolPath": {
           "type": "object",
           "additionalProperties": false,
