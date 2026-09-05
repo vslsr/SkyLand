@@ -31,7 +31,7 @@ import {
 import {
   createWoodBowLimbGeometry,
   createWoodBowStringGeometry,
-  woodBowStringOffsetX,
+  woodBowStringOffset,
 } from '../../models/actors/createWoodBowModel';
 import {
   createSlingshotBandGeometry,
@@ -284,7 +284,8 @@ function createMushroomPilePieces(
  * 掉在地上的一把弓：**只有一件，不堆**（`maximumQuantity` 是 1）。
  *
  * 几何和手持那把是同一对函数，所以地上那把和手上那把是同一副样子——两处各画一套
- * 迟早会分家。躺下来那一下靠绕 Z 转 90°：弓立着的长轴是 Y，倒在地上就该沿地面躺着。
+ * 迟早会分家。躺下来那一下靠绕 Z 转 90°：弓立着的长轴是 Y，倒在地上就该沿地面躺着；
+ * 弓面本来就在 YZ 上，转完正好整片贴着地。弦在 +Z 上，绕 Z 转不动它。
  */
 function createWoodBowPieces(definition: WoodBowRender, burning: boolean): PilePiece[] {
   const wood = new THREE.Color(burning ? '#d66b38' : definition.woodColor);
@@ -294,7 +295,7 @@ function createWoodBowPieces(definition: WoodBowRender, burning: boolean): PileP
     Math.PI / 2,
   );
   const lift = new THREE.Vector3(0, definition.thickness, 0);
-  const stringOffset = woodBowStringOffsetX(definition);
+  const stringOffset = woodBowStringOffset(definition);
   return [
     {
       geometry: createWoodBowLimbGeometry(definition),
@@ -304,9 +305,9 @@ function createWoodBowPieces(definition: WoodBowRender, burning: boolean): PileP
     },
     {
       geometry: createWoodBowStringGeometry(definition),
-      // 弦在弓的局部 +X 上；整把弓躺下之后那一段变成世界的 -Y，所以先转再平移。
+      // 弦在弓的局部 +Z 上，绕 Z 躺下来不动它，所以平移直接加在 Z 上。
       matrix: new THREE.Matrix4().compose(
-        new THREE.Vector3(lift.x, lift.y - stringOffset, lift.z),
+        new THREE.Vector3(lift.x, lift.y, lift.z + stringOffset),
         lying,
         new THREE.Vector3(1, 1, 1),
       ),

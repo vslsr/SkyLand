@@ -10,6 +10,10 @@ import type { InventoryCommand } from '../src/network/messages.ts';
 import type { BallisticPreviewState } from '../src/render/RenderScene.ts';
 import { ThreeRenderScene } from '../src/render/three/ThreeRenderScene.ts';
 import { ItemUseInputTags } from '../src/input/config/playerInput.ts';
+import {
+  createWoodBowLimbGeometry,
+  woodBowStringOffset,
+} from '../src/models/actors/createWoodBowModel';
 
 const BOW = itemCatalog.require('wood-bow').weapon!;
 
@@ -247,4 +251,19 @@ test('拉得越满弧越平：同样的落点，满蓄力的弧顶更低', () =>
     return points.getY(Math.floor(points.count / 2));
   };
   assert.ok(apexOf(1) < apexOf(0.2), '拉满是一条平射，轻放是一条吊射');
+});
+
+test('弓面垂直于射向：立在 YZ 上，弓臂鼓向 +Z、弦落在射手这一侧', () => {
+  const definition = { model: 'line-art-wood-bow', length: 1, thickness: 0.03 } as never;
+  const geometry = createWoodBowLimbGeometry(definition);
+  geometry.computeBoundingBox();
+  const box = geometry.boundingBox!;
+
+  // 手持体只继承玩家的 yaw，+Z 就是射出去的方向（`weaponImpactPoint` 用的同一套）。
+  // 弓面因此必须立在 YZ 上：X 上只剩木头本身那点粗细，多一点就是横着端弓。
+  assert.ok(box.max.x - box.min.x <= definition.thickness * 2 + 1e-6, '弓面不该占 X');
+  assert.ok(box.max.y - box.min.y > definition.length * 0.9, '长轴是 Y，弓立着');
+  // 鼓向目标、弦贴着射手：射手拉的是弦，弓背朝前。
+  assert.ok(box.max.z > definition.length * 0.4, '弓臂鼓向 +Z');
+  assert.ok(woodBowStringOffset(definition) < 0, '弦落在 -Z，也就是射手这一边');
 });
