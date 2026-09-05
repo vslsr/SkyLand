@@ -301,8 +301,13 @@ export class ClientActorSystem implements SceneFrameSystem {
   private readonly instances = new RenderInstanceBuffer(PROP_INT_STRIDE, PROP_FLOAT_STRIDE);
   /** 正被吃的那件食物（手持表现体）和它吃到哪一步；没人在吃时是 undefined。 */
   private chewingItem?: { actorId: string; ratio: number };
-  /** 手上那把弓拉到哪一步。只有本地玩家有：别人那把要过网才知道。 */
-  private bowDraw?: { actorId: string; charge: number; releaseRevision: number };
+  /**
+   * 每把正被拉着的弓拉到哪一步。
+   *
+   * 是一张表而不是一个值：屋里可能好几个人同时在拉弓，本地那把由按住直接驱动、
+   * 别人那几把由快照驱动，但到了这一层它们是同一件事——「哪个 Actor 拉了几成」。
+   */
+  private readonly bowDraws = new Map<string, { charge: number; releaseRevision: number }>();
   private bowReleaseRevision = 0;
   /** 树上果子走另一条通道：它的记录里没有原型、没有驻留态，形状不一样。 */
   private readonly fruitInstances = new RenderInstanceBuffer(FRUIT_INT_STRIDE, FRUIT_FLOAT_STRIDE);
@@ -393,9 +398,7 @@ export class ClientActorSystem implements SceneFrameSystem {
     this.world.addSystem(new ActorTransformSystem(this.transforms));
     // 参数要和 transform 同一次翻面，所以必须夹在写入与 publish 之间。
     this.world.addSystem(new ActorVisualParamSystem(this.transforms, {
-      bowDrawOf: (actorId) => (
-        this.bowDraw?.actorId === actorId ? this.bowDraw : undefined
-      ),
+      bowDrawOf: (actorId) => this.bowDraws.get(actorId),
     }));
     // 合批内容走自己那条通道，但同样是「写字节」，所以和 SoA 写入排在一起、
     // 都在 publish 之前。这条现在还没有双缓冲（同一帧写完就读），排在这里是为了
@@ -619,6 +622,11 @@ export class ClientActorSystem implements SceneFrameSystem {
       this.colliderInstances.delete(actorId);
       this.collision.removeDynamic(actorId);
       this.physics?.removeActorCollider(actorId);
+    }
+    // 换一次手就是一个新的手持表现体，旧的那把弓不会再有人问起它拉了几成。
+    // 不清的话这张表会随换手次数一直长。
+    for (const actorId of Array.from(this.bowDraws.keys())) {
+      if (!this.world.getActor(actorId)) this.bowDraws.delete(actorId);
     }
   }
 
@@ -949,11 +957,20 @@ export class ClientActorSystem implements SceneFrameSystem {
    * `releaseHeldBow`。
    */
   public setBowDraw(actorId: string | undefined, charge: number): void {
-    if (actorId === undefined) {
-      this.bowDraw = undefined;
-      return;
-    }
-    this.bowDraw = { actorId, charge, releaseRevision: this.bowReleaseRevision };
+    if (actorId === undefined) return;
+    const current = this.bowDraws.get(actorId);
+    this.bowDraws.set(actorId, {
+      charge,
+      releaseRevision: current?.releaseRevision ?? 0,
+    });
+  }
+
+  /** 这把弓松了：拉弓量归零，回弹由撒手那一下自己走。 */
+  public clearBowDraw(actorId: string | undefined): void {
+    if (actorId === undefined) return;
+    const current = this.bowDraws.get(actorId);
+    if (!current || current.charge === 0) return;
+    this.bowDraws.set(actorId, { charge: 0, releaseRevision: current.releaseRevision });
   }
 
   /**
@@ -964,7 +981,7 @@ export class ClientActorSystem implements SceneFrameSystem {
    */
   public releaseHeldBow(actorId: string): void {
     this.bowReleaseRevision += 1;
-    this.bowDraw = { actorId, charge: 0, releaseRevision: this.bowReleaseRevision };
+    this.bowDraws.set(actorId, { charge: 0, releaseRevision: this.bowReleaseRevision });
   }
 
   /** 这个原型的飘字从多高飞出来。按模型算一次，之后查表。 */

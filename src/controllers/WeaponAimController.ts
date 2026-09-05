@@ -223,3 +223,10 @@ export class WeaponAimController {
  */
 /** 朝向请求的收敛速度，导出给场景层复用。 */
 export const WEAPON_AIM_SHARPNESS = AIM_SHARPNESS;
+/**
+ * 出手点比脚底高多少，导出给场景层复用。
+ *
+ * 别人射出去那一箭的弧也从这个高度起——两处各写一个数的话，同一发箭在射手屏幕上
+ * 从手上出去，在旁观者屏幕上从脚底出去。
+ */
+export const WEAPON_MUZZLE_HEIGHT = MUZZLE_HEIGHT;

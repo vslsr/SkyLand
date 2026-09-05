@@ -49,6 +49,20 @@ export function fireWeapon({ scene, player, use, chargeRatio }) {
   const source = player.getComponent(GAME_ABILITY_COMPONENT)?.abilitySystem;
   const nowSeconds = scene.now() / 1000;
 
+  // 记下这一发，快照带出去：**别人也该看见那支箭**。带的是落点而不是「往哪个方向
+  // 射」——落点是判定用的那一个，两边因此画的是同一条弧；方向加距离会让接收方
+  // 再算一次，而那一次算错了没人会发现。
+  // 计数自增：一次性事件靠计数变化触发，bool 有可能在同一帧里立起来又倒下去。
+  player.weaponShot = {
+    revision: (player.weaponShot?.revision ?? 0) + 1,
+    x: player.x,
+    y: player.y,
+    z: player.z,
+    impactX: impact.x,
+    impactZ: impact.z,
+    ratio: strike.ratio,
+  };
+
   // 打空了也算打出去了：一发射偏的箭同样该进冷却，所以命中数不参与返回值。
   for (const target of collectWeaponTargets(scene, player, impact, strike.radius)) {
     const damage = weaponDamage(weapon, strike, resolveActorTags(target));
