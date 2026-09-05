@@ -1107,6 +1107,41 @@
             }
           }
         },
+        "weaponUser": {
+          "description": "会用武器的 AI。武器数值不写在这里，只写 itemType——一件东西只有一条账，AI 拿的和玩家拿的是同一把弓。",
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "itemType",
+            "engageRadius",
+            "chargeSeconds"
+          ],
+          "properties": {
+            "itemType": {
+              "description": "物品目录里的那件武器。它必须有 weapon 块，否则这个单位就是拿着一把打不响的弓。",
+              "type": "string",
+              "minLength": 1
+            },
+            "engageRadius": {
+              "description": "目标进到这个距离以内就开始拉弓，米。",
+              "type": "number",
+              "exclusiveMinimum": 0,
+              "maximum": 64
+            },
+            "chargeSeconds": {
+              "description": "放箭之前先拉多久，秒。它是这个单位放手前的那一段犹豫，不是「蓄到几成」——蓄到几成由目标有多远反解，因为弓手瞄的是人，不是最大射程。",
+              "type": "number",
+              "exclusiveMinimum": 0,
+              "maximum": 10
+            },
+            "turnSpeed": {
+              "description": "转身速度，弧度每秒。瞄不准的那一段是这个单位的破绽。",
+              "type": "number",
+              "exclusiveMinimum": 0,
+              "maximum": 12
+            }
+          }
+        },
         "render": {
           "oneOf": [
             {

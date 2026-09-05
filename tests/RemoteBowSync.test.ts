@@ -73,3 +73,21 @@ test('自己那一份不从快照来：本地按住已经驱动过一次了', ()
   assert.deepEqual(bar.draws, [], '自己的弓由本地按住驱动，等一趟网络回来会慢半拍');
   assert.deepEqual(bar.arrows, []);
 });
+
+test('AI 射的那一箭走同一条路：接收方不问射手是不是玩家', () => {
+  const bar = harness();
+  // Actor 快照上的形状和玩家那条一模一样，只是没有 heldActorId——AI 手上还没有
+  // 一把画出来的弓，所以它只有箭、没有弓的形变。
+  const archer = { id: 'legged-slime-archer-01' } as never;
+  const shot = { revision: 1, x: 9, y: 0, z: 3, impactX: 0, impactZ: 0, ratio: 0.4 };
+  bar.sync.apply([{ ...archer, weaponShot: shot }], 1_000);
+  assert.deepEqual(bar.arrows, [], '第一次看见它不补射');
+
+  bar.sync.apply([{ ...archer, weaponShot: { ...shot, revision: 2 } }], 1_100);
+  assert.equal(bar.arrows.length, 1);
+  assert.deepEqual(bar.arrows[0], {
+    originX: 9, originY: 0.62, originZ: 3,
+    impactX: 0, impactY: 0, impactZ: 0, ratio: 0.4,
+  });
+  assert.deepEqual(bar.releases, [], '没有手持体就没有弦可弹');
+});

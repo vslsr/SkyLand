@@ -148,6 +148,13 @@ export type ActorEventType =
 
 export interface SnapshotActor {
   id: string;
+  /**
+   * 这个 Actor 最近射出去的那一发。
+   *
+   * 和玩家那条是**同一个形状**：一发箭是谁射的和它怎么飞无关，接收方因此不需要
+   * 知道射手是玩家还是 AI。
+   */
+  weaponShot?: SnapshotWeaponShot;
   /** 生成物件由自描述 id 里的种类查表得到原型；普通网络 Actor 必填。 */
   archetypeId?: string;
   /** 离散复制状态；切换父节点时不做插值。 */

@@ -154,6 +154,13 @@ Read this reference only when the task touches gameplay entries (`@i`, `@b`, `@w
 **抛物线不属于 `EQS`。** 它是 `A` 里的表现：判定只认落点与半径，客户端那条白线读
 的是同一份 `weaponStrike` 换算，所以瞄的地方和打中的地方是同一处。
 
+**`@w` 不假定射手是玩家。** 判定入口是 `fireWeaponFrom(scene, shooter, weapon, ratio)`，
+只要求 shooter 带 Transform；`shoot` 这个使用动词只是它在物品那一侧的薄封装。所以同
+一条 `@w` 既是玩家手上那把，也是 AI 手上那把——AI 侧写一条 `weaponUser` Component
+（只写 `itemType` 加这个单位自己的交战距离与犹豫时长，**不写第二份数值**），开火、
+扣血、复制走的都是同一条路径。AI 蓄到几成由目标有多远反解
+（`weaponChargeRatioForDistance`）：弓手瞄的是人，不是最大射程。
+
 `A` 在工具上尤其要写全：蓄力那一段是 `比例` 驱动（跟长按圈同一个量），开火那一下是
 `一次性`，冷却是 `持续` 或 `比例`。重炮的蓄力抛物线细线也归 `A`——它是表现，不是判定，
 判定写在 `EQS`。

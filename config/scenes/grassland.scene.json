@@ -54,17 +54,50 @@
     {
       "id": "legged-slime-walker-01",
       "archetype": "legged-slime-walker",
-      "localTransform": { "position": [-5.5, 0, -2.5], "yaw": 0 }
+      "localTransform": {
+        "position": [
+          -5.5,
+          0,
+          -2.5
+        ],
+        "yaw": 0
+      }
     },
     {
       "id": "legged-slime-walker-02",
       "archetype": "legged-slime-walker",
-      "localTransform": { "position": [6.2, 0, -4.5], "yaw": 1.5707963 }
+      "localTransform": {
+        "position": [
+          6.2,
+          0,
+          -4.5
+        ],
+        "yaw": 1.5707963
+      }
     },
     {
       "id": "legged-slime-walker-03",
       "archetype": "legged-slime-walker",
-      "localTransform": { "position": [-1.5, 0, -8.5], "yaw": -0.7853982 }
+      "localTransform": {
+        "position": [
+          -1.5,
+          0,
+          -8.5
+        ],
+        "yaw": -0.7853982
+      }
+    },
+    {
+      "id": "legged-slime-archer-01",
+      "archetype": "legged-slime-archer",
+      "localTransform": {
+        "position": [
+          9.5,
+          0,
+          3.5
+        ],
+        "yaw": 3.1415927
+      }
     },
     {
       "id": "slingshot-01",
@@ -123,7 +156,10 @@
       "maximumZ": 11
     },
     "startingInventory": [
-      { "itemType": "wood-bow", "quantity": 1 }
+      {
+        "itemType": "wood-bow",
+        "quantity": 1
+      }
     ],
     "spawn": {
       "centerX": 0,

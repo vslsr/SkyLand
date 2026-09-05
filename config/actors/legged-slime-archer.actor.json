@@ -1,0 +1,56 @@
+{
+  "$schema": "./actor.schema.json",
+  "schemaVersion": 1,
+  "id": "legged-slime-archer",
+  "components": {
+    "patrolPath": {
+      "waypoints": [
+        [
+          0,
+          0,
+          0
+        ],
+        [
+          3.5,
+          0,
+          0
+        ]
+      ],
+      "speed": 0.7,
+      "waitSeconds": 1.2,
+      "mode": "ping-pong"
+    },
+    "weaponUser": {
+      "itemType": "wood-bow",
+      "engageRadius": 16,
+      "chargeSeconds": 1.1,
+      "turnSpeed": 2.2
+    },
+    "health": {
+      "maximum": 60,
+      "corpseSeconds": 12
+    },
+    "render": {
+      "model": "line-art-legged-slime",
+      "radius": 0.44,
+      "hipHeight": 0.66,
+      "legSpread": 0.16,
+      "legCount": 2,
+      "thighLength": 0.42,
+      "shinLength": 0.42,
+      "legThickness": 0.028,
+      "footLength": 0.13,
+      "stepLength": 0.28,
+      "stepHeight": 0.13,
+      "stepDuration": 0.22,
+      "membraneColor": "#9fc4c0",
+      "middleColor": "#cfe3e0",
+      "coreColor": "#3f7a72",
+      "bubbleColor": "#eef8f6",
+      "inkColor": "#000000",
+      "shadowColor": "#25443f",
+      "legColor": "#000000",
+      "footShadowColor": "#6f6f6f"
+    }
+  }
+}

@@ -1,6 +1,7 @@
 import {
   HEALTH_COMPONENT,
   TRANSFORM_COMPONENT,
+  WEAPON_SHOT_COMPONENT,
   resolveActorTags,
 } from '../../shared/actor/index.mjs';
 import {
@@ -33,43 +34,62 @@ import { registerItemUseAction } from './ItemUseActions.mjs';
  */
 
 /**
- * 开一次火。
+ * 开一次火。**射手是谁不在这里问**。
  *
- * @param {import('./ItemUseActions.mjs').ItemUseContext} context
- * @returns {boolean} 这一发到底打出去没有。
+ * 只要求 `shooter` 是一个带 Transform 的 Actor：位姿从 Transform 读、伤害来源从
+ * 它身上的 GAS 读（没有就是 undefined，扣血照样成立）、这一发记在它自己的
+ * `WeaponShotComponent` 上。玩家、AI 单位、以后的炮塔走的因此是同一条路——
+ * 「同一发箭」在系统里只有一种走法。
+ *
+ * @param scene 房间场景（权威侧）
+ * @param shooter 开火的 Actor。要有 `TRANSFORM_COMPONENT`
+ * @param weapon 物品目录里那份武器数据（`@w` 的 `D`）
+ * @param chargeRatio 松手那一刻的蓄力比例 [0, 1]
+ * @returns {boolean} 这一发到底打出去没有
  */
-export function fireWeapon({ scene, player, use, chargeRatio }) {
-  const weapon = use?.weapon;
-  // 没有 `@w` 条目的 `shoot` 物品就是一把打不响的武器：动词认得，兑现不了。
+export function fireWeaponFrom(scene, shooter, weapon, chargeRatio) {
+  // 没有 `@w` 条目就是一把打不响的武器：动词认得，兑现不了。
   if (!weapon) return false;
+  const transform = shooter?.getComponent(TRANSFORM_COMPONENT);
+  if (!transform) return false;
   const strike = resolveWeaponStrike(weapon, chargeRatio);
   // 空放：连箭都没出去，所以不进冷却、也不该被当成一次成功的使用。
   if (!strike) return false;
-  const impact = weaponImpactPoint(player.x, player.z, player.yaw, strike.distance);
-  const source = player.getComponent(GAME_ABILITY_COMPONENT)?.abilitySystem;
+
+  const impact = weaponImpactPoint(transform.x, transform.z, transform.yaw, strike.distance);
+  const source = shooter.getComponent(GAME_ABILITY_COMPONENT)?.abilitySystem;
   const nowSeconds = scene.now() / 1000;
 
-  // 记下这一发，快照带出去：**别人也该看见那支箭**。带的是落点而不是「往哪个方向
-  // 射」——落点是判定用的那一个，两边因此画的是同一条弧；方向加距离会让接收方
-  // 再算一次，而那一次算错了没人会发现。
-  // 计数自增：一次性事件靠计数变化触发，bool 有可能在同一帧里立起来又倒下去。
-  player.weaponShot = {
-    revision: (player.weaponShot?.revision ?? 0) + 1,
-    x: player.x,
-    y: player.y,
-    z: player.z,
+  // 记下这一发，快照带出去：**别人也该看见那支箭**。挂在射手自己身上而不是记在
+  // 玩家的一个裸属性上——AI 射的那一箭要和玩家射的走同一条复制路径。
+  shooter.getComponent(WEAPON_SHOT_COMPONENT)?.record({
+    x: transform.x,
+    y: transform.y,
+    z: transform.z,
     impactX: impact.x,
     impactZ: impact.z,
     ratio: strike.ratio,
-  };
+  });
 
   // 打空了也算打出去了：一发射偏的箭同样该进冷却，所以命中数不参与返回值。
-  for (const target of collectWeaponTargets(scene, player, impact, strike.radius)) {
+  for (const target of collectWeaponTargets(scene, shooter, impact, strike.radius)) {
     const damage = weaponDamage(weapon, strike, resolveActorTags(target));
     if (damage <= 0) continue;
     scene.applyHealthChange(target.id, -damage, { source, nowSeconds });
   }
   return true;
+}
+
+/**
+ * `shoot` 这个使用动词的执行器：把一次「用物品」翻成一次开火。
+ *
+ * 薄到只剩一句话是有意的——物品系统那一侧知道的是「谁按了哪一格、蓄了几成」，
+ * 武器系统知道的是「从哪儿往哪儿打」，这个函数就是那道缝。
+ *
+ * @param {import('./ItemUseActions.mjs').ItemUseContext} context
+ */
+export function fireWeapon({ scene, player, use, chargeRatio }) {
+  return fireWeaponFrom(scene, player, use?.weapon, chargeRatio);
 }
 
 /**
@@ -83,14 +103,14 @@ export const unregisterShootAction = registerItemUseAction('shoot', fireWeapon);
 /**
  * `D.EQS`：落点周围这一圈里所有能挨打的东西。
  *
- * 玩家自己不在内——弓箭的落点可能落在脚边（蓄力不足时射程最短），把自己算进去
+ * 射手自己不在内——弓箭的落点可能落在脚边（蓄力不足时射程最短），把自己算进去
  * 会让一次空射变成自杀。射出去的东西打不到射出它的人，这条在别的武器上也成立。
  */
-export function collectWeaponTargets(scene, player, impact, radius) {
+export function collectWeaponTargets(scene, shooter, impact, radius) {
   const targets = [];
   const squaredRadius = radius * radius;
   for (const actor of scene.actorWorld.query(HEALTH_COMPONENT, TRANSFORM_COMPONENT)) {
-    if (actor.id === player.id) continue;
+    if (actor.id === shooter.id) continue;
     if (actor.requireComponent(HEALTH_COMPONENT).dead) continue;
     const transform = actor.requireComponent(TRANSFORM_COMPONENT);
     const dx = transform.x - impact.x;

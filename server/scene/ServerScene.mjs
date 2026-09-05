@@ -28,6 +28,7 @@ import {
   ELASTIC_TETHER_COMPONENT,
   GENERATED_PROP_COMPONENT,
   HEALTH_COMPONENT,
+  WEAPON_SHOT_COMPONENT,
   INTERACTABLE_COMPONENT,
   INVENTORY_COMPONENT,
   ITEM_STACK_COMPONENT,
@@ -237,6 +238,11 @@ function chargeSnapshot(player) {
   return { startedAt: player.itemUseStartedAt, holdSeconds: use.holdSeconds };
 }
 
+/** 这名玩家最近射出去的那一发；一发都没射过时快照里没有这一条。 */
+function weaponShotSnapshot(player) {
+  return player.getComponent(WEAPON_SHOT_COMPONENT)?.snapshot();
+}
+
 export class ServerScene {
   constructor(sceneDefinition = { id: 'grassland' }, options = {}) {
     const definition = typeof sceneDefinition === 'string' ? { id: sceneDefinition } : sceneDefinition;
@@ -293,6 +299,9 @@ export class ServerScene {
     // 几个格子，成本不随房间里的 Actor 数或世界面积增长。
     this.collision = new CollisionWorld();
     this.actorWorld = createServerActorWorld(definition, {
+      // 会用武器的 AI 要能问「场景里有谁」「往谁身上扣血」，而那两件事只有场景
+      // 知道。System 只在 tick 里用它，所以这里递一个还没构造完的 this 是安全的。
+      scene: this,
       players: this.players,
       collision: this.collision,
       physics: this.physics,
@@ -1845,7 +1854,7 @@ export class ServerScene {
           // 拉弓和射出去那一发都是公开的：别人手上那把弓弯没弯、箭飞到哪儿，
           // 屋里每个人都该看见。两条都只带**权威的那几个数**，怎么画归客户端。
           ...(chargeSnapshot(player) ? { charge: chargeSnapshot(player) } : {}),
-          ...(player.weaponShot ? { weaponShot: player.weaponShot } : {}),
+          ...(weaponShotSnapshot(player) ? { weaponShot: weaponShotSnapshot(player) } : {}),
           heldActorId: player.getComponent(PICKUP_DROP_COMPONENT)?.heldActorId ?? null,
           pickupDropRevision: player.getComponent(PICKUP_DROP_COMPONENT)?.revision ?? 0,
           ...(slimeDrag ? { slimeDrag } : {}),
