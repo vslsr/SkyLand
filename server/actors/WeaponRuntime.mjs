@@ -1,6 +1,7 @@
 import {
   HEALTH_COMPONENT,
   TRANSFORM_COMPONENT,
+  WEAPON_SHOT_COMPONENT,
   resolveActorTags,
 } from '../../shared/actor/index.mjs';
 import {
@@ -46,40 +47,55 @@ import { registerItemUseAction } from './ItemUseActions.mjs';
  */
 
 /**
- * 开一次火：把一支箭送上路。
+ * 开一次火。**射手是谁不在这里问**。
  *
- * @param {import('./ItemUseActions.mjs').ItemUseContext} context
- * @returns {boolean} 这一发到底射出去没有。
+ * 只要求 `shooter` 是一个带 Transform 的 Actor：位姿从 Transform 读、伤害来源从
+ * 它身上的 GAS 读（没有就是 undefined，扣血照样成立）、这一发记在它自己的
+ * `WeaponShotComponent` 上。玩家、AI 单位、以后的炮塔走的因此是同一条路——
+ * 「同一发箭」在系统里只有一种走法。
+ *
+ * @param scene 房间场景（权威侧）
+ * @param shooter 开火的 Actor。要有 `TRANSFORM_COMPONENT`
+ * @param weapon 物品目录里那份武器数据（`@w` 的 `D`）
+ * @param chargeRatio 松手那一刻的蓄力比例 [0, 1]
+ * @param itemType 这把武器在物品目录里的 id。**弹药要带着它飞**：伤害在箭停住
+ *   那一刻才结算，那时得能再找回这份武器数据（标签倍率也在里面）。射手那时可能
+ *   已经死了、走远了，所以不能等到命中再回头问他手上拿的是什么。
+ * @returns {boolean} 这一发到底射出去没有
  */
-export function fireWeapon({ scene, player, use, chargeRatio }) {
-  const weapon = use?.weapon;
-  // 没有 `@w` 条目的 `shoot` 物品就是一把打不响的武器：动词认得，兑现不了。
+export function fireWeaponFrom(scene, shooter, weapon, chargeRatio, itemType) {
+  // 没有 `@w` 条目就是一把打不响的武器：动词认得，兑现不了。
   if (!weapon) return false;
+  const transform = shooter?.getComponent(TRANSFORM_COMPONENT);
+  if (!transform) return false;
   const strike = resolveWeaponStrike(weapon, chargeRatio);
   // 空放：连箭都没出去，所以不进冷却、也不该被当成一次成功的使用。
   if (!strike) return false;
+
   // 名义落点：没有任何东西挡路时这一箭会落在哪。真正的落点由飞行途中的扫掠决定，
   // 可能比这近得多——这正是「箭不再穿墙」的那一处差别。
-  const impact = weaponImpactPoint(player.x, player.z, player.yaw, strike.distance);
+  const impact = weaponImpactPoint(transform.x, transform.z, transform.yaw, strike.distance);
   const projectile = scene.spawnProjectileActor?.(weapon.projectileArchetypeId, {
-    originX: player.x,
-    originY: player.y + MUZZLE_HEIGHT,
-    originZ: player.z,
+    originX: transform.x,
+    originY: transform.y + MUZZLE_HEIGHT,
+    originZ: transform.z,
     impactX: impact.x,
     impactY: scene.projectileGroundHeightAt?.(impact.x, impact.z) ?? 0,
     impactZ: impact.z,
     ratio: strike.ratio,
-    ownerActorId: player.id,
-    weaponItemType: use.itemType,
+    ownerActorId: shooter.id,
+    weaponItemType: itemType,
   });
   // 射不出弹药的武器不算射出去了：悄悄退回「松手即判定」会把穿墙那条路重新接上。
   if (!projectile) return false;
-  // 记下这一发，快照带出去：**别人那把弓也该抖一下弦**。
+
+  // 记下这一发，快照带出去：**别人那把弓也该抖一下弦**。挂在射手自己身上而不是
+  // 记在玩家的一个裸属性上——AI 射的那一箭要和玩家射的走同一条复制路径。
   //
   // 只带一个自增计数：飞出去那支箭是复制过来的 Actor，落在哪儿由它自己说了算，
   // 接收方不需要（也不该）按落点再画一支——那样一发箭会变成两支，而本地画的那支
-  // 不认识墙。一次性事件靠计数变化触发，bool 有可能在同一帧里立起来又倒下去。
-  player.weaponShot = { revision: (player.weaponShot?.revision ?? 0) + 1 };
+  // 不认识墙。
+  shooter.getComponent(WEAPON_SHOT_COMPONENT)?.record();
   return true;
 }
 
@@ -90,9 +106,9 @@ export function fireWeapon({ scene, player, use, chargeRatio }) {
  * 那一下就是命中）；其余目标按 `D.EQS` 的落点半径收。两条合在一起去重，所以
  * 站在落点上又被正面射中的那一个只挨一次。
  *
- * @param {object} scene 房间场景（权威侧）
- * @param {import('../../shared/actor/index.mjs').ProjectileComponent} projectile 停下来的那一支
- * @param {{ x: number, y: number, z: number, targetActorId?: string }} impact
+ * @param scene 房间场景（权威侧）
+ * @param projectile 停下来的那一支（`ProjectileComponent`）
+ * @param impact 它停在哪儿，以及正面撞上的那一个
  * @returns {number} 这一发打到了几个目标
  */
 export function resolveProjectileImpact(scene, projectile, impact) {
@@ -104,7 +120,6 @@ export function resolveProjectileImpact(scene, projectile, impact) {
   const shooter = scene.actorWorld.getActor(projectile.ownerActorId);
   const source = shooter?.getComponent(GAME_ABILITY_COMPONENT)?.abilitySystem;
   const nowSeconds = scene.now() / 1000;
-
   const impulse = weaponHitImpulse(strike);
   // 这一箭是顺着哪条线来的：出手点 → 这一个目标。取**出手点**而不是射手此刻站的
   // 地方，是因为伤害现在在箭飞到的那一刻才结算，射手早就走开了；出手点是这条弧
@@ -148,6 +163,18 @@ export function resolveProjectileImpact(scene, projectile, impact) {
 }
 
 /**
+ * `shoot` 这个使用动词的执行器：把一次「用物品」翻成一次开火。
+ *
+ * 薄到只剩一句话是有意的——物品系统那一侧知道的是「谁按了哪一格、蓄了几成」，
+ * 武器系统知道的是「从哪儿往哪儿打」，这个函数就是那道缝。
+ *
+ * @param {import('./ItemUseActions.mjs').ItemUseContext} context
+ */
+export function fireWeapon({ scene, player, use, chargeRatio }) {
+  return fireWeaponFrom(scene, player, use?.weapon, chargeRatio, use?.itemType);
+}
+
+/**
  * 把 `shoot` 认领下来。
  *
  * 交出注销手柄，是为了让测试能把武器系统换成一个替身——不做成「后来的覆盖前面
@@ -158,8 +185,11 @@ export const unregisterShootAction = registerItemUseAction('shoot', fireWeapon);
 /**
  * `D.EQS`：落点周围这一圈里所有能挨打的东西。
  *
- * 射手自己不在内——射出去的东西打不到射出它的人。这条在弓的最短射程（6 米）下
- * 尤其要紧：一箭被脚边的墙挡住时，落点就在自己身上。
+ * 射手自己不在内——弓箭的落点可能落在脚边（蓄力不足时射程最短），把自己算进去
+ * 会让一次空射变成自杀。射出去的东西打不到射出它的人，这条在别的武器上也成立。
+ *
+ * 认的是 **id** 而不是射手那个 Actor：结算发生在箭停住那一刻，那时射手可能已经
+ * 死了、被收走了，但「不能打到自己」这条仍然成立。
  */
 export function collectWeaponTargets(scene, ownerActorId, impact, radius) {
   const targets = [];

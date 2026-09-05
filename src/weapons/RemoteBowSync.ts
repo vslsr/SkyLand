@@ -1,5 +1,5 @@
 import { holdRatio } from '../../shared/actor/index.mjs';
-import type { SnapshotPlayer } from '../network/protocol';
+import type { SnapshotActor, SnapshotPlayer } from '../network/protocol';
 
 /**
  * 别人手上那把弓（设计稿 `@i 木弓` 的 `A`，多端那一半）。
@@ -14,7 +14,16 @@ import type { SnapshotPlayer } from '../network/protocol';
  *
  * **自己那一份不走这里**：本地按住直接驱动，等一趟网络回来会让弓比物品栏那圈慢
  * 半拍。所以同一个人只会被驱动一次，两条路在调用方就分开了。
+ *
+ * 射手是不是玩家也不在这里问：AI 单位的那一发走的是 Actor 快照上同一个形状的
+ * `weaponShot`，所以这一侧只认「谁、拉了几成、松没松手」。AI 现在手上没有一把
+ * 画出来的弓（手持表现体还是玩家专有的），所以它那一发只看得见箭，没有弓的形变。
  */
+
+/** 一个可能开过火的东西：玩家或 Actor，这一侧只认这个形状。 */
+export type BowBearer =
+  Pick<SnapshotPlayer, 'id' | 'heldActorId' | 'charge' | 'weaponShot'>
+  | Pick<SnapshotActor, 'id' | 'weaponShot'>;
 
 export interface RemoteBowPort {
   /** 本地玩家的 id。自己那一份由本地按住驱动，不从快照来。 */
@@ -33,11 +42,12 @@ export class RemoteBowSync {
 
   public constructor(private readonly port: RemoteBowPort) {}
 
-  public apply(players: readonly SnapshotPlayer[], serverTime: number): void {
+  public apply(bearers: readonly BowBearer[], serverTime: number): void {
     const localPlayerId = this.port.localPlayerId();
-    for (const entry of players) {
+    for (const entry of bearers) {
       if (entry.id === localPlayerId) continue;
-      const heldActorId = entry.heldActorId ?? undefined;
+      // Actor 没有手持表现体（那条还是玩家专有的），所以它只有箭、没有弓的形变。
+      const heldActorId = ('heldActorId' in entry ? entry.heldActorId : undefined) ?? undefined;
       this.applyCharge(entry, heldActorId, serverTime);
       this.applyShot(entry, heldActorId);
     }
@@ -55,17 +65,18 @@ export class RemoteBowSync {
    * 的比例则要每帧都发一次，中间掉一帧弓就卡在半路上。
    */
   private applyCharge(
-    entry: SnapshotPlayer,
+    entry: BowBearer,
     heldActorId: string | undefined,
     serverTime: number,
   ): void {
-    if (!entry.charge || !heldActorId) {
+    const charge = 'charge' in entry ? entry.charge : undefined;
+    if (!charge || !heldActorId) {
       this.port.clearBowDraw(heldActorId);
       return;
     }
     this.port.setBowDraw(heldActorId, holdRatio(
-      (serverTime - entry.charge.startedAt) / 1000,
-      entry.charge.holdSeconds,
+      (serverTime - charge.startedAt) / 1000,
+      charge.holdSeconds,
     ));
   }
 
@@ -77,7 +88,7 @@ export class RemoteBowSync {
    *
    * 只认计数，不认落点：飞出去那支箭是复制过来的 Actor，落在哪儿由它自己说了算。
    */
-  private applyShot(entry: SnapshotPlayer, heldActorId: string | undefined): void {
+  private applyShot(entry: BowBearer, heldActorId: string | undefined): void {
     const shot = entry.weaponShot;
     if (!shot) return;
     const seen = this.shotRevisions.get(entry.id);

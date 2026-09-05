@@ -907,7 +907,9 @@ export class GrasslandScene extends Scene {
     this.debugMenuPage?.setWeather(snapshot.weather);
     this.debugMenuPage?.setTimeOfDay(snapshot.timeOfDay, snapshot.dayLength);
     this.world.syncActors(snapshot.actors, snapshot.players, snapshot.serverTime);
+    // 玩家和 Actor 一起过：射手是不是玩家不改变那一箭怎么飞。
     this.remoteBows.apply(snapshot.players, snapshot.serverTime);
+    this.remoteBows.apply(snapshot.actors, snapshot.serverTime);
     this.snapshots.push(snapshot);
 
     // 自己的那条不走插值：直接交给和解，把预测拉回服务器的结论。

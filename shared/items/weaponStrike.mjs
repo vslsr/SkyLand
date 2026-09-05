@@ -98,3 +98,25 @@ function clamp01(value) {
 function lerp(from, to, amount) {
   return from + (to - from) * amount;
 }
+
+/**
+ * 想打到这么远，得蓄到几成（`resolveWeaponStrike` 的距离那一半的反解）。
+ *
+ * AI 用它决定放箭时机：**弓手瞄的是人，不是最大射程**。总拉满的话，一个站在
+ * 八米外的目标会被一发飞到二十二米的箭从头顶掠过去——那看上去不像强，像瞎。
+ *
+ * 反解和正解写在同一个文件里，因为它们是同一条线：改了射程曲线，两处必须一起改，
+ * 而放在一起改漏一处会立刻看出来。
+ *
+ * 打不到（近于空放阈值处的射程、或远于满蓄力射程）时**夹到两端**：够不着就尽力
+ * 射最远，太近就用最轻的一发——这两种都比不放箭好，弓手不该站着发呆。
+ */
+export function weaponChargeRatioForDistance(weapon, distance) {
+  const minimum = weapon?.range?.minimum;
+  const maximum = weapon?.range?.maximum;
+  if (!Number.isFinite(minimum) || !Number.isFinite(maximum)) return undefined;
+  const span = maximum - minimum;
+  const raw = span > 0 ? (distance - minimum) / span : 1;
+  const floor = weapon?.charge?.minimumRatio ?? 0;
+  return Math.min(1, Math.max(floor, raw));
+}

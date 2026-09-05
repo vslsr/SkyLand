@@ -664,6 +664,34 @@ function validateProjectile(raw, filename) {
   };
 }
 
+/**
+ * 会用武器的 AI。
+ *
+ * 只校验「这个单位怎么用弓」，不校验弓本身——武器数值在物品目录那条 `@w` 上，
+ * 这里写第二份就会有两条账。`itemType` 指向的东西打不打得响也不在这里判：目录
+ * 是另一份配置，等到开火那一刻它自然是一把打不响的弓（`fireWeaponFrom` 的第一
+ * 句），而不是让整个场景加载不起来。
+ */
+function validateWeaponUser(raw, filename) {
+  const path = `${filename}.components.weaponUser`;
+  const definition = requireObject(raw, path);
+  const knownKeys = new Set(['itemType', 'engageRadius', 'chargeSeconds', 'turnSpeed']);
+  for (const key of Object.keys(definition)) {
+    if (!knownKeys.has(key)) throw new TypeError(`${path} 包含未知字段：${key}`);
+  }
+  if (typeof definition.itemType !== 'string' || definition.itemType.length === 0) {
+    throw new TypeError(`${path}.itemType 必须是非空字符串`);
+  }
+  return {
+    itemType: definition.itemType,
+    engageRadius: requireNumber(definition.engageRadius, `${path}.engageRadius`, 0.01, 64),
+    chargeSeconds: requireNumber(definition.chargeSeconds, `${path}.chargeSeconds`, 0.01, 10),
+    ...(definition.turnSpeed === undefined
+      ? {}
+      : { turnSpeed: requireNumber(definition.turnSpeed, `${path}.turnSpeed`, 0.01, 12) }),
+  };
+}
+
 function validatePatrolPath(raw, filename) {
   const path = `${filename}.components.patrolPath`;
   const definition = requireObject(raw, path);
@@ -1153,6 +1181,7 @@ function validateActorArchetype(raw, filename) {
     'generatedProp',
     'guidePath',
     'patrolPath',
+    'weaponUser',
     'buildPiece',
     'buildGrid',
     'render',
@@ -1174,6 +1203,9 @@ function validateActorArchetype(raw, filename) {
     : undefined;
   const projectile = components.projectile
     ? validateProjectile(components.projectile, filename)
+    : undefined;
+  const weaponUser = components.weaponUser
+    ? validateWeaponUser(components.weaponUser, filename)
     : undefined;
   // 船体根节点看不见：它的样子就是挂在它身上的那些地基，所以只有 buildGrid 也算。
   if (!render && !generatedProp && !guidePath && !components.buildGrid) {
@@ -1386,6 +1418,7 @@ function validateActorArchetype(raw, filename) {
       ...(generatedProp ? { generatedProp } : {}),
       ...(guidePath ? { guidePath } : {}),
       ...(patrolPath ? { patrolPath } : {}),
+      ...(weaponUser ? { weaponUser } : {}),
       ...(buildPiece ? { buildPiece } : {}),
       ...(buildGrid ? { buildGrid } : {}),
       ...(render ? { render } : {}),

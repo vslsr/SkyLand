@@ -26,6 +26,11 @@ function positive(value, fallback) {
   return Math.max(0.0001, finite(value, fallback));
 }
 
+/** 脱离成自由刚体的那种 Actor 只有一个 collider；没有就是空的。 */
+function dynamicColliders(entry) {
+  return entry?.collider ? [entry.collider] : [];
+}
+
 /**
  * 绕 +Y 轴转 yaw 的四元数。
  *
@@ -483,24 +488,31 @@ export class PhysicsWorld {
       end,
       finite(radius, 0.08),
       PROJECTILE_QUERY_GROUPS,
-      this.#characterColliderOf(excludeActorId),
+      this.#collidersOf(excludeActorId),
     );
   }
 
   /**
-   * 这个 id 在物理世界里的那具角色胶囊。
+   * 这个 id 在物理世界里占的那些 collider。
    *
-   * 只找角色：本地角色、远端代理。射手今天一定是玩家，而玩家在物理世界里正好是
-   * 一具胶囊，所以「排掉一个 collider」就够，不需要维护一张 handle → 所有者的
-   * 反查表——那张表要跟着 Rapier 回收 handle 一起维护，漏一处就会排错人。
+   * 三种射手都要认：玩家是一具角色胶囊（`#characters`）、别人是远端代理
+   * （`#proxies`）、AI 单位是普通 Actor 的一组 collider（`#actors`，菌盖那种支撑面
+   * 会有不止一个）。少认一种，那一类射手的第一段扫掠就撞在自己身上，箭永远飞不出去。
+   *
+   * 现查而不是维护一张 handle → 所有者的反查表：那张表要跟着 Rapier 回收 handle
+   * 一起维护，漏一处就会排错人；而这里每次射击只查一个 id。
    */
-  #characterColliderOf(id) {
+  #collidersOf(id) {
     if (id === undefined || id === null) return undefined;
     const character = this.#characters.get(id) ?? this.#proxies.get(id);
-    return character?.collider?.isValid() ? character.collider : undefined;
+    const colliders = character?.collider
+      ? [character.collider]
+      : (this.#actors.get(id) ?? dynamicColliders(this.#dynamicActors.get(id)));
+    const live = colliders.filter((collider) => collider?.isValid?.());
+    return live.length > 0 ? live : undefined;
   }
 
-  #castSphere(start, end, radius, groups, excludeCollider) {
+  #castSphere(start, end, radius, groups, excludeColliders) {
     this.#assertAlive();
     this.prepareQueries();
     const delta = {
@@ -521,7 +533,13 @@ export class PhysicsWorld {
       true,
       undefined,
       groups,
-      excludeCollider,
+      // 只有一个要排的时候走 Rapier 那个专门的入参；多于一个（AI 单位可能有好几个
+      // collider）才用谓词，那条路每次查询多一个闭包。
+      excludeColliders?.length === 1 ? excludeColliders[0] : undefined,
+      undefined,
+      excludeColliders && excludeColliders.length > 1
+        ? (collider) => !excludeColliders.some((excluded) => excluded.handle === collider.handle)
+        : undefined,
     );
     const time = hit?.timeOfImpact ?? hit?.time_of_impact;
     return Number.isFinite(time) ? Math.max(0, Math.min(1, time / distance)) : 1;

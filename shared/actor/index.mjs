@@ -46,6 +46,14 @@ export {
   HealthComponent,
 } from './components/HealthComponent.mjs';
 export {
+  WEAPON_SHOT_COMPONENT,
+  WeaponShotComponent,
+} from './components/WeaponShotComponent.mjs';
+export {
+  WEAPON_USER_COMPONENT,
+  WeaponUserComponent,
+} from './components/WeaponUserComponent.mjs';
+export {
   ACTOR_BUILD_TAG,
   ACTOR_CREATURE_TAG,
   ACTOR_ITEM_TAG,

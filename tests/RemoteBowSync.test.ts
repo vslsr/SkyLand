@@ -60,3 +60,16 @@ test('自己那一份不从快照来：本地按住已经驱动过一次了', ()
   assert.deepEqual(bar.draws, [], '自己的弓由本地按住驱动，等一趟网络回来会慢半拍');
   assert.deepEqual(bar.releases, [], '自己撒手那一下也是本地驱动的');
 });
+
+test('AI 射的那一发走同一条路：接收方不问射手是不是玩家', () => {
+  const bar = harness();
+  // Actor 快照上的形状和玩家那条一模一样，只是没有 heldActorId——AI 手上还没有
+  // 一把画出来的弓，所以它那一发只看得见箭，没有弓的形变。
+  const archer = { id: 'legged-slime-archer-01' } as never;
+  bar.sync.apply([{ ...archer, weaponShot: { revision: 1 } }], 1_000);
+  bar.sync.apply([{ ...archer, weaponShot: { revision: 2 } }], 1_100);
+  // 计数确实认了（同一条去重表），但没有手持体就没有弦可弹。箭本身是复制过来的
+  // Actor，不由这一侧生。
+  assert.deepEqual(bar.releases, []);
+  assert.deepEqual(bar.cleared.at(-1), undefined, 'Actor 没有手持体');
+});

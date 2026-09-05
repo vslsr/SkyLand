@@ -2,6 +2,7 @@ import {
   HEALTH_COMPONENT,
   PATROL_PATH_COMPONENT,
   TRANSFORM_COMPONENT,
+  WEAPON_USER_COMPONENT,
 } from '../../shared/actor/index.mjs';
 
 /** 一次 tick 最多补的时长。卡顿之后不该让巡逻者瞬移过半张地图。 */
@@ -25,6 +26,10 @@ export class PatrolPathSystem {
     for (const actor of world.query(PATROL_PATH_COMPONENT, TRANSFORM_COMPONENT)) {
       // 死了就不走了。尸体留在倒下的那一格，直到 `HealthSystem` 收走它。
       if (actor.getComponent(HEALTH_COMPONENT)?.dead) continue;
+      // 正在瞄准的站定不走（`WeaponUserSystem` 在这之前刚写下这个标记）。两个
+      // 系统同时写朝向的话，一个把脸转向目标、另一个把脸转回路线，弓手会永远
+      // 瞄不准——那不是「难打」，是打不出去。
+      if (actor.getComponent(WEAPON_USER_COMPONENT)?.engaged) continue;
       const patrol = actor.requireComponent(PATROL_PATH_COMPONENT);
       const transform = actor.requireComponent(TRANSFORM_COMPONENT);
       // 出生点只抓一次：路线相对它解算，而 Actor 自己正被这条路线推着走。

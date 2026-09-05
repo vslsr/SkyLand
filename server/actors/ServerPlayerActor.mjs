@@ -3,6 +3,7 @@ import {
   BiteComponent,
   HEALTH_COMPONENT,
   HealthComponent,
+  WeaponShotComponent,
   BuoyancyComponent,
   InventoryComponent,
   PickupDropComponent,
@@ -61,6 +62,9 @@ export class ServerPlayerActor extends Actor {
     if (archetype.components.health) {
       this.addComponent(new HealthComponent({ ...archetype.components.health, corpseSeconds: 0 }));
     }
+    // 射出去那一发记在射手自己身上。玩家一律带着它（一发都没射过时它不进快照），
+    // 因为「手上随时可能换成一把弓」是玩家这一类实体的常态。
+    this.addComponent(new WeaponShotComponent());
     this.waterMovementEffect = new WaterMovementEffectController(gameAbility.abilitySystem);
     // applyPlayerMovement 读取这份复用对象；每次输入只更新 GAS CurrentValue，避免热路径分配。
     this.effectiveMovement = {

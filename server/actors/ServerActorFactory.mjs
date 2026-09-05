@@ -24,7 +24,10 @@ import {
   HAZARD_COMPONENT,
   HazardComponent,
   HEALTH_COMPONENT,
+  WEAPON_SHOT_COMPONENT,
   HealthComponent,
+  WeaponShotComponent,
+  WeaponUserComponent,
   HEAT_EMITTER_COMPONENT,
   HeatEmitterComponent,
   GENERATED_PROP_COMPONENT,
@@ -80,6 +83,7 @@ import { HighCountActorSystem } from './HighCountActorSystem.mjs';
 import { GuidePathSystem } from './GuidePathSystem.mjs';
 import { PatrolPathSystem } from './PatrolPathSystem.mjs';
 import { ProjectileSystem } from './ProjectileSystem.mjs';
+import { WeaponUserSystem } from './WeaponUserSystem.mjs';
 import { CHUNK_SIZE } from '../../shared/world/worldConfig.mjs';
 
 export function createServerActor(spawn, archetype, runtime = {}) {
@@ -108,6 +112,12 @@ export function createServerActor(spawn, archetype, runtime = {}) {
     }));
   }
   if (archetype.components.hazard) actor.addComponent(new HazardComponent(archetype.components.hazard));
+  // 会用武器的 AI 一定带着「最近射出去那一发」：它射的箭要和玩家射的走同一条
+  // 复制路径，否则同一发箭在系统里会有两种走法。
+  if (archetype.components.weaponUser) {
+    actor.addComponent(new WeaponUserComponent(archetype.components.weaponUser));
+    actor.addComponent(new WeaponShotComponent());
+  }
   // 有生命值就得有 GAS：权威血量是 `Health` 属性，Component 只是它的复制面。
   // 玩家 Actor 自己带 GAS（见 ServerPlayerActor），走不到这里。
   if (archetype.components.health) {
@@ -235,6 +245,9 @@ export function createServerActorWorld(sceneDefinition, options = {}) {
   world.addSystem(new VesselMotorSystem());
   // 巡逻要排在 colliderIndex 之前：它移动的是权威 Transform，碰撞体必须跟上，
   // 否则玩家会撞在这只史莱姆上一帧之前的位置上。
+  // 排在巡逻**之前**：它决定这只弓手这一刻站不站定，巡逻据此放手。反过来的话
+  // 巡逻会在同一 tick 里把刚转过去的脸又转回路线上，弓手永远瞄不准。
+  if (options.scene) world.addSystem(new WeaponUserSystem(options.scene));
   world.addSystem(new PatrolPathSystem());
   // 弹药和巡逻同理排在 colliderIndex 之前：它写的是权威 Transform，而它这一 tick
   // 的扫掠要打在**已经更新过**的目标位置上，不是上一帧的位置上。
@@ -318,6 +331,7 @@ export function createActorSnapshots(world, options = {}) {
     const dropMotion = actor.getComponent(DROP_MOTION_COMPONENT);
     const hazard = actor.getComponent(HAZARD_COMPONENT);
     const health = actor.getComponent(HEALTH_COMPONENT);
+    const weaponShot = actor.getComponent(WEAPON_SHOT_COMPONENT)?.snapshot();
     const temperature = actor.getComponent(TEMPERATURE_COMPONENT);
     const combustible = actor.getComponent(COMBUSTIBLE_COMPONENT);
     const container = actor.getComponent(CONTAINER_COMPONENT);
@@ -357,6 +371,7 @@ export function createActorSnapshots(world, options = {}) {
         elasticDetach?.revision ?? 0,
         isPickedUp ? holderPickupDrop.revision : 0,
         health?.revision ?? 0,
+        weaponShot?.revision ?? 0,
         temperature?.revision ?? 0,
         combustible?.revision ?? 0,
         itemStack?.revision ?? 0,
@@ -378,6 +393,8 @@ export function createActorSnapshots(world, options = {}) {
         z: transform.localZ,
         yaw: transform.localYaw,
       },
+      // 射出去那一发和玩家那一条走同一个形状：接收方不需要知道射手是谁。
+      ...(weaponShot ? { weaponShot } : {}),
       ...(buoyancy ? {
         buoyancy: {
           state: buoyancy.state,
