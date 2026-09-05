@@ -23,6 +23,7 @@ import { HotbarController } from '../controllers/HotbarController';
 import { ContainerController } from '../controllers/ContainerController';
 import { ContainerPage } from '../ui/pages/ContainerPage';
 import type { TagLike } from '../tags';
+import { HealthBar } from '../ui/HealthBar';
 import { HoldProgressBadge } from '../ui/HoldProgressBadge';
 import { HotbarBar } from '../ui/HotbarBar';
 import { buildInventoryView } from '../inventory/index';
@@ -33,9 +34,10 @@ import { SnapshotBuffer } from '../network/SnapshotBuffer';
 import type { InterpolatedPlayerState, RoomSnapshot } from '../network/protocol';
 import { RemoteBowSync } from '../weapons/RemoteBowSync';
 import {
+  HealthDisplayController,
   HealthPopupEmitter,
   healthPopupAnchorY,
-} from '../health/HealthPopupEmitter';
+} from '../health/index';
 import {
   WEAPON_AIM_SHARPNESS,
   WeaponAimController,
@@ -112,6 +114,18 @@ export class GrasslandScene extends Scene {
   private readonly pointerRay: PointerRayTracker;
   private readonly gameInteractions = new GameInteractionLayer();
   private readonly hud = new HudController();
+  /** 屏幕底部那条生命条。控制器眼里它只是「一种画法」，随时可以再挂第二种。 */
+  private readonly healthBar = new HealthBar();
+  /**
+   * 本地玩家的生命值显示。
+   *
+   * 整条链上这里是唯一知道「显示的是谁」的地方，而它交出去的只有一个函数：
+   * 控制器与生命条都不认识 `PlayerEntity`，更不认识 `HealthComponent`。角色没了
+   * 就返回 undefined，生命条自己收起来，不需要另发一条「我没了」。
+   */
+  private readonly healthDisplay = new HealthDisplayController({
+    readHealth: () => this.player?.health,
+  });
   /**
    * 玩家头上那条飘字。Replica 的那份由 `ClientActorSystem` 自己发——玩家不是
    * Replica，走的是 players 快照，所以这一条在这里。
@@ -508,6 +522,11 @@ export class GrasslandScene extends Scene {
     document.getElementById('hotbar-root')?.append(this.hotbarBar.element);
     // 按住进度环是只读 HUD：贴在准星下方，pointer-events 关掉，不参与命中测试。
     this.baseLayer.append(this.holdProgress.element);
+    // 生命条同样是只读 HUD，贴在快捷栏上沿。挂载与订阅分成两件事：想再加一种
+    // 样式（准星旁的一圈、头顶的一排格子）就是再 append 一个元素、再 addView 一次，
+    // 控制器和这条横条都不用改。
+    document.getElementById('health-root')?.append(this.healthBar.element);
+    this.healthDisplay.addView(this.healthBar);
     this.hotbarBar.onSelect((slotIndex) => {
       this.roomClient.sendInventoryCommand({ kind: 'select', slotIndex });
     });
@@ -628,6 +647,8 @@ export class GrasslandScene extends Scene {
     this.weaponAim.update();
     const playerId = this.joinedRoom?.player.id;
     this.hud.setVesselStatus(playerId ? this.world.getVesselHudState(playerId) : undefined);
+    // 排在 sim-player 之后：这一帧的血量刚由那一段写进玩家实体，早了会慢一帧。
+    this.healthDisplay.update(deltaSeconds);
     this.sceneComponents.update(deltaSeconds, elapsedSeconds);
     this.sendPlayerInput(deltaSeconds);
     this.sendSlimeDrag(deltaSeconds);
@@ -1055,6 +1076,9 @@ export class GrasslandScene extends Scene {
     );
     this.healthPopups = new HealthPopupEmitter(renderWorld.scene);
     this.localPlayerDead = false;
+    // 换一条命就把残影与闪光清零：两条命之间没有关系，不清的话新角色的第一帧
+    // 会接着上一条命掉下去的那一截往下退。
+    this.healthDisplay.reset();
     this.hud.setDead(false);
     this.controls.setPlayerController(this.player.controller);
     this.timeSinceInputSent = 0;
@@ -1076,6 +1100,7 @@ export class GrasslandScene extends Scene {
     this.healthPopups?.clear();
     this.healthPopups = undefined;
     this.localPlayerDead = false;
+    this.healthDisplay.reset();
     this.hud.setDead(false);
     this.slimeSurfaceDrag?.dispose();
     this.performanceOverlay?.dispose();
