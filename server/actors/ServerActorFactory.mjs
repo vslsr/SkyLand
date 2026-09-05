@@ -45,6 +45,7 @@ import {
   PlayerMovementComponent,
   PlayerJumpComponent,
   PatrolPathComponent,
+  ProjectileComponent,
   PICKUP_DROP_COMPONENT,
   PickupDropComponent,
   REPLICATION_POLICY_COMPONENT,
@@ -78,6 +79,7 @@ import { TemperatureSystem } from './TemperatureSystem.mjs';
 import { HighCountActorSystem } from './HighCountActorSystem.mjs';
 import { GuidePathSystem } from './GuidePathSystem.mjs';
 import { PatrolPathSystem } from './PatrolPathSystem.mjs';
+import { ProjectileSystem } from './ProjectileSystem.mjs';
 import { CHUNK_SIZE } from '../../shared/world/worldConfig.mjs';
 
 export function createServerActor(spawn, archetype, runtime = {}) {
@@ -166,6 +168,14 @@ export function createServerActor(spawn, archetype, runtime = {}) {
   if (archetype.components.patrolPath) {
     actor.addComponent(new PatrolPathComponent(archetype.components.patrolPath));
   }
+  // 弧、蓄力比例、射手、哪件武器打的都由射出它的那一下给（`runtime.projectile`）；
+  // 原型只说这一类箭怎么飞。
+  if (archetype.components.projectile) {
+    actor.addComponent(new ProjectileComponent({
+      ...archetype.components.projectile,
+      ...runtime.projectile,
+    }));
+  }
   if (archetype.components.guidePath) {
     actor.addComponent(new GuidePathComponent({
       ...archetype.components.guidePath,
@@ -186,7 +196,12 @@ export function createServerActor(spawn, archetype, runtime = {}) {
   }
   // `collision: false` 是给纯表现体用的（手持物）：它有模型但不该挡住任何人，
   // 也不该出现在碰撞索引里。
-  if (archetype.components.render && runtime.collision !== false) {
+  //
+  // 弹药也没有碰撞体，而且这一条写在**原型**上而不是靠调用方传 `collision: false`：
+  // 「箭不该挡住走路的人」是这一类东西的性质，忘了传的那一次会让一支飞在空中的箭
+  // 变成一堵会动的墙。它自己撞什么由 `ProjectileSystem` 的扫掠说了算，那是查询，
+  // 不需要它在碰撞索引里占一格。
+  if (archetype.components.render && runtime.collision !== false && !archetype.components.projectile) {
     actor.addComponent(new SimpleCollisionComponent(createSimpleCollisionFromRender(
       archetype.components.render,
       // 可脱离物在附着阶段仍需保留模型的完整支撑面；真正断裂后由
@@ -221,6 +236,9 @@ export function createServerActorWorld(sceneDefinition, options = {}) {
   // 巡逻要排在 colliderIndex 之前：它移动的是权威 Transform，碰撞体必须跟上，
   // 否则玩家会撞在这只史莱姆上一帧之前的位置上。
   world.addSystem(new PatrolPathSystem());
+  // 弹药和巡逻同理排在 colliderIndex 之前：它写的是权威 Transform，而它这一 tick
+  // 的扫掠要打在**已经更新过**的目标位置上，不是上一帧的位置上。
+  world.addSystem(new ProjectileSystem());
   world.addSystem(colliderIndex);
   world.addSystem(new ActorSimpleCollisionSystem());
   world.addSystem(new ElasticTetherSystem());

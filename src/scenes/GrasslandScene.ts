@@ -38,7 +38,6 @@ import {
 } from '../health/HealthPopupEmitter';
 import {
   WEAPON_AIM_SHARPNESS,
-  WEAPON_MUZZLE_HEIGHT,
   WeaponAimController,
 } from '../controllers/WeaponAimController';
 import { frameTimeline } from '../platform/index';
@@ -67,6 +66,7 @@ import {
 } from '../../shared/actor/index.mjs';
 import { createHullBuildGrid, footprintBlocked } from '../../shared/build/index.mjs';
 import { PLAYER_COLLISION_RADIUS } from '../../shared/playerMovement.mjs';
+import { PROJECTILE_RADIUS } from '../../shared/ballistics/index.mjs';
 import { HudController } from '../ui/HudController';
 import { TerrainEditorPanel } from '../ui/TerrainEditorPanel';
 import { BuildPanel } from '../ui/BuildPanel';
@@ -134,9 +134,7 @@ export class GrasslandScene extends Scene {
     setBowDraw: (actorId, charge) => this.world.setBowDraw(actorId, charge),
     clearBowDraw: (actorId) => this.world.clearBowDraw(actorId),
     releaseBow: (actorId) => this.world.releaseHeldBow(actorId),
-    sampleGroundHeight: (x, z) => this.world.sampleGroundHeight(x, z),
-    spawnArrow: (state) => this.renderer.spawnArrowShot(state),
-  }, { muzzleHeight: WEAPON_MUZZLE_HEIGHT });
+  });
   private readonly holdProgress = new HoldProgressBadge();
 
   /**
@@ -434,14 +432,14 @@ export class GrasslandScene extends Scene {
         if (drawing === undefined) this.world.clearBowDraw(this.heldActorId());
         else this.world.setBowDraw(this.heldActorId(), drawing);
       },
-      // 松手那一下才射箭。收圈的路子不止这一条（换手、盖界面、进建造模式都收），
-      // 那几下不该有箭飞出去，所以这一条和 setProgress 分开走。
       // 冷却圈和长按那圈是同一个环，反着走。
       setCooldown: (cooldown) => this.hotbarBar.setCooldown(cooldown),
-      onUseRelease: (action, ratio) => {
+      // 松手那一下只剩弦回弹要画：箭不再由这一侧生出来，它是服务端射出去的一个
+      // 真 Actor（`ProjectileComponent`），顺着快照回到这里。收圈的路子不止松手
+      // 这一条（换手、盖界面、进建造模式都收），那几下不该抖弦，所以这一条和
+      // setProgress 分开走。
+      onUseRelease: (action) => {
         if (action !== 'shoot') return;
-        this.weaponAim.fire(ratio);
-        // 撒手那一下：弦回弹。箭飞出去和弦抖回来是同一刻的两件事。
         const heldActorId = this.heldActorId();
         if (heldActorId) this.world.releaseHeldBow(heldActorId);
       },
@@ -483,7 +481,12 @@ export class GrasslandScene extends Scene {
         );
       },
       setPreview: (state) => this.renderer.setBallisticPreview(state),
-      spawnArrow: (state) => this.renderer.spawnArrowShot(state),
+      // 预览线在墙、地形、挡在路上的实体处截断。读的是和服务端飞行判定同一份
+      // 扫掠，所以线停住的地方就是箭会停住的地方。
+      sweepProjectile: (arc) => this.world.sweepProjectileArc(arc, {
+        radius: PROJECTILE_RADIUS,
+        shooterActorId: this.joinedRoom?.player.id,
+      }),
     }, this.input);
     this.container = new ContainerController(this.containerPage, {
       getInventory: () => this.player?.getComponent(INVENTORY_COMPONENT) as

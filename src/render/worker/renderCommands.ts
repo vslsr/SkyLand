@@ -60,7 +60,6 @@ export type RenderCommand =
       readonly kind: 'setBallisticPreview';
       readonly state: BallisticPreviewState | undefined;
     }
-  | { readonly kind: 'spawnArrowShot'; readonly state: BallisticPreviewState }
   | { readonly kind: 'setAbilityLabTarget'; readonly id: ProxyId }
   | {
       readonly kind: 'setAbilityLabState';
@@ -262,10 +261,6 @@ export class RenderCommandQueue implements RenderScene, ChunkViewSink, RenderWor
 
   public setBallisticPreview(state: BallisticPreviewState | undefined): void {
     this.#commands.push({ kind: 'setBallisticPreview', state });
-  }
-
-  public spawnArrowShot(state: BallisticPreviewState): void {
-    this.#commands.push({ kind: 'spawnArrowShot', state });
   }
 
   public spawnHealthPopup(x: number, y: number, z: number, amount: number): void {
@@ -562,9 +557,6 @@ export function applyRenderCommand(
       return;
     case 'setBallisticPreview':
       target.scene.setBallisticPreview(command.state);
-      return;
-    case 'spawnArrowShot':
-      target.scene.spawnArrowShot(command.state);
       return;
     case 'spawnHealthPopup':
       target.scene.spawnHealthPopup(command.x, command.y, command.z, command.amount);

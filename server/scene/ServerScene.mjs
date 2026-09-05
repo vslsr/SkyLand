@@ -80,8 +80,9 @@ import {
   revokeItemAbility,
   updateItemUse,
 } from '../actors/ItemAbilityRuntime.mjs';
-// 引进来是为了副作用：武器系统在这里把物品目录里的 `shoot` 动词认领下来。
-import '../actors/WeaponRuntime.mjs';
+// 这条 import 有两个作用：拿到命中结算的入口，以及那个模块的副作用——武器系统
+// 在它自己那里把物品目录里的 `shoot` 动词认领下来。
+import { resolveProjectileImpact } from '../actors/WeaponRuntime.mjs';
 import { PlayerIdleSimulation } from './PlayerIdleSimulation.mjs';
 import { ServerChunkColliders } from './ServerChunkColliders.mjs';
 import { ServerTerrainColliders } from './ServerTerrainColliders.mjs';
@@ -306,6 +307,12 @@ export class ServerScene {
     this.actorWorld.context.stowPulledActor = (actor, player) => (
       this.stowPulledActor(actor, player)
     );
+    // 一支箭停下来了。`ProjectileSystem` 负责它飞到哪儿、什么时候停；这一发到底
+    // 打中了什么、扣多少血仍然归武器系统（`@w` 的 `D`）。System 只认识 world，
+    // 所以接头和上面那条一样挂在 context 上。
+    this.actorWorld.context.applyProjectileImpact = (projectile, impact) => (
+      resolveProjectileImpact(this, projectile, impact)
+    );
     // 静态碰撞只有流式场景才有；固定摆放的场景里树是布景，没有碰撞体。
     this.chunkColliders = new ServerChunkColliders({
       world: this.collision,
@@ -354,6 +361,9 @@ export class ServerScene {
     // 手持表现体的 id 计数。它们生生灭灭很频繁（每次换手一次），单调递增的序号
     // 保证不会撞上还没被客户端清掉的上一个。
     this.nextHeldItemId = 0;
+    // 弹药 id 计数。和手持表现体同一个道理：它们生生灭灭很频繁，单调递增的序号
+    // 保证不会撞上还没被客户端清掉的上一支。
+    this.nextProjectileId = 0;
     this.lastRefillAt = this.now();
   }
 
@@ -1712,6 +1722,48 @@ export class ServerScene {
     }, heldItemArchetype(archetype), { itemStack: { quantity: 1 }, collision: false });
     this.actorWorld.addActor(actor);
     return actor;
+  }
+
+  /**
+   * 射出去一支箭。
+   *
+   * 生成的是**世界里一件真东西**：它有权威 Transform、每 tick 沿弧推进、沿途扫掠
+   * 碰撞，撞上了才结算伤害（`ProjectileSystem` + `WeaponRuntime`）。老做法里箭只是
+   * 客户端画的一段动画，判定在松手那一刻就完了——所以它穿墙。
+   *
+   * 弧、蓄力比例、射手、哪件武器打的都在这里交给 Component；速度、扫掠半径、
+   * 停住之后留多久写在原型上。
+   */
+  spawnProjectileActor(archetypeId, projectile) {
+    const archetype = archetypeId
+      ? this.actorWorld.context.archetypes?.get(archetypeId)
+      : undefined;
+    // 原型不存在、或者那个原型根本不是弹药：这一发射不出去，而不是生成一个
+    // 不会飞的东西挂在半空。
+    if (!archetype?.components.projectile) return undefined;
+    const actor = this.actorWorld.context.createActor({
+      id: `projectile-${(this.nextProjectileId += 1).toString(36)}`,
+      archetypeId,
+      localTransform: {
+        position: [projectile.originX, projectile.originY, projectile.originZ],
+        yaw: Math.atan2(
+          projectile.impactX - projectile.originX,
+          projectile.impactZ - projectile.originZ,
+        ),
+      },
+    }, archetype, { projectile });
+    this.actorWorld.addActor(actor);
+    return actor;
+  }
+
+  /**
+   * 名义落点那一格的地面高度：没有任何东西挡路时，这一箭会落在多高。
+   *
+   * 客户端画蓄力线读的是同一件事（`SceneWorld.sampleGroundHeight`），所以两边算出
+   * 来的是同一条弧；真正落在哪儿仍然由飞行途中的扫掠决定。
+   */
+  projectileGroundHeightAt(x, z) {
+    return this.actorWorld.context.groundHeightAt?.(x, z) ?? 0;
   }
 
   /** 把 System 里排下的手持对齐补上。世界已经不在迭代中，增删都能当场生效。 */

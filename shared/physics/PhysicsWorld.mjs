@@ -9,6 +9,7 @@ import {
 import {
   CAMERA_QUERY_GROUPS,
   MOVEMENT_QUERY_GROUPS,
+  PROJECTILE_QUERY_GROUPS,
   SOLID_COLLIDER_GROUPS,
   colliderInteractionGroups,
 } from './collisionGroups.mjs';
@@ -458,6 +459,48 @@ export class PhysicsWorld {
 
   /** 沿线段扫掠球体，返回 0–1 的最早命中比例；地形与 CAMERA authoring 都参与。 */
   castCameraSphere(start, end, radius) {
+    return this.#castSphere(start, end, finite(radius, 0.32), CAMERA_QUERY_GROUPS);
+  }
+
+  /**
+   * 弹药沿一段弹道扫掠，返回 0–1 的最早命中比例；没碰到返回 1。
+   *
+   * 和相机悬臂是同一次 `castShape`，只换查询组：箭被挡住的条件是
+   * `PROJECTILE_QUERY_GROUPS`（见那里的注释——能挡住走路的东西挡住箭），
+   * 所以地形 trimesh、建造件、静态物件都自动参与，不需要为弹药再 authoring 一遍。
+   *
+   * `excludeActorId` 排掉**射手自己**。出手点在射手身体里面（弓握在身前偏上），
+   * 不排掉的话第一段扫掠就撞在自己的角色胶囊上，箭永远飞不出去——这不是理论问题，
+   * 是接上碰撞之后立刻会看到的那一发。排的是那一具胶囊，不是「所有玩家」：
+   * 别人挡在射线上就该挨这一箭。
+   *
+   * 一条弧由 `shared/ballistics/projectileSweep.mjs` 切成定长若干段来调它，
+   * 因此每次射击的查询数是常数，与射程和世界大小都无关。
+   */
+  castProjectileSphere(start, end, radius, excludeActorId) {
+    return this.#castSphere(
+      start,
+      end,
+      finite(radius, 0.08),
+      PROJECTILE_QUERY_GROUPS,
+      this.#characterColliderOf(excludeActorId),
+    );
+  }
+
+  /**
+   * 这个 id 在物理世界里的那具角色胶囊。
+   *
+   * 只找角色：本地角色、远端代理。射手今天一定是玩家，而玩家在物理世界里正好是
+   * 一具胶囊，所以「排掉一个 collider」就够，不需要维护一张 handle → 所有者的
+   * 反查表——那张表要跟着 Rapier 回收 handle 一起维护，漏一处就会排错人。
+   */
+  #characterColliderOf(id) {
+    if (id === undefined || id === null) return undefined;
+    const character = this.#characters.get(id) ?? this.#proxies.get(id);
+    return character?.collider?.isValid() ? character.collider : undefined;
+  }
+
+  #castSphere(start, end, radius, groups, excludeCollider) {
     this.#assertAlive();
     this.prepareQueries();
     const delta = {
@@ -472,12 +515,13 @@ export class PhysicsWorld {
       { x: finite(start?.[0]), y: finite(start?.[1]), z: finite(start?.[2]) },
       { x: 0, y: 0, z: 0, w: 1 },
       direction,
-      new this.#rapier.Ball(Math.max(0.001, finite(radius, 0.32))),
+      new this.#rapier.Ball(Math.max(0.001, radius)),
       0,
       distance,
       true,
       undefined,
-      CAMERA_QUERY_GROUPS,
+      groups,
+      excludeCollider,
     );
     const time = hit?.timeOfImpact ?? hit?.time_of_impact;
     return Number.isFinite(time) ? Math.max(0, Math.min(1, time / distance)) : 1;

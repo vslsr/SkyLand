@@ -938,6 +938,41 @@
             }
           }
         },
+        "projectile": {
+          "description": "会飞的弹药。整条弧在射出那一刻定下来，飞行途中沿它推进并逐段扫掠碰撞。",
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "speed",
+            "radius"
+          ],
+          "properties": {
+            "speed": {
+              "description": "飞行速度，米每秒。射程越远飞得越久，速度是同一个。",
+              "type": "number",
+              "exclusiveMinimum": 0,
+              "maximum": 200
+            },
+            "radius": {
+              "description": "扫掠半径，米。细成一条线会从墙角的缝里钻过去。",
+              "type": "number",
+              "exclusiveMinimum": 0,
+              "maximum": 1
+            },
+            "minimumFlightSeconds": {
+              "description": "飞行时间的下限，秒：再近的一箭也要看得见它飞过去。",
+              "type": "number",
+              "minimum": 0,
+              "maximum": 5
+            },
+            "lingerSeconds": {
+              "description": "停下之后再留多久才收走，秒。",
+              "type": "number",
+              "minimum": 0,
+              "maximum": 60
+            }
+          }
+        },
         "lifetime": {
           "type": "object",
           "additionalProperties": false,
@@ -1686,6 +1721,37 @@
                   "type": "number",
                   "exclusiveMinimum": 0,
                   "maximum": 3
+                }
+              }
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "model",
+                "length",
+                "shaftColor",
+                "headColor",
+                "inkColor"
+              ],
+              "properties": {
+                "model": {
+                  "const": "line-art-arrow"
+                },
+                "length": {
+                  "description": "箭全长，米（不含箭头那一小截）。",
+                  "type": "number",
+                  "exclusiveMinimum": 0,
+                  "maximum": 3
+                },
+                "shaftColor": {
+                  "$ref": "#/$defs/color"
+                },
+                "headColor": {
+                  "$ref": "#/$defs/color"
+                },
+                "inkColor": {
+                  "$ref": "#/$defs/color"
                 }
               }
             },

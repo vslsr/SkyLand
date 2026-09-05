@@ -124,6 +124,10 @@ export {
   PatrolPathComponent,
 } from './components/PatrolPathComponent.mjs';
 export {
+  PROJECTILE_COMPONENT,
+  ProjectileComponent,
+} from './components/ProjectileComponent.mjs';
+export {
   LIFETIME_COMPONENT,
   LifetimeComponent,
 } from './components/LifetimeComponent.mjs';
@@ -158,6 +162,7 @@ export {
 export {
   circleTouchesSimpleCollision,
   createSimpleCollisionDefinition,
+  createSimpleCollisionFromCharacter,
   createSimpleCollisionFromRender,
   resolveCircleAgainstSimpleCollision,
   resolveCircleAgainstSimpleCollisions,

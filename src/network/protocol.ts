@@ -113,8 +113,8 @@ export interface SnapshotPlayer {
    */
   charge?: { startedAt: number; holdSeconds: number };
   /**
-   * 最近射出去的那一发。**留着不撤**，接收方按 `revision` 变化去重——只在开火
-   * 那一帧下发的话，那一帧丢了这支箭就永远不会出现。
+   * 最近撒手的那一发。**留着不撤**，接收方按 `revision` 变化去重——只在开火那一帧
+   * 下发的话，那一帧丢了别人的弓就永远不会抖那一下。
    */
   weaponShot?: SnapshotWeaponShot;
   /** PickupDrop Component 的运行态；口部挂点来自玩家 Actor 原型。 */
@@ -129,22 +129,19 @@ export interface SnapshotPlayer {
 }
 
 /**
- * 一发已经打出去的箭。
+ * 撒手那一下。
  *
- * 带落点而不是「往哪个方向射多远」：落点是判定用的那一个，所有人因此画的是同一条
- * 弧。方向加距离要接收方再算一次，而那一次算错了没人会发现。
+ * **只有一个计数**：飞出去那支箭是复制过来的 Actor（`ProjectileComponent`），自己飞、
+ * 自己撞、撞上了才结算伤害，落在哪儿由它自己说了算。这条因此只回答「他刚才松手了没有」
+ * ——接收方拿它抖一下别人那把弓的弦。
+ *
+ * 带落点的那一版是箭还只是客户端画的一段动画时留下的：那时每一端都要按同一个落点
+ * 自己画一支。箭成了真东西之后，再按落点画一支会让一发箭变成两支，而本地画的那支
+ * 还不认识墙。
  */
 export interface SnapshotWeaponShot {
   /** 自增计数。一次性事件靠它的变化触发，不靠一个 bool。 */
   revision: number;
-  /** 出手时射手站在哪儿（脚下）。 */
-  x: number;
-  y: number;
-  z: number;
-  impactX: number;
-  impactZ: number;
-  /** 松手那一刻的蓄力比例。弧的形状按它取。 */
-  ratio: number;
 }
 
 export type ActorFloatState = 'afloat' | 'overloaded' | 'flooding' | 'sinking';

@@ -229,6 +229,19 @@ function validateWeapon(raw, path, use) {
   return Object.freeze({
     attack: requireNumber(definition.attack, `${path}.attack`, 0, 100_000),
     radius: requireNumber(definition.radius, `${path}.radius`, 0.2, 16),
+    /**
+     * 这把武器射出去的是哪一种弹药 Actor。
+     *
+     * 弹药是世界里一件真东西：它自己飞、自己撞、撞上了才结算伤害
+     * （`ProjectileComponent`）。所以武器只说「射哪一种」，怎么飞、飞多快、
+     * 长什么样都写在那个 Actor 原型上——换一种箭不需要动武器条目。
+     *
+     * 省略时这把武器射不出实体弹药：`fireWeapon` 会拒绝这一发，而不是悄悄
+     * 退回旧的「松手即判定」——那条路正是箭穿墙的来源。
+     */
+    projectileArchetypeId: definition.projectileArchetypeId === undefined
+      ? undefined
+      : requireId(definition.projectileArchetypeId, `${path}.projectileArchetypeId`),
     range: Object.freeze({ minimum: minimumRange, maximum: maximumRange }),
     charge: Object.freeze({
       minimumRatio: requireNumber(charge.minimumRatio, `${path}.charge.minimumRatio`, 0, 0.9),

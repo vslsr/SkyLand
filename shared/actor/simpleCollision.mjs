@@ -216,7 +216,44 @@ export function createSimpleCollisionFromRender(render, dropMotion) {
       maximumY: positiveNumber(render.height, 1.5),
     });
   }
+  if (model === 'line-art-arrow') {
+    // 箭这一类 Actor 不装碰撞体（飞在空中的箭不该挡住走路的人），但接口对所有
+    // 模型是同一个形状，所以仍然给得出一个贴着箭杆的细长盒。
+    const length = positiveNumber(render.length, 0.62);
+    return createSimpleCollisionDefinition({
+      halfWidth: length * 0.02,
+      halfLength: length * 0.5,
+      centerZ: length * 0.5,
+      minimumY: -length * 0.02,
+      maximumY: length * 0.02,
+    });
+  }
   throw new TypeError(`无法为模型 ${model || '<unknown>'} 生成简易碰撞`);
+}
+
+/**
+ * 角色（玩家）的窄相形状。
+ *
+ * 玩家 Actor **没有** `SimpleCollisionComponent`：他们在物理世界里是一具由角色
+ * 控制器拥有的 Rapier 胶囊，推出与站立都归那一具管，用不着第二份形状。但解析
+ * 查询要得到它——弹药沿弧扫掠时必须能算出「这一箭插在谁身上」，而 Rapier 那一路
+ * 只回答「撞到了东西」，回答不了「撞到了谁」。
+ *
+ * 尺寸取的是角色控制器用的那一对（`collisionRadius` / `collisionHeight`），不是
+ * 模型半径：两者可以不一样，按模型算会让判定和身体差一圈。
+ *
+ * @param {number} radius
+ * @param {number} height 脚底到头顶
+ * @returns {SimpleCollisionDefinition}
+ */
+export function createSimpleCollisionFromCharacter(radius, height) {
+  return createSimpleCollisionDefinition({
+    shape: 'cylinder',
+    halfWidth: radius,
+    halfLength: radius,
+    minimumY: 0,
+    maximumY: height,
+  });
 }
 
 /**

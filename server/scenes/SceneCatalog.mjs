@@ -794,6 +794,12 @@ function validateSceneDefinition(raw, filename, actorCatalog) {
   for (const archetype of actorCatalog.archetypes()) {
     if (archetype.components.itemStack) includeArchetype(archetype);
   }
+  // 弹药原型同理，而且理由更硬：射出去的那一箭是运行期才生成的 Actor，没有任何
+  // 一张地图会在 `actors` 里摆一支箭。不一律进表的话，服务端生成得出来、客户端
+  // 却在 `createReplica` 里找不到原型——箭在权威世界里飞着，屏幕上什么都没有。
+  for (const archetype of actorCatalog.archetypes()) {
+    if (archetype.components.projectile) includeArchetype(archetype);
+  }
   for (const component of sceneComponents) {
     if (component.type !== 'ability-lab') continue;
     const target = actorComposition.actors.find((actor) => actor.id === component.targetActorId);

@@ -837,6 +837,41 @@ export class ClientActorSystem implements SceneFrameSystem {
     return nearest?.candidate;
   }
 
+  /**
+   * 一段弹道扫过挡在路上的实体：返回最早的命中比例，没碰到就是 1。
+   *
+   * 只服务于**蓄力预览那条白线**——真正的命中由服务端在箭飞到的那一刻结算
+   * （`ProjectileSystem`）。用的是同一份窄相实现（`sweepProjectileTargets`）和
+   * 同一批候选（带生命值、还活着的 Actor），所以线停在哪就是箭停在哪。
+   *
+   * 本地玩家自己不在候选里：他没有 Replica，也就不在这张 Actor 世界里；服务端那边
+   * 由 `ownerActorId` 排掉，两侧的结果因此一致。
+   *
+   * 成本正比于带生命值的 Actor 数（场景常驻 Actor 由 Schema 限制在 256 个以内），
+   * 与世界大小无关；只有蓄力那几帧会调它。
+   */
+  public sweepProjectileTargets(
+    start: readonly [number, number, number],
+    end: readonly [number, number, number],
+    radius: number,
+  ): number {
+    let earliest = 1;
+    for (const actor of this.world.query(
+      HEALTH_COMPONENT,
+      TRANSFORM_COMPONENT,
+      SIMPLE_COLLISION_COMPONENT,
+    ) as Actor[]) {
+      if ((actor.requireComponent(HEALTH_COMPONENT) as HealthComponent).dead) continue;
+      this.pickProbe.collision = actor.requireComponent(
+        SIMPLE_COLLISION_COMPONENT,
+      ) as SimpleCollisionComponent;
+      this.pickProbe.transform = actor.requireComponent(TRANSFORM_COMPONENT) as TransformComponent;
+      const fraction = sweepSphereAgainstSimpleCollision(start, end, radius, this.pickProbe);
+      if (fraction < earliest) earliest = fraction;
+    }
+    return earliest;
+  }
+
   public findNearbyInteractableActor(
     position: { x: number; z: number },
   ): ActorInteractionCandidate | undefined {
@@ -1247,9 +1282,16 @@ export class ClientActorSystem implements SceneFrameSystem {
       // 碰撞盒由玩法侧自己从 render 定义算——和渲染侧模型工厂调的是同一个
       // shared 纯函数，所以这不是「另编一套近似」，是把那次往返省掉。
       // 注意只传 render：模型工厂也只传它，多传 dropMotion 会走进滚动半径那一支。
-      actor.addComponent(new SimpleCollisionComponent(
-        createSimpleCollisionFromRender(archetype.components.render),
-      ));
+      //
+      // 弹药不装：一支飞在空中的箭不该挡住走路的人，也不该被准星选中挡在它身后
+      // 那只史莱姆前面。它撞什么由服务端沿弧扫掠说了算（`ProjectileSystem`），
+      // 那是查询，不需要它在这一侧的碰撞索引里占一格。这条和服务端
+      // `ServerActorFactory` 里的判断是同一条，两侧因此不会一边有一边没有。
+      if (!archetype.components.projectile) {
+        actor.addComponent(new SimpleCollisionComponent(
+          createSimpleCollisionFromRender(archetype.components.render),
+        ));
+      }
       // RenderProxyComponent 必须先于所有表现 Component 加入：Actor.endPlay 是插入
       // 顺序的逆序，marker 要先释放自己的子树，proxy 的 disposeSubtree 才能最后跑。
       actor.addComponent(new RenderProxyComponent(proxyId, this.proxyIds));

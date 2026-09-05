@@ -1,13 +1,16 @@
 import { holdRatio } from '../../shared/actor/index.mjs';
-import type { BallisticPreviewState } from '../render/RenderScene';
 import type { SnapshotPlayer } from '../network/protocol';
 
 /**
  * 别人手上那把弓（设计稿 `@i 木弓` 的 `A`，多端那一半）。
  *
- * 拉弓和射出去那一发都是**公开的**：屋里每个人都该看见别人的弓弯没弯、箭飞到哪儿。
- * 权威侧只下发那几个数（蓄力的起止、这一发的落点与计数），怎么画归这一侧——和飘字、
+ * 拉弓和撒手都是**公开的**：屋里每个人都该看见别人的弓弯没弯、什么时候松的手。
+ * 权威侧只下发那几个数（蓄力的起止、这一发的计数），怎么画归这一侧——和飘字、
  * 和倒下那段动画是同一个取向。
+ *
+ * **箭不在这里**：它是服务端射出去的一个真 Actor（`ProjectileComponent`），自己飞、
+ * 自己撞、撞上了才结算伤害，然后顺着快照回到每一端。这一侧再按落点画一支出来的话，
+ * 一发箭会变成两支——而且本地画的那支不认识墙。所以这里只剩弦回弹那一下。
  *
  * **自己那一份不走这里**：本地按住直接驱动，等一趟网络回来会让弓比物品栏那圈慢
  * 半拍。所以同一个人只会被驱动一次，两条路在调用方就分开了。
@@ -22,29 +25,13 @@ export interface RemoteBowPort {
   clearBowDraw(actorId: string | undefined): void;
   /** 撒手那一下：弦回弹。 */
   releaseBow(actorId: string): void;
-  /** 落点那一格的地面高度，弧的末端要落在地上。 */
-  sampleGroundHeight(x: number, z: number): number;
-  spawnArrow(state: BallisticPreviewState): void;
-}
-
-export interface RemoteBowSyncOptions {
-  /**
-   * 出手点比脚底高多少。
-   *
-   * 和本地那条弧读同一个数，否则同一发箭在射手屏幕上从手上出去，在旁观者屏幕上
-   * 从脚底出去。
-   */
-  readonly muzzleHeight: number;
 }
 
 export class RemoteBowSync {
-  /** 每个人最近一发的计数，用来只射一次。 */
+  /** 每个人最近一发的计数，用来只抖一次弦。 */
   private readonly shotRevisions = new Map<string, number>();
 
-  public constructor(
-    private readonly port: RemoteBowPort,
-    private readonly options: RemoteBowSyncOptions,
-  ) {}
+  public constructor(private readonly port: RemoteBowPort) {}
 
   public apply(players: readonly SnapshotPlayer[], serverTime: number): void {
     const localPlayerId = this.port.localPlayerId();
@@ -83,10 +70,12 @@ export class RemoteBowSync {
   }
 
   /**
-   * 这一发射出去过没有。
+   * 这一发射出去过没有——用来抖一下弦。
    *
-   * 快照里那条**留着不撤**，所以靠计数变化去重；第一次看见一个人时不补射——他进屋
+   * 快照里那条**留着不撤**，所以靠计数变化去重；第一次看见一个人时不补抖——他进屋
    * 之前射过的那些箭早就落地了，重放一遍只会让人莫名其妙。
+   *
+   * 只认计数，不认落点：飞出去那支箭是复制过来的 Actor，落在哪儿由它自己说了算。
    */
   private applyShot(entry: SnapshotPlayer, heldActorId: string | undefined): void {
     const shot = entry.weaponShot;
@@ -95,14 +84,5 @@ export class RemoteBowSync {
     this.shotRevisions.set(entry.id, shot.revision);
     if (seen === undefined || seen === shot.revision) return;
     if (heldActorId) this.port.releaseBow(heldActorId);
-    this.port.spawnArrow({
-      originX: shot.x,
-      originY: shot.y + this.options.muzzleHeight,
-      originZ: shot.z,
-      impactX: shot.impactX,
-      impactY: this.port.sampleGroundHeight(shot.impactX, shot.impactZ),
-      impactZ: shot.impactZ,
-      ratio: shot.ratio,
-    });
   }
 }

@@ -16,6 +16,7 @@ import { createFruitPileModel } from './createFruitPileModel';
 import { createMushroomPileModel } from './createMushroomPileModel';
 import { createSlingshotModel } from './createSlingshotModel';
 import { createStonePileModel } from './createStonePileModel';
+import { createArrowModel } from './createArrowModel';
 import { createWoodBowModel } from './createWoodBowModel';
 import { createWoodPileModel } from './createWoodPileModel';
 import { createPbfSlimeModel } from './createPbfSlimeModel';
@@ -65,6 +66,9 @@ export function createActorVisualModel(
   }
   if (definition.model === 'line-art-wood-bow') {
     return createWoodBowModel(environment, definition);
+  }
+  if (definition.model === 'line-art-arrow') {
+    return createArrowModel(environment, definition);
   }
   if (definition.model === 'line-art-wood-pile') {
     return createWoodPileModel(environment, definition);

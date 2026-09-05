@@ -195,6 +195,14 @@ export type ActorRenderDefinition =
       height: number;
     }
   | {
+      model: 'line-art-arrow';
+      /** 箭全长，米（不含箭头那一小截）。 */
+      length: number;
+      shaftColor: string;
+      headColor: string;
+      inkColor: string;
+    }
+  | {
       model: 'line-art-wood-bow';
       /** 上下弓梢之间的距离，米。 */
       length: number;
@@ -293,6 +301,18 @@ export interface ActorArchetypeDefinition {
       speed: number;
       waitSeconds: number;
       mode: 'ping-pong' | 'loop';
+    };
+    /**
+     * 会飞的弹药。整条弧、蓄力比例、射手都是运行期状态，由服务端在射出那一刻
+     * 交给 Component；原型只说这一类箭怎么飞。客户端不模拟它——位置整段由快照
+     * 插值而来——列在这里是为了让原型的形状在两侧对得上，并且让副本知道
+     * 「这是一支箭」：箭不装碰撞体。
+     */
+    projectile?: {
+      speed: number;
+      radius: number;
+      minimumFlightSeconds: number;
+      lingerSeconds: number;
     };
     playerMovement?: {
       walkSpeed: number;
