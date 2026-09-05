@@ -31,6 +31,13 @@ import {
  * `travel` 为止就不再往前。渲染时刻取的是快照缓冲那一个（落后一个插值延迟），
  * 所以「停住」这条消息总是先到、箭不会先飞过头再被拽回来。
  *
+ * **停住之后这一位就撒手**：扎中的那一箭在服务端被挂到了目标身上
+ * （`ProjectileSystem` 的 `setActorParent`），从那一刻起它是目标下面的一个静态
+ * 子 Actor，位置与朝向都由那份挂载解算出来、随快照过来。这里要是还照弧写世界
+ * 坐标，箭就会钉死在命中时那个世界点上——史莱姆走开，箭留在半空。所以
+ * `stopped` 之后不再碰 Transform，只把那一刻的俯仰继续摆着（它是绕 yaw 之后的
+ * 局部 X 转的，父节点只有 yaw，所以跟着目标转身也仍然是扎进去的那个姿态）。
+ *
  * 排在 `ActorTransformSystem` 之前：它写的是权威 Transform，那一位再把它送过边界。
  */
 export class ClientProjectileSystem {
@@ -50,16 +57,19 @@ export class ClientProjectileSystem {
     const renderTime = this.renderTime();
     for (const actor of world.query(PROJECTILE_COMPONENT, TRANSFORM_COMPONENT) as Actor[]) {
       const projectile = actor.requireComponent(PROJECTILE_COMPONENT) as ProjectileComponent;
-      const transform = actor.requireComponent(TRANSFORM_COMPONENT) as TransformComponent;
       const travel = this.resolveTravel(projectile, renderTime);
-      ballisticArcPoint(projectile, travel, this.point);
-      transform.setWorldTransform(
-        [this.point.x, this.point.y, this.point.z],
-        Math.atan2(
-          projectile.impactX - projectile.originX,
-          projectile.impactZ - projectile.originZ,
-        ),
-      );
+      // 还在飞的才由这一位摆位置；扎住的那一支交回给挂载与复制。
+      if (!projectile.stopped) {
+        const transform = actor.requireComponent(TRANSFORM_COMPONENT) as TransformComponent;
+        ballisticArcPoint(projectile, travel, this.point);
+        transform.setWorldTransform(
+          [this.point.x, this.point.y, this.point.z],
+          Math.atan2(
+            projectile.impactX - projectile.originX,
+            projectile.impactZ - projectile.originZ,
+          ),
+        );
+      }
       const proxy = actor.getComponent(RENDER_PROXY_COMPONENT) as RenderProxyComponent | undefined;
       if (!proxy) continue;
       ballisticArcTangent(projectile, travel, this.tangent);

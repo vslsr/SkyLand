@@ -54,6 +54,11 @@ const definition = {
       projectile: { speed: 34, radius: PROJECTILE_RADIUS, minimumFlightSeconds: 0.12, lingerSeconds: 1.6 },
       render: ARROW_RENDER,
     },
+  }, {
+    // 被射中的那一个。这里只需要它是个画得出来、走得动的 Actor。
+    schemaVersion: 1,
+    id: 'target-post',
+    components: { render: ARROW_RENDER },
   }],
   renderer: {
     type: 'line-art',
@@ -226,4 +231,76 @@ test('停住之后不再往前：撞在哪儿是服务端说了算的', () => {
 
   const expected = ballisticArcPoint(arc(), 0.4, { x: 0, y: 0, z: 0 });
   assert.ok(Math.abs(stopped.z - expected.z) < 1e-3, `没停在权威说的地方：${stopped.z} vs ${expected.z}`);
+});
+
+test('扎住之后是目标下面的一个静态子 Actor：目标走了，箭跟着走', () => {
+  const clock = { now: 1_000 };
+  const system = createSystem(clock);
+  const post = (z: number) => ({
+    id: 'post-1',
+    archetypeId: 'target-post',
+    parentActorId: null,
+    revision: 1,
+    transform: { x: 0, y: 0, z, yaw: 0 },
+    localTransform: { x: 0, y: 0, z, yaw: 0 },
+  } as unknown as SnapshotActor);
+  // 扎在柱子身上：世界坐标由服务端的挂载解算给出，本地坐标是「插进去多深」。
+  const stuck = (z: number) => ({
+    ...arrow(0.4, true),
+    parentActorId: 'post-1',
+    transform: { x: 0, y: 1.1, z: z + 0.3, yaw: 0 },
+    localTransform: { x: 0, y: 1.1, z: 0.3, yaw: 0 },
+  } as unknown as SnapshotActor);
+
+  system.syncSnapshots([post(10), stuck(10)], clock.now);
+  clock.now += 200;
+  stepActorFrame(system, 0.016, 0);
+  const before = positionOf(system);
+  assert.ok(Math.abs(before.z - 10.3) < 1e-3, `该扎在柱子上，实际 ${before.z}`);
+
+  // 柱子往前走了两米。箭是它的子 Actor，所以一起走——而不是钉死在命中时
+  // 那个世界点上（那正是「箭留在半空」的老毛病）。
+  clock.now += 200;
+  system.syncSnapshots([post(12), stuck(12)], clock.now);
+  clock.now += 200;
+  stepActorFrame(system, 0.016, 0);
+  const after = positionOf(system);
+  assert.ok(Math.abs(after.z - 12.3) < 1e-3, `箭没跟着目标走，停在 ${after.z}`);
+});
+
+test('切线就是弧的导数：拿差分对，不拿实现自己对自己', () => {
+  // 这一条防的是上一次那种错：断言照着实现写，实现的正负号反了，断言跟着一起反。
+  const step = 1e-4;
+  const at = (t: number) => ballisticArcPoint(arc(), t, { x: 0, y: 0, z: 0 });
+  for (const t of [0.05, 0.5, 0.95]) {
+    const before = at(t - step);
+    const after = at(t + step);
+    const length = Math.hypot(after.x - before.x, after.y - before.y, after.z - before.z);
+    const tangent = ballisticArcTangent(arc(), t, { x: 0, y: 0, z: 0 });
+    assert.ok(Math.abs((after.y - before.y) / length - tangent.y) < 1e-6, `t=${t} 竖直分量不是导数`);
+    assert.ok(Math.abs((after.z - before.z) / length - tangent.z) < 1e-6, `t=${t} 水平分量不是导数`);
+  }
+  // 而且方向是对的：出手抬头、落地扎下去。
+  assert.ok(ballisticArcTangent(arc(), 0.05, { x: 0, y: 0, z: 0 }).y > 0);
+  assert.ok(ballisticArcTangent(arc(), 0.95, { x: 0, y: 0, z: 0 }).y < 0);
+});
+
+test('模型锚在箭尖：权威位置就是这一箭的前端，杆挂在它后面', () => {
+  const clock = { now: 1_000 };
+  const system = createSystem(clock);
+  system.syncSnapshots([arrow(0.5)], clock.now);
+  clock.now += 400;
+  stepActorFrame(system, 0.016, 0);
+
+  const proxy = renderProxyOf(system, 'projectile-1')!;
+  const box = new THREE.Box3().setFromObject(proxy.visualRoot);
+  const origin = positionOf(system);
+  // 整支箭落在权威点**后方**：最远的一端是箭尾，没有任何一段跑到点的前面去。
+  // 锚在箭尾的老做法下，整支箭画在真正位置前方 0.72 米，扎中之后整根埋进目标里。
+  const ahead = new THREE.Vector3(0, 0, 1)
+    .transformDirection(proxy.visualRoot.matrixWorld)
+    .normalize()
+    .dot(box.max.clone().sub(origin));
+  assert.ok(ahead < 1e-3, `有一段跑到箭尖前面去了：${ahead}`);
+  assert.ok(box.min.distanceTo(box.max) > 0.5, '箭还是那么长，只是挪了锚点');
 });
