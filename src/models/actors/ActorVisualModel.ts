@@ -32,6 +32,8 @@ export interface ActorVisualModel {
   readonly dropRollRig?: DropRollVisualRig;
   /** 仅训练假人提供；能力表现只修改这些 VisualRoot 下的展示节点。 */
   readonly abilityTargetRig?: AbilityTargetVisualRig;
+  /** 仅弹药提供；俯仰由渲染侧按这一帧的位移求出来，见 `ThreeProjectileVisual`。 */
+  readonly projectileRig?: ProjectileVisualRig;
   /** 热状态只控制强度；所有顶点与火星对象都位于该 Actor 的 visualRoot 下。 */
   readonly fireVisualRig?: LineArtFireVisualRig;
   /** 单体软泥外壳；当前由球形核心与弹簧蒙皮驱动，旧 PBF 求解器仍独立保留。 */
@@ -138,6 +140,17 @@ export interface LineArtFireVisualRig {
 export interface DropRollVisualRig {
   readonly pivotRoot: THREE.Group;
   readonly bodyRoot: THREE.Group;
+}
+
+/**
+ * 弹药的俯仰枢轴。
+ *
+ * 只有 `rotation.x` 归它：水平朝向来自权威 Transform 的 yaw（模型沿 +Z 躺着，
+ * 和世界的 yaw=0 是同一个方向），抬头低头则是渲染侧从连续两帧的位移里求出来的
+ * 切线——那是表现，不是权威状态，所以它不过网、也不写在 root 上。
+ */
+export interface ProjectileVisualRig {
+  readonly pitchRoot: THREE.Group;
 }
 
 /**

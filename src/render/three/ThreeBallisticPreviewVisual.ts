@@ -1,14 +1,17 @@
 import * as THREE from 'three';
-import { ballisticArcPoint } from '../ballisticArc';
+import { ballisticArcPoint, ballisticArcTravel } from '../ballisticArc';
 import type { BallisticPreviewState } from '../RenderScene';
 
 /**
  * 蓄力时那条白色抛物线，住在渲染世界里（设计稿 `@w` 的 `A`）。
  *
- * **它不是判定**：判定只认落点与半径，这条线画的是同一个落点的一段抛物弧。
- * 玩法侧每帧只给两个端点和一个蓄力比例，弧本身在这一侧插出来（`ballisticArcPoint`，
+ * **它不是判定**：判定跟着射出去那支箭走，这条线画的是它会走的那条弧。玩法侧每帧
+ * 只给两个端点、一个蓄力比例和一个截断处，弧本身在这一侧插出来（`ballisticArcPoint`，
  * 射出去那支箭走的是同一条）——那是一条纯粹的表现曲线，让它过边界只会让同一件事
  * 在两边各有一份。
+ *
+ * 截断处（`travel`）由玩法侧沿弧扫掠算出来：线因此画到墙上、山坡上、挡在路上的
+ * 那只史莱姆身上为止，而不是穿过去落在它们后面。
  *
  * 顶点数固定：一条线一段几何，蓄力时每帧改写同一段 `Float32Array`，
  * 不随蓄力时长或射程增长。
@@ -70,9 +73,12 @@ export class ThreeBallisticPreviewVisual {
       this.shadow.visible = false;
       return;
     }
+    // 被挡住的那一条只画到障碍物为止：顶点数不变，最后一段挤在截断处，
+    // 于是同一段 `Float32Array` 每帧原地改写，不随射程或障碍物远近增长。
+    const travel = ballisticArcTravel(state);
     for (let index = 0; index <= SEGMENTS; index += 1) {
       const offset = index * 3;
-      ballisticArcPoint(state, index / SEGMENTS, this.point);
+      ballisticArcPoint(state, (index / SEGMENTS) * travel, this.point);
       this.positions[offset] = this.point.x;
       this.positions[offset + 1] = this.point.y;
       this.positions[offset + 2] = this.point.z;

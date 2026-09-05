@@ -230,14 +230,6 @@ export class SceneRenderer {
     this.renderWorldHandle?.scene.setBallisticPreview(state);
   }
 
-  /**
-   * 射一支箭。和抛物线不同，它是**一次性**的：发一条命令就完事，之后那半秒的
-   * 飞行由渲染世界自己走完，玩法侧不再每帧说话。
-   */
-  public spawnArrowShot(state: BallisticPreviewState): void {
-    this.renderWorldHandle?.scene.spawnArrowShot(state);
-  }
-
   public setSimpleCollisionVisible(visible: boolean): void {
     this.simpleCollisionVisible = visible;
     this.actorSnapshotTarget?.setSimpleCollisionVisible(visible);

@@ -214,9 +214,9 @@ export interface GuidePathState {
 /**
  * 蓄力时那条白色抛物线（设计稿 `@w` 的 `A`）。
  *
- * **它是表现，不是判定**：判定只认落点与半径（`D.EQS`），这条线画的是同一个落点
- * 的一段抛物弧，好让玩家在松手之前看得见这一箭会落到哪儿。弧顶抬多高由蓄力比例
- * 决定，那段插值在渲染侧算——玩法侧只给两个端点和一个比例。
+ * **它是表现，不是判定**：真正的判定跟着射出去那支箭走（`ProjectileComponent`），
+ * 这条线画的是同一条弧，好让玩家在松手之前看得见这一箭会往哪儿去。弧顶抬多高由
+ * 蓄力比例决定，那段插值在渲染侧算——玩法侧只给两个端点、一个比例和一个截断处。
  */
 export interface BallisticPreviewState {
   readonly originX: number;
@@ -227,6 +227,14 @@ export interface BallisticPreviewState {
   readonly impactZ: number;
   /** 蓄力比例 [0, 1]。弧顶按它抬，所以拉得越满线越平、越远。 */
   readonly ratio: number;
+  /**
+   * 这条弧走得到哪儿，[0, 1]；省略等同于 1。
+   *
+   * 墙、地形、站在半路上的实体会把它截短——玩法侧拿的是**和服务端飞行判定同一份
+   * 沿弧扫掠**的结果，所以线停住的地方就是箭会停住的地方。端点仍然是没被挡住时
+   * 的那一对：挡住只截短这条曲线，不改变它的形状。
+   */
+  readonly travel?: number;
 }
 
 /**
@@ -287,13 +295,6 @@ export interface RenderScene extends RenderCommandSink {
   setBuildPreview(state: BuildPreviewState | undefined): void;
   /** 蓄力时那条白色抛物线。传 undefined 收起。见 `BallisticPreviewState`。 */
   setBallisticPreview(state: BallisticPreviewState | undefined): void;
-  /**
-   * 射出去一支箭。**一次性事件**，不是每帧状态：弹道在松手那一刻就算完了，
-   * 玩法侧发这一条之后不再管它，剩下的半秒由渲染世界自己走完。
-   *
-   * 参数就是预览那条线的同一份端点与比例，所以箭走的是玩家刚才瞄的那条弧。
-   */
-  spawnArrowShot(state: BallisticPreviewState): void;
   /**
    * 能力实验室的三条命令（只有开发用的实验室地图会发）。
    *

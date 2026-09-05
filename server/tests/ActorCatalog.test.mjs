@@ -458,3 +458,37 @@ test('ActorCatalog 净化巡逻路线，并拒绝与玩家移动并存', async (
   single.components.patrolPath.waypoints = [[0, 0, 2]];
   await assert.rejects(loadSingleActor(single), /必须是 2 到 16 个路点/);
 });
+
+test('ActorCatalog 净化弹药原型，并拒绝看不见的箭与两套积分', async () => {
+  const catalog = await ActorCatalog.load();
+  const arrow = catalog.require('wood-arrow');
+  assert.equal(arrow.components.projectile.speed, 34);
+  assert.equal(arrow.components.projectile.radius, 0.08);
+  assert.equal(arrow.components.projectile.lingerSeconds, 1.6);
+  assert.equal(arrow.components.render.model, 'line-art-arrow');
+  // 弧、蓄力比例、射手都是运行期的事，原型里写不出来。
+  assert.equal(arrow.components.projectile.ownerActorId, undefined);
+
+  // 看不见的弹药是一次看不见的判定，也就是这套改动取代掉的那个东西。
+  // 光删掉 render 会先被「至少要有一种可视来源」那条挡下，所以补一个 buildGrid
+  // 让它走到弹药自己那条规则上。
+  const invisible = structuredClone(arrow);
+  invisible.id = 'probe-arrow';
+  delete invisible.components.render;
+  await assert.rejects(loadSingleActor(invisible), /至少需要 render/);
+  invisible.components.buildGrid = {
+    cellSize: 1, columns: 0, rows: 0, deckHeight: 0,
+  };
+  await assert.rejects(loadSingleActor(invisible), /projectile 需要 render/);
+
+  // 一样东西不能既按弧飞、又按重力掉：两套积分会把权威位置各写一遍。
+  const falling = structuredClone(arrow);
+  falling.id = 'probe-arrow';
+  falling.components.dropMotion = { gravity: 9.8, drag: 0.5, settleSpeed: 0.08 };
+  await assert.rejects(loadSingleActor(falling), /不能与 dropMotion、playerMovement 并存/);
+
+  const unknown = structuredClone(arrow);
+  unknown.id = 'probe-arrow';
+  unknown.components.projectile.homing = true;
+  await assert.rejects(loadSingleActor(unknown), /包含未知字段：homing/);
+});

@@ -1,0 +1,24 @@
+{
+  "$schema": "./actor.schema.json",
+  "schemaVersion": 1,
+  "id": "wood-arrow",
+  "components": {
+    "projectile": {
+      "speed": 34,
+      "radius": 0.08,
+      "minimumFlightSeconds": 0.12,
+      "lingerSeconds": 1.6
+    },
+    "replicationPolicy": {
+      "mode": "aoi",
+      "radiusChunks": 2
+    },
+    "render": {
+      "model": "line-art-arrow",
+      "shaftColor": "#c8a06a",
+      "headColor": "#7a6a58",
+      "inkColor": "#2f2419",
+      "length": 0.62
+    }
+  }
+}

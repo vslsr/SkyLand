@@ -3,6 +3,7 @@ import type { BuildSiteIndex } from '../../shared/build/BuildSiteIndex.mjs';
 import type { BuildFootprint } from '../../shared/build/buildFootprint.mjs';
 import { cellWithinBounds } from '../../shared/build/index.mjs';
 import type { PhysicsWorld } from '../../shared/physics/PhysicsWorld.mjs';
+import { sweepProjectileArc } from '../../shared/ballistics/index.mjs';
 import { TERRAIN_CELL_SIZE } from '../../shared/world/terrainConfig.mjs';
 import { intersectRayWithHorizontalPlane } from '../camera/cameraRay';
 import type { ContainerModelLike } from '../inventory/index';
@@ -259,6 +260,50 @@ export class SceneWorld implements GrassInteractionTarget {
     radius: number,
   ): number {
     return this.physicsWorld?.castCameraSphere(start, end, radius) ?? 1;
+  }
+
+  /**
+   * 蓄力预览那条弧被挡在哪儿：返回 [0, 1] 的截断比例，一路无阻就是 1。
+   *
+   * 走的是和服务端**同一份**沿弧扫掠（`sweepProjectileArc`），只是碰撞数据各取
+   * 各的：世界几何问本地那个 Rapier 世界，实体问本地 Actor 世界。两边的算法一样，
+   * 所以「线停在哪」和「箭停在哪」是同一个答案；只有取法不同，因为客户端手上就是
+   * 另一份世界。
+   *
+   * 排掉的是**本地玩家自己**：出手点在他身体里，不排的话第一段就撞在自己身上，
+   * 线永远画不出去。服务端那边由 `ownerActorId` 排同一个人。
+   *
+   * 只在蓄力那几帧调用，每次的查询数是常数（弧固定切成若干段），与射程和世界大小
+   * 都无关。
+   */
+  public sweepProjectileArc(
+    arc: {
+      originX: number; originY: number; originZ: number;
+      impactX: number; impactY: number; impactZ: number; ratio: number;
+    },
+    options: { radius: number; shooterActorId?: string },
+  ): number {
+    const physics = this.physicsWorld;
+    const actors = this.actorSnapshotTarget;
+    if (!physics && !actors) return 1;
+    return sweepProjectileArc(arc, {
+      radius: options.radius,
+      sweepWorld: physics
+        ? (start, end, radius) => physics.castProjectileSphere(
+          start,
+          end,
+          radius,
+          options.shooterActorId,
+        )
+        : undefined,
+      sweepTargets: actors
+        ? (start, end, radius) => {
+          const fraction = actors.sweepProjectileTargets(start, end, radius);
+          // 预览只需要「停在哪」，不需要「停在谁身上」——谁挨打是服务端的事。
+          return fraction < 1 ? { fraction } : undefined;
+        }
+        : undefined,
+    }).travel;
   }
 
   // --- 草地 ---------------------------------------------------------------

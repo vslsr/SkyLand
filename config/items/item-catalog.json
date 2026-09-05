@@ -60,6 +60,7 @@
       "weapon": {
         "attack": 5,
         "radius": 1.2,
+        "projectileArchetypeId": "wood-arrow",
         "range": { "minimum": 6, "maximum": 22 },
         "charge": {
           "minimumRatio": 0.15,

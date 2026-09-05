@@ -61,7 +61,7 @@ import {
 import { ThreeFireVisual } from './ThreeFireVisual';
 import { ThreePointLightVisual } from './ThreePointLightVisual';
 import { ThreeGuidePathVisual } from './ThreeGuidePathVisual';
-import { ThreeArrowShotVisual } from './ThreeArrowShotVisual';
+import { ThreeProjectileVisual } from './ThreeProjectileVisual';
 import { ThreeBallisticPreviewVisual } from './ThreeBallisticPreviewVisual';
 import { ThreeHealthPopupVisual } from './ThreeHealthPopupVisual';
 import { ThreeHybridSlimeVisual } from './ThreeHybridSlimeVisual';
@@ -203,8 +203,16 @@ export class ThreeRenderScene implements RenderScene {
   private healthPopups?: ThreeHealthPopupVisual;
   /** 蓄力时那条白色抛物线。同样按需建，见 `setBallisticPreview`。 */
   private ballisticPreview?: ThreeBallisticPreviewVisual;
-  /** 飞在空中的那几支箭。第一箭射出去才建，见 `spawnArrowShot`。 */
-  private arrowShots?: ThreeArrowShotVisual;
+  /**
+   * proxyId → 飞在空中那支箭的俯仰。只有弹药模型有。
+   *
+   * 箭以前不在这张表里，因为它以前不是 Actor：射出去的是渲染世界自己池子里的一个
+   * 对象，判定在松手那一刻早就结算完了。现在权威侧真的有一支箭在飞、会撞墙，
+   * 这一侧要做的只剩「把它摆成它正在去的方向」。
+   */
+  private readonly projectiles = new Map<ProxyId, ThreeProjectileVisual>();
+  /** 求俯仰时逐帧复用的读出缓冲。 */
+  private readonly projectileWorld: RenderTransform = { x: 0, y: 0, z: 0, yaw: 0 };
   /**
    * 能力实验室的表现（引擎迁移路线图 第 3 步）。
    *
@@ -263,13 +271,6 @@ export class ThreeRenderScene implements RenderScene {
     this.ballisticPreview.setState(state);
   }
 
-  public spawnArrowShot(state: BallisticPreviewState): void {
-    if (!this.arrowShots) {
-      this.arrowShots = new ThreeArrowShotVisual(this.environment);
-      this.root.add(this.arrowShots.root);
-    }
-    this.arrowShots.spawn(state);
-  }
 
   public spawnHealthPopup(x: number, y: number, z: number, amount: number): void {
     if (!this.healthPopups) {
@@ -326,6 +327,9 @@ export class ThreeRenderScene implements RenderScene {
     }
     if (model.dropRollRig) {
       this.dropRolls.set(proxy.id, new ThreeDropRollVisual(proxy.id, model.dropRollRig));
+    }
+    if (model.projectileRig) {
+      this.projectiles.set(proxy.id, new ThreeProjectileVisual(proxy.id, model.projectileRig));
     }
     if (model.containerLidRig) {
       this.containerLids.set(proxy.id, new ThreeContainerLidVisual(proxy.id, model.containerLidRig));
@@ -435,6 +439,7 @@ export class ThreeRenderScene implements RenderScene {
     this.waterMotions.delete(id);
     this.elasticTethers.delete(id);
     this.dropRolls.delete(id);
+    this.projectiles.delete(id);
     this.containerLids.delete(id);
     this.attachmentVisual.forget(id);
     proxy.dispose();
@@ -568,8 +573,10 @@ export class ThreeRenderScene implements RenderScene {
     for (const guide of this.guidePaths.values()) guide.update(deltaSeconds);
     // 飘字和别的表现一样按渲染帧走：玩法侧只在血量变的那一帧发一条命令。
     this.healthPopups?.update(deltaSeconds);
-    // 箭同理：弹道在射出去那一刻就定了，这里只是按渲染帧把它走完。
-    this.arrowShots?.update(deltaSeconds);
+    // 箭的俯仰跟着它这一帧真的走了多少：位置是权威复制过来的，切线在这一侧求。
+    for (const projectile of this.projectiles.values()) {
+      projectile.update(transforms, this.projectileWorld);
+    }
     // 权威 yaw 取的是 submitTransforms 刚摆好的 root 角度：外壳要抵消的正是
     // 「root 这一级实际被转了多少」，父子情况下那已经是相对 yaw。
     for (const [id, slime] of this.slimeVisuals) {
@@ -865,8 +872,7 @@ export class ThreeRenderScene implements RenderScene {
     this.healthPopups = undefined;
     this.ballisticPreview?.dispose();
     this.ballisticPreview = undefined;
-    this.arrowShots?.dispose();
-    this.arrowShots = undefined;
+    this.projectiles.clear();
     this.pointLights.dispose();
     this.buildPreview.dispose();
     this.highCountBatches.dispose();

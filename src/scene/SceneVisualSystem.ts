@@ -79,6 +79,17 @@ export interface ActorSnapshotTarget {
   findNearbyInteractableActor(
     position: { x: number; z: number },
   ): ActorInteractionCandidate | undefined;
+  /**
+   * 一段弹道扫过挡在路上的实体，返回最早的命中比例（0–1，没挡住就是 1）。
+   *
+   * 只是蓄力预览用：真正的命中由服务端在箭飞到的那一刻结算。两边读的是同一份
+   * 扫掠实现（`sweepProjectileTargets`），所以线停在哪就是箭停在哪。
+   */
+  sweepProjectileTargets(
+    start: readonly [number, number, number],
+    end: readonly [number, number, number],
+    radius: number,
+  ): number;
   /** 这名玩家正拉着或叼着的那一株；它不靠就近搜索，交互键要能直接指向它。 */
   findHeldInteractableActor(playerId: string): ActorInteractionCandidate | undefined;
   /** 这个 Actor 上的容器状态；界面据此画箱内内容。 */

@@ -7,6 +7,8 @@ import {
   ACTOR_PLAYER_TAG,
   HEALTH_COMPONENT,
   INVENTORY_COMPONENT,
+  PATROL_PATH_COMPONENT,
+  PROJECTILE_COMPONENT,
   TRANSFORM_COMPONENT,
   resolveActorTags,
 } from '../../shared/actor/index.mjs';
@@ -52,10 +54,31 @@ function equipBow(scene) {
 }
 
 /**
+ * 把巡逻史莱姆钉在原地，当一个靶子用。
+ *
+ * 箭现在要飞过去才结算（0.65 秒左右），走着的靶子在这段时间里会挪开——那正是
+ * 这套改动想要的物理，但它让「这一箭该不该打中」变成一个和路线有关的问题。
+ * 测判定的时候把它停住，测移动的时候再让它走。
+ *
+ * 摘掉整个 Component 而不是把速度调成 0：速度为 0 时巡逻 System 每 tick 仍然把
+ * Actor 写回「出发点 + 当前路点」。
+ */
+function freeze(target) {
+  target.removeComponent(PATROL_PATH_COMPONENT);
+  return target;
+}
+
+/** 让世界跑到天上那支箭落地为止。返回还剩几支在飞（正常是 0）。 */
+function flyOut(context, seconds = 1.2) {
+  for (let step = 0; step < Math.ceil(seconds / 0.05); step += 1) context.advance(0.05);
+  return context.scene.actorWorld.query(PROJECTILE_COMPONENT)
+    .filter((arrow) => !arrow.requireComponent(PROJECTILE_COMPONENT).stopped).length;
+}
+
+/**
  * 站到「这一箭正好落在目标身上」的位置。
  *
- * 巡逻史莱姆在蓄力那一秒里还在走，所以瞄准要在**松手前**做：判定用的是松手那一
- * 刻的权威朝向与位置，测试也照这个时刻摆。
+ * 瞄准在**松手前**做：弧由松手那一刻的权威朝向与位置定下来，测试也照这个时刻摆。
  */
 function aimAt(player, target, heldSeconds) {
   const ratio = Math.min(1, heldSeconds / resolveItemUse('wood-bow').holdSeconds);
@@ -125,11 +148,10 @@ test('标签由 Component 推导，不需要每份配置各写一遍', async () 
   assert.deepEqual(resolveActorTags(player), [ACTOR_PLAYER_TAG]);
 });
 
-test('拉满一箭打中面前的史莱姆，伤害按蓄力与标签结算', async () => {
+test('拉满一箭打中面前的史莱姆，伤害在箭飞到的那一刻结算', async () => {
   const context = await createScene();
   const { scene, player } = context;
-  const walker = scene.actorWorld.getActor('legged-slime-walker-01');
-  const transform = walker.requireComponent(TRANSFORM_COMPONENT);
+  const walker = freeze(scene.actorWorld.getActor('legged-slime-walker-01'));
   const health = walker.requireComponent(HEALTH_COMPONENT);
 
   // 木弓在出生背包里；装到物品栏上才拿在手上。
@@ -137,36 +159,46 @@ test('拉满一箭打中面前的史莱姆，伤害按蓄力与标签结算', as
   assert.equal(player.getComponent(INVENTORY_COMPONENT).heldItemType, 'wood-bow');
 
   assert.equal(fire(context, 1.5, walker), true, '拉满松手应当射出去');
+  // **松手那一刻还不掉血**：这一箭刚离弦，二十几米外的目标什么都没发生。判定跟着
+  // 箭走，不再跟着按键走——墙、地形、半路上的人因此都有机会挡下它。
+  assert.equal(health.current, 100, '箭还在飞，伤害不该已经结算');
+  const flying = scene.actorWorld.query(PROJECTILE_COMPONENT);
+  assert.equal(flying.length, 1, '松手应当生成一支真的在飞的箭');
+  assert.equal(flying[0].requireComponent(PROJECTILE_COMPONENT).ownerActorId, 'archer');
+
+  assert.equal(flyOut(context), 0, '这一箭应当在一秒出头之内落地');
   // 5 × 2.0 = 10
   assert.equal(health.current, 90);
 });
 
 test('空放不发射，拉满之后的连发被 CD 挡住', async () => {
   const context = await createScene();
-  const { scene, player } = context;
-  const walker = scene.actorWorld.getActor('legged-slime-walker-01');
-  const transform = walker.requireComponent(TRANSFORM_COMPONENT);
+  const { scene } = context;
+  const walker = freeze(scene.actorWorld.getActor('legged-slime-walker-01'));
   const health = walker.requireComponent(HEALTH_COMPONENT);
   equipBow(scene);
 
   // 点一下就松：比例远低于 0.15，空放。
   assert.equal(fire(context, 0.05, walker), false, '空放不该算做成事');
+  assert.equal(scene.actorWorld.query(PROJECTILE_COMPONENT).length, 0, '空放不该有箭出去');
   assert.equal(health.current, 100);
   // 冷却记在「按下去用了一次」上，不记在「打没打中」上：空放同样要等这 0.1 秒，
   // 否则空放就成了一个可以无限点的动作。
   context.advance(0.2);
 
   assert.equal(fire(context, 1.5, walker), true);
+  assert.equal(flyOut(context), 0);
   assert.equal(health.current, 90);
   // 冷却 0.1 秒：紧接着的一箭被能力系统挡下，血量不动。
   assert.equal(fire(context, 0.01, walker), false);
+  assert.equal(flyOut(context), 0);
   assert.equal(health.current, 90);
 });
 
 test('射空地不打到任何人，自己也不会被自己射中', async () => {
   const context = await createScene();
   const { scene, player } = context;
-  const walker = scene.actorWorld.getActor('legged-slime-walker-01');
+  const walker = freeze(scene.actorWorld.getActor('legged-slime-walker-01'));
   const health = walker.requireComponent(HEALTH_COMPONENT);
   const playerHealth = player.requireComponent(HEALTH_COMPONENT);
   equipBow(scene);
@@ -182,6 +214,7 @@ test('射空地不打到任何人，自己也不会被自己射中', async () =>
     true,
     '一箭确实射出去了',
   );
+  flyOut(context);
   assert.equal(health.current, 100, '朝反方向射不该打中它');
   assert.equal(playerHealth.current, 100, '射出去的箭打不到射它的人');
 });
@@ -191,6 +224,7 @@ test('武器不消耗自己：射完手上那把弓还在', async () => {
   const { scene, player } = context;
   equipBow(scene);
   fire(context, 1.5);
+  flyOut(context);
   assert.equal(player.getComponent(INVENTORY_COMPONENT).heldItemType, 'wood-bow');
   assert.equal(resolveItemUse('wood-bow').mode, 'charge');
 });

@@ -638,6 +638,32 @@ function validateReplicationPolicy(raw, filename) {
   return { mode: definition.mode, radiusChunks };
 }
 
+/**
+ * 会飞的弹药（`ProjectileComponent`）。
+ *
+ * 这里只认「这一类弹药怎么飞」：速度、扫掠半径、看得见的下限时长、停住之后留多久。
+ * 弧、蓄力比例、射手、哪件武器打的都是**运行期**的事，由 `fireWeapon` 在生成那一刻
+ * 交给 Component，不写进原型——原型描述的是一种箭，不是某一箭。
+ */
+function validateProjectile(raw, filename) {
+  const path = `${filename}.components.projectile`;
+  const definition = requireObject(raw, path);
+  const knownKeys = new Set(['speed', 'radius', 'minimumFlightSeconds', 'lingerSeconds']);
+  for (const key of Object.keys(definition)) {
+    if (!knownKeys.has(key)) throw new TypeError(`${path} 包含未知字段：${key}`);
+  }
+  return {
+    speed: requireNumber(definition.speed, `${path}.speed`, Number.EPSILON, 200),
+    radius: requireNumber(definition.radius, `${path}.radius`, Number.EPSILON, 1),
+    minimumFlightSeconds: definition.minimumFlightSeconds === undefined
+      ? 0.12
+      : requireNumber(definition.minimumFlightSeconds, `${path}.minimumFlightSeconds`, 0, 5),
+    lingerSeconds: definition.lingerSeconds === undefined
+      ? 1.6
+      : requireNumber(definition.lingerSeconds, `${path}.lingerSeconds`, 0, 60),
+  };
+}
+
 function validatePatrolPath(raw, filename) {
   const path = `${filename}.components.patrolPath`;
   const definition = requireObject(raw, path);
@@ -999,6 +1025,15 @@ function validateRender(raw, filename) {
       height: requireNumber(render.height, `${path}.height`, Number.EPSILON, 3),
     };
   }
+  if (render.model === 'line-art-arrow') {
+    return {
+      model: render.model,
+      shaftColor: requireColor(render.shaftColor, `${path}.shaftColor`),
+      headColor: requireColor(render.headColor, `${path}.headColor`),
+      inkColor: requireColor(render.inkColor, `${path}.inkColor`),
+      length: requireNumber(render.length, `${path}.length`, Number.EPSILON, 3),
+    };
+  }
   if (render.model === 'line-art-wood-bow') {
     return {
       model: render.model,
@@ -1112,6 +1147,7 @@ function validateActorArchetype(raw, filename) {
     'itemStack',
     'actorResidency',
     'dropMotion',
+    'projectile',
     'lifetime',
     'replicationPolicy',
     'generatedProp',
@@ -1135,6 +1171,9 @@ function validateActorArchetype(raw, filename) {
     : undefined;
   const patrolPath = components.patrolPath
     ? validatePatrolPath(components.patrolPath, filename)
+    : undefined;
+  const projectile = components.projectile
+    ? validateProjectile(components.projectile, filename)
     : undefined;
   // 船体根节点看不见：它的样子就是挂在它身上的那些地基，所以只有 buildGrid 也算。
   if (!render && !generatedProp && !guidePath && !components.buildGrid) {
@@ -1193,6 +1232,15 @@ function validateActorArchetype(raw, filename) {
   // 服务端推着走的生物（见 patrolPath）。所以这里**不**强制要 playerMovement。
   if (patrolPath && playerMovement) {
     throw new TypeError(`${filename}.components.patrolPath 不能与 playerMovement 并存`);
+  }
+  // 弹药是**飞在世界里被人看见**的东西：没有 render 的话它只是一次看不见的判定，
+  // 而那正是它取代掉的旧做法。
+  if (projectile && !render) {
+    throw new TypeError(`${filename}.components.projectile 需要 render`);
+  }
+  // 一样东西不能既按弧飞、又按重力掉：两套积分会把权威位置各写一遍。
+  if (projectile && (components.dropMotion || playerMovement)) {
+    throw new TypeError(`${filename}.components.projectile 不能与 dropMotion、playerMovement 并存`);
   }
   if (slimeSurfaceDrag && render?.model !== 'line-art-pbf-slime') {
     throw new TypeError(`${filename}.components.slimeSurfaceDrag 需要 line-art-pbf-slime render`);
@@ -1332,6 +1380,7 @@ function validateActorArchetype(raw, filename) {
       ...(itemStack ? { itemStack } : {}),
       ...(actorResidency ? { actorResidency } : {}),
       ...(dropMotion ? { dropMotion } : {}),
+      ...(projectile ? { projectile } : {}),
       ...(lifetime ? { lifetime } : {}),
       ...(replicationPolicy ? { replicationPolicy } : {}),
       ...(generatedProp ? { generatedProp } : {}),
