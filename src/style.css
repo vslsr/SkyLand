@@ -1192,6 +1192,119 @@ body.is-topdown .virtual-controls.is-desktop-debug {
  * 挂在 HUD 层，不进 CommonUI 栈：游戏进行中一直可见可点，也不该被背包盖住。
  * 每一格都是真按钮——点击/触摸是切换手持的第一入口，数字键与手柄肩键是另外两条。
  */
+/*
+ * 生命条。
+ *
+ * 只读 HUD：`--layer-hud` + `pointer-events: none`，因此它排在虚拟摇杆热区
+ * **下面**——横条横跨屏幕下方，排到热区上面就会把那一整条上的触摸吃掉，
+ * 表现是「摇杆在这一带推不动」，而且不报任何错。
+ *
+ * 位置贴着快捷栏上沿：18px（栏距底）+ 82px（栏高：22 上留白 + 52 格 + 8 下留白）
+ * + 8px 间隙。快捷栏那块留白本来就是给浮起来的手持格用的，横条压不到它。
+ */
+.health-root {
+  position: fixed;
+  inset-inline: 0;
+  bottom: 108px;
+  z-index: var(--layer-hud);
+  display: flex;
+  justify-content: center;
+  pointer-events: none;
+}
+
+/*
+ * 纸面线稿的一条方横条：直角、一圈墨线、纸色底。别改成圆角胶囊——那是另一套
+ * 视觉语言，和快捷栏、弹窗、滚动条都对不上。
+ *
+ * 三层宽度与闪光浓淡全部由 `HealthBar` 每帧写进自定义属性。**这里不写
+ * transition，也不写 animation**：补间的时基在 `HealthDisplayController` 那边，
+ * CSS 再补一次，两份时基会在每次快照到达时互相打断，横条反而抖。
+ */
+.health-bar {
+  --health-ink: rgba(28, 26, 23, 0.86);
+  --health-edge: rgba(138, 98, 56, 0.42);
+  --health-fill: #728562;
+  --health-ghost-ink: rgba(165, 62, 44, 0.45);
+  --health-flash-ink: rgba(165, 62, 44, 0.8);
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 5px 10px;
+  color: var(--health-ink);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  background: rgba(253, 251, 246, 0.82);
+  border: 1px solid var(--health-edge);
+}
+
+.health-bar[hidden] {
+  display: none;
+}
+
+.health-bar__track {
+  position: relative;
+  overflow: hidden;
+  width: clamp(140px, 20vw, 216px);
+  height: 10px;
+  background: rgba(253, 251, 246, 0.94);
+  border: 1px solid var(--health-ink);
+}
+
+.health-bar__ghost,
+.health-bar__fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  display: block;
+}
+
+/* 残影：刚掉的那一截先留在原处再退，玩家因此看得见这一下少了多少。 */
+.health-bar__ghost {
+  width: var(--health-ghost, 100%);
+  background: var(--health-ghost-ink);
+}
+
+.health-bar__fill {
+  width: var(--health-ratio, 100%);
+  background: var(--health-fill);
+}
+
+/* 结算闪光。浓淡是控制器按事件年龄写下来的，所以几种血条样式闪在同一刻。 */
+.health-bar__track::after {
+  position: absolute;
+  inset: 0;
+  content: '';
+  background: var(--health-flash-ink);
+  opacity: var(--health-flash, 0);
+}
+
+.health-bar[data-change='heal'] {
+  --health-flash-ink: rgba(114, 133, 98, 0.8);
+}
+
+/* 警戒线由控制器统一判定，这里只负责变红。 */
+.health-bar[data-state='critical'] {
+  --health-fill: #a53e2c;
+  border-color: rgba(165, 62, 44, 0.6);
+}
+
+/*
+ * 阵亡：条空着，整块退成灰墨。为什么还留在屏幕上——收掉它，玩家就只剩中间那条
+ * 「你已阵亡」，看不出自己是被打空的还是掉线了。
+ */
+.health-bar[data-state='dead'] {
+  --health-fill: transparent;
+  --health-ghost-ink: rgba(28, 26, 23, 0.2);
+  color: rgba(28, 26, 23, 0.5);
+  border-color: rgba(28, 26, 23, 0.28);
+}
+
+.health-bar__readout {
+  min-width: 56px;
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
 .hotbar-root {
   position: fixed;
   inset-inline: 0;

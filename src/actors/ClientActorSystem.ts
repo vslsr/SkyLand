@@ -70,7 +70,7 @@ import { selectWorldPropVariant } from '../../shared/world/worldPropVariants.mjs
 import {
   HealthPopupEmitter,
   healthPopupAnchorY,
-} from '../health/HealthPopupEmitter';
+} from '../health/index';
 import { NULL_PROXY_ID, type RenderScene } from '../render/RenderScene';
 import { resolveSlimeLegGroundProbeLayout } from '../render/RenderSlimeLegs';
 import { frameTimeline } from '../platform/index';

@@ -16,6 +16,7 @@ import {
 } from '../controllers/TopDownController';
 import type { Vec3 } from '../math/vec3';
 import type { GrassInteractionTarget } from '../grass';
+import type { HealthReading } from '../health/HealthDisplay';
 import type { InputSubsystem } from '../input/index';
 import type {
   ActorArchetypeDefinition,
@@ -164,6 +165,8 @@ export class PlayerEntity extends Actor {
   /** 自己挨的那一箭：和死亡一样是服务端复制回来的，本地不预测。 */
   private readonly impact = createSlimeImpactParams();
   private isDead = false;
+  /** 这一帧的生命值原样存一份，交给界面读；见 `health`。 */
+  private healthReading?: HealthReading;
 
   public constructor(
     playerId: string,
@@ -311,6 +314,7 @@ export class PlayerEntity extends Actor {
 
   /** 服务端复制回来的生命值。死了之后自己不再驱动角色，见 `dead`。 */
   public setHealth(health: SnapshotHealth | undefined): void {
+    this.healthReading = health;
     this.isDead = health?.dead === true;
     this.deathRevision = health?.dead ? health.deathRevision : 0;
     // 中箭那一下：计数和方向一起来，渲染侧靠计数变化踢一次凹陷。没有冲量的事件
@@ -321,6 +325,20 @@ export class PlayerEntity extends Actor {
   /** 死了没有。场景据它切自由视角，控制器据它停止驱动角色。 */
   public get dead(): boolean {
     return this.isDead;
+  }
+
+  /**
+   * 这一帧复制回来的生命值，给界面读。
+   *
+   * 类型写成 `HealthReading` 而不是 `SnapshotHealth`：界面只该看到那几个数，
+   * 看不到来袭方向、冲量、尸体停留秒数这些给权威结算和蒙皮形变用的字段。
+   * 于是这个 getter 就是 `HealthSource` 的一整个实现——生命条那一侧因此完全
+   * 不认识快照，也不认识 `HealthComponent`。
+   *
+   * 每帧被 `setHealth` 换成当帧那份，不留跨帧引用。
+   */
+  public get health(): HealthReading | undefined {
+    return this.healthReading;
   }
 
   public setReplicatedSlimeDrag(drag: SnapshotSlimeDrag | undefined): void {
