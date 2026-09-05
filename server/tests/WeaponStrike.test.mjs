@@ -17,7 +17,10 @@ import {
   resolveItemUse,
   resolveWeaponStrike,
   weaponDamage,
+  weaponHitDirection,
+  weaponHitImpulse,
   weaponImpactPoint,
+  MINIMUM_HIT_IMPULSE,
 } from '../../shared/items/index.mjs';
 import { SceneCatalog } from '../scenes/SceneCatalog.mjs';
 import { ServerScene } from '../scene/ServerScene.mjs';
@@ -227,4 +230,70 @@ test('武器不消耗自己：射完手上那把弓还在', async () => {
   flyOut(context);
   assert.equal(player.getComponent(INVENTORY_COMPONENT).heldItemType, 'wood-bow');
   assert.equal(resolveItemUse('wood-bow').mode, 'charge');
+});
+
+test('来袭方向是「射手 → 这一个目标」，两人重合时退回权威 yaw', () => {
+  // 正北打过去：+Z。方向是**弹药飞进去的方向**，也就是蒙皮该被压凹的方向。
+  const north = weaponHitDirection(0, 0, 0, 6, 0);
+  assert.ok(Math.abs(north.x) < 1e-9 && Math.abs(north.z - 1) < 1e-9);
+  // 侧面那一只按它自己的方位算，不是按 yaw：一次落点里可能站着好几个东西。
+  const flank = weaponHitDirection(0, 0, 3, 4, 0);
+  assert.ok(Math.abs(flank.x - 0.6) < 1e-9 && Math.abs(flank.z - 0.8) < 1e-9);
+  assert.ok(Math.abs(Math.hypot(flank.x, flank.z) - 1) < 1e-9, '必须是单位向量');
+  // 目标正好站在脚下：零向量没有方向可言，退回朝向。
+  const overlapped = weaponHitDirection(2, -1, 2, -1, Math.PI / 2);
+  assert.ok(Math.abs(overlapped.x - 1) < 1e-9 && Math.abs(overlapped.z) < 1e-9);
+});
+
+test('冲量只看蓄力，不看伤害倍率：射墙和射史莱姆凹得一样深', () => {
+  assert.equal(weaponHitImpulse(undefined), 0, '没射出去就没有这一下');
+  assert.equal(weaponHitImpulse(resolveWeaponStrike(BOW, 1)), 1);
+  const light = weaponHitImpulse(resolveWeaponStrike(BOW, BOW.charge.minimumRatio));
+  assert.ok(light >= MINIMUM_HIT_IMPULSE, `最轻的一发也要看得见，实际 ${light}`);
+  assert.ok(light < 1);
+  // 标签倍率把伤害压到一成，冲量不跟着变——扎进去多深是箭的事。
+  const strike = resolveWeaponStrike(BOW, 1);
+  assert.ok(Math.abs(weaponDamage(BOW, strike, [ACTOR_BUILD_TAG]) - 1) < 1e-9);
+  assert.equal(weaponHitImpulse(strike), 1);
+});
+
+test('中箭把来袭方向记进复制面：方向、冲量与事件计数一起过网', async () => {
+  const context = await createScene();
+  const { scene } = context;
+  const walker = freeze(scene.actorWorld.getActor('legged-slime-walker-01'));
+  const health = walker.requireComponent(HEALTH_COMPONENT);
+  equipBow(scene);
+
+  assert.equal(health.snapshot().lastHitImpulse, undefined, '没挨过打就不占这几个字段');
+
+  // aimAt 把弓手摆在目标正南方 `distance` 米处，yaw = 0：箭朝 +Z 飞进去。
+  // 方向记在**箭飞到的那一刻**，所以要等它飞完这一段。
+  assert.equal(fire(context, 1.5, walker), true);
+  assert.equal(health.snapshot().lastHitImpulse, undefined, '箭还在飞，这一下还没发生');
+  assert.equal(flyOut(context), 0);
+  const hit = health.snapshot();
+  assert.equal(hit.lastHitImpulse, 1, '拉满就是满冲量');
+  assert.ok(Math.abs(hit.lastHitZ - 1) < 1e-6, `方向该朝 +Z，实际 ${hit.lastHitZ}`);
+  assert.ok(Math.abs(hit.lastHitX) < 1e-6);
+  assert.equal(hit.lastHitY, 0, '今天的箭只有水平方向');
+  assert.ok(hit.lastDelta < 0 && hit.eventRevision > 0, '飘字和这一下读的是同一次事件');
+
+  // 治疗也是一次事件，但它没有方向：不清零的话，客户端会拿上一箭的轴再砸一次。
+  scene.applyHealthChange(walker.id, 5);
+  const healed = health.snapshot();
+  assert.equal(healed.lastHitImpulse, undefined);
+  assert.equal(healed.lastHitZ, undefined);
+  assert.ok(healed.eventRevision > hit.eventRevision, '治疗照样是一次事件');
+});
+
+test('没有方向的伤害照常结算，只是没有那一下凹陷', async () => {
+  const context = await createScene();
+  const { scene } = context;
+  const walker = freeze(scene.actorWorld.getActor('legged-slime-walker-01'));
+  const health = walker.requireComponent(HEALTH_COMPONENT);
+  // 调试指令、火、跌落都走同一个入口，只是不带 impact。
+  scene.applyHealthChange(walker.id, -10);
+  assert.equal(health.current, 90);
+  assert.equal(health.lastHitImpulse, 0);
+  assert.equal(health.snapshot().lastHitX, undefined);
 });

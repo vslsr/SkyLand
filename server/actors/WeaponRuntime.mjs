@@ -7,6 +7,8 @@ import {
   itemCatalog,
   resolveWeaponStrike,
   weaponDamage,
+  weaponHitDirection,
+  weaponHitImpulse,
   weaponImpactPoint,
 } from '../../shared/items/index.mjs';
 import { MUZZLE_HEIGHT } from '../../shared/ballistics/index.mjs';
@@ -96,6 +98,16 @@ export function resolveProjectileImpact(scene, projectile, impact) {
   const source = shooter?.getComponent(GAME_ABILITY_COMPONENT)?.abilitySystem;
   const nowSeconds = scene.now() / 1000;
 
+  const impulse = weaponHitImpulse(strike);
+  // 这一箭是顺着哪条线来的：出手点 → 这一个目标。取**出手点**而不是射手此刻站的
+  // 地方，是因为伤害现在在箭飞到的那一刻才结算，射手早就走开了；出手点是这条弧
+  // 的起点，也就是箭真正来的方向。落点半径里可能站着好几个东西，各自算各自的：
+  // 打在侧面那一只身上的箭该从它的侧面进去。
+  const arcYaw = Math.atan2(
+    projectile.impactX - projectile.originX,
+    projectile.impactZ - projectile.originZ,
+  );
+
   let hits = 0;
   const damaged = new Set();
   const apply = (target) => {
@@ -103,7 +115,21 @@ export function resolveProjectileImpact(scene, projectile, impact) {
     damaged.add(target.id);
     const damage = weaponDamage(weapon, strike, resolveActorTags(target));
     if (damage <= 0) return;
-    scene.applyHealthChange(target.id, -damage, { source, nowSeconds });
+    // 方向随伤害一起过网，客户端拿它把蒙皮朝里砸一下（见 `src/render/RenderSlimeImpact.ts`）。
+    // 形状不过网——每个客户端按同一个轴自己解，和咬住的那个尖同一个取向。
+    const transform = target.requireComponent(TRANSFORM_COMPONENT);
+    const direction = weaponHitDirection(
+      projectile.originX,
+      projectile.originZ,
+      transform.x,
+      transform.z,
+      arcYaw,
+    );
+    scene.applyHealthChange(target.id, -damage, {
+      source,
+      nowSeconds,
+      impact: { x: direction.x, y: 0, z: direction.z, impulse },
+    });
     hits += 1;
   };
 

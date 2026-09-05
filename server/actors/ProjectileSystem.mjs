@@ -27,7 +27,10 @@ import {
  *    的那一个决定这一箭停在哪儿。
  * 3. **结算**：停下的那一刻才把伤害交出去（`world.context.applyProjectileImpact`），
  *    落点就是它真正停住的位置，不是名义落点。
- * 4. **收走**：停住之后插在那儿 `lingerSeconds` 秒，让眼睛跟得上，然后从世界里摘掉。
+ * 4. **挂上去**：撞在实体身上的那一支挂到它身上（父子关系），跟着它走。不挂的话
+ *    被射中的东西走开之后箭会留在半空里，命中在画面上就读不出来了。挂载让尸体
+ *    被收走时把插在身上的箭一起带走（`removeActorTree` 是级联的）。
+ * 5. **收走**：停住之后插在那儿 `lingerSeconds` 秒，让眼睛跟得上，然后从世界里摘掉。
  *    回收归这个 System 自己管，弹药原型因此不带 `lifetime`——那个 Component 只由
  *    `HighCountActorSystem` 兑现（它要 itemStack + residency + dropMotion），挂在箭上
  *    是一个没人跑的计时器。这里的上界是确定的：`flightSeconds + lingerSeconds`。
@@ -103,6 +106,12 @@ export class ProjectileSystem {
           targetActorId: hit.targetId,
           blocked: hit.blocked,
         });
+        // 插在谁身上就跟着谁走。不挂上去的话，被射中的史莱姆走开之后，那支箭会
+        // 留在半空中它刚才站过的地方——命中因此在画面上读不出来。
+        // `worldPositionStays` 让它保持刚扎进去的姿态，本地坐标由挂载自己反解。
+        if (hit.targetId && world.getActor(hit.targetId)) {
+          world.setActorParent(actor.id, hit.targetId, { worldPositionStays: true });
+        }
       }
     }
   }

@@ -227,3 +227,51 @@ test('实体窄相扫掠取最近的一个，射手自己排除在外', () => {
     undefined,
   );
 });
+
+test('箭插在被射中的那一只身上，跟着它走而不是留在半空', async () => {
+  const context = await createScene();
+  const { scene } = context;
+  const walker = freeze(scene.actorWorld.getActor('legged-slime-walker-01'));
+  const target = walker.requireComponent(TRANSFORM_COMPONENT);
+
+  assert.equal(fireAt(context, walker), true);
+  const arrows = context.flyOut();
+  assert.ok(
+    walker.requireComponent(HEALTH_COMPONENT).current < 100,
+    '先确认这一箭真的打中了',
+  );
+  assert.equal(arrows[0].parent?.id, walker.id);
+
+  const arrowZ = arrows[0].requireComponent(TRANSFORM_COMPONENT).z;
+  target.setWorldTransform([target.x, target.y, target.z + 2], target.yaw);
+  context.advance(0.05);
+  assert.ok(
+    Math.abs(arrows[0].requireComponent(TRANSFORM_COMPONENT).z - (arrowZ + 2)) < 1e-6,
+    '靶子挪了两米，插在它身上的箭该挪同样的两米',
+  );
+});
+
+test('打在墙上的那一支不挂给谁：它插在世界里，不跟着任何人走', async () => {
+  const context = await createScene();
+  const { scene } = context;
+  const walker = freeze(scene.actorWorld.getActor('legged-slime-walker-01'));
+  const target = walker.requireComponent(TRANSFORM_COMPONENT);
+
+  assert.equal(fireAt(context, walker), true);
+  scene.physics.setActorCollider('test-wall', {
+    shape: 'box',
+    halfWidth: 6,
+    halfLength: 0.25,
+    minimumY: 0,
+    maximumY: 4,
+    x: target.x,
+    y: 0,
+    z: target.z - 3,
+    yaw: 0,
+    layers: COLLISION_LAYER_SOLID,
+  });
+  scene.physics.prepareQueries();
+
+  const arrows = context.flyOut();
+  assert.equal(arrows[0].parent, undefined);
+});
