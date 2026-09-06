@@ -79,7 +79,7 @@ test('弹药位摊成界面画得出来的一份：名字、图标、还剩几�
   // 没装的时候不该冒出一个「0 发」的视图：格子上那个小框据此决定画不画。
   const empty = buildInventoryView(inventory as unknown as InventoryModelLike);
   const before = empty.pooled.find((stack) => stack.itemType === 'slingshot');
-  assert.deepEqual(before?.ammoSlot, { accepts: ['stone'], capacity: 5 });
+  assert.deepEqual(before?.ammoSlot, { accepts: ['stone'], capacity: 5, reloadSeconds: 0.8 });
   assert.equal(before?.ammo, undefined);
 
   inventory.loadAmmo(

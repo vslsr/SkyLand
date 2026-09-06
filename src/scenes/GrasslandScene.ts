@@ -448,6 +448,8 @@ export class GrasslandScene extends Scene {
       },
       // 冷却圈和长按那圈是同一个环，反着走。
       setCooldown: (cooldown) => this.hotbarBar.setCooldown(cooldown),
+      // 按不动的那一下让那一格抖一下：「按了没反应」得自己有个说法。
+      rejectUse: (reason) => this.hotbarBar.rejectUse(reason),
       // 松手那一下只剩弦回弹要画：箭不再由这一侧生出来，它是服务端射出去的一个
       // 真 Actor（`ProjectileComponent`），顺着快照回到这里。收圈的路子不止松手
       // 这一条（换手、盖界面、进建造模式都收），那几下不该抖弦，所以这一条和
@@ -951,6 +953,8 @@ export class GrasslandScene extends Scene {
       own.inventory ?? [],
       own.inventoryRevision ?? inventory.revision,
       own.hotbar,
+      // 装填还剩几秒是相对量：接下来由本地这块表倒数，所以换算的基准也得是它。
+      performance.now() / 1000,
     )) {
       this.inventory.sync();
       this.hotbarBar.setSlots(buildInventoryView(inventory).hotbar);

@@ -56,6 +56,8 @@ export interface ItemDefinitionLike {
   readonly ammo?: {
     readonly accepts: readonly string[];
     readonly capacity: number;
+    /** 装一次弹要多久，秒。装填期间这一格按不动。 */
+    readonly reloadSeconds: number;
   };
 }
 
@@ -114,6 +116,17 @@ export interface InventoryModelLike {
   readonly hotbar?: readonly (HotbarSlotModelLike | null)[];
   readonly activeHotbarIndex?: number;
   readonly heldItemType?: string;
+  /** 手上那一格的地址；空手时是 undefined。 */
+  activeSlotAddress?(): { kind: 'hotbar'; slotIndex: number } | undefined;
+  /** 这一格装着什么弹药。 */
+  ammoAt?(ref: unknown): { readonly itemType: string; readonly quantity: number } | undefined;
+  /**
+   * 这一格还要装多久，秒。
+   *
+   * 两端各自用自己的表倒数：服务端只在装填开始那一帧发一次「还剩几秒」，之后不
+   * 每帧再发——那是一段确定的时长，两边跑同一个减法就够了。
+   */
+  reloadRemaining?(ref: unknown, nowSeconds: number): number;
 }
 
 export interface InventoryStackView {

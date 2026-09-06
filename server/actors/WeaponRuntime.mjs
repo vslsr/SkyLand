@@ -191,6 +191,8 @@ export function resolveProjectileImpact(scene, projectile, impact) {
  */
 export function fireWeapon({ scene, player, use, chargeRatio, ammo, consumeAmmo }) {
   // 收弹药的武器空着就打不响。不收弹药的（还没有这样的武器）照旧能打。
+  // 打空之后自动去找下一摞不在这里：那是**弹药位**的事，归物品系统
+  // （见 `ItemAbilityRuntime`），武器系统不该认识背包。
   if (use?.ammo && !(ammo?.quantity > 0)) return false;
   if (!fireWeaponFrom(scene, player, use?.weapon, chargeRatio, use?.itemType)) return false;
   if (use?.ammo) consumeAmmo(1);
