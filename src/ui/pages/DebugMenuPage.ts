@@ -60,6 +60,9 @@ export class DebugMenuPage extends ModalWindow {
   private readonly giveItemMenu: HTMLElement;
   private readonly giveItemStatus: HTMLParagraphElement;
   private itemGrantHandler?: (itemType: string) => void;
+  /** 列表这一次打开以来连着点的是哪一件、点了几下；换一件或收起列表就归零。 */
+  private lastGrantedItemType?: string;
+  private lastGrantedCount = 0;
   private readonly transformLogButton: HTMLButtonElement;
   private readonly transformLogStatus: HTMLParagraphElement;
   private readonly collisionButton: HTMLButtonElement;
@@ -171,7 +174,8 @@ export class DebugMenuPage extends ModalWindow {
     const giveItemHeading = document.createElement('h3');
     giveItemHeading.textContent = 'GIVE ITEM';
     const giveItemDescription = document.createElement('p');
-    giveItemDescription.textContent = '点开列表，点一件就给自己一个。'
+    giveItemDescription.textContent = '点开列表，点一件就给自己一个；列表不自己收起，'
+      + '要几个就点几下，收起来由那颗按钮或关掉 F8 说了算。'
       + '落点和拾取完全一样：先手上、再物品栏、最后背包——身上满了就给不进去。';
     this.giveItemButton = document.createElement('button');
     this.giveItemButton.className = 'paper-button debug-menu__toggle';
@@ -203,10 +207,17 @@ export class DebugMenuPage extends ModalWindow {
       button.setAttribute('aria-label', `给自己一个${definition.displayName}`);
       button.addEventListener('click', () => {
         this.itemGrantHandler?.(definition.id);
-        // 给出去没有由下一帧快照说了算，这里只回执「已经请求了哪一件」——
-        // 写「已获得」会在背包满的时候撒谎。
-        this.giveItemStatus.textContent = `已请求 ${definition.displayName} ×1；背包里没有就是没收下。`;
-        this.setGiveItemMenuOpen(false);
+        // 列表点完不收起来：调试时要的往往是「同一件再来五个」，一点就关等于
+        // 每给一个都要重开一次列表。
+        this.lastGrantedCount = this.lastGrantedItemType === definition.id
+          ? this.lastGrantedCount + 1
+          : 1;
+        this.lastGrantedItemType = definition.id;
+        // 给出去没有由下一帧快照说了算，这里只回执「已经请求了哪一件、几个」——
+        // 写「已获得」会在背包满的时候撒谎。连点同一件时数字要跟着走，
+        // 否则第二下点下去屏幕上什么都不变，看着像没点着。
+        this.giveItemStatus.textContent =
+          `已请求 ${definition.displayName} ×${this.lastGrantedCount}；背包里没有就是没收下。`;
       });
       this.giveItemMenu.append(button);
     }
@@ -346,6 +357,9 @@ export class DebugMenuPage extends ModalWindow {
   }
 
   private setGiveItemMenuOpen(open: boolean): void {
+    // 开合一次就把连点的计数归零：下一次翻开列表数的是新的一轮。
+    this.lastGrantedItemType = undefined;
+    this.lastGrantedCount = 0;
     this.giveItemMenu.hidden = !open;
     this.giveItemButton.setAttribute('aria-expanded', String(open));
     this.giveItemButton.textContent = open ? '收起物品列表' : '选择物品…';
