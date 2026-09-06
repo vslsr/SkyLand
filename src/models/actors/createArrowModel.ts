@@ -15,10 +15,15 @@ export type ArrowRender = Extract<ActorRenderDefinition, { model: 'line-art-arro
  * 穿墙：它没有位置、没有 tick、没有沿途碰撞，屏幕上那条轨迹和世界没有关系。现在
  * 权威侧真的有一支箭在飞（`ProjectileComponent`），这里画的就是它。
  *
- * 箭沿局部 **+Z** 躺着，尾在原点、头在 +Z：这和世界里 yaw 为 0 的正前方是同一个
- * 方向（见 `weaponImpactPoint`），所以权威 Transform 的 yaw 直接就是它的水平朝向，
- * 不需要再补一次旋转。俯仰由渲染侧按位移求出来写在 `visualRoot` 上
- * （`ThreeProjectileVisual`）——那是表现，不是权威状态。
+ * 箭沿局部 **+Z** 躺着，头朝 +Z：这和世界里 yaw 为 0 的正前方是同一个方向
+ * （见 `weaponImpactPoint`），所以权威 Transform 的 yaw 直接就是它的水平朝向，
+ * 不需要再补一次旋转。俯仰是玩法侧从整条弧上解析求出来的一个参数，渲染侧只把它
+ * 摆到 `visualRoot` 上（`ThreeProjectileVisual`）——那是表现，不是权威状态。
+ *
+ * **原点在箭尖，不在箭尾。** 权威位置是扫掠球的球心，也就是这一箭的**前端**：
+ * 锚在箭尾的话整支箭会画在它真正位置的前方 0.72 米处，扎中之后更是整根埋进目标
+ * 里——看到的是「穿过去了」，而不是「扎上了」。锚在箭尖，俯仰也就绕箭尖转，
+ * 插进去那一下杆自然甩在外面。
  *
  * 碰撞盒由 `createSimpleCollisionFromRender` 一并产出，但**箭这一类 Actor 不装它**
  * （见 `ServerActorFactory`）：一支飞在空中的箭不该挡住走路的人。这里仍然给出来，
@@ -89,23 +94,28 @@ export function createArrowModel(
   root.add(visualRoot);
 
   const length = definition.length;
+  // 几何仍然按「尾在 0、头在 +Z」建（读起来最直白），整支往后挪一个全长，
+  // 于是 `visualRoot` 的原点落在箭尖上。俯仰绕的就是这一点。
+  const body = new THREE.Group();
+  body.position.z = -(length + HEAD_LENGTH);
+  visualRoot.add(body);
   const shaftRadius = arrowShaftRadius(length);
   const outline = new THREE.LineBasicMaterial({ color: definition.inkColor });
 
-  visualRoot.add(createOutlinedObject(
+  body.add(createOutlinedObject(
     createArrowShaftGeometry(length),
     createFillMaterial(definition.shaftColor, environment),
     1.2,
     outline,
   ));
-  visualRoot.add(createOutlinedObject(
+  body.add(createOutlinedObject(
     createArrowHeadGeometry(length),
     createFillMaterial(definition.headColor, environment),
     1,
     outline,
   ));
   for (const roll of ARROW_FLETCHING_ROLLS) {
-    visualRoot.add(createOutlinedObject(
+    body.add(createOutlinedObject(
       createArrowFletchingGeometry(roll),
       createFillMaterial(definition.headColor, environment),
       1,

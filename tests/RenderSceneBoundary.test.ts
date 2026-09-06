@@ -379,6 +379,7 @@ test('还在主线程建 THREE 对象的场景组件只有已知的那几个', (
 });
 
 const ACTOR_WORLD_SYSTEMS = [
+  'ClientProjectileSystem.ts',
   'ActorTransformSystem.ts',
   'ActorVisualParamSystem.ts',
   'ActorInstanceSystem.ts',

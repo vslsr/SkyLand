@@ -6,6 +6,7 @@ import {
   ACTOR_CREATURE_TAG,
   ACTOR_PLAYER_TAG,
   HEALTH_COMPONENT,
+  PICKUP_DROP_COMPONENT,
   INVENTORY_COMPONENT,
   PATROL_PATH_COMPONENT,
   PROJECTILE_COMPONENT,
@@ -318,9 +319,19 @@ test('中箭把来袭方向记进复制面：方向、冲量与事件计数一�
   assert.equal(flyOut(context), 0);
   const hit = health.snapshot();
   assert.equal(hit.lastHitImpulse, 1, '拉满就是满冲量');
-  assert.ok(Math.abs(hit.lastHitZ - 1) < 1e-6, `方向该朝 +Z，实际 ${hit.lastHitZ}`);
+  assert.ok(hit.lastHitZ > 0.9, `水平方向该朝 +Z，实际 ${hit.lastHitZ}`);
   assert.ok(Math.abs(hit.lastHitX) < 1e-6);
-  assert.equal(hit.lastHitY, 0, '今天的箭只有水平方向');
+  // **斜着扎下来**：竖直那一份取的是箭停住那一点的弧切线。拉满一箭飞 22 米，
+  // 落下来大约二十来度——平着飞进去的箭是这条链路上原来那个洞。
+  const pitchDegrees = Math.asin(-hit.lastHitY) * 180 / Math.PI;
+  assert.ok(
+    pitchDegrees > 10 && pitchDegrees < 40,
+    `该以十几到几十度扎下来，实际 ${pitchDegrees.toFixed(1)}°`,
+  );
+  assert.ok(
+    Math.abs(Math.hypot(hit.lastHitX, hit.lastHitY, hit.lastHitZ) - 1) < 1e-3,
+    '过网的是单位向量',
+  );
   assert.ok(hit.lastDelta < 0 && hit.eventRevision > 0, '飘字和这一下读的是同一次事件');
 
   // 治疗也是一次事件，但它没有方向：不清零的话，客户端会拿上一箭的轴再砸一次。
@@ -417,4 +428,49 @@ test('弹弓走同一条路：装石头、蓄力、射出去一颗石子', async
   assert.equal(flyOut(context), 0);
   // 3 × 1.6 = 4.8：比弓那一箭轻。
   assert.ok(Math.abs(health.current - (100 - 4.8)) < 1e-6, `实际 ${health.current}`);
+});
+
+test('一箭把叼着东西的人射死，不会在 tick 里炸掉房间', async () => {
+  // 这一条守的是时机，不是伤害。伤害现在落在**箭真的到了**那一刻，也就是弹药
+  // System 的 tick 中途；那时 `ActorWorld` 正在迭代，`addActor` 会排队。死亡的
+  // 连带后果里要重挂手持表现体（「先建出来、再挂上去」两步），中间夹一次排队
+  // 的话第二步就找不到第一步建的那个 Actor，房间进程直接抛「不存在 Actor」倒下。
+  const context = await createScene();
+  const { scene } = context;
+  equipBow(scene);
+
+  scene.addPlayer({ id: 'victim', name: '靶子', slot: 1 });
+  const victim = scene.players.get('victim');
+  // 靶子手上也拿着一件东西：死亡那一下要对齐的就是它。
+  scene.applyInventoryCommand('victim', {
+    sequence: 1,
+    command: { kind: 'assign', slotIndex: 0, itemType: 'wood-bow' },
+  });
+  scene.applyInventoryCommand('victim', {
+    sequence: 2,
+    command: { kind: 'select', slotIndex: 0 },
+  });
+  scene.update();
+  const held = victim.requireComponent(PICKUP_DROP_COMPONENT);
+  const heldBefore = held.heldActorId;
+  assert.ok(heldBefore, '靶子手上确实叼着一件东西');
+
+  // 一箭就得打死，死亡才会落在飞行结算那一刻。
+  // 权威血量在 GAS 上，`health.current` 只是复制面的镜像——直接写它不算数，
+  // 得走同一个入口把人先打到只剩一口气。
+  const health = victim.requireComponent(HEALTH_COMPONENT);
+  scene.applyHealthChange('victim', -(health.maximum - 1));
+  assert.equal(health.current, 1, '靶子只剩一口气');
+  victim.setPosition(0, 20);
+  scene.update();
+  fire(context, 1.2, victim);
+  assert.equal(flyOut(context), 0, '箭飞完了');
+
+  assert.equal(health.dead, true, '这一箭把人射死了');
+  // 走到这里就说明没抛：那次对齐排到了本轮 System 之后，而不是在迭代中途
+  // 「建一个排队的 Actor、下一行就去挂它」。
+  assert.notEqual(held.heldActorId, heldBefore, '死亡的连带对齐真的做了');
+  const rebuilt = scene.actorWorld.getActor(held.heldActorId);
+  assert.ok(rebuilt, '重挂的那件手持表现体确实在世界里');
+  assert.equal(rebuilt.parent?.id, 'victim', '而且挂在了它的主人身上');
 });

@@ -6,7 +6,6 @@ import type {
   ActorArchetypeDefinition,
   ActorRenderDefinition,
 } from '../scenes/data/SceneDefinition';
-import type { BallisticArc } from './ballisticArc';
 import type { PointLightDesc } from './RenderPointLights';
 import type { RenderInstanceBuffer } from './RenderInstanceBuffer';
 import type { RenderTransformBuffer } from './RenderTransformBuffer';
@@ -72,14 +71,6 @@ export interface MeshProxyDesc {
    * 给定；每帧过边界的只有路点、当前节点与开关。
    */
   readonly guidePath?: GuidePathStyle;
-  /**
-   * 这一箭走的那条弧。
-   *
-   * 和 `render` 一样是 spawn 时的一次性事实：弧在射出那一刻就定下来了，飞行途中
-   * 不变。渲染侧拿它解析地求箭尖的俯仰——**朝向是位置的函数**，不是「位置之差」
-   * 的函数，所以它不跟着量化过的坐标一起抖。
-   */
-  readonly projectileArc?: BallisticArc;
   /**
    * 这个 proxy 的 `visualRoot` 由哪种客户端波动驱动。
    *
@@ -236,14 +227,6 @@ export interface BallisticPreviewState {
   readonly impactZ: number;
   /** 蓄力比例 [0, 1]。弧顶按它抬，所以拉得越满线越平、越远。 */
   readonly ratio: number;
-  /**
-   * 现在松手打不打得出去；省略等同于打得出去。
-   *
-   * 线从按下的第一帧就在，长度从最短射程开始长——攒够没有由这一项说，而不是由
-   * 「有没有线」说。用出现与否来说的话，线只能在攒过阈值那一帧凭空出现在八米
-   * 之外，读起来是先抖一下才开始伸长。
-   */
-  readonly armed?: boolean;
   /**
    * 这条弧走得到哪儿，[0, 1]；省略等同于 1。
    *

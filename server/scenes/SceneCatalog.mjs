@@ -378,6 +378,100 @@ function validateWorldProps(gameplay, filename, actorCatalog, world, content) {
   return bindings;
 }
 
+const CREATURE_SPAWN_MAXIMUM_RULES = 8;
+
+/**
+ * 生物自然刷新的场景配置。
+ *
+ * 每一条规则对应 Minecraft 自然刷新里的一组数：配额、周期、成群、刷新圆环、
+ * 刷新区块、昼夜窗口。**刷新算法本身没有配置项**，因为它不该有——一张地图不能
+ * 改「怎么刷」，只能改「刷什么、刷多少、刷多远」。
+ *
+ * 只允许用在流式场景上：刷新要问「这一格是平地吗」，而那个问题只有台阶地形
+ * 答得出来。固定摆放的场景把这一条写上会得到一个永远刷不出东西的配置，那种
+ * 错误应该在启动时说出来，而不是让作者盯着空地图猜。
+ */
+function validateCreatureSpawns(gameplay, filename, actorCatalog, world) {
+  const path = `${filename}.gameplay.creatureSpawns`;
+  if (gameplay.creatureSpawns === undefined) return [];
+  if (!world) throw new TypeError(`${path} 只能用在带 renderer.world 的流式场景上`);
+  const rawRules = gameplay.creatureSpawns;
+  if (!Array.isArray(rawRules) || rawRules.length > CREATURE_SPAWN_MAXIMUM_RULES) {
+    throw new TypeError(`${path} 必须是最多 ${CREATURE_SPAWN_MAXIMUM_RULES} 条规则的数组`);
+  }
+  const seenArchetypes = new Set();
+  return rawRules.map((rawRule, index) => {
+    const rulePath = `${path}[${index}]`;
+    const rule = requireObject(rawRule, rulePath);
+    const knownKeys = new Set([
+      'archetype', 'capPerPlayer', 'maximumPerRoom', 'cycleSeconds', 'attemptsPerCycle',
+      'packMaximum', 'minimumDistance', 'maximumDistance', 'chunkOneIn', 'nightOnly',
+    ]);
+    for (const key of Object.keys(rule)) {
+      if (!knownKeys.has(key)) throw new TypeError(`${rulePath}.${key} 不受支持`);
+    }
+    const archetypeId = requireString(rule.archetype, `${rulePath}.archetype`, 48);
+    if (!SCENE_ID_PATTERN.test(archetypeId)) throw new TypeError(`${rulePath}.archetype 格式无效`);
+    // 同一种生物写两条规则，两条会各记各的配额，加起来是双倍——那几乎总是笔误。
+    if (seenArchetypes.has(archetypeId)) {
+      throw new TypeError(`${path} 不能重复引用原型：${archetypeId}`);
+    }
+    seenArchetypes.add(archetypeId);
+    const archetype = actorCatalog.require(archetypeId);
+    if (archetype.components.playerMovement) {
+      throw new TypeError(`${rulePath}.archetype 不能引用玩家原型`);
+    }
+    // 看不见的东西刷出来也没有意义，而且足迹是从 render 推的：没有 render
+    // 就没有「塞不塞得下」可言。
+    if (!archetype.components.render) {
+      throw new TypeError(`${rulePath} 的 ${archetypeId} 缺少 render`);
+    }
+    // 刷出来的个体散在世界各处，全房间复制会让远处的客户端收到一堆它永远
+    // 看不见的东西。
+    if (archetype.components.replicationPolicy?.mode !== 'aoi') {
+      throw new TypeError(`${rulePath} 的 ${archetypeId} 需要 replicationPolicy.mode = aoi`);
+    }
+    const minimumDistance = rule.minimumDistance === undefined
+      ? 16
+      : requireNumber(rule.minimumDistance, `${rulePath}.minimumDistance`, 2, 256);
+    const maximumDistance = rule.maximumDistance === undefined
+      ? 48
+      : requireNumber(rule.maximumDistance, `${rulePath}.maximumDistance`, 4, 512);
+    // 外径不大于内径的圆环是空的：那条规则一只都刷不出来，而它看起来完全正常。
+    if (maximumDistance <= minimumDistance) {
+      throw new TypeError(`${rulePath}.maximumDistance 必须大于 minimumDistance`);
+    }
+    if (rule.nightOnly !== undefined && typeof rule.nightOnly !== 'boolean') {
+      throw new TypeError(`${rulePath}.nightOnly 必须是布尔值`);
+    }
+    return {
+      archetypeId,
+      capPerPlayer: requireInteger(rule.capPerPlayer, `${rulePath}.capPerPlayer`, 1, 32),
+      maximumPerRoom: rule.maximumPerRoom === undefined
+        ? 32
+        : requireInteger(rule.maximumPerRoom, `${rulePath}.maximumPerRoom`, 1, 256),
+      cycleSeconds: rule.cycleSeconds === undefined
+        ? 10
+        : requireNumber(rule.cycleSeconds, `${rulePath}.cycleSeconds`, Number.EPSILON, 600),
+      attemptsPerCycle: rule.attemptsPerCycle === undefined
+        ? 6
+        : requireInteger(rule.attemptsPerCycle, `${rulePath}.attemptsPerCycle`, 1, 32),
+      packMaximum: rule.packMaximum === undefined
+        ? 1
+        : requireInteger(rule.packMaximum, `${rulePath}.packMaximum`, 1, 8),
+      minimumDistance,
+      maximumDistance,
+      chunkOneIn: rule.chunkOneIn === undefined
+        ? 1
+        : requireInteger(rule.chunkOneIn, `${rulePath}.chunkOneIn`, 1, 64),
+      // 每条规则一份盐：两种一分之四的生物不该刷在同一批 chunk 上。下标够用，
+      // 因为同一原型不允许出现两次。
+      chunkSalt: index,
+      nightOnly: rule.nightOnly === true,
+    };
+  });
+}
+
 const WEATHER_CYCLE_MINIMUM_SECONDS = 5;
 const WEATHER_CYCLE_MAXIMUM_SECONDS = 7200;
 
@@ -666,6 +760,7 @@ function validateSceneDefinition(raw, filename, actorCatalog) {
   });
   const startingInventory = validateStartingInventory(gameplay.startingInventory, filename);
   const worldProps = validateWorldProps(gameplay, filename, actorCatalog, world, content);
+  const creatureSpawns = validateCreatureSpawns(gameplay, filename, actorCatalog, world);
   if (
     sceneComponents.some((component) => (
       component.type === 'interactive-particle-effect' && component.worldGeneration
@@ -757,6 +852,11 @@ function validateSceneDefinition(raw, filename, actorCatalog) {
     }
   };
   for (const hull of hullArchetypes) includeArchetype(hull);
+  // 自然刷新引用的原型一并进表，理由和 worldProps 一样：作者不用在
+  // runtimeActorArchetypes 里重复写一遍，而那份重复正是「绑了但忘了带进来」
+  // 这类错误的来源。刷出来的个体是运行期才存在的 Actor，没有原型的话服务端
+  // 刷得出来、客户端却在 createReplica 里找不到它。
+  for (const rule of creatureSpawns) includeArchetype(actorCatalog.require(rule.archetypeId));
   for (const [kind, variants] of Object.entries(worldProps)) {
     for (const [index, variant] of variants.entries()) {
       const archetype = actorCatalog.require(variant.archetypeId);
@@ -856,6 +956,9 @@ function validateSceneDefinition(raw, filename, actorCatalog) {
           variants.map((variant) => ({ ...variant })),
         ]),
       ),
+      ...(creatureSpawns.length > 0
+        ? { creatureSpawns: creatureSpawns.map((rule) => ({ ...rule })) }
+        : {}),
       bounds: { minimumX, maximumX, minimumZ, maximumZ },
       spawn: {
         centerX,

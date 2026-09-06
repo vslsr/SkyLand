@@ -32,7 +32,7 @@ export interface ActorVisualModel {
   readonly dropRollRig?: DropRollVisualRig;
   /** 仅训练假人提供；能力表现只修改这些 VisualRoot 下的展示节点。 */
   readonly abilityTargetRig?: AbilityTargetVisualRig;
-  /** 仅弹药提供；俯仰由渲染侧按这一帧的位移求出来，见 `ThreeProjectileVisual`。 */
+  /** 仅弹药提供；俯仰是玩法侧从整条弧上解析求出来的一个参数，见 `ThreeProjectileVisual`。 */
   readonly projectileRig?: ProjectileVisualRig;
   /** 热状态只控制强度；所有顶点与火星对象都位于该 Actor 的 visualRoot 下。 */
   readonly fireVisualRig?: LineArtFireVisualRig;

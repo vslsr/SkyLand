@@ -9,7 +9,6 @@ export {
 } from './ItemCatalog.mjs';
 export {
   resolveWeaponStrike,
-  weaponStrikeAt,
   weaponChargeRatioForDistance,
   tagMultiplier,
   weaponDamage,

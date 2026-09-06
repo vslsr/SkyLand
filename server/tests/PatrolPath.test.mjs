@@ -148,3 +148,49 @@ test('软体测试场景里的巡逻史莱姆真的会来回走，并进入快�
   );
   assert.ok(found, '碰撞体应当停在这只史莱姆当前所在的位置');
 });
+
+test('把进度对齐到当前位置：追完之后交还方向盘不会瞬移回路线上', () => {
+  const patrol = new PatrolPathComponent({
+    waypoints: [[0, 0, 0], [0, 0, 10]],
+    speed: 2,
+    mode: 'ping-pong',
+  });
+  patrol.captureOrigin({ x: 0, y: 0, z: 0, yaw: 0 });
+  // 走到路线三成处，然后被别的系统（导航）带走。
+  walkTo(patrol, 1.5);
+  const pose = { x: 0, y: 0, z: 0, yaw: 0, hasHeading: false, moving: false };
+  patrol.advance(0, pose);
+  assert.ok(Math.abs(pose.z - 3) < 1e-6, `离开时在 z=3，实际 ${pose.z}`);
+
+  // 交还方向盘时它站在 z=8 附近：不对齐的话，巡逻的第一笔会把它写回 z=3。
+  assert.equal(patrol.resyncTo(0.2, 8), true);
+  patrol.advance(0, pose);
+  assert.ok(Math.abs(pose.z - 8) < 1e-6, `对齐后应当接着 z=8 走，实际 ${pose.z}`);
+  assert.ok(Math.abs(pose.x) < 1e-9, '对齐落在路线上，横向偏移不会被带进进度');
+
+  // 对齐只挪进度，不挪路线：原点和路点一个都没动。
+  assert.deepEqual([patrol.originX, patrol.originZ], [0, 0]);
+  const advanced = walkTo(patrol, 0.5);
+  assert.ok(Math.abs(advanced.z - 9) < 1e-6, `接着往前走，实际 ${advanced.z}`);
+});
+
+test('对齐时并列保留当前段：正在回程的生物不会因为线段重合而掉头', () => {
+  const patrol = new PatrolPathComponent({
+    waypoints: [[0, 0, 0], [0, 0, 10]],
+    speed: 2,
+    mode: 'ping-pong',
+  });
+  patrol.captureOrigin({ x: 0, y: 0, z: 0, yaw: 0 });
+  // 走到头掉头，这时当前段是「从路点 1 回到路点 0」。
+  const turned = walkTo(patrol, 6);
+  assert.ok(Math.abs(turned.z - 8) < 1e-6, `掉头后回到 z=8，实际 ${turned.z}`);
+
+  patrol.resyncTo(0, 4);
+  const pose = { x: 0, y: 0, z: 0, yaw: 0, hasHeading: false, moving: false };
+  patrol.advance(0, pose);
+  assert.ok(Math.abs(pose.z - 4) < 1e-6, `对齐到 z=4，实际 ${pose.z}`);
+  // 来回走的路线上同一条线被正反各数一次，两次投影一样近。断言的是**走起来
+  // 往哪边**，不是内部那个方向标记——并列时保留当前段，正是为了这一条。
+  const advanced = walkTo(patrol, 0.5);
+  assert.ok(advanced.z < 4, `一只往回走的生物不该忽然掉头，实际 ${advanced.z}`);
+});

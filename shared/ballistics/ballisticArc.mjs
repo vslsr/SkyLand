@@ -65,6 +65,41 @@ export function ballisticArcPoint(arc, t, out) {
 }
 
 /**
+ * 弧在 `t` 处的**切线**：单位向量，也就是这一刻箭尖朝的方向。
+ *
+ * 解析求导，不是拿两帧位移去差分：差分要么被快照率限住（20 Hz 的位置插值是折线，
+ * 每个接缝上切线跳一次），要么在停住那一帧退化成零向量。这条曲线的导数是写得出来的，
+ * 就不该去猜它。
+ *
+ * 水平方向匀速，所以只有竖直那一项随 t 变：`dy/dt = (impactY - originY) + 4·apex·(1 - 2t)`。
+ * 起手时它是正的（往上），过了弧顶变负（扎下去）。
+ *
+ * 退化成零向量（原点与落点重合、且弧顶为 0）时给正前方，不让它变成 NaN。
+ *
+ * @param {BallisticArc} arc
+ * @param {number} t
+ * @param {{ x: number, y: number, z: number }} out
+ * @returns {{ x: number, y: number, z: number }}
+ */
+export function ballisticArcTangent(arc, t, out) {
+  const apex = ballisticArcApex(arc);
+  const dx = arc.impactX - arc.originX;
+  const dz = arc.impactZ - arc.originZ;
+  const dy = (arc.impactY - arc.originY) + apex * 4 * (1 - 2 * t);
+  const length = Math.hypot(dx, dy, dz);
+  if (!(length > 1e-9)) {
+    out.x = 0;
+    out.y = 0;
+    out.z = 1;
+    return out;
+  }
+  out.x = dx / length;
+  out.y = dy / length;
+  out.z = dz / length;
+  return out;
+}
+
+/**
  * 这一箭实际走完弧的百分之多少。没被挡住就是 1。
  *
  * **为什么截断记成一个比例，而不是把落点改小**：被墙挡住的一箭走的是原来那条
@@ -91,47 +126,4 @@ export function ballisticArcTravel(arc) {
  */
 export function ballisticArcImpact(arc, out) {
   return ballisticArcPoint(arc, ballisticArcTravel(arc), out);
-}
-
-/**
- * 弧上 `t` 处的**俯仰角**，弧度。抬头为正。
- *
- * 解析求导，不是拿两帧位置去差分：差分出来的方向会跟着位置一起抖——复制过来的
- * 坐标是量化过的，两帧之间的位移又小，噪声占的比例因此不小；快照边界上那一下
- * 折线转折还会让方向整个跳一格。而这条弧本身是解析的，箭尖该朝哪儿是**位置的
- * 函数**，不是「位置之差」的函数。
- *
- * 水平方向匀速，所以 dHorizontal/dt 就是弦长；竖直方向是一条直线加一条标准
- * 抛物线，导数写出来只有两项。
- *
- * @param {BallisticArc} arc
- * @param {number} t
- * @returns {number}
- */
-export function ballisticArcPitch(arc, t) {
-  const horizontal = Math.hypot(arc.impactX - arc.originX, arc.impactZ - arc.originZ);
-  // 垂直射出去的一箭（弦长为 0）没有俯仰可言：它一直朝上。
-  if (horizontal <= 1e-6) return Math.PI / 2;
-  const rise = (arc.impactY - arc.originY) + ballisticArcApex(arc) * 4 * (1 - 2 * t);
-  return Math.atan2(rise, horizontal);
-}
-
-/**
- * 这个世界坐标落在弧的第几成上（把它投影到弦上）。
- *
- * 给的是**插值之后的那个位置**：箭尖的朝向因此和它自己所在的位置严丝合缝，而不是
- * 和「服务端上一 tick 报的 travel」严丝合缝——后者会让朝向比位置早一步。
- *
- * @param {BallisticArc} arc
- * @param {number} x
- * @param {number} z
- * @returns {number} [0, 1]
- */
-export function ballisticArcProgressAt(arc, x, z) {
-  const dx = arc.impactX - arc.originX;
-  const dz = arc.impactZ - arc.originZ;
-  const squared = dx * dx + dz * dz;
-  if (squared <= 1e-12) return 0;
-  const projected = ((x - arc.originX) * dx + (z - arc.originZ) * dz) / squared;
-  return Math.min(1, Math.max(0, projected));
 }

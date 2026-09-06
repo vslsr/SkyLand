@@ -105,6 +105,57 @@ export class PatrolPathComponent extends ActorComponent {
   }
 
   /**
+   * 把行进进度对齐到某个世界位置上。
+   *
+   * 用在**交还方向盘**的那一刻：追击期间巡逻是被跳过的，它的进度冻结在生物
+   * 离开路线时；直接恢复的话，巡逻算出来的第一个位置未必就是生物现在站的
+   * 地方，那一步会成为一次瞬移。把进度挪到离当前位置最近的那一点上，交接
+   * 就是连续的。
+   *
+   * 段的枚举**从当前段开始**，并且只有严格更近的段才顶掉它。来回走的路线上
+   * 一条线会被正反各数一次，两次投影一样近；不给当前段这个优先权的话，一只
+   * 正在回程的生物会因为并列而忽然掉头。行进方向本身不动——它由
+   * `nextIndex(segmentIndex, direction)` 决定，这里改的只是走到哪儿了。
+   */
+  resyncTo(x, z) {
+    if (!this.hasOrigin) return false;
+    const from = { x: 0, y: 0, z: 0 };
+    const to = { x: 0, y: 0, z: 0 };
+    const count = this.waypoints.length;
+    let bestIndex = this.segmentIndex;
+    let bestProgress = this.segmentProgress;
+    let bestDistance = Infinity;
+    for (let offset = 0; offset < count; offset += 1) {
+      const index = (this.segmentIndex + offset) % count;
+      const step = this.nextIndex(index, this.direction);
+      if (step.index === index) continue;
+      this.resolveWaypoint(index, from);
+      this.resolveWaypoint(step.index, to);
+      const deltaX = to.x - from.x;
+      const deltaZ = to.z - from.z;
+      const lengthSquared = deltaX * deltaX + deltaZ * deltaZ;
+      if (lengthSquared <= 1e-12) continue;
+      const projected = Math.max(0, Math.min(
+        1,
+        ((x - from.x) * deltaX + (z - from.z) * deltaZ) / lengthSquared,
+      ));
+      const closestX = from.x + deltaX * projected;
+      const closestZ = from.z + deltaZ * projected;
+      const distance = Math.hypot(x - closestX, z - closestZ);
+      if (distance >= bestDistance) continue;
+      bestDistance = distance;
+      bestIndex = index;
+      bestProgress = projected;
+    }
+    if (bestDistance === Infinity) return false;
+    this.segmentIndex = bestIndex;
+    this.segmentProgress = bestProgress;
+    // 站定过的生物不该在交接的同时又被一个残留的到站停顿钉住。
+    this.waitRemaining = 0;
+    return true;
+  }
+
+  /**
    * 推进 `deltaSeconds`，把当前位置与朝向写进 `out`。
    *
    * 一次调用可能跨过多个路点（低帧率或短路段），所以里面是个循环；循环次数按

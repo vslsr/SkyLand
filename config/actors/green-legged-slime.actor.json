@@ -1,0 +1,56 @@
+{
+  "$schema": "./actor.schema.json",
+  "schemaVersion": 1,
+  "id": "green-legged-slime",
+  "components": {
+    "navigation": {
+      "speed": 1.7,
+      "turnSpeed": 4.5,
+      "stepUp": 1.05,
+      "maxDrop": 2.2,
+      "arriveRadius": 1,
+      "repathSeconds": 1,
+      "goalTolerance": 1.4,
+      "searchRadiusCells": 12,
+      "maxVisitedNodes": 240,
+      "malus": {
+        "danger": 24
+      },
+      "chase": {
+        "senseRadius": 11,
+        "giveUpRadius": 18,
+        "keepDistance": 1.1
+      }
+    },
+    "health": {
+      "maximum": 60,
+      "corpseSeconds": 6
+    },
+    "replicationPolicy": {
+      "mode": "aoi",
+      "radiusChunks": 2
+    },
+    "render": {
+      "model": "line-art-legged-slime",
+      "radius": 0.4,
+      "hipHeight": 0.6,
+      "legSpread": 0.15,
+      "legCount": 2,
+      "thighLength": 0.38,
+      "shinLength": 0.38,
+      "legThickness": 0.027,
+      "footLength": 0.12,
+      "stepLength": 0.26,
+      "stepHeight": 0.13,
+      "stepDuration": 0.21,
+      "membraneColor": "#a8c489",
+      "middleColor": "#d8e6c6",
+      "coreColor": "#5c8340",
+      "bubbleColor": "#f1f8e8",
+      "inkColor": "#000000",
+      "shadowColor": "#2e4420",
+      "legColor": "#000000",
+      "footShadowColor": "#6f6f6f"
+    }
+  }
+}

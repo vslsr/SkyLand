@@ -119,9 +119,25 @@ export class ActorSnapshotBuffer {
     return this.clockOffset === undefined ? undefined : nowMs - this.clockOffset;
   }
 
+  /**
+   * 上一次 `sample` 算出来的那个渲染时刻（服务端时钟，毫秒）。
+   *
+   * 露出来是给**自己按曲线走**的那些东西用的：飞在空中的弹药不靠位置插值，
+   * 它拿这条弧和这个时刻自己求点（见 `ClientProjectileSystem`）。两者读同一个
+   * 时刻，箭才和别的 Actor 落在同一帧上——各用各的时钟会让它比世界快或慢半拍。
+   *
+   * 还没有时钟基准时是 undefined。
+   */
+  public get renderTime(): number | undefined {
+    return this.lastRenderTime;
+  }
+
+  private lastRenderTime?: number;
+
   public sample(nowMs = Date.now()): readonly SnapshotActor[] {
     if (this.frames.length === 0 || this.clockOffset === undefined) return [];
     const renderTime = nowMs - this.clockOffset - INTERPOLATION_DELAY_MS;
+    this.lastRenderTime = renderTime;
     const newest = this.frames[this.frames.length - 1];
     if (renderTime >= newest.serverTime) return newest.actors;
     const oldest = this.frames[0];

@@ -8,8 +8,7 @@ export {
   ballisticArcApex,
   ballisticArcImpact,
   ballisticArcPoint,
-  ballisticArcPitch,
-  ballisticArcProgressAt,
+  ballisticArcTangent,
   ballisticArcTravel,
 } from './ballisticArc.mjs';
 export {

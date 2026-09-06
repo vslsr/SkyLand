@@ -126,6 +126,10 @@ export {
   MAX_GUIDE_PATH_POINTS,
 } from './components/GuidePathComponent.mjs';
 export {
+  NAVIGATION_COMPONENT,
+  NavigationComponent,
+} from './components/NavigationComponent.mjs';
+export {
   PATROL_PATH_COMPONENT,
   MAX_PATROL_WAYPOINTS,
   MAX_PATROL_LOCAL_COORDINATE,

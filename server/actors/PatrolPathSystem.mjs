@@ -1,5 +1,6 @@
 import {
   HEALTH_COMPONENT,
+  NAVIGATION_COMPONENT,
   PATROL_PATH_COMPONENT,
   TRANSFORM_COMPONENT,
   WEAPON_USER_COMPONENT,
@@ -30,6 +31,11 @@ export class PatrolPathSystem {
       // 系统同时写朝向的话，一个把脸转向目标、另一个把脸转回路线，弓手会永远
       // 瞄不准——那不是「难打」，是打不出去。
       if (actor.getComponent(WEAPON_USER_COMPONENT)?.engaged) continue;
+      // 正被导航推着走的也一样让位（`NavigationSystem` 在这之前刚写下这个标记）。
+      // 一只追着玩家跑的生物如果同时还被巡逻拽回路线上，它会原地画圈。追完了
+      // 导航自己会把标记放下，巡逻从当前段接着走——路线是相对出生点解算的，
+      // 中途被带偏也不会让整条线跟着漂。
+      if (actor.getComponent(NAVIGATION_COMPONENT)?.driving) continue;
       const patrol = actor.requireComponent(PATROL_PATH_COMPONENT);
       const transform = actor.requireComponent(TRANSFORM_COMPONENT);
       // 出生点只抓一次：路线相对它解算，而 Actor 自己正被这条路线推着走。

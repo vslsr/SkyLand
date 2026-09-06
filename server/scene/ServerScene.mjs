@@ -96,6 +96,8 @@ import {
 } from '../../shared/world/fruitDrop.mjs';
 import { toWorldSeed } from '../../shared/world/worldConfig.mjs';
 import { SceneEnvironmentDirector } from './SceneEnvironmentDirector.mjs';
+import { SceneCreatureSpawner } from './SceneCreatureSpawner.mjs';
+import { SceneNavigation } from './SceneNavigation.mjs';
 import { TERRAIN_CELL_SIZE, TERRAIN_SURFACE } from '../../shared/world/terrainConfig.mjs';
 import { sampleTerrain, terrainCellSurface } from '../../shared/world/terrainContent.mjs';
 import { terrainCellTopHeight } from '../../shared/world/terrainSupport.mjs';
@@ -311,6 +313,11 @@ export class ServerScene {
         ? (x, z) => sampleTerrain(this.worldSeed, x, z, {}, this.terrainCellCodeAt).groundY
         : undefined,
     });
+    // AI 寻路看的地形、建造件与障碍全部是场景已有的那几份权威数据，这里只是
+    // 把它们接上（`SceneNavigation`）。System 只认识 world，所以和下面几条一样
+    // 挂在 context 上。
+    this.navigation = new SceneNavigation(this);
+    this.actorWorld.context.navigation = this.navigation;
     // 拔出来的世界物件怎么进物品栏，只有场景知道（它要删 Actor、要重挂手持
     // 表现体）。ElasticDetachSystem 只认识 world，所以这一步从 context 上问。
     this.actorWorld.context.stowPulledActor = (actor, player) => (
@@ -337,6 +344,11 @@ export class ServerScene {
       terrainPatches: this.terrainPatches,
       onTerrainChanged: () => this.liftPlayersAboveTerrain(),
     });
+    // 自然刷新的生物。和生成物件不同，它们**不是**世界的确定性产物：什么时候
+    // 出、出在哪儿由房间自己掷骰子决定，走远了还会消失。所以它只认场景的权威
+    // 数据，不参与任何跨端推导。
+    this.nextSpawnedCreatureId = 0;
+    this.creatureSpawner = new SceneCreatureSpawner(this, definition.gameplay?.creatureSpawns ?? []);
     // 生成物件和静态碰撞一样跟着玩家滑动，房间启动时一个都不建。
     // 哪些种类真的产生 Actor、同 kind 如何分配原型，由 gameplay.worldProps 决定。
     this.generatedProps = new ServerGeneratedPropActors({
@@ -723,10 +735,7 @@ export class ServerScene {
     // 已经选中的那一格不用再切：`setActiveHotbarSlot` 把「切到当前格」当成收手，
     // 再调一次会让刚拔出来的这一朵立刻从手上消失。
     if (inventory.activeHotbarIndex !== slotIndex) inventory.setActiveHotbarSlot(slotIndex);
-    // 拔断发生在 System 跑的中途，那时 `ActorWorld` 正在迭代，增删都排到本轮之后。
-    // 手持表现体要「先建出来、再挂到玩家身上」，这两步中间不能夹一次排队——所以
-    // 挂手的事排到这一轮 System 跑完再做。
-    this.pendingHeldItemSyncs.add(player.id);
+    this.syncHeldItemWhenSettled(player);
     return true;
   }
 
@@ -926,7 +935,7 @@ export class ServerScene {
     // 换手、装配、收回都要让「嘴上那件」和「身上挂着的物品能力」跟着物品栏走。
     // 使用与丢下已经在各自的变更里对齐过了，重复调一次也是幂等的。
     if (!['use:begin', 'use:cancel', 'use:arm'].includes(command.kind)) {
-      syncHeldItemActor(this, player);
+      this.syncHeldItemWhenSettled(player);
     }
     player.inventoryCommandSequence = sequence;
     return changed;
@@ -1029,8 +1038,8 @@ export class ServerScene {
       const pickedUp = this.actorWorld.context.highCountActors?.pickup(this.actorWorld, target.id, player) ?? 0;
       if (pickedUp <= 0) return false;
       // 捡起来的东西进背包，不进物品栏。这里仍然对齐一次：拾取可能让背包从
-      // 满变成不满，`syncHeldItemActor` 是幂等的，没变化就什么都不做。
-      syncHeldItemActor(this, player);
+      // 满变成不满，对齐是幂等的，没变化就什么都不做。
+      this.syncHeldItemWhenSettled(player);
       player.actorInteractionSequence = sequence;
       return true;
     }
@@ -1253,7 +1262,7 @@ export class ServerScene {
       this.#clearBitesOf(player.id);
       cancelItemUse(player);
       this.dropCarriedActorsOf(player.id);
-      syncHeldItemActor(this, player);
+      this.syncHeldItemWhenSettled(player);
       return;
     }
     for (const other of this.players.values()) {
@@ -1619,8 +1628,9 @@ export class ServerScene {
     const inventory = player?.getComponent(INVENTORY_COMPONENT);
     if (!player || !id || !inventory) return false;
     if (inventory.receive(id, 1) !== 1) return false;
-    // 落在手上那一格时嘴上要跟着出现模型，和拾取完全一样。
-    syncHeldItemActor(this, player);
+    // 落在手上那一格时嘴上要跟着出现模型，和拾取完全一样。发货这条路子是可以从
+    // System 里走的（战利品掉在死亡那一刻），所以同样交给「落定了再挂」。
+    this.syncHeldItemWhenSettled(player);
     return true;
   }
 
@@ -1695,6 +1705,9 @@ export class ServerScene {
     this.chunkColliders.sync(this.players.values());
     this.terrainColliders.sync(this.players.values());
     this.generatedProps.sync(this.players.values());
+    // 刷新排在常驻同步**之后**：新刷出来的生物要落在已经就位的碰撞体之间，
+    // 否则「塞不塞得下」这一问会在一片空的碰撞世界上得到「哪儿都行」。
+    this.creatureSpawner.advance(elapsedSeconds);
     // 走远的人自动退出容器界面；不依赖客户端自觉发关闭。
     this.updateContainerViewers();
     // 长按倒计时在**服务端**走完，不等客户端报「我按满了」：玩家看到的圈满和这里
@@ -1760,7 +1773,8 @@ export class ServerScene {
           projectile.impactZ - projectile.originZ,
         ),
       },
-    }, archetype, { projectile });
+      // 出发时刻随弧一起复制：客户端拿它自己算这一箭飞到哪儿了，不靠位置插值。
+    }, archetype, { projectile: { ...projectile, startedAt: this.now() / 1000 } });
     this.actorWorld.addActor(actor);
     return actor;
   }
@@ -1773,6 +1787,23 @@ export class ServerScene {
    */
   projectileGroundHeightAt(x, z) {
     return this.actorWorld.context.groundHeightAt?.(x, z) ?? 0;
+  }
+
+  /**
+   * 对齐这名玩家手上那件东西——**能当场做就当场做，不能就排到本轮 System 之后**。
+   *
+   * 判据是 `ActorWorld` 正不正在迭代。迭代中 `addActor` 会排队，而挂手持表现体是
+   * 「先建出来、再挂到玩家身上」两步，中间夹一次排队的话第二步就找不到第一步建
+   * 的那个 Actor（`setActorParent` 直接抛「不存在 Actor」）。
+   *
+   * 会走到这里的路子不止一条，而且还在变多：拔断蘑菇是玩家自己触发的，而一箭把
+   * 人射死是**弹药 System 在 tick 里**结算的——伤害现在落在箭真的到了的那一刻，
+   * 不再是松手那一下。所以「现在是不是在迭代中」不能由调用点各自记着，得在这里问。
+   */
+  syncHeldItemWhenSettled(player) {
+    if (!player) return;
+    if (this.actorWorld.updating) this.pendingHeldItemSyncs.add(player.id);
+    else syncHeldItemActor(this, player);
   }
 
   /** 把 System 里排下的手持对齐补上。世界已经不在迭代中，增删都能当场生效。 */

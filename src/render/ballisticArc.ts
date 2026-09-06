@@ -1,7 +1,5 @@
 import {
   ballisticArcApex as sharedApex,
-  ballisticArcPitch as sharedPitch,
-  ballisticArcProgressAt as sharedProgressAt,
   ballisticArcImpact as sharedImpact,
   ballisticArcPoint as sharedPoint,
   ballisticArcTravel as sharedTravel,
@@ -46,16 +44,6 @@ export function ballisticArcPoint(
   out: { x: number; y: number; z: number },
 ): { x: number; y: number; z: number } {
   return sharedPoint(arc, t, out);
-}
-
-/** 弧上 `t` 处的俯仰角，弧度，抬头为正。解析求导，不差分。 */
-export function ballisticArcPitch(arc: BallisticArc, t: number): number {
-  return sharedPitch(arc, t);
-}
-
-/** 这个世界坐标落在弧的第几成上（投影到弦上）。 */
-export function ballisticArcProgressAt(arc: BallisticArc, x: number, z: number): number {
-  return sharedProgressAt(arc, x, z);
 }
 
 /** 这一箭实际走完弧的百分之多少；没被挡住就是 1。 */
