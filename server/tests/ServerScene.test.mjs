@@ -345,3 +345,27 @@ test('出生点会避开已经在场的玩家，即使座位号重复', () => {
     }
   }
 });
+
+test('跳跃边沿跟着本人的快照回去，别人那份不带', () => {
+  // 跳跃按边沿触发，这条边沿存在权威的 characterState 里。客户端每收到一份快照
+  // 就从它重放一遍未确认步，少了这一位，按住空格会在每份快照上重新起跳一次。
+  const scene = new ServerScene('grassland');
+  scene.addPlayer({ id: 'jumper', name: '按住不放的人', slot: 0 });
+  scene.addPlayer({ id: 'watcher', name: '旁观的人', slot: 1 });
+
+  scene.applyInput('jumper', inputSteps(1, 3, { jump: true }));
+  const own = scene.createSnapshot('jumper').players.find((entry) => entry.id === 'jumper');
+  assert.equal(own.jumpPressed, true, '按住不放时，权威的跳跃边沿必须回到本人手上');
+
+  const seenByOthers = scene.createSnapshot('watcher').players
+    .find((entry) => entry.id === 'jumper');
+  assert.equal(
+    Object.hasOwn(seenByOthers, 'jumpPressed'),
+    false,
+    '别人那份不做预测重放，不该为它每帧多发一个字段',
+  );
+
+  scene.applyInput('jumper', inputSteps(4, 2, { jump: false }));
+  const released = scene.createSnapshot('jumper').players.find((entry) => entry.id === 'jumper');
+  assert.equal(released.jumpPressed, false, '松手之后边沿要跟着落回去，下一次按下才算新的一跳');
+});

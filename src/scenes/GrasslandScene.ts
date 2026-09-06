@@ -977,6 +977,7 @@ export class GrasslandScene extends Scene {
       verticalVelocity: own.verticalVelocity,
       velocityZ: own.velocityZ,
       grounded: own.grounded,
+      jumpPressed: own.jumpPressed,
     };
     this.playerTransformLog?.record('client.snapshot_received', {
       snapshotTick: snapshot.tick,
@@ -996,16 +997,9 @@ export class GrasslandScene extends Scene {
     // `frameTimeline` 会把这段自耗时攒到下一次 `endFrame`，也就是被它拖慢的那一帧上。
     // 代价是这个阶段不计入整帧耗时，「整帧 − 各阶段之和」在有和解的帧上会偏小。
     const reconciliation = frameTimeline.measure('net-reconcile', () => (
-      player.applyAuthoritativeState(
-        own.ackTick ?? own.sequence,
-        own.x,
-        own.z,
-        own.y,
-        own.verticalVelocity,
-        own.velocityX,
-        own.velocityZ,
-        own.grounded,
-      )
+      // 和解与上面那条打点读的是同一份 authority：两处各抄一遍字段，迟早会有
+      // 一处漏抄——`jumpPressed` 当初就是这么漏掉的。
+      player.applyAuthoritativeState(authority.ackTick, authority)
     ));
     // 拉回了几次、拉回多远，面板上「和解」那一行读它。
     recordReconciliation(reconciliation);

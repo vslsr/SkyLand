@@ -1923,6 +1923,14 @@ export class ServerScene {
           velocityX: roundCoordinate(player.characterState.vx),
           velocityZ: roundCoordinate(player.characterState.vz),
           grounded: player.characterState.grounded,
+          // 跳跃是边沿触发的：`stepCharacter` 只在「这一步按下、上一步没按下」
+          // 时起跳。这条边沿存在 characterState 里，所以它和坐标、速度一样是
+          // 权威状态的一部分，必须跟着回到客户端——否则客户端每次和解都从
+          // 「上一步没按」重新起算，按住空格会在每份快照上重新起跳一次。
+          // 只发给本人：别人那份不做预测重放，用不上这个数。
+          ...(player.id === viewerPlayerId ? {
+            jumpPressed: player.characterState.jumpPressed === true,
+          } : {}),
           // 背包只发给本人：别人包里有什么不是这名玩家该知道的，一屋子人也不该
           // 每帧互相推送全部库存。嘴上叼着什么是看得见的，照发。
           ...(player.id === viewerPlayerId ? {
