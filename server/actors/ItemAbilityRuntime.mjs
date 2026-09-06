@@ -68,13 +68,21 @@ export function armItemAbility(scene, player, itemType, source) {
   abilities.grant(
     ITEM_USE_ABILITY_SLOT,
     createItemUseAbility(use, ({ payload }) => {
-      armed.succeeded = runItemUseAction(createItemUseContext(scene, player, {
+      const context = createItemUseContext(scene, player, {
         use,
         source,
         slotIndex,
         heldSeconds: payload?.heldSeconds ?? 0,
         chargeRatio: payload?.chargeRatio ?? 1,
-      }));
+      });
+      armed.succeeded = runItemUseAction(context);
+      // 打空了就自己去找下一摞。这一步归**物品系统**而不是武器系统：弹药位是这一
+      // 侧的账，武器那边不认识背包。找不到才是「弹药不足」——那时物品栏那一格会
+      // 抖给玩家看。按 R 手动换弹走的是同一条 `reloadFrom`，所以自动和手动装的
+      // 是同一发、等的是同一段。
+      if (use.ammo && !(context.ammo?.quantity > 0)) {
+        context.inventory?.reloadFrom(context.slot, scene.now() / 1000);
+      }
     }),
     `item:${use.itemType}`,
   );
@@ -101,13 +109,36 @@ export function revokeItemAbility(player) {
  * `tap` 在这里不激活：一次点击是「按下再松开」，激活留给 `releaseItemUse`，
  * 按住不放不会连发。`hold` 与 `charge` 记下起点，圈由 `updateItemUse` 每 tick 推进。
  *
- * **冷却中的那一下在这里就被挡住**，而不是等到激活时被能力系统拒绝：不挡的话，
- * 玩家会先看到一圈画满的蓄力，松手才发现这一下从来没算数。
+ * **按不动的那一下在这里就被挡住**，而不是等到激活时才发现：不挡的话，玩家会先
+ * 看到一圈画满的蓄力，松手才发现这一下从来没算数。三种按不动：冷却里、正在装填、
+ * 以及**空着**——一把没有弹药的弓连拉都不该拉得动。
  */
 export function beginItemUse(player, now) {
   if (!player?.itemAbility || itemUseCooldownRemaining(player) > 0) return false;
+  if (itemUseBlockedByAmmo(player, now)) return false;
   player.itemUseStartedAt = now;
   return true;
+}
+
+/**
+ * 手上这件东西现在被弹药挡着吗（空了，或者正在装）。
+ *
+ * 只问吃弹药的那几件：不吃弹药的东西没有「空」这回事。
+ *
+ * 两端跑同一个判断——客户端据此不画那个圈、改成抖一下；服务端据此拒绝这条命令。
+ * 只在服务端拦的话，玩家会看着圈转完才发现什么都没发生。
+ *
+ * @param {number} now 服务端时钟的毫秒数
+ */
+export function itemUseBlockedByAmmo(player, now) {
+  const armed = player?.itemAbility;
+  if (!armed?.use?.ammo) return false;
+  const inventory = player.getComponent(INVENTORY_COMPONENT);
+  const slot = armed.source === 'hotbar'
+    ? { kind: 'hotbar', slotIndex: armed.slotIndex }
+    : { kind: 'backpack', itemType: armed.itemType };
+  if (inventory?.reloadRemaining(slot, now / 1000) > 0) return true;
+  return !(inventory?.ammoAt(slot)?.quantity > 0);
 }
 
 /**

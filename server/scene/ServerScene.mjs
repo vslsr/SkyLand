@@ -121,6 +121,7 @@ const HOTBAR_COMMAND_KINDS = new Set([
   'drop:hotbar',
   'ammo:load',
   'ammo:unload',
+  'ammo:reload',
 ]);
 
 /** 调试伤害指令够得到多远的生物，米。和交互距离同量级，不是远程打击。 */
@@ -913,6 +914,17 @@ export class ServerScene {
         const slot = sanitizeSlotAddress(command.slot);
         const from = sanitizeSlotAddress(command.source);
         changed = Boolean(slot && from) && inventory.loadAmmo(slot, from) > 0;
+        // 手动拖进去的那一次也要等装填时间：谁按的不改变装一次弹要多久，
+        // 否则玩家会用背包界面绕开这段时间。
+        if (changed) inventory.beginReload(slot, this.now() / 1000);
+        break;
+      }
+      case 'ammo:reload': {
+        // 换弹：身上找第一种这把武器吃得下的弹药，装满它。找哪一种、从哪一格拿
+        // 由物品栏自己按 `accepts` 的顺序决定（见 `reloadFrom`）——客户端只说
+        // 「给这一格换弹」，不替它挑。
+        const slot = sanitizeSlotAddress(command.slot) ?? inventory.activeSlotAddress?.();
+        changed = Boolean(slot) && inventory.reloadFrom(slot, this.now() / 1000) > 0;
         break;
       }
       case 'ammo:unload': {
@@ -1899,6 +1911,7 @@ export class ServerScene {
 
   createSnapshot(viewerPlayerId) {
     const viewer = viewerPlayerId ? this.players.get(viewerPlayerId) : undefined;
+    const nowSeconds = this.now() / 1000;
     return {
       sceneId: this.id,
       tick: this.tick,
@@ -1934,9 +1947,11 @@ export class ServerScene {
           // 背包只发给本人：别人包里有什么不是这名玩家该知道的，一屋子人也不该
           // 每帧互相推送全部库存。嘴上叼着什么是看得见的，照发。
           ...(player.id === viewerPlayerId ? {
-            inventory: player.requireComponent(INVENTORY_COMPONENT).snapshot(),
+            // 装填还剩几秒要跟着这一份走：它记在那一格上（和弹药同一处），
+            // 所以快照要知道「现在是第几秒」才算得出剩余。
+            inventory: player.requireComponent(INVENTORY_COMPONENT).snapshot(nowSeconds),
             inventoryRevision: player.requireComponent(INVENTORY_COMPONENT).revision,
-            hotbar: player.requireComponent(INVENTORY_COMPONENT).hotbarSnapshot(),
+            hotbar: player.requireComponent(INVENTORY_COMPONENT).hotbarSnapshot(nowSeconds),
           } : {}),
           // 血量是公开信息：别人头上的飘字和倒下那一下，所有人都该看见。
           ...(player.getComponent(HEALTH_COMPONENT)

@@ -1491,6 +1491,36 @@ body.is-topdown .virtual-controls.is-desktop-debug {
 }
 
 /*
+ * 按不动的那一下：抖一格。
+ *
+ * 「按了没反应」必须自己有个说法，否则它和「按了但没打中」在画面上是同一个样子。
+ * 抖动而不是变色：变色是一种状态（这一格一直是红的），而按不动是**这一下**的事。
+ *
+ * 位移小、时间短（180ms）：它要读得出是「被挡了一下」，不是这一格坏了。
+ */
+@keyframes hotbar-reject-shake {
+  0%, 100% { transform: translateX(0); }
+  20% { transform: translateX(-3px); }
+  45% { transform: translateX(3px); }
+  70% { transform: translateX(-2px); }
+}
+
+.hotbar__slot.is-rejected {
+  animation: hotbar-reject-shake 180ms ease-out;
+  border-color: rgba(201, 120, 104, 0.9);
+}
+
+/*
+ * 装填中。
+ *
+ * 和冷却读同一个环，只是颜色不同：两者都在回答「这一格现在能不能按」，但一个是
+ * 「刚打完，等一下」，另一个是「正在装弹」。同一个环、两种颜色，玩家不用学两套记号。
+ */
+.hotbar__slot[data-progress='reload'] {
+  --hotbar-progress-color: rgba(139, 118, 74, 0.85);
+}
+
+/*
  * 冷却中（设计稿「CD效果 · 轻型工具CD」）。
  *
  * 和长按那圈是同一个环，只是反着走：长按是攒满，冷却是退空。颜色压成墨灰——

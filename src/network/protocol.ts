@@ -99,7 +99,7 @@ export interface SnapshotPlayer {
    */
   jumpPressed?: boolean;
   /** 背包只发给本人：别人包里有什么不是这名玩家该知道的。 */
-  inventory?: Array<{ itemType: string; quantity: number }>;
+  inventory?: SnapshotInventoryEntry[];
   inventoryRevision?: number;
   /**
    * 物品栏内容与选中格；同样只发给本人。
@@ -108,7 +108,7 @@ export interface SnapshotPlayer {
    * 引用，所以数量在背包那份快照里已经查不到了。
    */
   hotbar?: {
-    slots: Array<{ itemType: string; quantity: number } | null>;
+    slots: Array<SnapshotInventoryEntry | null>;
     activeIndex: number;
   };
   /** 生命值与死亡状态。血量是公开信息：别人头上的飘字大家都该看见。 */
@@ -178,6 +178,19 @@ export interface SnapshotProjectile {
 export interface SnapshotWeaponShot {
   /** 自增计数。一次性事件靠它的变化触发，不靠一个 bool。 */
   revision: number;
+}
+
+/**
+ * 账本里的一条：一摞货，可能装着弹药，可能正在装填。
+ *
+ * 装填发的是**还剩几秒**而不是那个绝对时刻：接收方用自己的表倒数，不必先和服务端
+ * 对表。装完了就整条不发——一条恒为 0 的字段只会让每一格都多几个字节。
+ */
+export interface SnapshotInventoryEntry {
+  itemType: string;
+  quantity: number;
+  ammo?: { itemType: string; quantity: number };
+  reloadSeconds?: number;
 }
 
 export type ActorFloatState = 'afloat' | 'overloaded' | 'flooding' | 'sinking';

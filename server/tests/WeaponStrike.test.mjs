@@ -28,6 +28,7 @@ import { ServerScene } from '../scene/ServerScene.mjs';
 
 const catalogPromise = SceneCatalog.load();
 const BOW = itemCatalog.require('wood-bow').weapon;
+const BOW_RELOAD_SECONDS = itemCatalog.require('wood-bow').ammo.reloadSeconds;
 
 async function createScene() {
   const catalog = await catalogPromise;
@@ -372,8 +373,9 @@ test('没箭就射不出去；射出去的那一发从弹药位上扣', async ()
   inventory.add('arrow', 2);
   send(scene, { kind: 'ammo:load', slot: bowSlot, source: { kind: 'backpack', itemType: 'arrow' } });
   assert.deepEqual(inventory.ammoAt(bowSlot), { itemType: 'arrow', quantity: 2 });
-
-  context.advance(0.3);
+  // 手动拖进去的那一次也要等装填时间：谁按的不改变装一次弹要多久。
+  assert.equal(fire(context, 1.5, walker), false, '还在装填，按不动');
+  context.advance(BOW_RELOAD_SECONDS);
   assert.equal(fire(context, 1.5, walker), true);
   assert.deepEqual(inventory.ammoAt(bowSlot), { itemType: 'arrow', quantity: 1 }, '打掉一支');
   assert.equal(flyOut(context), 0);
@@ -383,7 +385,7 @@ test('没箭就射不出去；射出去的那一发从弹药位上扣', async ()
   assert.equal(fire(context, 0.05, walker), false);
   assert.deepEqual(inventory.ammoAt(bowSlot), { itemType: 'arrow', quantity: 1 }, '空放不该白吃一支');
 
-  // 把最后一支打掉，再按就没反应了。
+  // 把最后一支打掉。背包里已经没有箭了，所以自动换弹也补不上——这时才是「弹药不足」。
   context.advance(0.3);
   assert.equal(fire(context, 1.5, walker), true);
   assert.equal(inventory.ammoAt(bowSlot), undefined, '打光了那一格就空着');
@@ -406,6 +408,8 @@ test('弹弓走同一条路：装石头、蓄力、射出去一颗石子', async
   send(scene, { kind: 'ammo:load', slot, source: { kind: 'backpack', itemType: 'stone' } });
   send(scene, { kind: 'select', slotIndex: 1 });
   assert.deepEqual(inventory.ammoAt(slot), { itemType: 'stone', quantity: 3 });
+  // 刚装完弹要等装填时间才拉得动。
+  context.advance(itemCatalog.require('slingshot').ammo.reloadSeconds);
 
   // 站到弹弓拉满打得到的地方——它比弓近，射程另算。
   const sling = itemCatalog.require('slingshot').weapon;

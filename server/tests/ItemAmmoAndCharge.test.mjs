@@ -8,6 +8,7 @@ import {
   ITEM_STACK_COMPONENT,
   PICKUP_DROP_COMPONENT,
 } from '../../shared/actor/index.mjs';
+import { itemCatalog } from '../../shared/items/index.mjs';
 import { registerItemUseAction } from '../actors/ItemUseActions.mjs';
 import { unregisterShootAction } from '../actors/WeaponRuntime.mjs';
 import { itemUseCooldownRemaining } from '../actors/ItemAbilityRuntime.mjs';
@@ -197,7 +198,7 @@ test('冷却中的那一下按不下去：圈都不该开始画', async () => {
   assert.equal(shots.length, 2);
 });
 
-test('弹药空了这一下就不算数：扣不出弹药的那次发射由武器系统自己否决', async () => {
+test('弹药空了连按都按不下去：圈不该先画满再告诉你没子弹', async () => {
   const clock = createClock();
   const { scene, inventory } = await createScene(clock);
   shots.length = 0;
@@ -205,12 +206,68 @@ test('弹药空了这一下就不算数：扣不出弹药的那次发射由武�
   send(scene, { kind: 'assign', slotIndex: 0, itemType: 'slingshot' });
   send(scene, { kind: 'select', slotIndex: 0 });
 
-  send(scene, { kind: 'use:begin' });
+  // 空着的那一把在**按下**那一刻就被挡住。不挡的话玩家会看着圈转完，松手才发现
+  // 这一下从来没算数——那和「打出去但没打中」在画面上是同一个样子。
+  assert.equal(send(scene, { kind: 'use:begin' }), false, '空枪按不动');
   clock.advance(1);
   scene.update();
   send(scene, { kind: 'use:release' });
-  assert.equal(shots.length, 1, '执行器照样被调用：空不空由它自己判断');
-  assert.equal(shots[0].ammoBefore, undefined);
+  assert.deepEqual(shots, [], '执行器根本不该被调用');
+});
+
+test('换弹：身上找第一种合用的弹药装上，装完之前按不动', async () => {
+  const clock = createClock();
+  const { scene, inventory } = await createScene(clock);
+  shots.length = 0;
+  inventory.add('slingshot', 1);
+  inventory.add('stone', 4);
+  send(scene, { kind: 'assign', slotIndex: 0, itemType: 'slingshot' });
+  send(scene, { kind: 'select', slotIndex: 0 });
+  const slot = { kind: 'hotbar', slotIndex: 0 };
+  assert.equal(inventory.ammoAt(slot), undefined, '一开始是空的');
+
+  // 换弹不用说装哪一种：那是这件武器的事（`accepts` 的顺序），客户端只说「换弹」。
+  send(scene, { kind: 'ammo:reload' });
+  assert.deepEqual(inventory.ammoAt(slot), { itemType: 'stone', quantity: 4 });
+  assert.equal(inventory.quantityOf('stone'), 0, '装填是一次转移，包里那一摞跟着少');
+
+  // 装填期间按不动——手动拖进去的那一次也一样，见 `ammo:load`。
+  assert.equal(send(scene, { kind: 'use:begin' }), false, '正在装填');
+  const reloadSeconds = itemCatalog.require('slingshot').ammo.reloadSeconds;
+  clock.advance(reloadSeconds);
+  scene.update();
+  assert.equal(send(scene, { kind: 'use:begin' }), true, '装完了就能拉了');
+});
+
+test('打空最后一发就自己去找下一摞，不用玩家再按一次', async () => {
+  const clock = createClock();
+  const { scene, inventory } = await createScene(clock);
+  shots.length = 0;
+  inventory.add('slingshot', 1);
+  inventory.add('stone', 6);
+  send(scene, { kind: 'assign', slotIndex: 0, itemType: 'slingshot' });
+  send(scene, { kind: 'select', slotIndex: 0 });
+  const slot = { kind: 'hotbar', slotIndex: 0 };
+  // 容量 5：先装满，包里还剩一颗。
+  send(scene, { kind: 'ammo:reload' });
+  assert.deepEqual(inventory.ammoAt(slot), { itemType: 'stone', quantity: 5 });
+  clock.advance(itemCatalog.require('slingshot').ammo.reloadSeconds);
+  scene.update();
+
+  // 一路打空这五发。
+  for (let shot = 0; shot < 5; shot += 1) {
+    assert.equal(send(scene, { kind: 'use:begin' }), true, `第 ${shot + 1} 发按得动`);
+    clock.advance(1);
+    scene.update();
+    send(scene, { kind: 'use:release' });
+    // 隔过这一发的冷却，下一发才按得动。
+    clock.advance(itemCatalog.require('slingshot').use.cooldownSeconds + 0.05);
+    scene.update();
+  }
+  assert.equal(shots.length, 5);
+  // 打空那一刻自动补上包里最后那一颗，并进入装填。找得到就不该让玩家再按一次 R。
+  assert.deepEqual(inventory.ammoAt(slot), { itemType: 'stone', quantity: 1 }, '自动补上了');
+  assert.equal(send(scene, { kind: 'use:begin' }), false, '自动装填同样要等');
 });
 
 test('丢下一把装着石头的弹弓：石头回到身上，不跟着蒸发', async () => {

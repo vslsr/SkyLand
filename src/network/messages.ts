@@ -131,6 +131,14 @@ export type InventoryCommand =
   | { kind: 'ammo:load'; slot: InventorySlotAddress; source: InventorySlotAddress }
   /** 卸下：把那一格里装着的弹药收回身上（先手上、再物品栏、最后背包）。 */
   | { kind: 'ammo:unload'; slot: InventorySlotAddress }
+  /**
+   * 换弹：给这一格装满。省略 `slot` 就是手上那一格。
+   *
+   * **不说装哪一种**：找哪一种、从哪一格拿由物品栏按武器自己的 `accepts` 顺序
+   * 决定（`InventoryComponent.reloadFrom`）。客户端替它挑的话，两边挑法一不一样
+   * 就成了一件要对齐的事。
+   */
+  | { kind: 'ammo:reload'; slot?: InventorySlotAddress }
   | { kind: 'container:open'; actorId: string }
   | { kind: 'container:close'; actorId: string }
   | {

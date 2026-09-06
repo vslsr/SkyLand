@@ -371,6 +371,89 @@ export class InventoryComponent extends ActorComponent {
    * @param {{kind: string}} source 弹药从哪一格来
    * @returns {number} 实际装进去几发
    */
+  /**
+   * 手上那一格的地址；空手时是 undefined。
+   *
+   * 换弹这类「对手上那件东西做点什么」的命令用它：客户端不必再算一遍哪一格是
+   * 手上那一格，两边也就不会因为算法不同指向不同的格子。
+   */
+  activeSlotAddress() {
+    if (!this.isHotbarSlot(this.activeHotbarIndex)) return undefined;
+    if (!this.hotbar[this.activeHotbarIndex]) return undefined;
+    return /** @type {const} */ ({ kind: 'hotbar', slotIndex: this.activeHotbarIndex });
+  }
+
+  /**
+   * 这一格还要装多久，秒。
+   *
+   * 装填时间记在**那一格**上，和弹药本身同一个地方：装着的是那一把弓，正在装的
+   * 也是那一把。记在玩家身上的话，背包里另一把弓的装填会把手上这把一起锁住。
+   *
+   * @param {number} nowSeconds 现在是服务端的第几秒
+   */
+  reloadRemaining(ref, nowSeconds) {
+    const until = this.entryAt(ref)?.reloadUntil;
+    if (!Number.isFinite(until)) return 0;
+    return Math.max(0, until - nowSeconds);
+  }
+
+  /**
+   * 记下「这一格刚装过弹，要等一会儿」。
+   *
+   * 装填时间来自弹药位的配置，所以**谁按的不改变它**：手动从背包里拖一摞箭进去，
+   * 和按 R 自动装，等的是同一段时间。把手动装填当成免费的，玩家就会用背包界面
+   * 绕开这段时间。
+   */
+  beginReload(ref, nowSeconds) {
+    const entry = this.entryAt(ref);
+    const seconds = entry ? this.catalog.get(entry.itemType)?.ammo?.reloadSeconds : undefined;
+    if (!entry || !(seconds > 0)) return false;
+    entry.reloadUntil = Math.max(entry.reloadUntil ?? 0, nowSeconds + seconds);
+    this.revision += 1;
+    return true;
+  }
+
+  /**
+   * 从身上找第一种这把武器吃得下的弹药，装满它。
+   *
+   * **按 `accepts` 的顺序找，不按背包里的顺序**：哪一种优先是这件武器的设计
+   * （目录里那一行的书写顺序），不是玩家整理背包的副作用。同一种弹药先用物品栏
+   * 那几格、再用背包——摆在物品栏上的那一摞是玩家主动放在手边的。
+   *
+   * @returns {number} 装进去几发；0 表示身上没有合用的弹药（或者已经满了）
+   */
+  reloadFrom(target, nowSeconds) {
+    const entry = this.entryAt(target);
+    const slot = entry ? this.catalog.get(entry.itemType)?.ammo : undefined;
+    if (!entry || !slot) return 0;
+    const loaded = entry.ammo;
+    if (loaded && loaded.quantity >= slot.capacity) return 0;
+    // 已经装着一种的时候只补同一种：换种要先卸下，混装说不清打出去的是什么。
+    const wanted = loaded ? [loaded.itemType] : slot.accepts;
+    for (const ammoType of wanted) {
+      for (const source of this.sourcesOf(ammoType)) {
+        const moved = this.loadAmmo(target, source);
+        if (moved > 0) {
+          this.beginReload(target, nowSeconds);
+          return moved;
+        }
+      }
+    }
+    return 0;
+  }
+
+  /** 身上装着这种弹药的那几格：物品栏在前，背包在后。 */
+  sourcesOf(itemType) {
+    const sources = [];
+    this.hotbar.forEach((slot, slotIndex) => {
+      if (slot?.itemType === itemType && slot.quantity > 0) {
+        sources.push({ kind: 'hotbar', slotIndex });
+      }
+    });
+    if (this.quantityOf(itemType) > 0) sources.push({ kind: 'backpack', itemType });
+    return sources;
+  }
+
   loadAmmo(target, source, quantity = Number.POSITIVE_INFINITY) {
     const entry = this.entryAt(target);
     const slot = entry ? this.catalog.get(entry.itemType)?.ammo : undefined;
@@ -459,7 +542,7 @@ export class InventoryComponent extends ActorComponent {
     return true;
   }
 
-  snapshot() { return this.ledger.snapshot(); }
+  snapshot(nowSeconds) { return this.ledger.snapshot(nowSeconds); }
 
   /**
    * 物品栏内容与选中格；和背包一起下发，只发给物主。
@@ -467,12 +550,21 @@ export class InventoryComponent extends ActorComponent {
    * 每格带上数量，因为物品栏现在自己持有那一摞——只发 itemType 的话，客户端要
    * 去背包账上找数量，而那里已经没有它了。
    */
-  hotbarSnapshot() {
+  hotbarSnapshot(nowSeconds) {
     return {
       // 弹药那一段也复制一份：快照发出去之后不该还指着账本里那个对象。
-      slots: this.hotbar.map((slot) => (
-        slot ? { ...slot, ...(slot.ammo ? { ammo: { ...slot.ammo } } : {}) } : null
-      )),
+      slots: this.hotbar.map((slot) => {
+        if (!slot) return null;
+        const remaining = Number.isFinite(nowSeconds) && Number.isFinite(slot.reloadUntil)
+          ? Math.max(0, slot.reloadUntil - nowSeconds)
+          : 0;
+        return {
+          ...slot,
+          ...(slot.ammo ? { ammo: { ...slot.ammo } } : {}),
+          // 发**还剩几秒**而不是那个绝对时刻：接收方用自己的表倒数，不必先对表。
+          ...(remaining > 0 ? { reloadSeconds: Math.round(remaining * 100) / 100 } : {}),
+        };
+      }),
       activeIndex: this.activeHotbarIndex,
     };
   }
@@ -484,16 +576,18 @@ export class InventoryComponent extends ActorComponent {
    * @param {number} [revision]
    * @param {{slots: Array<{itemType: string, quantity: number}|null>, activeIndex: number}} [hotbar]
    *   没有这一段时保持本地物品栏不动，只更新背包。
+   * @param {number} [nowSeconds] 本地时钟的秒数。给了它，快照里那些「还剩几秒」的
+   *   装填会换算成本地时钟上的时刻，之后由本地这块表自己倒数。
    * @returns {boolean} 内容或 revision 是否真的变了，供界面决定要不要重画。
    */
-  applySnapshot(entries, revision = this.revision, hotbar = undefined) {
+  applySnapshot(entries, revision = this.revision, hotbar = undefined, nowSeconds = undefined) {
     const nextRevision = Math.max(0, Math.trunc(Number(revision) || 0));
-    let changed = this.ledger.applySnapshot(entries) || nextRevision !== this.revision;
+    let changed = this.ledger.applySnapshot(entries, nowSeconds) || nextRevision !== this.revision;
     if (hotbar) {
       const slots = Array.isArray(hotbar.slots) ? hotbar.slots : [];
       const next = new Array(this.hotbarCapacity).fill(null);
       for (let index = 0; index < this.hotbarCapacity; index += 1) {
-        next[index] = this.sanitizeHotbarSlot(slots[index]);
+        next[index] = this.sanitizeHotbarSlot(slots[index], nowSeconds);
       }
       const activeIndex = this.isHotbarSlot(hotbar.activeIndex)
         ? hotbar.activeIndex
@@ -509,15 +603,20 @@ export class InventoryComponent extends ActorComponent {
   }
 
   /** 快照里没登记的物品、数量为 0 的格子一律当成空格，不写坏本地物品栏。 */
-  sanitizeHotbarSlot(raw) {
+  sanitizeHotbarSlot(raw, nowSeconds) {
     const definition = raw ? this.catalog.get(raw.itemType) : undefined;
     const quantity = requestedQuantity(raw?.quantity);
     if (!definition || quantity === 0) return null;
     const ammo = sanitizeAmmo(raw?.ammo, definition, this.catalog);
+    // 还剩几秒 → 本地时钟上的那个时刻。两端各自用自己的表倒数，不必先对表。
+    const remaining = Number(raw?.reloadSeconds);
     return {
       itemType: definition.id,
       quantity: Math.min(quantity, definition.stackLimit),
       ...(ammo ? { ammo } : {}),
+      ...(Number.isFinite(nowSeconds) && remaining > 0
+        ? { reloadUntil: nowSeconds + remaining }
+        : {}),
     };
   }
 

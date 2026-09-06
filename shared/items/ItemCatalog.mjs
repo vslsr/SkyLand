@@ -169,6 +169,16 @@ function validateAmmo(raw, path, { pooled, stackLimit }) {
   return Object.freeze({
     accepts: Object.freeze(accepts),
     capacity: requireInteger(definition.capacity, `${path}.capacity`, 1, 999),
+    /**
+     * 装一次弹要多久，秒。
+     *
+     * 它是**弹药位的属性**，不是使用的属性：装填慢的是这把武器，和它打一发要蓄
+     * 多久、隔多久才能再打无关。所以它写在 `ammo` 里，不写在 `use` 里。
+     *
+     * 装填期间这一格按不动——手动拖进去的那一次也一样。「谁按的」不改变「装一次
+     * 弹要多久」，把手动装填当成免费的，玩家就会用背包界面绕开这段时间。
+     */
+    reloadSeconds: requireNumber(definition.reloadSeconds, `${path}.reloadSeconds`, 0, 10),
   });
 }
 

@@ -78,6 +78,13 @@
       }
     },
     {
+      "id": "IA_Player_Reload",
+      "valueType": "digital",
+      "trigger": {
+        "type": "pressed"
+      }
+    },
+    {
       "id": "IA_World_Interact",
       "valueType": "digital",
       "trigger": {
@@ -253,6 +260,10 @@
       {
         "tag": "Input.Player.Drop",
         "actionId": "IA_Player_Drop"
+      },
+      {
+        "tag": "Input.Player.Reload",
+        "actionId": "IA_Player_Reload"
       },
       {
         "tag": "Input.World.Interact",
@@ -557,6 +568,24 @@
           "deviceKind": "touch",
           "control": "Virtual.AimStickCharge",
           "actionId": "IA_Player_Primary"
+        },
+        {
+          "id": "Reload.Keyboard.R",
+          "deviceKind": "keyboardMouse",
+          "control": "Keyboard.KeyR",
+          "actionId": "IA_Player_Reload"
+        },
+        {
+          "id": "Reload.Gamepad.West",
+          "deviceKind": "gamepad",
+          "control": "Gamepad.ButtonWest",
+          "actionId": "IA_Player_Reload"
+        },
+        {
+          "id": "Reload.Touch.Button",
+          "deviceKind": "touch",
+          "control": "Virtual.ReloadButton",
+          "actionId": "IA_Player_Reload"
         },
         {
           "id": "Interact.Keyboard.Primary",
@@ -985,6 +1014,15 @@
         "sizePx": 64,
         "gridColumn": 2,
         "gridRow": 2
+      },
+      {
+        "id": "reload",
+        "control": "Virtual.ReloadButton",
+        "label": "R",
+        "ariaLabel": "换弹",
+        "sizePx": 52,
+        "gridColumn": 1,
+        "gridRow": 4
       },
       {
         "id": "inventory",

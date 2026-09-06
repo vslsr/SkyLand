@@ -5,7 +5,8 @@ import {
 } from '../input/config/playerInput';
 import type { InputSubsystem } from '../input/core/InputSubsystem';
 import type { InventoryModelLike } from '../inventory/index';
-import type { InventoryCommand } from '../network/messages';
+import type { InventoryCommand, InventorySlotAddress } from '../network/messages';
+import { itemCatalog } from '../../shared/items/index.mjs';
 import type { TagLike } from '../tags';
 import { holdRatio, resolveHeldItemAction } from '../../shared/actor/index.mjs';
 
@@ -89,6 +90,13 @@ export interface HotbarPort {
    */
   setCooldown?(cooldown: { itemType: string; remainingRatio: number } | undefined): void;
   /**
+   * 这一下按不动。
+   *
+   * 界面据此抖一下那一格——「按了没反应」必须自己有个说法，否则它和「按了但没打
+   * 中」在画面上是同一个样子。
+   */
+  rejectUse?(reason: 'empty' | 'reloading'): void;
+  /**
    * 松手那一下（只有蓄力这一类有）。
    *
    * 和 `setProgress(undefined)` 分开，是因为**取消也会收圈**：换手上那件东西、
@@ -167,6 +175,9 @@ export class HotbarController {
       // 丢出键单独一个：一个键一件事。交互键归「和世界互动」（拾取、采集、开箱），
       // 手上有没有东西都不改变它的含义。
       this.input.bind(PlayerInputTags.Drop, () => this.dropHeld(), triggered),
+      // 换弹键：只发「给手上那一格换弹」，装哪一种由服务端按武器自己的 accepts
+      // 顺序挑——客户端替它挑的话，两边挑法一不一样就成了一件要对齐的事。
+      this.input.bind(PlayerInputTags.Reload, () => this.reloadHeld(), triggered),
       this.input.bind(
         ItemUseInputTags.primary,
         (event) => this.handleUse('primary', event.phase),
@@ -241,6 +252,12 @@ export class HotbarController {
    * 的冷却仍在走——清掉只会让圈骗人。
    */
   private updateCooldown(): void {
+    // 装填盖过冷却：两者都让这一格按不动，而装填更长、也更需要玩家知道。
+    const reloading = this.reloadProgress();
+    if (reloading) {
+      this.port.setCooldown?.(reloading);
+      return;
+    }
     const cooling = this.cooling;
     if (!cooling) {
       this.port.setCooldown?.(undefined);
@@ -254,6 +271,31 @@ export class HotbarController {
       return;
     }
     this.port.setCooldown?.({ itemType: cooling.itemType, remainingRatio });
+  }
+
+  /**
+   * 手上那一格正在装弹的话，这一圈画到哪儿。
+   *
+   * 剩余秒数由物品栏自己算（服务端在装填开始那一帧发过一次「还剩几秒」，两端各自
+   * 用自己的表倒数），这里只把它换算成那个环的比例。
+   */
+  private reloadProgress(): { itemType: string; remainingRatio: number; kind: 'reload' } | undefined {
+    const inventory = this.port.getInventory();
+    const slot = inventory ? this.heldSlot(inventory) : undefined;
+    if (!inventory || !slot) return undefined;
+    const spec = this.ammoSpecOf(inventory, slot);
+    if (!spec?.reloadSeconds) return undefined;
+    const remaining = inventory.reloadRemaining?.(slot, this.now() / 1000) ?? 0;
+    if (remaining <= 0) return undefined;
+    const itemType = slot.kind === 'backpack'
+      ? slot.itemType
+      : inventory.hotbar?.[slot.slotIndex]?.itemType;
+    if (!itemType) return undefined;
+    return {
+      itemType,
+      remainingRatio: Math.min(1, remaining / spec.reloadSeconds),
+      kind: 'reload',
+    };
   }
 
   /**
@@ -307,6 +349,45 @@ export class HotbarController {
     this.port.send({ kind: 'drop' });
   }
 
+  /** 换弹键。手上那件不吃弹药就当这个键在它身上没有含义。 */
+  private reloadHeld(): void {
+    const inventory = this.port.getInventory();
+    if (!this.port.isActive() || !inventory) return;
+    const slot = this.heldSlot(inventory);
+    if (!slot || !this.ammoSpecOf(inventory, slot)) return;
+    this.port.send({ kind: 'ammo:reload' });
+  }
+
+  /**
+   * 手上那件东西被弹药挡着吗（空了，或者正在装）。
+   *
+   * **和服务端跑同一份判断**（`itemUseBlockedByAmmo`）：这一侧据此根本不画那个圈、
+   * 改成抖一下，那一侧据此拒绝命令。只在一边判的话，要么圈转完才发现没子弹，
+   * 要么画面上按下去了而服务端当没发生。
+   */
+  private ammoBlock(): 'empty' | 'reloading' | undefined {
+    const inventory = this.port.getInventory();
+    const slot = inventory ? this.heldSlot(inventory) : undefined;
+    if (!inventory || !slot || !this.ammoSpecOf(inventory, slot)) return undefined;
+    if ((inventory.reloadRemaining?.(slot, this.now() / 1000) ?? 0) > 0) return 'reloading';
+    return (inventory.ammoAt?.(slot)?.quantity ?? 0) > 0 ? undefined : 'empty';
+  }
+
+  /** 这一次用的是哪一格：背包里点出来的那条没有格子，走它自己的地址。 */
+  private heldSlot(inventory: InventoryModelLike): InventorySlotAddress | undefined {
+    if (this.armed && !this.armed.onHotbar) {
+      return { kind: 'backpack', itemType: this.armed.itemType };
+    }
+    return inventory.activeSlotAddress?.();
+  }
+
+  private ammoSpecOf(inventory: InventoryModelLike, slot: InventorySlotAddress) {
+    const itemType = slot.kind === 'backpack'
+      ? slot.itemType
+      : inventory.hotbar?.[slot.slotIndex]?.itemType;
+    return itemType ? itemCatalog.get(itemType)?.ammo : undefined;
+  }
+
   /**
    * 使用键：激活当前授予的那条物品能力。
    *
@@ -322,6 +403,13 @@ export class HotbarController {
       return;
     }
     if (phase === 'started') {
+      // 空着、或者正在装填：这一下按不动。圈根本不画，改成让那一格抖一下——
+      // 「按了没反应」和「按了但打不出去」在画面上必须是两回事。
+      const blocked = this.ammoBlock();
+      if (blocked) {
+        this.port.rejectUse?.(blocked);
+        return;
+      }
       this.begin({
         action: use.action as ItemUseAction,
         startedAt: this.now(),

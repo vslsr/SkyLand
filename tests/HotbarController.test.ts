@@ -19,7 +19,8 @@ function harness(initialHeldActorId: string | undefined) {
   } as never;
   const sent: InventoryCommand[] = [];
   const progress: (HeldItemProgress | undefined)[] = [];
-  const cooldowns: ({ itemType: string; remainingRatio: number } | undefined)[] = [];
+  const cooldowns: ({ itemType: string; remainingRatio: number; kind?: string } | undefined)[] = [];
+  const rejects: string[] = [];
   let clock = 0;
   const inventory = new InventoryComponent({ slotCapacity: 8, hotbarCapacity: 9 });
   const controller = new HotbarController(input, {
@@ -30,8 +31,10 @@ function harness(initialHeldActorId: string | undefined) {
     send: (command) => sent.push(command),
     setProgress: (next) => progress.push(next),
     setCooldown: (next) => cooldowns.push(next),
+    rejectUse: (reason) => rejects.push(reason),
   }, () => clock);
   const press = (phase: string) => handlers.get(PlayerInputTags.Drop)?.({ phase });
+  const reload = () => handlers.get(PlayerInputTags.Reload)?.({ phase: 'triggered' });
   const use = (phase: string) => handlers.get(ItemUseInputTags.primary)?.({ phase });
   return {
     controller,
@@ -39,8 +42,24 @@ function harness(initialHeldActorId: string | undefined) {
     sent,
     progress,
     cooldowns,
+    rejects,
+    /**
+     * 装好弹、拿在手上、并把装填时间跳过去。
+     *
+     * 空着的武器现在按不动，装填期间也按不动——这三条用例测的是圈和冷却，不是
+     * 弹药，所以把这一段一次性摆平。
+     */
+    loadWeapon: (weapon: string, ammo: string) => {
+      inventory.add(weapon, 1);
+      inventory.add(ammo, 5);
+      inventory.assignHotbarSlot(0, weapon);
+      inventory.setActiveHotbarSlot(0);
+      inventory.reloadFrom({ kind: 'hotbar', slotIndex: 0 }, clock / 1000);
+      clock += 2000;
+    },
     press,
     use,
+    reload,
     /** 快照到账：服务端换手时手持表现体会换一个新 id。 */
     setHeldActorId: (next: string | undefined) => { heldActorId = next; },
     advance: (ms: number) => { clock += ms; },
@@ -207,9 +226,7 @@ test('蓄力：圈满停在满圈上等松手，松手才发出那一下', () =>
   // 弹弓是 charge / 0.9 秒。和长按画的是同一个圈，收尾完全相反：长按的圈满是
   // 结算，蓄力的圈满只是拉满——松手才是那一下，所以圈不能收。
   const bar = harness('held-1');
-  bar.inventory.add('slingshot', 1);
-  bar.inventory.assignHotbarSlot(0, 'slingshot');
-  bar.inventory.setActiveHotbarSlot(0);
+  bar.loadWeapon('slingshot', 'stone');
 
   bar.use('started');
   assert.deepEqual(bar.sent, [{ kind: 'use:begin' }]);
@@ -235,9 +252,7 @@ test('蓄力：圈满停在满圈上等松手，松手才发出那一下', () =>
 
 test('冷却圈：松手那一刻开始退，走完就没了', () => {
   const bar = harness('held-1');
-  bar.inventory.add('wood-bow', 1);
-  bar.inventory.assignHotbarSlot(0, 'wood-bow');
-  bar.inventory.setActiveHotbarSlot(0);
+  bar.loadWeapon('wood-bow', 'arrow');
 
   bar.use('started');
   bar.advance(400);
@@ -263,9 +278,7 @@ test('冷却圈：松手那一刻开始退，走完就没了', () => {
 
 test('冷却不随取消清掉：界面盖上来，那边的 CD 照样在走', () => {
   const bar = harness('held-1');
-  bar.inventory.add('wood-bow', 1);
-  bar.inventory.assignHotbarSlot(0, 'wood-bow');
-  bar.inventory.setActiveHotbarSlot(0);
+  bar.loadWeapon('wood-bow', 'arrow');
 
   bar.use('started');
   bar.advance(400);
@@ -276,4 +289,69 @@ test('冷却不随取消清掉：界面盖上来，那边的 CD 照样在走', (
   bar.controller.update();
   // 清掉只会让圈骗人：服务端那边并不因为界面盖上来就不冷却了。
   assert.equal(bar.cooldowns.at(-1)?.itemType, 'wood-bow');
+});
+
+test('空着的武器按不动：圈根本不画，那一格抖一下', () => {
+  const bar = harness('held-1');
+  bar.inventory.add('wood-bow', 1);
+  bar.inventory.assignHotbarSlot(0, 'wood-bow');
+  bar.inventory.setActiveHotbarSlot(0);
+
+  bar.use('started');
+  // 「按了没反应」必须自己有个说法，否则它和「按了但没打中」在画面上是同一个样子。
+  assert.deepEqual(bar.rejects, ['empty']);
+  assert.deepEqual(bar.sent, [], '连 use:begin 都不发');
+  bar.advance(500);
+  bar.controller.update();
+  assert.equal(bar.progress.at(-1), undefined, '圈根本不画');
+});
+
+test('装填期间按不动：手动拖进去的那一次也一样', () => {
+  const bar = harness('held-1');
+  bar.inventory.add('wood-bow', 1);
+  bar.inventory.add('arrow', 5);
+  bar.inventory.assignHotbarSlot(0, 'wood-bow');
+  bar.inventory.setActiveHotbarSlot(0);
+  // 手动装填：谁按的不改变装一次弹要多久。
+  bar.inventory.loadAmmo(
+    { kind: 'hotbar', slotIndex: 0 },
+    { kind: 'backpack', itemType: 'arrow' },
+  );
+  bar.inventory.beginReload({ kind: 'hotbar', slotIndex: 0 }, 0);
+
+  bar.use('started');
+  assert.deepEqual(bar.rejects, ['reloading']);
+  assert.deepEqual(bar.sent, []);
+
+  // 装填圈和冷却圈是同一个环，只是说的不是同一件事。
+  bar.controller.update();
+  const dial = bar.cooldowns.at(-1);
+  assert.equal(dial?.kind, 'reload');
+  assert.equal(dial?.itemType, 'wood-bow');
+  assert.ok(dial!.remainingRatio > 0.9, '刚开始装，圈几乎是满的');
+
+  // 装完了就按得动了。
+  bar.advance(1200);
+  bar.use('started');
+  assert.deepEqual(bar.rejects, ['reloading'], '没有再抖一下');
+  assert.deepEqual(bar.sent, [{ kind: 'use:begin' }]);
+});
+
+test('按 R 只发一条「换弹」：装哪一种由服务端按武器自己的顺序挑', () => {
+  const bar = harness('held-1');
+  bar.inventory.add('wood-bow', 1);
+  bar.inventory.add('arrow', 5);
+  bar.inventory.assignHotbarSlot(0, 'wood-bow');
+  bar.inventory.setActiveHotbarSlot(0);
+
+  bar.reload();
+  assert.deepEqual(bar.sent, [{ kind: 'ammo:reload' }]);
+
+  // 手上那件不吃弹药就当这个键在它身上没有含义。
+  bar.sent.length = 0;
+  bar.inventory.add('fruit', 1);
+  bar.inventory.assignHotbarSlot(1, 'fruit');
+  bar.inventory.setActiveHotbarSlot(1);
+  bar.reload();
+  assert.deepEqual(bar.sent, []);
 });

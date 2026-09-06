@@ -39,10 +39,25 @@ interface HotbarSlot {
  * 记的是**物品种类**而不是格号：冷却记在种类上（服务端那边也是，见
  * `itemCooldownGroup`），冷却途中把弓拖到另一格并不会让它立刻又能射。
  */
+/**
+ * 这一格现在按不动的理由。
+ *
+ * 「弹药空了」和「正在装填」分成两种，是因为玩家要做的事不一样：一个该去捡弹药
+ * 或者按 R，另一个只要等一下。抖动是同一下，但装填还会画一圈倒计时。
+ */
+export type HotbarRejectReason = 'empty' | 'reloading';
+
 export interface HotbarCooldownState {
   readonly itemType: string;
-  /** 还剩多少没走完，[0, 1]。1 是刚进冷却，0 是好了。 */
+  /** 还剩多少没走完，[0, 1]。1 是刚开始，0 是好了。 */
   readonly remainingRatio: number;
+  /**
+   * 这一圈说的是哪一件事：刚打完的冷却，还是正在装弹。
+   *
+   * 同一个环、两种颜色，玩家不用学两套记号——它们回答的是同一个问题「这一格现在
+   * 能不能按」。省略等同于冷却。
+   */
+  readonly kind?: 'cooldown' | 'reload';
 }
 
 function slotState(slot: HotbarSlotView): HotbarSlotState {
@@ -169,7 +184,7 @@ export class HotbarBar {
         if (slot.itemType !== cooling.itemType) continue;
         slot.dial.hidden = false;
         slot.dial.style.setProperty('--hotbar-progress', `${Math.round(cooling.remainingRatio * 100)}%`);
-        slot.button.dataset.progress = 'cooldown';
+        slot.button.dataset.progress = cooling.kind ?? 'cooldown';
       }
     }
 
@@ -185,6 +200,21 @@ export class HotbarBar {
       held.dial.dataset.charged = String(progress.mode === 'charge' && progress.ratio >= 1);
     }
     this.syncPlate();
+  }
+
+  /**
+   * 这一下按不动：让手上那一格抖一下。
+   *
+   * 用重启动画而不是 CSS 类的开关：连着按两下要抖两下，而一个类留在那里第二下
+   * 什么都不会发生。先摘掉再强制回流，浏览器才会把这段动画从头放一次。
+   */
+  public rejectUse(_reason: HotbarRejectReason): void {
+    const held = this.heldSlot;
+    if (!held) return;
+    held.button.classList.remove('is-rejected');
+    // 读一次布局强制回流：不读的话浏览器会把「摘掉再加上」合并成什么都没发生。
+    void held.button.offsetWidth;
+    held.button.classList.add('is-rejected');
   }
 
   public dispose(): void {

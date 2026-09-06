@@ -191,8 +191,12 @@ function hotbarHarness() {
   let clock = 0;
   const inventory = new InventoryComponent({ slotCapacity: 8, hotbarCapacity: 9 });
   inventory.add('wood-bow', 1);
+  inventory.add('arrow', 5);
   inventory.assignHotbarSlot(0, 'wood-bow');
   inventory.setActiveHotbarSlot(0);
+  // 空着的弓现在按不动，装填期间也按不动：这一份测的是圈，不是弹药。
+  inventory.reloadFrom({ kind: 'hotbar', slotIndex: 0 }, 0);
+  clock += 2000;
   const controller = new HotbarController(input, {
     getInventory: () => inventory,
     getHeldActorId: () => 'held-bow',

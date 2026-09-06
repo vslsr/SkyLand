@@ -114,7 +114,8 @@
           "additionalProperties": false,
           "required": [
             "accepts",
-            "capacity"
+            "capacity",
+            "reloadSeconds"
           ],
           "properties": {
             "accepts": {
@@ -132,6 +133,12 @@
               "type": "integer",
               "minimum": 1,
               "maximum": 999
+            },
+            "reloadSeconds": {
+              "description": "装一次弹要多久，秒。它是弹药位的属性，不是使用的属性——装填慢的是这把武器，和它打一发要蓄多久、隔多久才能再打无关。装填期间这一格按不动，手动拖进去的那一次也一样。",
+              "type": "number",
+              "minimum": 0,
+              "maximum": 10
             }
           }
         },

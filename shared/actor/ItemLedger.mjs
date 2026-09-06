@@ -208,12 +208,23 @@ export class ItemLedger {
    * 稳定排一次），账本这一层保持「谁先进来谁在前」，服务端重启前后一致。
    * slotCost 与分类两端都能从物品目录查到，不进快照。
    */
-  snapshot() {
-    return [...this.slots, ...this.pooled].map(({ itemType, quantity, ammo }) => ({
-      itemType,
-      quantity,
-      ...(ammo ? { ammo: { ...ammo } } : {}),
-    }));
+  /**
+   * @param {number} [nowSeconds] 现在是服务端的第几秒。给了它，正在装填的那一格
+   *   会带上**还剩几秒**——发剩余而不是发那个绝对时刻，接收方就不必先和服务端对表。
+   */
+  snapshot(nowSeconds) {
+    return [...this.slots, ...this.pooled].map(({ itemType, quantity, ammo, reloadUntil }) => {
+      const remaining = Number.isFinite(nowSeconds) && Number.isFinite(reloadUntil)
+        ? Math.max(0, reloadUntil - nowSeconds)
+        : 0;
+      return {
+        itemType,
+        quantity,
+        ...(ammo ? { ammo: { ...ammo } } : {}),
+        // 装完了就不发这一条：一条恒为 0 的字段只会让每一格都多几个字节。
+        ...(remaining > 0 ? { reloadSeconds: Math.round(remaining * 100) / 100 } : {}),
+      };
+    });
   }
 
   /**
@@ -221,7 +232,7 @@ export class ItemLedger {
    *
    * @returns 内容是否真的变了，供界面决定要不要重画。
    */
-  applySnapshot(entries) {
+  applySnapshot(entries, nowSeconds) {
     const source = Array.isArray(entries) ? entries : [];
     const slots = [];
     const pooled = [];
@@ -236,6 +247,10 @@ export class ItemLedger {
       };
       const ammo = sanitizeAmmo(entry?.ammo, definition, this.catalog);
       if (ammo) stack.ammo = ammo;
+      // 还剩几秒 → 本地时钟上的那个时刻。两端各自用自己的表算「还有多久」，
+      // 不必对表：这一段短得对得起这点误差，而对表是另一整套机制。
+      const remaining = Number(entry?.reloadSeconds);
+      if (Number.isFinite(nowSeconds) && remaining > 0) stack.reloadUntil = nowSeconds + remaining;
       (definition.pooled ? pooled : slots).push(stack);
     }
     const changed = !this.matches(slots, pooled);
