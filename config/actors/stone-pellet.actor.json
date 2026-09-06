@@ -7,7 +7,7 @@
       "speed": 40,
       "radius": 0.06,
       "minimumFlightSeconds": 0.1,
-      "lingerSeconds": 0.9
+      "lingerSeconds": 0.35
     },
     "replicationPolicy": {
       "mode": "aoi",

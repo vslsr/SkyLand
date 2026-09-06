@@ -14,7 +14,12 @@ import { INTERPOLATION_DELAY_MS } from '../shared/networkTuning.mjs';
 import type { SnapshotActor } from '../src/network/protocol';
 import { RenderTransformBuffer } from '../src/render/RenderTransformBuffer';
 import type { SceneDefinition } from '../src/scenes/data/SceneDefinition';
-import { createTestActorSystem, renderProxyOf, stepActorFrame } from './renderProxyProbe';
+import {
+  createTestActorSystem,
+  renderProxyOf,
+  renderRootOf,
+  stepActorFrame,
+} from './renderProxyProbe';
 
 /**
  * 射出去那支箭在客户端这一侧是什么（设计稿 `@w 木弓` 的 `A`）。
@@ -39,6 +44,13 @@ const ARROW_RENDER = {
   inkColor: '#2f2419',
 } as const;
 
+const PELLET_RENDER = {
+  model: 'line-art-pellet',
+  radius: 0.075,
+  stoneColor: '#b9b4a8',
+  inkColor: '#4a453e',
+} as const;
+
 const definition = {
   schemaVersion: 1,
   id: 'projectile-probe',
@@ -53,6 +65,14 @@ const definition = {
     components: {
       projectile: { speed: 34, radius: PROJECTILE_RADIUS, minimumFlightSeconds: 0.12, lingerSeconds: 1.6 },
       render: ARROW_RENDER,
+    },
+  }, {
+    // 弹弓打出去那颗石子：和箭同一条路，只是撞上就碎。
+    schemaVersion: 1,
+    id: 'stone-pellet',
+    components: {
+      projectile: { speed: 40, radius: 0.06, minimumFlightSeconds: 0.1, lingerSeconds: 0.35 },
+      render: PELLET_RENDER,
     },
   }, {
     // 被射中的那一个。这里只需要它是个画得出来、走得动的 Actor。
@@ -79,6 +99,42 @@ const IMPACT = { x: 0, y: 0, z: 22 };
 /** 出发那一刻的服务端秒数。测试里的服务端时钟和本地时钟对齐，见 `createSystem`。 */
 const STARTED_AT = 0.5;
 const FLIGHT_SECONDS = 1;
+
+function projectileSnapshot(
+  travel: number,
+  stopped: boolean,
+  archetypeId: string,
+  id: string,
+): SnapshotActor {
+  const point = ballisticArcPoint(arc(), travel, { x: 0, y: 0, z: 0 });
+  const transform = { x: point.x, y: point.y, z: point.z, yaw: 0 };
+  return {
+    id,
+    archetypeId,
+    parentActorId: null,
+    revision: 1,
+    transform,
+    localTransform: transform,
+    projectile: {
+      originX: ORIGIN.x,
+      originY: ORIGIN.y,
+      originZ: ORIGIN.z,
+      impactX: IMPACT.x,
+      impactY: IMPACT.y,
+      impactZ: IMPACT.z,
+      ratio: 1,
+      startedAt: STARTED_AT,
+      flightSeconds: FLIGHT_SECONDS,
+      travel,
+      stopped,
+    },
+  } as unknown as SnapshotActor;
+}
+
+/** 弹弓那颗石子。和箭走同一条路，区别只在停住那一刻。 */
+function pellet(travel: number, stopped = false): SnapshotActor {
+  return projectileSnapshot(travel, stopped, 'stone-pellet', 'pellet-1');
+}
 
 function arrow(travel: number, stopped = false): SnapshotActor {
   const point = ballisticArcPoint(arc(), travel, { x: 0, y: 0, z: 0 });
@@ -303,4 +359,34 @@ test('模型锚在箭尖：权威位置就是这一箭的前端，杆挂在它�
     .dot(box.max.clone().sub(origin));
   assert.ok(ahead < 1e-3, `有一段跑到箭尖前面去了：${ahead}`);
   assert.ok(box.min.distanceTo(box.max) > 0.5, '箭还是那么长，只是挪了锚点');
+});
+
+test('石子画得出来，落地那一刻收起模型、炸一团烟尘', () => {
+  // 石子的模型和箭是两回事，但走的是同一条复制路径。先确认它真的建得出来——
+  // 它一度整个不显示，因为 `createSimpleCollisionFromRender` 不认得这个模型，
+  // 模型工厂在建到一半时抛了。
+  const clock = { now: 1_000 };
+  const system = createSystem(clock);
+  const root = renderRootOf(system);
+  system.syncSnapshots([pellet(0.4)], clock.now, clock.now);
+  stepActorFrame(system, 0, 0);
+  const proxy = renderProxyOf(system, 'pellet-1');
+  assert.ok(proxy, '石子画得出来');
+  assert.equal(proxy!.visualRoot.visible, true, '飞着的时候看得见');
+  const puffsBefore = root.getObjectByName('dust-puffs');
+  assert.equal(puffsBefore, undefined, '还没落地就不该有烟尘');
+
+  // 落地：模型当场收起来。一支箭停住之后还是一支箭，一颗石子停住之后什么都不剩。
+  clock.now += 200;
+  system.syncSnapshots([pellet(1, true)], clock.now, clock.now);
+  stepActorFrame(system, 1 / 60, 0.2);
+  assert.equal(proxy!.visualRoot.visible, false, '石子不留在地上');
+  const puffs = root.getObjectByName('dust-puffs');
+  assert.ok(puffs, '炸出了一团烟尘');
+  assert.equal(puffs!.children.length, 1, '一次命中只炸一团');
+
+  // 碎只碎一次：停住之后那一位一直是 1，不该每帧再炸一团。
+  stepActorFrame(system, 1 / 60, 0.22);
+  assert.equal(puffs!.children.length, 1);
+  system.dispose();
 });

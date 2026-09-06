@@ -7,7 +7,10 @@ import {
   type TransformComponent,
 } from '../../../shared/actor/index.mjs';
 import { ballisticArcPoint, ballisticArcTangent } from '../../../shared/ballistics/index.mjs';
-import { PARAM_PROJECTILE_PITCH } from '../../render/RenderVisualParams';
+import {
+  PARAM_PROJECTILE_PITCH,
+  PARAM_PROJECTILE_STOPPED,
+} from '../../render/RenderVisualParams';
 import type { RenderTransformBuffer } from '../../render/RenderTransformBuffer';
 import {
   RENDER_PROXY_COMPONENT,
@@ -72,6 +75,13 @@ export class ClientProjectileSystem {
       }
       const proxy = actor.getComponent(RENDER_PROXY_COMPONENT) as RenderProxyComponent | undefined;
       if (!proxy) continue;
+      // 停住那一刻要发生什么表现归渲染侧：箭插在那儿不动，石子碎成一团烟尘。
+      // 这一位只说「停了」。
+      this.transforms.writeParam(
+        proxy.proxyId,
+        PARAM_PROJECTILE_STOPPED,
+        projectile.stopped ? 1 : 0,
+      );
       ballisticArcTangent(projectile, travel, this.tangent);
       // 模型沿 +Z 躺着；绕 X 的**正**旋转把 +Z 压向下方，所以抬头是负角。
       this.transforms.writeParam(

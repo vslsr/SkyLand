@@ -192,6 +192,16 @@ export interface DropRollVisualRig {
  */
 export interface ProjectileVisualRig {
   readonly pitchRoot: THREE.Group;
+  /**
+   * 撞上就碎：停住那一刻把模型收起来，改成一团烟尘。
+   *
+   * 箭和石子的差别就在这一位。一支箭停住之后**还是一支箭**——它插在墙上、插在
+   * 挨打的那只身上，是命中留下的痕迹；一颗石子停住之后什么都不该剩，地上凭空
+   * 多出一颗悬着的石头只会让人以为它卡住了。
+   *
+   * 碎成什么样不在这里：那是渲染世界的事（`ThreeDustPuffVisual`）。
+   */
+  readonly shattersOnImpact?: boolean;
 }
 
 /**

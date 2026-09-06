@@ -10,8 +10,10 @@ export type PelletRender = Extract<ActorRenderDefinition, { model: 'line-art-pel
 /**
  * 弹弓打出去的那颗石子。
  *
- * 它不像箭那样有头有尾，所以**没有 `projectileRig`**：一颗石子没有「箭尖」，也就
- * 没有俯仰可摆。渲染侧因此不会给它建那套朝向表现——不是漏了，是它本来就不需要。
+ * 它不像箭那样有头有尾，所以**俯仰对它没有意义**：一颗石子没有「箭尖」，转不转
+ * 都是同一颗石子。它仍然给出 `projectileRig`，但那是为了另一件事——`shattersOnImpact`：
+ * 撞上那一刻把自己收起来，换成一团烟尘。一支箭停住之后还是一支箭（插在那儿是命中
+ * 的痕迹），一颗石子停住之后什么都不该剩。
  *
  * 用一个低面数的多面体而不是球：线稿靠轮廓说话，球描出来是一个圆圈，看不出是块石头。
  */
@@ -40,5 +42,6 @@ export function createPelletModel(
     length: definition.radius * 2,
     width: definition.radius * 2,
     simpleCollision: createSimpleCollisionFromRender(definition),
+    projectileRig: { pitchRoot: visualRoot, shattersOnImpact: true },
   };
 }

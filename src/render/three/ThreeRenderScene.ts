@@ -77,6 +77,7 @@ import { ThreeSlimeLegVisual } from './ThreeSlimeLegVisual';
 import { ThreeAttachmentVisual } from './ThreeAttachmentVisual';
 import { ThreeBuildPreviewVisual } from './ThreeBuildPreviewVisual';
 import { ThreeContainerLidVisual } from './ThreeContainerLidVisual';
+import { ThreeDustPuffVisual } from './ThreeDustPuffVisual';
 import { ThreeSlingshotVisual } from './ThreeSlingshotVisual';
 import { ThreeWoodBowVisual } from './ThreeWoodBowVisual';
 import { ThreeDropRollVisual } from './ThreeDropRollVisual';
@@ -223,6 +224,13 @@ export class ThreeRenderScene implements RenderScene {
    * 这一侧要做的只剩「把它摆成它正在去的方向」。
    */
   private readonly projectiles = new Map<ProxyId, ThreeProjectileVisual>();
+  /** 读弹药世界坐标用的暂存，逐帧复用不分配。 */
+  private readonly projectileWorld: RenderTransform = { x: 0, y: 0, z: 0, yaw: 0 };
+  /**
+   * 石子砸在地上那一小团烟尘。**第一团到了才建**：一整池线圈，而绝大多数场景
+   * 一团都不会有——和飘字同一个取向。
+   */
+  private dustPuffs?: ThreeDustPuffVisual;
   /**
    * 能力实验室的表现（引擎迁移路线图 第 3 步）。
    *
@@ -281,6 +289,15 @@ export class ThreeRenderScene implements RenderScene {
     this.ballisticPreview.setState(state);
   }
 
+
+  /** 在这一点炸一小团烟尘。渲染世界自己调，不过边界。 */
+  private spawnDustPuff(x: number, y: number, z: number): void {
+    if (!this.dustPuffs) {
+      this.dustPuffs = new ThreeDustPuffVisual();
+      this.root.add(this.dustPuffs.root);
+    }
+    this.dustPuffs.spawn(x, y, z);
+  }
 
   public spawnHealthPopup(x: number, y: number, z: number, amount: number): void {
     if (!this.healthPopups) {
@@ -597,7 +614,18 @@ export class ThreeRenderScene implements RenderScene {
     // 飘字和别的表现一样按渲染帧走：玩法侧只在血量变的那一帧发一条命令。
     this.healthPopups?.update(deltaSeconds);
     // 箭的俯仰：玩法侧从整条弧上解析求出来的切线，这一侧只负责把它摆上去。
-    for (const projectile of this.projectiles.values()) projectile.update(transforms);
+    // 撞上就碎的那一类（石子）在停住那一刻回报一次，烟尘就炸在它停住的地方——
+    // 烟尘不属于那个 proxy（模型已经收起来了），它属于世界。
+    for (const [id, projectile] of this.projectiles) {
+      if (!projectile.update(transforms)) continue;
+      transforms.readTransform(id, this.projectileWorld);
+      this.spawnDustPuff(
+        this.projectileWorld.x,
+        this.projectileWorld.y,
+        this.projectileWorld.z,
+      );
+    }
+    this.dustPuffs?.update(deltaSeconds);
     // 权威 yaw 取的是 submitTransforms 刚摆好的 root 角度：外壳要抵消的正是
     // 「root 这一级实际被转了多少」，父子情况下那已经是相对 yaw。
     for (const [id, slime] of this.slimeVisuals) {
@@ -900,6 +928,8 @@ export class ThreeRenderScene implements RenderScene {
 
   public dispose(): void {
     this.#disposeHoverHelper();
+    this.dustPuffs?.dispose();
+    this.dustPuffs = undefined;
     this.healthPopups?.dispose();
     this.healthPopups = undefined;
     this.ballisticPreview?.dispose();

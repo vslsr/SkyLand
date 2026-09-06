@@ -228,6 +228,17 @@ export function createSimpleCollisionFromRender(render, dropMotion) {
       maximumY: length * 0.02,
     });
   }
+  if (model === 'line-art-pellet') {
+    // 弹丸和箭一样不装碰撞体（飞在空中的石子不该挡住走路的人），但接口对所有模型
+    // 是同一个形状，所以仍然给得出一个包住它的小方盒。
+    const radius = positiveNumber(render.radius, 0.075);
+    return createSimpleCollisionDefinition({
+      halfWidth: radius,
+      halfLength: radius,
+      minimumY: -radius,
+      maximumY: radius,
+    });
+  }
   throw new TypeError(`无法为模型 ${model || '<unknown>'} 生成简易碰撞`);
 }
 

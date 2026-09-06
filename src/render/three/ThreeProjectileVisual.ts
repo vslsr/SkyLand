@@ -1,6 +1,7 @@
 import type { ProjectileVisualRig } from '../../models/actors/ActorVisualModel';
 import type { ProxyId } from '../RenderScene';
 import type { RenderTransformBuffer } from '../RenderTransformBuffer';
+import { PARAM_PROJECTILE_STOPPED } from '../RenderVisualParams';
 import { PARAM_PROJECTILE_PITCH } from '../RenderVisualParams';
 
 /**
@@ -14,6 +15,11 @@ import { PARAM_PROJECTILE_PITCH } from '../RenderVisualParams';
  * ——箭插在走动的史莱姆身上时，它会随着那只史莱姆走路慢慢摆平，而一支扎进身体的
  * 箭该保持扎进去的姿态。
  *
+ * **撞上就碎的那一类**（弹弓的石子）在停住那一刻把模型收起来，改成一团烟尘：
+ * 一支箭停住之后还是一支箭——它插在墙上、插在挨打的那只身上，是命中留下的痕迹；
+ * 一颗石子停住之后什么都不该剩，地上凭空多出一颗悬着的石头只会让人以为它卡住了。
+ * 碎不碎由模型自己说（`shattersOnImpact`），碎成什么样归渲染世界。
+ *
  * 每支箭一个实例，随 proxy 建、随 proxy 销毁；上界就是同屏飞着的箭数。
  */
 export class ThreeProjectileVisual {
@@ -22,7 +28,19 @@ export class ThreeProjectileVisual {
     private readonly rig: ProjectileVisualRig,
   ) {}
 
-  public update(transforms: RenderTransformBuffer): void {
+  /** 已经碎过了没有。碎只碎一次：停住之后那一位一直是 1。 */
+  private shattered = false;
+
+  /**
+   * @returns 这一帧是不是**刚刚**碎的。真的话由调用方在它的位置上炸一团烟尘——
+   *   烟尘不属于这个 proxy（模型都收起来了），它属于世界。
+   */
+  public update(transforms: RenderTransformBuffer): boolean {
     this.rig.pitchRoot.rotation.x = transforms.readParam(this.id, PARAM_PROJECTILE_PITCH);
+    if (!this.rig.shattersOnImpact || this.shattered) return false;
+    if (transforms.readParam(this.id, PARAM_PROJECTILE_STOPPED) < 0.5) return false;
+    this.shattered = true;
+    this.rig.pitchRoot.visible = false;
+    return true;
   }
 }

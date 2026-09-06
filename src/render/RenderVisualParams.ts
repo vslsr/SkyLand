@@ -212,5 +212,14 @@ export const PARAM_SLIME_IMPACT_IMPULSE = 55;
  */
 export const PARAM_PROJECTILE_PITCH = 56;
 
+/**
+ * 这一发停住了没有（0 / 1）。
+ *
+ * 「停住」是权威事实（撞在哪儿、什么时候停只有服务端知道），而**停住那一刻要发生
+ * 什么表现**是渲染世界自己的事：箭插在那儿不动，石子当场碎成一团烟尘。所以过边界
+ * 的只有这一位，碎没碎、怎么碎由模型自己说（`ProjectileVisualRig.shattersOnImpact`）。
+ */
+export const PARAM_PROJECTILE_STOPPED = 57;
+
 /** 每个 proxy 槽位的参数个数。新增参数就在上面加常量并把这里加一。 */
-export const RENDER_VISUAL_PARAM_COUNT = 57;
+export const RENDER_VISUAL_PARAM_COUNT = 58;
