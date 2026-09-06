@@ -10,6 +10,7 @@ import {
   isCreatureChunk,
   isNightWindow,
   packSize,
+  pickSpawnVariant,
   sampleSpawnPoint,
 } from '../../shared/world/creatureSpawn.mjs';
 import { CHUNK_SIZE, DEFAULT_WORLD_SEED } from '../../shared/world/worldConfig.mjs';
@@ -180,4 +181,33 @@ test('刷新区块的粒度就是 chunk：同一个 chunk 里的点答案一致'
     const insideZ = Math.floor((chunkZ * CHUNK_SIZE + offset) / CHUNK_SIZE);
     assert.equal(isCreatureChunk(DEFAULT_WORLD_SEED, insideX, insideZ, 4), expected);
   }
+});
+
+test('带权变体按权重切分区间，顺序是配置契约的一部分', () => {
+  const variants = [{ id: 'green', weight: 4 }, { id: 'dusk', weight: 2 }, { id: 'clay', weight: 3 }];
+  const counts = { green: 0, dusk: 0, clay: 0 };
+  const total = 9000;
+  for (let index = 0; index < total; index += 1) {
+    counts[pickSpawnVariant(index / total, variants).id] += 1;
+  }
+  // 权重 4:2:3 → 各占九分之四、九分之二、九分之三。
+  assert.equal(counts.green / total, 4 / 9);
+  assert.equal(counts.dusk / total, 2 / 9);
+  assert.equal(counts.clay / total, 3 / 9);
+
+  // 两个端点都要落在表内，不能越界成 undefined。
+  assert.equal(pickSpawnVariant(0, variants).id, 'green');
+  assert.equal(pickSpawnVariant(1, variants).id, 'clay');
+  assert.equal(pickSpawnVariant(-5, variants).id, 'green');
+});
+
+test('变体表坏了就是没有变体，而不是刷出半只东西', () => {
+  assert.equal(pickSpawnVariant(0.5, []), undefined);
+  assert.equal(pickSpawnVariant(0.5, undefined), undefined);
+  assert.equal(pickSpawnVariant(0.5, [{ weight: 0 }]), undefined, '零权重的表选不出东西');
+  assert.equal(pickSpawnVariant(0.5, [{ weight: 1.5 }]), undefined, '权重必须是整数');
+  // 只有一项时永远是它，掷多少都一样。
+  const only = [{ id: 'green', weight: 1 }];
+  assert.equal(pickSpawnVariant(0, only).id, 'green');
+  assert.equal(pickSpawnVariant(0.999, only).id, 'green');
 });

@@ -14,6 +14,7 @@ import {
   isCreatureChunk,
   isNightWindow,
   packSize,
+  pickSpawnVariant,
   sampleSpawnPoint,
   spawnChunkOf,
 } from '../../shared/world/creatureSpawn.mjs';
@@ -74,12 +75,11 @@ export class SceneCreatureSpawner {
     this.scene = scene;
     this.random = createRandom(toWorldSeed(scene.worldSeed) ^ 0x63_7275_65);
     /**
-     * 每条规则一份运行态。规则本身来自场景数据且不可变，这里只挂上判据要用的
-     * 查询、「下一次什么时候刷」和「现在有哪些是它刷出来的」。
+     * 每条规则一份运行态。规则本身来自场景数据且不可变，这里只挂上解析好的
+     * 变体、「下一次什么时候刷」和「现在有哪些是它刷出来的」。
      * @type {Array<{
      *   rule: object,
-     *   archetype: object,
-     *   world: object,
+     *   variants: Array<{ weight: number, archetype: object, world: object }>,
      *   secondsUntilCycle: number,
      *   liveIds: Set<string>,
      * }>}
@@ -92,26 +92,35 @@ export class SceneCreatureSpawner {
     // 没有台阶地形就没有「这一格是什么」可问，整套刷新在这张图上不存在。
     if (!scene.terrainCellCodeAt) return;
     for (const rule of rules) {
-      const archetype = scene.actorWorld.context.archetypes?.get(rule.archetypeId);
-      // 绑定的合法性在 SceneCatalog 就校验过了；这里只是不让一个坏配置每个
-      // 周期炸一次。
-      if (!archetype) continue;
-      // 足迹取自这只生物**自己那份碰撞盒**的推导函数，不在这里另算一遍：
-      // 「刷得进去」和「站得住」必须是同一个圆，否则会刷出一只当场被推开的怪。
-      const collision = createSimpleCollisionFromRender(
-        archetype.components.render,
-        archetype.components.dropMotion,
-      );
+      const variants = [];
+      for (const variant of rule.variants) {
+        const archetype = scene.actorWorld.context.archetypes?.get(variant.archetypeId);
+        // 绑定的合法性在 SceneCatalog 就校验过了；这里只是不让一个坏配置每个
+        // 周期炸一次。
+        if (!archetype) continue;
+        // 足迹取自这只生物**自己那份碰撞盒**的推导函数，不在这里另算一遍：
+        // 「刷得进去」和「站得住」必须是同一个圆，否则会刷出一只当场被推开的怪。
+        // 每个变体各存一份：同一个种群里的胖瘦不一定一样。
+        const collision = createSimpleCollisionFromRender(
+          archetype.components.render,
+          archetype.components.dropMotion,
+        );
+        variants.push({
+          weight: variant.weight,
+          archetype,
+          // 判据要问的四个查询按变体建**一次**。一个周期要试十几个候选点，
+          // 每次现建一份就是十几个只活一瞬间的闭包。
+          world: this.createWorldQueries({
+            radius: Math.min(collision.halfWidth, collision.halfLength),
+            minimumY: collision.minimumY,
+            maximumY: collision.maximumY,
+          }),
+        });
+      }
+      if (variants.length === 0) continue;
       this.entries.push({
         rule,
-        archetype,
-        // 判据要问的四个查询按规则建**一次**。一个周期要试十几个候选点，
-        // 每次现建一份就是十几个只活一瞬间的闭包。
-        world: this.createWorldQueries({
-          radius: Math.min(collision.halfWidth, collision.halfLength),
-          minimumY: collision.minimumY,
-          maximumY: collision.maximumY,
-        }),
+        variants,
         // 错开首次刷新，房间开局不会在同一秒把所有种类一起放出来。
         secondsUntilCycle: this.random() * rule.cycleSeconds,
         liveIds: new Set(),
@@ -185,7 +194,10 @@ export class SceneCreatureSpawner {
     );
     const centerX = this.scratchPoint.x;
     const centerZ = this.scratchPoint.z;
-    if (!this.canPlaceAt(entry, players, centerX, centerZ)) return;
+    // 长相**在判据之前**掷：足迹是按变体存的，胖一点的那种未必塞得进瘦的那种
+    // 站得住的地方。先判后掷就会把一只胖的塞进一个只够瘦的站的缝里。
+    const leadVariant = this.pickVariant(entry);
+    if (!this.canPlaceAt(entry, players, centerX, centerZ, leadVariant)) return;
 
     const packTotal = packSize(this.random(), 1, rule.packMaximum);
     for (let index = 0; index < packTotal; index += 1) {
@@ -193,11 +205,20 @@ export class SceneCreatureSpawner {
       // 第一只落在刷新点上，同伴散在周围。**同伴各自再过一遍完整判据**，不是只
       // 沾队长的光：一群怪不该因为「队长站得下」就整队站进树里，也不该因为队长
       // 站在刷新区块的边上就把半群撒进旁边那个不出怪的 chunk。
+      //
+      // 长相也是逐只掷的：一群里混着几种颜色，比一群整齐划一的克隆更像是这片
+      // 地自己长出来的。
+      const variant = index === 0 ? leadVariant : this.pickVariant(entry);
       const x = index === 0 ? centerX : centerX + (this.random() * 2 - 1) * PACK_SCATTER_RADIUS;
       const z = index === 0 ? centerZ : centerZ + (this.random() * 2 - 1) * PACK_SCATTER_RADIUS;
-      if (index > 0 && !this.canPlaceAt(entry, players, x, z)) continue;
-      this.spawnOne(entry, x, this.scratchCell.y, z);
+      if (index > 0 && !this.canPlaceAt(entry, players, x, z, variant)) continue;
+      this.spawnOne(entry, variant, x, this.scratchCell.y, z);
     }
+  }
+
+  /** 掷一个长相。权重表在场景数据里，掷的是房间自己的骰子。 */
+  pickVariant(entry) {
+    return pickSpawnVariant(this.random(), entry.variants) ?? entry.variants[0];
   }
 
   /**
@@ -207,7 +228,7 @@ export class SceneCreatureSpawner {
    * 「刷出来的都在刷新区块里」这句话就不再成立，而它正是这套机制对玩家的承诺。
    * 通过时 `scratchCell` 里留着落地高度。
    */
-  canPlaceAt(entry, players, x, z) {
+  canPlaceAt(entry, players, x, z, variant = entry.variants[0]) {
     const rule = entry.rule;
     const { chunkX, chunkZ } = spawnChunkOf(x, z);
     // 出怪的地图和世界本身一样是种子的纯函数：那一片地一直出，另一片一直不出。
@@ -218,18 +239,18 @@ export class SceneCreatureSpawner {
     this.scratchPoint.x = x;
     this.scratchPoint.z = z;
     if (this.nearestPlayerDistance(this.scratchPoint, players) < rule.minimumDistance) return false;
-    return canSpawnCreatureAt(entry.world, x, z, this.scratchCell);
+    return canSpawnCreatureAt(variant.world, x, z, this.scratchCell);
   }
 
-  /** 放下一只。id 带着规则名，调试时一眼看得出它是谁刷的。 */
-  spawnOne(entry, x, y, z) {
+  /** 放下一只。id 带着原型名，调试时一眼看得出它是谁刷的。 */
+  spawnOne(entry, variant, x, y, z) {
     const scene = this.scene;
-    const id = `spawn-${entry.rule.archetypeId}-${(scene.nextSpawnedCreatureId += 1).toString(36)}`;
+    const id = `spawn-${variant.archetype.id}-${(scene.nextSpawnedCreatureId += 1).toString(36)}`;
     const actor = createServerActor({
       id,
-      archetypeId: entry.archetype.id,
+      archetypeId: variant.archetype.id,
       localTransform: { position: [x, y, z], yaw: this.random() * Math.PI * 2 },
-    }, entry.archetype);
+    }, variant.archetype);
     scene.actorWorld.addActor(actor);
     entry.liveIds.add(id);
     return actor;
