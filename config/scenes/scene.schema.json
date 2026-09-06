@@ -338,12 +338,22 @@
           "items": {
             "type": "object",
             "additionalProperties": false,
-            "required": ["archetype", "capPerPlayer"],
+            "required": ["variants", "capPerPlayer"],
             "properties": {
-              "archetype": {
-                "description": "刷出来的是哪种 Actor。原型会自动进入场景原型表，不必在 runtimeActorArchetypes 里重复写。",
-                "type": "string",
-                "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+              "variants": {
+                "description": "这个种群长什么样的带权列表。同一份配额、同一批刷新区块、同一套判据，长相是落地那一刻掷出来的。原型会自动进入场景原型表，不必在 runtimeActorArchetypes 里重复写。",
+                "type": "array",
+                "minItems": 1,
+                "maxItems": 8,
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["archetype", "weight"],
+                  "properties": {
+                    "archetype": { "type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$" },
+                    "weight": { "type": "integer", "minimum": 1, "maximum": 1000 }
+                  }
+                }
               },
               "capPerPlayer": { "description": "每名在场玩家给这种生物的配额。房间里没有人时配额是 0。", "type": "integer", "minimum": 1, "maximum": 32 },
               "maximumPerRoom": { "description": "全房间的硬上限，压过按人头算出来的配额。", "type": "integer", "minimum": 1, "maximum": 256 },

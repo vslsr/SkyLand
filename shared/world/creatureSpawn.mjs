@@ -102,6 +102,40 @@ export function packSize(roll, minimum, maximum) {
 }
 
 /**
+ * 从带权变体表里掷一个。
+ *
+ * 刷出来的是「一只 legged slime」，而不是「一只某某色的 legged slime」：同一个
+ * 种群共用一份配额、一份刷新区块、一套判据，长什么样是落地那一刻掷出来的。
+ * 分成几条规则也能凑出多种外观，但那样每一种各占一份配额，世界里就永远是
+ * 「每种各两只」，而不是「一共几只，样子各不相同」。
+ *
+ * 与世界物件的 `selectWorldPropVariant` 是两件事，别拿来复用：那一个必须由
+ * 种子确定性推导（两端各算一次要得到同一棵树），这一个是房间掷的骰子——刷出来
+ * 的个体本来就不可推导，它整只都要复制过去。
+ *
+ * 权重按顺序切分 [0, 总权重)，所以数组顺序是配置契约的一部分。
+ *
+ * @template {{ weight: number }} T
+ * @param {number} roll 0..1
+ * @param {ReadonlyArray<T>} variants
+ * @returns {T | undefined}
+ */
+export function pickSpawnVariant(roll, variants) {
+  if (!Array.isArray(variants) || variants.length === 0) return undefined;
+  let totalWeight = 0;
+  for (const variant of variants) {
+    if (!Number.isInteger(variant?.weight) || variant.weight <= 0) return undefined;
+    totalWeight += variant.weight;
+  }
+  let ticket = Math.max(0, Math.min(0.999999, Number(roll) || 0)) * totalWeight;
+  for (const variant of variants) {
+    if (ticket < variant.weight) return variant;
+    ticket -= variant.weight;
+  }
+  return variants.at(-1);
+}
+
+/**
  * 在以某个玩家为中心的圆环里取一个候选点。
  *
  * 环而不是圆：内圈是「别在人脸上刷」（Minecraft 的 24 格），外圈是「刷了也得有人

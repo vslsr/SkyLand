@@ -1,0 +1,56 @@
+{
+  "$schema": "./actor.schema.json",
+  "schemaVersion": 1,
+  "id": "clay-legged-slime",
+  "components": {
+    "navigation": {
+      "speed": 1.3,
+      "turnSpeed": 4.5,
+      "stepUp": 1.05,
+      "maxDrop": 2.2,
+      "arriveRadius": 1,
+      "repathSeconds": 1,
+      "goalTolerance": 1.4,
+      "searchRadiusCells": 12,
+      "maxVisitedNodes": 240,
+      "malus": {
+        "danger": 24
+      },
+      "chase": {
+        "senseRadius": 9,
+        "giveUpRadius": 15,
+        "keepDistance": 1.2
+      }
+    },
+    "health": {
+      "maximum": 85,
+      "corpseSeconds": 6
+    },
+    "replicationPolicy": {
+      "mode": "aoi",
+      "radiusChunks": 2
+    },
+    "render": {
+      "model": "line-art-legged-slime",
+      "radius": 0.46,
+      "hipHeight": 0.52,
+      "legSpread": 0.15,
+      "legCount": 2,
+      "thighLength": 0.32,
+      "shinLength": 0.32,
+      "legThickness": 0.031,
+      "footLength": 0.12,
+      "stepLength": 0.22,
+      "stepHeight": 0.13,
+      "stepDuration": 0.24,
+      "membraneColor": "#d0a184",
+      "middleColor": "#eed6c6",
+      "coreColor": "#8c5433",
+      "bubbleColor": "#fbefe6",
+      "inkColor": "#000000",
+      "shadowColor": "#4a2c18",
+      "legColor": "#000000",
+      "footShadowColor": "#6f6f6f"
+    }
+  }
+}

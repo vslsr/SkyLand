@@ -43,9 +43,10 @@ function placePlayer(player, x, z) {
   player.z = z;
 }
 
-test('骨骼腿史莱姆图刷的是绿色的那一种，落在玩家周围的圆环里', async () => {
+test('刷出来的落在玩家周围的圆环里，且只可能是规则列的那几种', async () => {
   const { scene, clock, rule } = await createScene();
-  assert.equal(rule.archetypeId, 'green-legged-slime');
+  const allowed = new Set(rule.variants.map((variant) => variant.archetypeId));
+  assert.ok(allowed.has('green-legged-slime'), '绿史莱姆仍在这张图的名单里');
   scene.addPlayer({ id: 'p1', name: '猎物', slot: 0 });
   const player = scene.players.get('p1');
   placePlayer(player, 0, 0);
@@ -54,7 +55,7 @@ test('骨骼腿史莱姆图刷的是绿色的那一种，落在玩家周围的�
   const spawned = spawnedActors(scene);
   assert.ok(spawned.length > 0, '跑够几个周期总该刷出来一些');
   for (const actor of spawned) {
-    assert.equal(actor.archetypeId, 'green-legged-slime');
+    assert.ok(allowed.has(actor.archetypeId), `刷出了名单外的 ${actor.archetypeId}`);
     const transform = actor.requireComponent(TRANSFORM_COMPONENT);
     const distance = Math.hypot(transform.x - player.x, transform.z - player.z);
     // 成群刷新会让同伴散开一点，所以内圈留出散开半径的余量。
@@ -63,20 +64,76 @@ test('骨骼腿史莱姆图刷的是绿色的那一种，落在玩家周围的�
   }
 });
 
-test('刷出来的都是绿色：颜色写在原型上，不是刷新时挑的', async () => {
+test('长相写在原型上，不是刷新时挑的：绿的是绿的，紫的是紫的', async () => {
   const catalog = await catalogPromise;
   const definition = catalog.require('legged-slime');
-  const archetype = definition.actorArchetypes.find((each) => each.id === 'green-legged-slime');
-  assert.ok(archetype, '刷新引用的原型自动进了场景原型表，不用在 runtimeActorArchetypes 里重复写');
-  const render = archetype.components.render;
-  assert.equal(render.model, 'line-art-legged-slime');
-  // 膜、中层、核三层都要落在绿色那一侧，否则「绿史莱姆」只是名字绿。
-  for (const key of ['membraneColor', 'middleColor', 'coreColor']) {
-    const color = render[key];
-    const red = Number.parseInt(color.slice(1, 3), 16);
-    const green = Number.parseInt(color.slice(3, 5), 16);
-    const blue = Number.parseInt(color.slice(5, 7), 16);
-    assert.ok(green > red && green > blue, `${key} = ${color} 不是绿的`);
+  const channelsOf = (color) => [1, 3, 5].map((offset) => (
+    Number.parseInt(color.slice(offset, offset + 2), 16)
+  ));
+
+  for (const [archetypeId, dominant] of [['green-legged-slime', 1], ['dusk-legged-slime', 2]]) {
+    const archetype = definition.actorArchetypes.find((each) => each.id === archetypeId);
+    assert.ok(archetype, `${archetypeId} 自动进了场景原型表，不用在 runtimeActorArchetypes 里重复写`);
+    const render = archetype.components.render;
+    assert.equal(render.model, 'line-art-legged-slime', '同一套骨骼腿模型，只是配色不同');
+    // 膜、中层、核三层都要偏向同一个色相，否则「绿史莱姆」只是名字绿。
+    for (const key of ['membraneColor', 'middleColor', 'coreColor']) {
+      const [red, green, blue] = channelsOf(render[key]);
+      const others = [red, green, blue].filter((_, index) => index !== dominant);
+      assert.ok(
+        [red, green, blue][dominant] > Math.max(...others),
+        `${archetypeId}.${key} = ${render[key]} 的主色不对`,
+      );
+    }
+  }
+});
+
+test('同一份配额里混着几种长相：随机的是个体，不是种群', async () => {
+  const { scene, clock, rule } = await createScene();
+  assert.ok(rule.variants.length > 1, '这条用例要的就是「不止一种长相」');
+  scene.addPlayer({ id: 'p1', name: '猎物', slot: 0 });
+  const player = scene.players.get('p1');
+
+  // 换几个位置反复刷，样本才盖得住权重表。刷出来的总数仍然只受**一份**配额约束——
+  // 三种长相不是三个种群，那正是带权变体与「写三条规则」的区别。
+  const seen = new Set();
+  for (const [x, z] of [[0, 0], [200, -140], [-320, 260], [640, 480]]) {
+    placePlayer(player, x, z);
+    runTicks(scene, clock, 600);
+    for (const actor of spawnedActors(scene)) seen.add(actor.archetypeId);
+    assert.ok(
+      scene.creatureSpawner.liveCount <= rule.capPerPlayer,
+      `一份配额是 ${rule.capPerPlayer}，实际 ${scene.creatureSpawner.liveCount}`,
+    );
+  }
+  assert.ok(seen.size > 1, `应当见到不止一种长相，实际只有 ${[...seen].join(', ')}`);
+});
+
+test('无边草原上也刷：大世界这张图才是它真正要服务的地方', async () => {
+  const catalog = await catalogPromise;
+  const clock = createClock();
+  const definition = structuredClone(catalog.require('open-world'));
+  const rule = definition.gameplay.creatureSpawns[0];
+  const scene = new ServerScene(definition, { now: clock.now });
+  assert.equal(scene.creatureSpawner.enabled, true);
+  scene.addPlayer({ id: 'p1', name: '远行者', slot: 0 });
+  const player = scene.players.get('p1');
+
+  // 出生点、几公里外、两万米外各刷一轮：世界是种子推出来的，走多远都该照刷，
+  // 而数量始终封在同一份配额里。
+  for (const distance of [0, 3_000, 20_000]) {
+    placePlayer(player, distance, -distance);
+    runTicks(scene, clock, 900);
+    assert.ok(scene.creatureSpawner.liveCount > 0, `走到 ${distance} 米之后应当照样出怪`);
+    assert.ok(
+      scene.creatureSpawner.liveCount <= rule.capPerPlayer,
+      `配额是 ${rule.capPerPlayer}，实际 ${scene.creatureSpawner.liveCount}`,
+    );
+    for (const actor of spawnedActors(scene)) {
+      const transform = actor.requireComponent(TRANSFORM_COMPONENT);
+      const away = Math.hypot(transform.x - player.x, transform.z - player.z);
+      assert.ok(away <= rule.maximumDistance * 1.5, `远处的旧个体没被收走：${away.toFixed(1)}`);
+    }
   }
 });
 
@@ -201,9 +258,11 @@ test('走在流式大世界里：两万米之外照样刷，数量仍然封在�
 });
 
 test('没有配置刷新的地图一个字节都不花', async () => {
+  // 果林同样是流式大世界，只是没写 creatureSpawns：能刷和刷不刷是两件事，
+  // 一张不刷的图不该为这套机制付任何代价。
   const catalog = await catalogPromise;
   const clock = createClock();
-  const scene = new ServerScene(structuredClone(catalog.require('open-world')), { now: clock.now });
+  const scene = new ServerScene(structuredClone(catalog.require('orchard')), { now: clock.now });
   assert.equal(scene.creatureSpawner.enabled, false);
   scene.addPlayer({ id: 'p1', name: '路人', slot: 0 });
   runTicks(scene, clock, 200);

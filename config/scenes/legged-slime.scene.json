@@ -69,7 +69,20 @@
     "playerActor": { "archetype": "legged-slime" },
     "creatureSpawns": [
       {
-        "archetype": "green-legged-slime",
+        "variants": [
+          {
+            "archetype": "green-legged-slime",
+            "weight": 3
+          },
+          {
+            "archetype": "dusk-legged-slime",
+            "weight": 2
+          },
+          {
+            "archetype": "clay-legged-slime",
+            "weight": 2
+          }
+        ],
         "capPerPlayer": 5,
         "maximumPerRoom": 20,
         "cycleSeconds": 4,

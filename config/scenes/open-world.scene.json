@@ -82,6 +82,32 @@
     "runtimeActorArchetypes": [
       "ground-foundation", "wood-wall", "stone-wall", "campfire", "float-foundation", "float-wall"
     ],
+    "creatureSpawns": [
+      {
+        "variants": [
+          {
+            "archetype": "green-legged-slime",
+            "weight": 4
+          },
+          {
+            "archetype": "dusk-legged-slime",
+            "weight": 2
+          },
+          {
+            "archetype": "clay-legged-slime",
+            "weight": 3
+          }
+        ],
+        "capPerPlayer": 6,
+        "maximumPerRoom": 40,
+        "cycleSeconds": 5,
+        "attemptsPerCycle": 12,
+        "packMaximum": 3,
+        "minimumDistance": 18,
+        "maximumDistance": 52,
+        "chunkOneIn": 3
+      }
+    ],
     "worldProps": {
       "tree": [
         { "archetype": "generated-tree", "weight": 5 },

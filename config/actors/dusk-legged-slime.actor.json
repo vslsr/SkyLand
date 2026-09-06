@@ -1,0 +1,56 @@
+{
+  "$schema": "./actor.schema.json",
+  "schemaVersion": 1,
+  "id": "dusk-legged-slime",
+  "components": {
+    "navigation": {
+      "speed": 2.0,
+      "turnSpeed": 4.5,
+      "stepUp": 1.05,
+      "maxDrop": 2.2,
+      "arriveRadius": 1,
+      "repathSeconds": 1,
+      "goalTolerance": 1.4,
+      "searchRadiusCells": 12,
+      "maxVisitedNodes": 240,
+      "malus": {
+        "danger": 24
+      },
+      "chase": {
+        "senseRadius": 12,
+        "giveUpRadius": 19,
+        "keepDistance": 1.1
+      }
+    },
+    "health": {
+      "maximum": 45,
+      "corpseSeconds": 6
+    },
+    "replicationPolicy": {
+      "mode": "aoi",
+      "radiusChunks": 2
+    },
+    "render": {
+      "model": "line-art-legged-slime",
+      "radius": 0.36,
+      "hipHeight": 0.66,
+      "legSpread": 0.15,
+      "legCount": 2,
+      "thighLength": 0.42,
+      "shinLength": 0.42,
+      "legThickness": 0.027,
+      "footLength": 0.12,
+      "stepLength": 0.3,
+      "stepHeight": 0.13,
+      "stepDuration": 0.19,
+      "membraneColor": "#b0a2c8",
+      "middleColor": "#ddd5ea",
+      "coreColor": "#5f4d80",
+      "bubbleColor": "#f4f0fa",
+      "inkColor": "#000000",
+      "shadowColor": "#2f2440",
+      "legColor": "#000000",
+      "footShadowColor": "#6f6f6f"
+    }
+  }
+}
