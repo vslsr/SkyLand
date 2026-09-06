@@ -3,7 +3,7 @@ import { createSimpleCollisionFromRender } from '../../../shared/actor/simpleCol
 import { createFillMaterial, type FillMaterialEnvironment } from '../../materials/createFillMaterial';
 import type { ActorRenderDefinition } from '../../scenes/data/SceneDefinition';
 import { createOutlinedObject } from '../outlinedObject';
-import type { ActorVisualModel } from './ActorVisualModel';
+import type { ActorVisualModel, SlingshotVisualRig } from './ActorVisualModel';
 
 export type SlingshotRender = Extract<ActorRenderDefinition, { model: 'line-art-slingshot-pile' }>;
 
@@ -83,14 +83,37 @@ export function createSlingshotModel(
     visualRoot.add(fork);
   }
 
-  const band = createOutlinedObject(
-    createSlingshotBandGeometry(definition.radius),
+  // 皮筋是三段折线的两段：左杈头 → 兜 → 右杈头。拉开时中间那个点后移成 V 形，
+  // 所以它必须是一条能改点的线，而不是一根定长的横杆。地上那把仍是横杆——它不会
+  // 被拉开，一段几何更省（见 `ThreeHighCountBatchVisual`）。
+  const bandHalfSpan = slingshotForkPlacements(definition.radius, definition.height)[1].x;
+  const bandHeight = slingshotBandHeight(definition.height);
+  const bandGeometry = new THREE.BufferGeometry();
+  bandGeometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array([
+    -bandHalfSpan, bandHeight, 0,
+    0, bandHeight, 0,
+    bandHalfSpan, bandHeight, 0,
+  ]), 3));
+  const band = new THREE.Line(
+    bandGeometry,
+    new THREE.LineBasicMaterial({ color: definition.bandColor }),
+  );
+  band.name = 'slingshot-band';
+  band.frustumCulled = false;
+  visualRoot.add(band);
+
+  // 兜：皮筋中间那一小块。它是玩家眼里「弹丸在哪儿」的那个点，所以拉开时它要跟着
+  // 中点一起后移——只动线不动兜的话，看上去像皮筋从兜里滑出去了。
+  const pouch = createOutlinedObject(
+    new THREE.BoxGeometry(definition.radius * 0.5, definition.radius * 0.34, definition.radius * 0.2),
     createFillMaterial(definition.bandColor, environment),
     1,
     outline,
   );
-  band.position.y = slingshotBandHeight(definition.height);
-  visualRoot.add(band);
+  pouch.position.set(0, bandHeight, 0);
+  visualRoot.add(pouch);
+
+  const slingshotRig: SlingshotVisualRig = { band, pouch, bandHalfSpan, bandHeight };
 
   return {
     root,
@@ -99,5 +122,6 @@ export function createSlingshotModel(
     width: definition.radius * 2,
     simpleCollision: createSimpleCollisionFromRender(definition),
     interactionAnchorY: definition.height + 0.4,
+    slingshotRig,
   };
 }

@@ -1,0 +1,23 @@
+{
+  "$schema": "./actor.schema.json",
+  "schemaVersion": 1,
+  "id": "stone-pellet",
+  "components": {
+    "projectile": {
+      "speed": 40,
+      "radius": 0.06,
+      "minimumFlightSeconds": 0.1,
+      "lingerSeconds": 0.9
+    },
+    "replicationPolicy": {
+      "mode": "aoi",
+      "radiusChunks": 2
+    },
+    "render": {
+      "model": "line-art-pellet",
+      "radius": 0.075,
+      "stoneColor": "#B9B4A8",
+      "inkColor": "#4A453E"
+    }
+  }
+}

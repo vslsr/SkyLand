@@ -22,12 +22,16 @@ import {
   BOW_LIMB_BEND_RADIANS,
   BOW_RELEASE_SECONDS,
   BOW_STRING_PULL,
+  SLING_BAND_PULL,
   bowReleaseLimbBend,
-  bowReleaseStringPull,
-} from '../src/render/RenderBowDraw.ts';
+  weaponDrawPull,
+  weaponReleasePull,
+} from '../src/render/RenderWeaponDraw.ts';
+import { createSlingshotModel } from '../src/models/actors/createSlingshotModel.ts';
+import { ThreeSlingshotVisual } from '../src/render/three/ThreeSlingshotVisual.ts';
 import {
-  PARAM_BOW_CHARGE,
-  PARAM_BOW_RELEASE_REVISION,
+  PARAM_WEAPON_DRAW,
+  PARAM_WEAPON_RELEASE_REVISION,
 } from '../src/render/RenderVisualParams.ts';
 
 /** 只够 `ThreeWoodBowVisual` 读两个参数的替身。 */
@@ -428,14 +432,14 @@ test('拉弓：弓梢向后转、弦中点后移成 V 形，两者都跟着同�
   const visual = new ThreeWoodBowVisual(0 as never, rig);
   const transforms = new StubTransforms();
 
-  transforms.set(PARAM_BOW_CHARGE, 0);
+  transforms.set(PARAM_WEAPON_DRAW, 0);
   visual.update(transforms as never, 1 / 60);
   assert.ok(Math.abs(rig.upperLimb.rotation.x) < 1e-9, '没拉的时候弓是直的');
   const rest = rig.string.geometry.getAttribute('position').getZ(1);
   // 顶点是 float32，所以比的是「同一处」而不是同一个双精度数。
   assert.ok(Math.abs(rest - rig.stringOffsetZ) < 1e-6, '弦中点贴在两梢那条线上');
 
-  transforms.set(PARAM_BOW_CHARGE, 1);
+  transforms.set(PARAM_WEAPON_DRAW, 1);
   visual.update(transforms as never, 1 / 60);
   // 16°，上下反号：两条弓臂在原点两侧，同样是「向后」。
   assert.ok(Math.abs(rig.upperLimb.rotation.x + BOW_LIMB_BEND_RADIANS) < 1e-9);
@@ -450,12 +454,12 @@ test('拉弓：弓梢向后转、弦中点后移成 V 形，两者都跟着同�
 
 test('撒手：弦从当时的后移量回弹过冲，弓梢比弦先回正', () => {
   // 曲线本身是纯函数，所以直接问它，不必摆一把弓出来。
-  assert.ok(Math.abs(bowReleaseStringPull(BOW_STRING_PULL, 0) - BOW_STRING_PULL) < 1e-9,
+  assert.ok(Math.abs(weaponReleasePull(BOW_STRING_PULL, 0) - BOW_STRING_PULL) < 1e-9,
     '撒手那一刻正接在拉满的位置上，不跳');
   // 中途越过 0 往前过冲：这就是「弹回去」那一下。
   const samples = [];
   for (let step = 1; step <= 12; step += 1) {
-    samples.push(bowReleaseStringPull(BOW_STRING_PULL, (step / 12) * BOW_RELEASE_SECONDS));
+    samples.push(weaponReleasePull(BOW_STRING_PULL, (step / 12) * BOW_RELEASE_SECONDS));
   }
   assert.ok(samples.some((value) => value < 0), '过冲到弦的前面去了');
   assert.ok(Math.abs(samples.at(-1)!) < 0.005, '这一下结束时基本收住了');
@@ -463,4 +467,39 @@ test('撒手：弦从当时的后移量回弹过冲，弓梢比弦先回正', ()
   // 弓梢在前 1/3 就回正：木头比弦硬，一起抖会让整把弓看上去是软的。
   assert.ok(bowReleaseLimbBend(1, BOW_RELEASE_SECONDS * 0.2) > 0);
   assert.equal(bowReleaseLimbBend(1, BOW_RELEASE_SECONDS * 0.34), 0);
+});
+
+test('拉皮筋：中点后移成 V 形、兜跟着走，两个杈头钉死不动', () => {
+  const definition = {
+    model: 'line-art-slingshot-pile', radius: 0.16, height: 0.46,
+    frameColor: '#8a6a46', bandColor: '#3f2f24', inkColor: '#2f2419',
+  } as never;
+  const model = createSlingshotModel({ fogColor: '#fff', fogNear: 10, fogFar: 100 }, definition);
+  const rig = model.slingshotRig!;
+  const visual = new ThreeSlingshotVisual(0 as never, rig);
+  const transforms = new StubTransforms();
+
+  transforms.set(PARAM_WEAPON_DRAW, 0);
+  visual.update(transforms as never, 1 / 60);
+  const rest = rig.band.geometry.getAttribute('position');
+  assert.ok(Math.abs(rest.getZ(1)) < 1e-6, '没拉的时候皮筋是直的');
+  assert.ok(Math.abs(rig.pouch.position.z) < 1e-6);
+
+  transforms.set(PARAM_WEAPON_DRAW, 1);
+  visual.update(transforms as never, 1 / 60);
+  const pulled = rig.band.geometry.getAttribute('position');
+  assert.ok(Math.abs(pulled.getZ(1) + SLING_BAND_PULL) < 1e-6, '中点后移一整个拉开量');
+  assert.ok(Math.abs(rig.pouch.position.z + SLING_BAND_PULL) < 1e-6, '兜跟着中点走');
+  // 杈是硬的：一把树杈弹弓的力全在皮筋上，两个杈头一动不动。
+  assert.ok(Math.abs(pulled.getZ(0)) < 1e-6);
+  assert.ok(Math.abs(pulled.getZ(2)) < 1e-6);
+  assert.ok(Math.abs(pulled.getX(0) + rig.bandHalfSpan) < 1e-6);
+});
+
+test('弓和弹弓共用同一条回弹曲线，只有拉多开不一样', () => {
+  // 同一条曲线意味着改回弹手感只改一处。皮筋比弓弦短，所以同一比例下拉开得少。
+  assert.ok(weaponDrawPull(1, SLING_BAND_PULL) < weaponDrawPull(1, BOW_STRING_PULL));
+  assert.equal(weaponDrawPull(0.5, BOW_STRING_PULL), BOW_STRING_PULL * 0.5);
+  // 回弹只认「从多少开始弹」，不问那是弦还是皮筋。
+  assert.equal(weaponReleasePull(SLING_BAND_PULL, 0), SLING_BAND_PULL);
 });

@@ -1,0 +1,46 @@
+{
+  "$schema": "./actor.schema.json",
+  "schemaVersion": 1,
+  "id": "arrow-pile",
+  "components": {
+    "interactable": {
+      "action": "pickup-stack",
+      "label": "箭矢",
+      "maximumDistance": 2.4
+    },
+    "itemStack": {
+      "itemType": "arrow",
+      "displayName": "箭矢",
+      "defaultQuantity": 1,
+      "maximumQuantity": 999,
+      "compatibilityKey": "arrow-standard"
+    },
+    "actorResidency": {
+      "sleepDelaySeconds": 1,
+      "dormantDelaySeconds": 3,
+      "dormantEligible": true
+    },
+    "dropMotion": {
+      "gravity": 9.8,
+      "drag": 0.5,
+      "groundDrag": 2.8,
+      "restitution": 0.12,
+      "radius": 0.12,
+      "settleSpeed": 0.08
+    },
+    "lifetime": {
+      "lifetimeSeconds": 900
+    },
+    "replicationPolicy": {
+      "mode": "aoi",
+      "radiusChunks": 2
+    },
+    "render": {
+      "model": "line-art-arrow",
+      "length": 0.62,
+      "shaftColor": "#c8a06a",
+      "headColor": "#7a6a58",
+      "inkColor": "#2f2419"
+    }
+  }
+}

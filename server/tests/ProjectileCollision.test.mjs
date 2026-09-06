@@ -3,6 +3,7 @@ import test from 'node:test';
 import './initRapier.mjs';
 import {
   HEALTH_COMPONENT,
+  INVENTORY_COMPONENT,
   PATROL_PATH_COMPONENT,
   PROJECTILE_COMPONENT,
   TRANSFORM_COMPONENT,
@@ -43,11 +44,22 @@ async function createScene() {
       return scene.actorWorld.query(PROJECTILE_COMPONENT);
     },
   };
+  // 空弓射不出去，所以先把箭装进弹药位——这一份测的是箭飞出去之后撞什么，
+  // 不是「有没有箭」。
+  context.player.getComponent(INVENTORY_COMPONENT).add('arrow', 10);
   scene.applyInventoryCommand('archer', {
     sequence: 1,
+    command: {
+      kind: 'ammo:load',
+      slot: { kind: 'backpack', itemType: 'wood-bow' },
+      source: { kind: 'backpack', itemType: 'arrow' },
+    },
+  });
+  scene.applyInventoryCommand('archer', {
+    sequence: 2,
     command: { kind: 'assign', slotIndex: 0, itemType: 'wood-bow' },
   });
-  scene.applyInventoryCommand('archer', { sequence: 2, command: { kind: 'select', slotIndex: 0 } });
+  scene.applyInventoryCommand('archer', { sequence: 3, command: { kind: 'select', slotIndex: 0 } });
   return context;
 }
 

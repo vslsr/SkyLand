@@ -1,12 +1,13 @@
 import type { WoodBowVisualRig } from '../../models/actors/ActorVisualModel';
 import {
   BOW_RELEASE_SECONDS,
+  BOW_STRING_PULL,
   bowLimbBend,
   bowReleaseLimbBend,
-  bowReleaseStringPull,
-  bowStringPull,
-} from '../RenderBowDraw';
-import { PARAM_BOW_CHARGE, PARAM_BOW_RELEASE_REVISION } from '../RenderVisualParams';
+  weaponDrawPull,
+  weaponReleasePull,
+} from '../RenderWeaponDraw';
+import { PARAM_WEAPON_DRAW, PARAM_WEAPON_RELEASE_REVISION } from '../RenderVisualParams';
 import type { ProxyId } from '../RenderScene';
 import type { RenderTransformBuffer } from '../RenderTransformBuffer';
 
@@ -33,8 +34,8 @@ export class ThreeWoodBowVisual {
   ) {}
 
   public update(transforms: RenderTransformBuffer, deltaSeconds: number): void {
-    const charge = transforms.readParam(this.id, PARAM_BOW_CHARGE);
-    const revision = transforms.readParam(this.id, PARAM_BOW_RELEASE_REVISION);
+    const charge = transforms.readParam(this.id, PARAM_WEAPON_DRAW);
+    const revision = transforms.readParam(this.id, PARAM_WEAPON_RELEASE_REVISION);
     if (this.releaseRevision === undefined) {
       this.releaseRevision = revision;
     } else if (revision !== this.releaseRevision) {
@@ -62,8 +63,8 @@ export class ThreeWoodBowVisual {
 
   private currentPull(charge: number): number {
     return this.releaseElapsed === undefined
-      ? bowStringPull(charge)
-      : bowReleaseStringPull(this.releasePull, this.releaseElapsed);
+      ? weaponDrawPull(charge, BOW_STRING_PULL)
+      : weaponReleasePull(this.releasePull, this.releaseElapsed);
   }
 
   /**

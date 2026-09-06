@@ -32,7 +32,7 @@ import { VesselControlController } from '../controllers/VesselControlController'
 import { RoomClient, type JoinedRoom, type RoomSummary } from '../network/RoomClient';
 import { SnapshotBuffer } from '../network/SnapshotBuffer';
 import type { InterpolatedPlayerState, RoomSnapshot } from '../network/protocol';
-import { RemoteBowSync } from '../weapons/RemoteBowSync';
+import { RemoteWeaponSync } from '../weapons/RemoteWeaponSync';
 import {
   HealthDisplayController,
   HealthPopupEmitter,
@@ -143,11 +143,11 @@ export class GrasslandScene extends Scene {
    * 别人手上那把弓与他们射出去的箭。自己那一份不走它：本地按住直接驱动，等一趟
    * 网络回来会让弓比物品栏那圈慢半拍。
    */
-  private readonly remoteBows = new RemoteBowSync({
+  private readonly remoteWeapons = new RemoteWeaponSync({
     localPlayerId: () => this.joinedRoom?.player.id,
-    setBowDraw: (actorId, charge) => this.world.setBowDraw(actorId, charge),
-    clearBowDraw: (actorId) => this.world.clearBowDraw(actorId),
-    releaseBow: (actorId) => this.world.releaseHeldBow(actorId),
+    setWeaponDraw: (actorId, charge) => this.world.setWeaponDraw(actorId, charge),
+    clearWeaponDraw: (actorId) => this.world.clearWeaponDraw(actorId),
+    releaseWeapon: (actorId) => this.world.releaseHeldWeapon(actorId),
   });
   private readonly holdProgress = new HoldProgressBadge();
 
@@ -441,10 +441,10 @@ export class GrasslandScene extends Scene {
         this.world.setChewingItem(chewing === undefined ? undefined : this.heldActorId(), chewing ?? 0);
         // 拉弓读的也是这同一个比例：物品栏那圈画到哪，弓就拉到哪。
         const drawing = progress?.action === 'shoot' ? progress.ratio : undefined;
-        // 松开 / 取消要显式归零：`setBowDraw(undefined)` 什么都不做，那把弓会一直
+        // 松开 / 取消要显式归零：`setWeaponDraw(undefined)` 什么都不做，那把弓会一直
         // 拉着——这张表是按 Actor 记的，没人替它清。
-        if (drawing === undefined) this.world.clearBowDraw(this.heldActorId());
-        else this.world.setBowDraw(this.heldActorId(), drawing);
+        if (drawing === undefined) this.world.clearWeaponDraw(this.heldActorId());
+        else this.world.setWeaponDraw(this.heldActorId(), drawing);
       },
       // 冷却圈和长按那圈是同一个环，反着走。
       setCooldown: (cooldown) => this.hotbarBar.setCooldown(cooldown),
@@ -455,7 +455,7 @@ export class GrasslandScene extends Scene {
       onUseRelease: (action) => {
         if (action !== 'shoot') return;
         const heldActorId = this.heldActorId();
-        if (heldActorId) this.world.releaseHeldBow(heldActorId);
+        if (heldActorId) this.world.releaseHeldWeapon(heldActorId);
       },
     });
     this.weaponAim = new WeaponAimController({
@@ -929,8 +929,8 @@ export class GrasslandScene extends Scene {
     this.debugMenuPage?.setTimeOfDay(snapshot.timeOfDay, snapshot.dayLength);
     this.world.syncActors(snapshot.actors, snapshot.players, snapshot.serverTime);
     // 玩家和 Actor 一起过：射手是不是玩家不改变那一箭怎么飞。
-    this.remoteBows.apply(snapshot.players, snapshot.serverTime);
-    this.remoteBows.apply(snapshot.actors, snapshot.serverTime);
+    this.remoteWeapons.apply(snapshot.players, snapshot.serverTime);
+    this.remoteWeapons.apply(snapshot.actors, snapshot.serverTime);
     this.snapshots.push(snapshot);
 
     // 自己的那条不走插值：直接交给和解，把预测拉回服务器的结论。

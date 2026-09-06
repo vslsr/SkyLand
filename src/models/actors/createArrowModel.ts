@@ -32,6 +32,54 @@ const FLETCHING_SIZE = 0.06;
 /** 箭杆有多粗，按全长的比例。线稿靠轮廓说话，太细了描边会糊成一条。 */
 const SHAFT_RADIUS_RATIO = 0.0194;
 
+/** 箭杆有多粗。掉在地上那一捆和飞着的那一支读同一个数。 */
+export function arrowShaftRadius(length: number): number {
+  return length * SHAFT_RADIUS_RATIO;
+}
+
+/** 箭杆：原点在箭尾，沿 +Z 躺着。 */
+export function createArrowShaftGeometry(length: number): THREE.BufferGeometry {
+  const geometry = new THREE.CylinderGeometry(
+    arrowShaftRadius(length),
+    arrowShaftRadius(length),
+    length,
+    5,
+    1,
+  );
+  // 圆柱默认沿 Y 立着，转到 +Z 上躺下。
+  geometry.rotateX(Math.PI / 2);
+  geometry.translate(0, 0, length * 0.5);
+  return geometry;
+}
+
+/**
+ * 箭头：一个四棱锥，尖端朝 +Z。
+ *
+ * 棱数取 4 而不是更多，是为了描边之后是几条硬边，一眼看得出这是个尖，而不是一段
+ * 圆头的杆。
+ */
+export function createArrowHeadGeometry(length: number): THREE.BufferGeometry {
+  const geometry = new THREE.ConeGeometry(arrowShaftRadius(length) * 2.6, HEAD_LENGTH, 4, 1);
+  geometry.rotateX(Math.PI / 2);
+  geometry.translate(0, 0, length + HEAD_LENGTH * 0.5 - 0.01);
+  return geometry;
+}
+
+/**
+ * 尾羽那一片。两片交叉插在箭尾，`roll` 给的是这一片绕箭杆转多少。
+ *
+ * 用盒子而不是平面，因为线稿要的是一圈描边，单面片从背面看是一条线。
+ */
+export function createArrowFletchingGeometry(roll: number): THREE.BufferGeometry {
+  const geometry = new THREE.BoxGeometry(0.004, FLETCHING_SIZE, FLETCHING_SIZE * 1.8);
+  geometry.translate(0, FLETCHING_SIZE * 0.4, FLETCHING_SIZE * 0.9 + 0.01);
+  geometry.rotateZ(roll);
+  return geometry;
+}
+
+/** 两片尾羽各转多少。 */
+export const ARROW_FLETCHING_ROLLS = [0, Math.PI / 2];
+
 export function createArrowModel(
   environment: FillMaterialEnvironment,
   definition: ArrowRender,
@@ -41,40 +89,24 @@ export function createArrowModel(
   root.add(visualRoot);
 
   const length = definition.length;
-  const shaftRadius = length * SHAFT_RADIUS_RATIO;
+  const shaftRadius = arrowShaftRadius(length);
   const outline = new THREE.LineBasicMaterial({ color: definition.inkColor });
 
-  // 圆柱默认沿 Y 立着，转到 +Z 上躺下。原点在箭尾，箭尖朝 +Z。
-  const shaftGeometry = new THREE.CylinderGeometry(shaftRadius, shaftRadius, length, 5, 1);
-  shaftGeometry.rotateX(Math.PI / 2);
-  shaftGeometry.translate(0, 0, length * 0.5);
   visualRoot.add(createOutlinedObject(
-    shaftGeometry,
+    createArrowShaftGeometry(length),
     createFillMaterial(definition.shaftColor, environment),
     1.2,
     outline,
   ));
-
-  // 箭头：一个四棱锥，尖端朝 +Z。棱数取 4 而不是更多，是为了描边之后是几条硬边，
-  // 一眼看得出这是个尖，而不是一段圆头的杆。
-  const headGeometry = new THREE.ConeGeometry(shaftRadius * 2.6, HEAD_LENGTH, 4, 1);
-  headGeometry.rotateX(Math.PI / 2);
-  headGeometry.translate(0, 0, length + HEAD_LENGTH * 0.5 - 0.01);
   visualRoot.add(createOutlinedObject(
-    headGeometry,
+    createArrowHeadGeometry(length),
     createFillMaterial(definition.headColor, environment),
     1,
     outline,
   ));
-
-  // 尾羽：两片薄片交叉插在箭尾。用盒子而不是平面，因为线稿要的是一圈描边，
-  // 单面片从背面看是一条线。
-  for (const roll of [0, Math.PI / 2]) {
-    const fletchingGeometry = new THREE.BoxGeometry(0.004, FLETCHING_SIZE, FLETCHING_SIZE * 1.8);
-    fletchingGeometry.translate(0, FLETCHING_SIZE * 0.4, FLETCHING_SIZE * 0.9 + 0.01);
-    fletchingGeometry.rotateZ(roll);
+  for (const roll of ARROW_FLETCHING_ROLLS) {
     visualRoot.add(createOutlinedObject(
-      fletchingGeometry,
+      createArrowFletchingGeometry(roll),
       createFillMaterial(definition.headColor, environment),
       1,
       outline,

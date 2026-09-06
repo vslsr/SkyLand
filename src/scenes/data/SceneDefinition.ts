@@ -203,6 +203,13 @@ export type ActorRenderDefinition =
       inkColor: string;
     }
   | {
+      model: 'line-art-pellet';
+      /** 弹丸半径，米。 */
+      radius: number;
+      stoneColor: string;
+      inkColor: string;
+    }
+  | {
       model: 'line-art-wood-bow';
       /** 上下弓梢之间的距离，米。 */
       length: number;

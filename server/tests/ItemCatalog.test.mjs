@@ -23,19 +23,21 @@ const VALID_MATERIAL = {
   summary: '测试用材料。',
 };
 
-test('目录就是设计稿上那张物品表：木头、石头、果子、木弓、蘑菇、弹弓', () => {
+test('目录就是设计稿上那张物品表：木头、石头、箭矢、果子、木弓、蘑菇、弹弓', () => {
   assert.deepEqual(
     itemCatalog.list().map((item) => item.id),
-    ['wood', 'stone', 'fruit', 'wood-bow', 'mushroom', 'slingshot'],
+    ['wood', 'stone', 'arrow', 'fruit', 'wood-bow', 'mushroom', 'slingshot'],
   );
 
-  // 材料只是材料：占一格、能堆、没有用法。
-  for (const itemType of ['wood', 'stone']) {
+  // 材料只是材料：占一格、能堆、没有用法。箭矢也是材料——它装进弓里才有意义，
+  // 自己拿在手上按不出任何东西。
+  // 箭矢一摞比木石多：一次出门带二十支才够射一会儿，而它们本来就细。
+  for (const [itemType, stackLimit] of [['wood', 10], ['stone', 10], ['arrow', 20]]) {
     const definition = itemCatalog.require(itemType);
     assert.equal(definition.category, 'material');
     assert.equal(definition.slotCost, 1);
     assert.equal(definition.pooled, false);
-    assert.equal(definition.stackLimit, 10);
+    assert.equal(definition.stackLimit, stackLimit);
     assert.equal(definition.use, undefined, `${itemType} 不能使用`);
   }
 
@@ -70,13 +72,17 @@ test('目录就是设计稿上那张物品表：木头、石头、果子、木�
   assert.equal(slingshot.pooled, true);
   assert.equal(slingshot.stackLimit, 1);
   assert.deepEqual(slingshot.ammo.accepts, ['stone']);
+  // 弓收的是箭：两把武器各收各的那一种，装错了什么都不会发生。
+  assert.deepEqual(itemCatalog.require('wood-bow').ammo.accepts, ['arrow']);
   assert.ok(slingshot.ammo.capacity > 0);
   assert.equal(slingshot.use.action, 'shoot');
   assert.equal(slingshot.use.mode, 'charge');
   assert.ok(slingshot.use.holdSeconds > 0);
   assert.ok(slingshot.use.cooldownSeconds > 0);
-  // 弹弓还没有 `@w` 条目：动词认得，兑现不了——它现在是一把打不响的弹弓。
-  assert.equal(slingshot.weapon, undefined);
+  // 弹弓也有 `@w` 条目了，打的是石子：比弓近、比弓轻，但走的是同一套判定。
+  assert.equal(slingshot.weapon.projectileArchetypeId, 'stone-pellet');
+  assert.ok(slingshot.weapon.attack < itemCatalog.require('wood-bow').weapon.attack);
+  assert.ok(slingshot.weapon.range.maximum < itemCatalog.require('wood-bow').weapon.range.maximum);
 
   // 耐久现在全是 0：没有「用一次掉一点」的系统，写成别的数只会是一个空承诺。
   for (const definition of itemCatalog.list()) {

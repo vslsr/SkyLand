@@ -18,8 +18,8 @@ import {
   writeSlimeImpactParams,
 } from '../../render/RenderSlimeImpact';
 import {
-  PARAM_BOW_CHARGE,
-  PARAM_BOW_RELEASE_REVISION,
+  PARAM_WEAPON_DRAW,
+  PARAM_WEAPON_RELEASE_REVISION,
   PARAM_BUOYANCY_DRAFT,
   PARAM_BUOYANCY_STATIC_PITCH,
   PARAM_BUOYANCY_STATIC_ROLL,
@@ -95,8 +95,8 @@ import {
  * （`ActorInstanceCatalog.chewRatioOf`）是同一个形状。**只有本地玩家有**：别人
  * 那把弓要过网才知道拉到哪儿，现在还没有那条事件。
  */
-export interface BowDrawSource {
-  bowDrawOf(actorId: string): { charge: number; releaseRevision: number } | undefined;
+export interface WeaponDrawSource {
+  weaponDrawOf(actorId: string): { charge: number; releaseRevision: number } | undefined;
 }
 
 export class ActorVisualParamSystem {
@@ -105,7 +105,7 @@ export class ActorVisualParamSystem {
 
   public constructor(
     private readonly transforms: RenderTransformBuffer,
-    private readonly bows?: BowDrawSource,
+    private readonly bows?: WeaponDrawSource,
   ) {}
 
   public update(world: ActorWorld, _deltaSeconds: number, _elapsedSeconds: number): void {
@@ -159,11 +159,11 @@ export class ActorVisualParamSystem {
       // 留下的速度会让新 proxy 一出生就在滑行。
       // 拉弓：没在拉的写 0，和别的参数一样每帧写满——槽位会被复用，留着上一把弓
       // 的拉弓量会让新 proxy 一出生就是拉满的。
-      const bow = this.bows?.bowDrawOf(actor.id);
-      this.transforms.writeParam(proxy.proxyId, PARAM_BOW_CHARGE, bow?.charge ?? 0);
+      const bow = this.bows?.weaponDrawOf(actor.id);
+      this.transforms.writeParam(proxy.proxyId, PARAM_WEAPON_DRAW, bow?.charge ?? 0);
       this.transforms.writeParam(
         proxy.proxyId,
-        PARAM_BOW_RELEASE_REVISION,
+        PARAM_WEAPON_RELEASE_REVISION,
         bow?.releaseRevision ?? 0,
       );
       writeSlimeMotionParams(this.transforms, proxy.proxyId, SLIME_MOTION_AT_REST);

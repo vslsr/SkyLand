@@ -15,6 +15,7 @@ import { createDryHayModel } from './createDryHayModel';
 import { createFruitPileModel } from './createFruitPileModel';
 import { createMushroomPileModel } from './createMushroomPileModel';
 import { createSlingshotModel } from './createSlingshotModel';
+import { createPelletModel } from './createPelletModel';
 import { createStonePileModel } from './createStonePileModel';
 import { createArrowModel } from './createArrowModel';
 import { createWoodBowModel } from './createWoodBowModel';
@@ -75,6 +76,9 @@ export function createActorVisualModel(
   }
   if (definition.model === 'line-art-mushroom-pile') {
     return createMushroomPileModel(environment, definition);
+  }
+  if (definition.model === 'line-art-pellet') {
+    return createPelletModel(environment, definition);
   }
   if (definition.model === 'line-art-stone-pile') {
     return createStonePileModel(environment, definition);

@@ -29,6 +29,13 @@ import {
   mushroomStemHeight,
 } from '../../models/actors/createMushroomPileModel';
 import {
+  ARROW_FLETCHING_ROLLS,
+  arrowShaftRadius,
+  createArrowFletchingGeometry,
+  createArrowHeadGeometry,
+  createArrowShaftGeometry,
+} from '../../models/actors/createArrowModel';
+import {
   createWoodBowLimbGeometry,
   createWoodBowStringGeometry,
   woodBowStringOffset,
@@ -57,6 +64,7 @@ type StonePileRender = Extract<ActorRender, { model: 'line-art-stone-pile' }>;
 type FruitPileRender = Extract<ActorRender, { model: 'line-art-fruit-pile' }>;
 type MushroomPileRender = Extract<ActorRender, { model: 'line-art-mushroom-pile' }>;
 type WoodBowRender = Extract<ActorRender, { model: 'line-art-wood-bow' }>;
+type ArrowRender = Extract<ActorRender, { model: 'line-art-arrow' }>;
 type SlingshotRender = Extract<ActorRender, { model: 'line-art-slingshot-pile' }>;
 type PileRender =
   | WoodPileRender
@@ -64,6 +72,7 @@ type PileRender =
   | FruitPileRender
   | MushroomPileRender
   | WoodBowRender
+  | ArrowRender
   | SlingshotRender;
 
 /** 走合批绘制的堆叠模型。新增一种堆叠物就在这里登记，并补一个 pieces 构造。 */
@@ -73,6 +82,7 @@ const PILE_RENDER_MODELS = new Set<PileRender['model']>([
   'line-art-fruit-pile',
   'line-art-mushroom-pile',
   'line-art-wood-bow',
+  'line-art-arrow',
   'line-art-slingshot-pile',
 ]);
 
@@ -353,6 +363,56 @@ function createSlingshotPieces(definition: SlingshotRender, burning: boolean): P
   return pieces;
 }
 
+/**
+ * 掉在地上的一捆箭。
+ *
+ * 和飞在空中那一支是同一副几何（同一组 `createArrow*Geometry`），所以捡起来再射
+ * 出去，看到的是同一支箭——两处各画一套迟早会分家。
+ *
+ * 一捆最多摆三支：再多就糊成一团，而数量本来就写在旁边那个数字上。箭躺下来靠绕
+ * X 转 90°——箭立着的长轴是 +Z，倒在地上就该沿地面躺着；每一支再各自岔开一点，
+ * 免得三支叠成一条线。
+ */
+function createArrowPieces(definition: ArrowRender, burning: boolean, single: boolean): PilePiece[] {
+  const shaft = new THREE.Color(burning ? '#d66b38' : definition.shaftColor);
+  const head = new THREE.Color(burning ? '#f2a04f' : definition.headColor);
+  const lying = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), Math.PI / 2);
+  const radius = arrowShaftRadius(definition.length);
+  const layout = single
+    ? [{ x: 0, z: 0, yaw: 0 }]
+    : [{ x: -0.05, z: 0, yaw: 0.12 }, { x: 0.02, z: 0.03, yaw: -0.09 }, { x: 0.07, z: -0.02, yaw: 0.03 }];
+
+  const pieces: PilePiece[] = [];
+  for (const [index, place] of layout.entries()) {
+    const matrix = new THREE.Matrix4().compose(
+      new THREE.Vector3(place.x, radius + index * radius * 2.1, place.z),
+      new THREE.Quaternion().setFromEuler(new THREE.Euler(0, place.yaw, 0)).multiply(lying),
+      new THREE.Vector3(1, 1, 1),
+    );
+    pieces.push({
+      geometry: createArrowShaftGeometry(definition.length),
+      matrix,
+      tint: shaft,
+      edgeThreshold: 1.2,
+    });
+    pieces.push({
+      geometry: createArrowHeadGeometry(definition.length),
+      matrix,
+      tint: head,
+      edgeThreshold: 1,
+    });
+    for (const roll of ARROW_FLETCHING_ROLLS) {
+      pieces.push({
+        geometry: createArrowFletchingGeometry(roll),
+        matrix,
+        tint: head,
+        edgeThreshold: 1,
+      });
+    }
+  }
+  return pieces;
+}
+
 function createPilePieces(
   definition: PileRender,
   burning: boolean,
@@ -370,6 +430,9 @@ function createPilePieces(
   }
   if (definition.model === 'line-art-wood-bow') {
     return createWoodBowPieces(definition, burning);
+  }
+  if (definition.model === 'line-art-arrow') {
+    return createArrowPieces(definition, burning, single);
   }
   if (definition.model === 'line-art-slingshot-pile') {
     return createSlingshotPieces(definition, burning);

@@ -165,13 +165,24 @@ export function resolveProjectileImpact(scene, projectile, impact) {
 /**
  * `shoot` 这个使用动词的执行器：把一次「用物品」翻成一次开火。
  *
- * 薄到只剩一句话是有意的——物品系统那一侧知道的是「谁按了哪一格、蓄了几成」，
- * 武器系统知道的是「从哪儿往哪儿打」，这个函数就是那道缝。
+ * 它做两件事，一件是那道缝本身（物品系统知道「谁按了哪一格、蓄了几成」，武器
+ * 系统知道「从哪儿往哪儿打」），另一件是**扣弹药**。
+ *
+ * 弹药扣在这里而不是 `fireWeaponFrom` 里：弹药是**物品栏那一格上的账**，AI 弓手
+ * 身上根本没有那本账。所以「这一格还有没有货」归物品那一侧，「这一箭怎么飞」归
+ * 武器那一侧，两件事在这一个函数里接上。
+ *
+ * 顺序是**先看有没有、再打、打不出去就退回**：先扣后打的话，一次空放（攒得太少）
+ * 会白白吃掉一发。
  *
  * @param {import('./ItemUseActions.mjs').ItemUseContext} context
  */
-export function fireWeapon({ scene, player, use, chargeRatio }) {
-  return fireWeaponFrom(scene, player, use?.weapon, chargeRatio, use?.itemType);
+export function fireWeapon({ scene, player, use, chargeRatio, ammo, consumeAmmo }) {
+  // 收弹药的武器空着就打不响。不收弹药的（还没有这样的武器）照旧能打。
+  if (use?.ammo && !(ammo?.quantity > 0)) return false;
+  if (!fireWeaponFrom(scene, player, use?.weapon, chargeRatio, use?.itemType)) return false;
+  if (use?.ammo) consumeAmmo(1);
+  return true;
 }
 
 /**

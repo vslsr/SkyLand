@@ -42,6 +42,8 @@ export interface ActorVisualModel {
   readonly slimeLegVisualRig?: SlimeLegVisualRig;
   /** 仅木弓提供；拉弓的形变与撒手那一下的回弹由 `ThreeWoodBowVisual` 驱动。 */
   readonly woodBowRig?: WoodBowVisualRig;
+  /** 仅弹弓提供；拉皮筋与撒手那一下的回弹由 `ThreeSlingshotVisual` 驱动。 */
+  readonly slingshotRig?: SlingshotVisualRig;
 }
 
 /**
@@ -62,6 +64,23 @@ export interface WoodBowVisualRig {
   readonly stringHalfSpan: number;
   /** 弦贴着弓的哪一处（局部 Z）。 */
   readonly stringOffsetZ: number;
+}
+
+/**
+ * 拉皮筋那一下动的两样东西（设计稿 `@i 弹弓` 的 `A`）。
+ *
+ * 和弓的差别在于**杈不弯**：一把树杈弹弓的力全在皮筋上，木头是硬的。所以这里没有
+ * 「臂」，只有皮筋那三段折线和兜在中间的那颗弹丸。
+ */
+export interface SlingshotVisualRig {
+  /** 皮筋那三段折线（左杈头 → 兜 → 右杈头）。拉开时中间那个点沿 -Z 后移。 */
+  readonly band: THREE.Line;
+  /** 兜着弹丸的那一小块。跟着皮筋中点走，拉满时最靠后。 */
+  readonly pouch: THREE.Object3D;
+  /** 两个杈头之间的半跨度，米。 */
+  readonly bandHalfSpan: number;
+  /** 皮筋横在多高。 */
+  readonly bandHeight: number;
 }
 
 /** 一条腿的全部节点。两节骨头是圆柱——WebGL 忽略 `LineBasicMaterial.linewidth`。 */

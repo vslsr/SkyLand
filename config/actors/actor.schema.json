@@ -1795,6 +1795,33 @@
               "additionalProperties": false,
               "required": [
                 "model",
+                "radius",
+                "stoneColor",
+                "inkColor"
+              ],
+              "properties": {
+                "model": {
+                  "const": "line-art-pellet"
+                },
+                "radius": {
+                  "description": "弹丸半径，米。",
+                  "type": "number",
+                  "exclusiveMinimum": 0,
+                  "maximum": 1
+                },
+                "stoneColor": {
+                  "$ref": "#/$defs/color"
+                },
+                "inkColor": {
+                  "$ref": "#/$defs/color"
+                }
+              }
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "model",
                 "length",
                 "thickness",
                 "woodColor",

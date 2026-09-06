@@ -24,6 +24,16 @@
       "summary": "敲岩石得到的一块石头，加固与铺设的基础材料。"
     },
     {
+      "id": "arrow",
+      "displayName": "箭矢",
+      "category": "material",
+      "stackLimit": 20,
+      "slotCost": 1,
+      "iconId": "item-arrow",
+      "tint": "#C8A06A",
+      "summary": "一支削好的木箭，装在弓上才有用。"
+    },
+    {
       "id": "fruit",
       "displayName": "果子",
       "category": "supply",
@@ -49,6 +59,12 @@
       "iconId": "item-wood-bow",
       "tint": "#9A6B3F",
       "summary": "一张弯木配一根弦，拉满了射得更远也更疼。",
+      "ammo": {
+        "accepts": [
+          "arrow"
+        ],
+        "capacity": 20
+      },
       "use": {
         "action": "shoot",
         "input": "primary",
@@ -61,13 +77,22 @@
         "attack": 5,
         "radius": 1.2,
         "projectileArchetypeId": "wood-arrow",
-        "range": { "minimum": 6, "maximum": 22 },
+        "range": {
+          "minimum": 6,
+          "maximum": 22
+        },
         "charge": {
           "minimumRatio": 0.15,
-          "damageScale": { "minimum": 0.5, "maximum": 2 }
+          "damageScale": {
+            "minimum": 0.5,
+            "maximum": 2
+          }
         },
         "tagMultipliers": [
-          { "tag": "Actor.Build", "multiplier": 0.1 }
+          {
+            "tag": "Actor.Build",
+            "multiplier": 0.1
+          }
         ]
       }
     },
@@ -99,7 +124,9 @@
       "summary": "一把树杈弹弓，装上石头，拉满了打出去。",
       "durability": 0,
       "ammo": {
-        "accepts": ["stone"],
+        "accepts": [
+          "stone"
+        ],
         "capacity": 5
       },
       "use": {
@@ -109,6 +136,28 @@
         "holdSeconds": 0.9,
         "cooldownSeconds": 0.5,
         "value": 180
+      },
+      "weapon": {
+        "attack": 3,
+        "radius": 0.9,
+        "projectileArchetypeId": "stone-pellet",
+        "range": {
+          "minimum": 5,
+          "maximum": 16
+        },
+        "charge": {
+          "minimumRatio": 0.15,
+          "damageScale": {
+            "minimum": 0.6,
+            "maximum": 1.6
+          }
+        },
+        "tagMultipliers": [
+          {
+            "tag": "Actor.Build",
+            "multiplier": 0.1
+          }
+        ]
       }
     }
   ]

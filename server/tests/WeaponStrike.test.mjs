@@ -45,15 +45,21 @@ async function createScene() {
 }
 
 /** 把出生背包里那把弓装到物品栏第一格并选中它。 */
-function equipBow(scene) {
-  scene.applyInventoryCommand('archer', {
-    sequence: 1,
-    command: { kind: 'assign', slotIndex: 0, itemType: 'wood-bow' },
-  });
-  return scene.applyInventoryCommand('archer', {
-    sequence: 2,
-    command: { kind: 'select', slotIndex: 0 },
-  });
+function equipBow(scene, { arrows = 10 } = {}) {
+  const player = scene.players.get('archer');
+  const inventory = player.getComponent(INVENTORY_COMPONENT);
+  // 先把箭装进弓的弹药位，再把弓装到物品栏上——弹药跟着那一格走，所以顺序无所谓，
+  // 但空弓是射不出去的，测试要的是一把装好的弓。
+  if (arrows > 0) {
+    inventory.add('arrow', arrows);
+    send(scene, {
+      kind: 'ammo:load',
+      slot: { kind: 'backpack', itemType: 'wood-bow' },
+      source: { kind: 'backpack', itemType: 'arrow' },
+    });
+  }
+  send(scene, { kind: 'assign', slotIndex: 0, itemType: 'wood-bow' });
+  return send(scene, { kind: 'select', slotIndex: 0 });
 }
 
 /**
@@ -92,21 +98,25 @@ function aimAt(player, target, heldSeconds) {
   player.yaw = 0;
 }
 
+/**
+ * 下一个物品栏命令序号。
+ *
+ * 服务端只认单调递增的序号，所以整个文件共用一个计数器：谁临时挑一个大数字，
+ * 后面所有命令都会被静静丢掉，而症状是「这一箭莫名其妙没射出去」。
+ */
+let sequence = 100;
+const send = (scene, command) => scene.applyInventoryCommand('archer', {
+  sequence: (sequence += 1),
+  command,
+});
+
 /** 按住 `heldSeconds` 秒再松手。返回这一次使用有没有做成事。 */
 function fire(context, heldSeconds, target) {
   const { scene } = context;
-  const sequence = (fire.sequence = (fire.sequence ?? 0) + 1);
-  // 序号只要单调递增；前两个号留给装配与选中。
-  scene.applyInventoryCommand('archer', {
-    sequence: sequence * 4 + 2,
-    command: { kind: 'use:begin' },
-  });
+  send(scene, { kind: 'use:begin' });
   context.advance(heldSeconds);
   if (target) aimAt(context.player, target, heldSeconds);
-  return scene.applyInventoryCommand('archer', {
-    sequence: sequence * 4 + 4,
-    command: { kind: 'use:release' },
-  });
+  return send(scene, { kind: 'use:release' });
 }
 
 test('蓄力换算：低于阈值是空放，拉满时射程与伤害都到顶', () => {
@@ -209,11 +219,11 @@ test('射空地不打到任何人，自己也不会被自己射中', async () =>
   aimAt(player, walker, 1.5);
   const away = () => { player.yaw = Math.PI; };
 
-  scene.applyInventoryCommand('archer', { sequence: 100, command: { kind: 'use:begin' } });
+  send(scene, { kind: 'use:begin' });
   context.advance(1.5);
   away();
   assert.equal(
-    scene.applyInventoryCommand('archer', { sequence: 102, command: { kind: 'use:release' } }),
+    send(scene, { kind: 'use:release' }),
     true,
     '一箭确实射出去了',
   );
@@ -244,7 +254,7 @@ test('拉弓和撒手那一下都进快照：别人也看得见', async () => {
   assert.equal(viewerSnapshot().charge, undefined);
   assert.equal(viewerSnapshot().weaponShot, undefined);
 
-  scene.applyInventoryCommand('archer', { sequence: 500, command: { kind: 'use:begin' } });
+  send(scene, { kind: 'use:begin' });
   const charging = viewerSnapshot().charge;
   // 带的是起点和总时长，不是算好的比例：两端跑同一个 holdRatio，接收方用自己的
   // 时钟推进，中间掉几帧也不会让弓卡在半路上。
@@ -254,7 +264,7 @@ test('拉弓和撒手那一下都进快照：别人也看得见', async () => {
   aimAt(player, walker, 1.5);
   context.advance(1.5);
   aimAt(player, walker, 1.5);
-  scene.applyInventoryCommand('archer', { sequence: 504, command: { kind: 'use:release' } });
+  send(scene, { kind: 'use:release' });
 
   assert.equal(viewerSnapshot().charge, undefined, '松手之后就不再蓄了');
   // 只带一个计数：飞出去那支箭是复制过来的 Actor，落在哪儿由它自己说了算，
@@ -331,4 +341,80 @@ test('没有方向的伤害照常结算，只是没有那一下凹陷', async ()
   assert.equal(health.current, 90);
   assert.equal(health.lastHitImpulse, 0);
   assert.equal(health.snapshot().lastHitX, undefined);
+});
+
+test('没箭就射不出去；射出去的那一发从弹药位上扣', async () => {
+  const context = await createScene();
+  const { scene, player } = context;
+  const walker = freeze(scene.actorWorld.getActor('legged-slime-walker-01'));
+  const inventory = player.getComponent(INVENTORY_COMPONENT);
+  const bowSlot = { kind: 'hotbar', slotIndex: 0 };
+
+  // 一支箭都没装：弓拿在手上，蓄力也走得动，但松手什么都不会发生。
+  equipBow(scene, { arrows: 0 });
+  assert.equal(inventory.ammoAt(bowSlot), undefined);
+  assert.equal(fire(context, 1.5, walker), false, '空弓射不出去');
+  assert.equal(scene.actorWorld.query(PROJECTILE_COMPONENT).length, 0);
+  assert.equal(walker.requireComponent(HEALTH_COMPONENT).current, 100);
+
+  // 装两支：射一发扣一支。
+  inventory.add('arrow', 2);
+  send(scene, { kind: 'ammo:load', slot: bowSlot, source: { kind: 'backpack', itemType: 'arrow' } });
+  assert.deepEqual(inventory.ammoAt(bowSlot), { itemType: 'arrow', quantity: 2 });
+
+  context.advance(0.3);
+  assert.equal(fire(context, 1.5, walker), true);
+  assert.deepEqual(inventory.ammoAt(bowSlot), { itemType: 'arrow', quantity: 1 }, '打掉一支');
+  assert.equal(flyOut(context), 0);
+
+  // 空放不吃箭：先看有没有、再打、打不出去就不扣。
+  context.advance(0.3);
+  assert.equal(fire(context, 0.05, walker), false);
+  assert.deepEqual(inventory.ammoAt(bowSlot), { itemType: 'arrow', quantity: 1 }, '空放不该白吃一支');
+
+  // 把最后一支打掉，再按就没反应了。
+  context.advance(0.3);
+  assert.equal(fire(context, 1.5, walker), true);
+  assert.equal(inventory.ammoAt(bowSlot), undefined, '打光了那一格就空着');
+  assert.equal(flyOut(context), 0);
+  context.advance(0.3);
+  assert.equal(fire(context, 1.5, walker), false, '没箭了');
+});
+
+test('弹弓走同一条路：装石头、蓄力、射出去一颗石子', async () => {
+  const context = await createScene();
+  const { scene, player } = context;
+  const walker = freeze(scene.actorWorld.getActor('legged-slime-walker-01'));
+  const health = walker.requireComponent(HEALTH_COMPONENT);
+  const inventory = player.getComponent(INVENTORY_COMPONENT);
+  const slot = { kind: 'hotbar', slotIndex: 1 };
+
+  inventory.add('slingshot', 1);
+  inventory.add('stone', 3);
+  send(scene, { kind: 'assign', slotIndex: 1, itemType: 'slingshot' });
+  send(scene, { kind: 'ammo:load', slot, source: { kind: 'backpack', itemType: 'stone' } });
+  send(scene, { kind: 'select', slotIndex: 1 });
+  assert.deepEqual(inventory.ammoAt(slot), { itemType: 'stone', quantity: 3 });
+
+  // 站到弹弓拉满打得到的地方——它比弓近，射程另算。
+  const sling = itemCatalog.require('slingshot').weapon;
+  const transform = walker.requireComponent(TRANSFORM_COMPONENT);
+  player.setPosition(transform.x, transform.z - sling.range.maximum);
+  player.yaw = 0;
+
+  send(scene, { kind: 'use:begin' });
+  context.advance(1.5);
+  player.setPosition(transform.x, transform.z - sling.range.maximum);
+  player.yaw = 0;
+  assert.equal(send(scene, { kind: 'use:release' }), true);
+
+  // 打出去的是石子，不是箭：射哪一种写在武器条目上。
+  const flying = scene.actorWorld.query(PROJECTILE_COMPONENT);
+  assert.equal(flying.length, 1);
+  assert.equal(flying[0].archetypeId, 'stone-pellet');
+  assert.deepEqual(inventory.ammoAt(slot), { itemType: 'stone', quantity: 2 }, '打掉一颗');
+
+  assert.equal(flyOut(context), 0);
+  // 3 × 1.6 = 4.8：比弓那一箭轻。
+  assert.ok(Math.abs(health.current - (100 - 4.8)) < 1e-6, `实际 ${health.current}`);
 });

@@ -1062,6 +1062,14 @@ function validateRender(raw, filename) {
       length: requireNumber(render.length, `${path}.length`, Number.EPSILON, 3),
     };
   }
+  if (render.model === 'line-art-pellet') {
+    return {
+      model: render.model,
+      stoneColor: requireColor(render.stoneColor, `${path}.stoneColor`),
+      inkColor: requireColor(render.inkColor, `${path}.inkColor`),
+      radius: requireNumber(render.radius, `${path}.radius`, Number.EPSILON, 1),
+    };
+  }
   if (render.model === 'line-art-wood-bow') {
     return {
       model: render.model,

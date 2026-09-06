@@ -1,17 +1,17 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { RemoteBowSync } from '../src/weapons/RemoteBowSync.ts';
+import { RemoteWeaponSync } from '../src/weapons/RemoteWeaponSync.ts';
 import type { SnapshotPlayer } from '../src/network/protocol.ts';
 
 function harness() {
   const draws: Array<{ actorId: string; charge: number }> = [];
   const cleared: (string | undefined)[] = [];
   const releases: string[] = [];
-  const sync = new RemoteBowSync({
+  const sync = new RemoteWeaponSync({
     localPlayerId: () => 'me',
-    setBowDraw: (actorId, charge) => draws.push({ actorId, charge }),
-    clearBowDraw: (actorId) => cleared.push(actorId),
-    releaseBow: (actorId) => releases.push(actorId),
+    setWeaponDraw: (actorId, charge) => draws.push({ actorId, charge }),
+    clearWeaponDraw: (actorId) => cleared.push(actorId),
+    releaseWeapon: (actorId) => releases.push(actorId),
   });
   return { sync, draws, cleared, releases };
 }
