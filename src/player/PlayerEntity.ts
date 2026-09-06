@@ -86,6 +86,22 @@ export interface PlayerTransformDebugState {
   lastPendingTick?: number;
 }
 
+/**
+ * 快照里属于自己的那条权威状态。除了坐标和速度，它还带着**跳跃边沿**：
+ * `stepCharacter` 只在「这一步按下、上一步没按下」时起跳，所以这条边沿必须
+ * 和坐标一起从服务端回来，重放才会和权威算的是同一件事。
+ */
+export interface PlayerSnapshotAuthority {
+  x: number;
+  z: number;
+  y?: number;
+  verticalVelocity?: number;
+  velocityX?: number;
+  velocityZ?: number;
+  grounded?: boolean;
+  jumpPressed?: boolean;
+}
+
 export interface PlayerAuthoritativeApplyResult {
   applied: boolean;
   reason: 'reconciled' | 'stale-ack' | 'incomplete-authority';
@@ -385,14 +401,11 @@ export class PlayerEntity extends Actor {
   /** 快照里属于自己的那条权威状态。 */
   public applyAuthoritativeState(
     ackTick: number,
-    x: number,
-    z: number,
-    y?: number,
-    verticalVelocity?: number,
-    velocityX?: number,
-    velocityZ?: number,
-    grounded?: boolean,
+    authority: PlayerSnapshotAuthority,
   ): PlayerAuthoritativeApplyResult {
+    const {
+      x, z, y, verticalVelocity, velocityX, velocityZ, grounded,
+    } = authority;
     const pendingBefore = this.pendingInputSteps.length;
     if (
       y === undefined
@@ -410,6 +423,9 @@ export class PlayerEntity extends Actor {
       };
     }
     const firstPending = this.pendingInputSteps.findIndex((input) => input.tick > ackTick);
+    const acknowledged = firstPending === 0
+      ? undefined
+      : this.pendingInputSteps[(firstPending < 0 ? this.pendingInputSteps.length : firstPending) - 1];
     this.pendingInputSteps.splice(
       0,
       firstPending < 0 ? this.pendingInputSteps.length : firstPending,
@@ -424,6 +440,11 @@ export class PlayerEntity extends Actor {
         vy: verticalVelocity,
         vz: velocityZ,
         grounded,
+        // 跳跃按边沿触发，所以「上一步按没按」和坐标、速度一样属于权威状态。
+        // 漏掉它，重放就会从「上一步没按」重新起算，按住空格时每份快照都会
+        // 再起跳一次，人一直被顶在空中。旧快照没带这个字段时退回服务端最后
+        // 执行到的那一步——权威当时算的正是它。
+        jumpPressed: authority.jumpPressed ?? acknowledged?.jump === true,
       },
       this.pendingInputSteps,
       this.controller,

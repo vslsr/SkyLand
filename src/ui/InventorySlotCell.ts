@@ -202,6 +202,8 @@ export function createInventorySlotCell(
     cell.addEventListener('keydown', (event) => {
       if (event.key !== 'Enter' && event.key !== ' ') return;
       event.preventDefault();
+      // 按住不放是一次「打开」，不是一串。自动重复补发的 keydown 只拦默认行为。
+      if (event.repeat) return;
       handlers.openMenu?.(cell, slot);
     });
     if (handlers.beginDrag) makeDraggable(cell, slot, handlers);

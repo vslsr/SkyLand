@@ -92,6 +92,12 @@ export interface SnapshotPlayer {
   velocityX?: number;
   velocityZ?: number;
   grounded?: boolean;
+  /**
+   * 服务端最后执行到的那一步按没按跳。跳跃按边沿触发，这条边沿也是权威状态；
+   * 少了它，客户端每次和解都会从「上一步没按」重新起算，按住空格就会反复起跳。
+   * 只发给本人：别人那份不做预测重放。
+   */
+  jumpPressed?: boolean;
   /** 背包只发给本人：别人包里有什么不是这名玩家该知道的。 */
   inventory?: Array<{ itemType: string; quantity: number }>;
   inventoryRevision?: number;
