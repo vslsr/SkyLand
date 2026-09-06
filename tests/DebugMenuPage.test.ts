@@ -224,7 +224,7 @@ test('F8 里的物品那一栏：点开列表是物品目录本身，点一件�
     assert.ok(slingshot, '目录里的弹弓也该列出来');
     slingshot.dispatchEvent(new Event('click'));
     assert.deepEqual(grants, ['slingshot']);
-    assert.equal(menu.hidden, true, '点完就收起来：一次点击给一个');
+    assert.equal(menu.hidden, false, '点完不收起来：连着点就是连着给');
 
     // 给没给成由下一帧快照说了算，回执只说「已经请求了哪一件」。
     const status = fakeDocument.elements.find((element) => (
@@ -232,10 +232,32 @@ test('F8 里的物品那一栏：点开列表是物品目录本身，点一件�
     ));
     assert.ok(status);
     assert.ok(status.textContent.includes('弹弓'), status.textContent);
+    assert.ok(status.textContent.includes('×1'), status.textContent);
 
-    // 关掉 F8 再打开，不该看见上一次翻开的那一半。
+    // 同一件连点：每一下都发一次意图，回执上的数字跟着走，否则看着像没点着。
+    slingshot.dispatchEvent(new Event('click'));
+    assert.deepEqual(grants, ['slingshot', 'slingshot']);
+    assert.equal(menu.hidden, false);
+    assert.ok(status.textContent.includes('×2'), status.textContent);
+
+    // 换一件就是新的一轮，数字从头数。
+    const other = menu.children.find((child) => (
+      child.dataset.itemType !== undefined && child.dataset.itemType !== 'slingshot'
+    ));
+    if (other) {
+      other.dispatchEvent(new Event('click'));
+      assert.ok(status.textContent.includes('×1'), status.textContent);
+    }
+
+    // 收起列表再翻开，连点的计数归零。
+    toggle.dispatchEvent(new Event('click'));
+    assert.equal(menu.hidden, true);
     toggle.dispatchEvent(new Event('click'));
     assert.equal(menu.hidden, false);
+    slingshot.dispatchEvent(new Event('click'));
+    assert.ok(status.textContent.includes('×1'), status.textContent);
+
+    // 关掉 F8 再打开，不该看见上一次翻开的那一半。
     page.onClose();
     assert.equal(menu.hidden, true);
   } finally {
