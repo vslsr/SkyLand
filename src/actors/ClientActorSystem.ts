@@ -1262,6 +1262,9 @@ export class ClientActorSystem implements SceneFrameSystem {
       interactionMarker: Boolean(archetype.components.interactable),
       temperatureMarker: Boolean(archetype.components.temperature),
       guidePath: guidePathStyle,
+      // 这一箭走的那条弧：射出那一刻就定下来了，所以和 render 一样只在 spawn 时
+      // 给一次。渲染侧拿它解析地求箭尖的俯仰。
+      projectileArc: snapshot.projectile,
       // 船体和货箱在原型里互斥（有 buoyancy 的没有 cargo，反之亦然），
       // 所以「哪一种浮动」是一个值而不是两个开关。
       waterMotion: archetype.components.buoyancy

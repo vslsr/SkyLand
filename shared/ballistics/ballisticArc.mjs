@@ -92,3 +92,46 @@ export function ballisticArcTravel(arc) {
 export function ballisticArcImpact(arc, out) {
   return ballisticArcPoint(arc, ballisticArcTravel(arc), out);
 }
+
+/**
+ * 弧上 `t` 处的**俯仰角**，弧度。抬头为正。
+ *
+ * 解析求导，不是拿两帧位置去差分：差分出来的方向会跟着位置一起抖——复制过来的
+ * 坐标是量化过的，两帧之间的位移又小，噪声占的比例因此不小；快照边界上那一下
+ * 折线转折还会让方向整个跳一格。而这条弧本身是解析的，箭尖该朝哪儿是**位置的
+ * 函数**，不是「位置之差」的函数。
+ *
+ * 水平方向匀速，所以 dHorizontal/dt 就是弦长；竖直方向是一条直线加一条标准
+ * 抛物线，导数写出来只有两项。
+ *
+ * @param {BallisticArc} arc
+ * @param {number} t
+ * @returns {number}
+ */
+export function ballisticArcPitch(arc, t) {
+  const horizontal = Math.hypot(arc.impactX - arc.originX, arc.impactZ - arc.originZ);
+  // 垂直射出去的一箭（弦长为 0）没有俯仰可言：它一直朝上。
+  if (horizontal <= 1e-6) return Math.PI / 2;
+  const rise = (arc.impactY - arc.originY) + ballisticArcApex(arc) * 4 * (1 - 2 * t);
+  return Math.atan2(rise, horizontal);
+}
+
+/**
+ * 这个世界坐标落在弧的第几成上（把它投影到弦上）。
+ *
+ * 给的是**插值之后的那个位置**：箭尖的朝向因此和它自己所在的位置严丝合缝，而不是
+ * 和「服务端上一 tick 报的 travel」严丝合缝——后者会让朝向比位置早一步。
+ *
+ * @param {BallisticArc} arc
+ * @param {number} x
+ * @param {number} z
+ * @returns {number} [0, 1]
+ */
+export function ballisticArcProgressAt(arc, x, z) {
+  const dx = arc.impactX - arc.originX;
+  const dz = arc.impactZ - arc.originZ;
+  const squared = dx * dx + dz * dz;
+  if (squared <= 1e-12) return 0;
+  const projected = ((x - arc.originX) * dx + (z - arc.originZ) * dz) / squared;
+  return Math.min(1, Math.max(0, projected));
+}

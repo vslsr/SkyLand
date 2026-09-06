@@ -27,6 +27,16 @@ const SEGMENTS = 24;
  * 压低几厘米正好投影成白线下方的一道暗边，和线稿里「填充 + 描边」是同一套办法。
  */
 const INK_SHADOW_OFFSET = 0.06;
+/**
+ * 还没攒够那一段把线画淡到几成。
+ *
+ * 线从按下的第一帧就在，所以「现在松手射不出去」必须自己有个说法——用「有没有
+ * 线」来说的话，线会在攒过阈值那一帧凭空出现在八米之外，读起来是先抖一下才开始
+ * 伸长。淡一档既说清了还没攒够，又让玩家一按下就看得见自己瞄的是哪儿。
+ */
+const UNARMED_OPACITY_SCALE = 0.4;
+const LINE_OPACITY = 0.95;
+const SHADOW_OPACITY = 0.55;
 
 export class ThreeBallisticPreviewVisual {
   public readonly root = new THREE.Group();
@@ -37,13 +47,13 @@ export class ThreeBallisticPreviewVisual {
   private readonly material = new THREE.LineBasicMaterial({
     color: 0xfdfbf6,
     transparent: true,
-    opacity: 0.95,
+    opacity: LINE_OPACITY,
     fog: false,
   });
   private readonly shadowMaterial = new THREE.LineBasicMaterial({
     color: 0x2f2419,
     transparent: true,
-    opacity: 0.55,
+    opacity: SHADOW_OPACITY,
     fog: false,
   });
   /** 每帧沿弧取点用的暂存，避免一帧新建二十几个对象。 */
@@ -90,6 +100,10 @@ export class ThreeBallisticPreviewVisual {
     this.geometry.computeBoundingSphere();
     this.shadowGeometry.getAttribute('position').needsUpdate = true;
     this.shadowGeometry.computeBoundingSphere();
+    // 攒够之前整条线淡一档：位置照旧是准的，只是它还打不出去。
+    const scale = state.armed === false ? UNARMED_OPACITY_SCALE : 1;
+    this.material.opacity = LINE_OPACITY * scale;
+    this.shadowMaterial.opacity = SHADOW_OPACITY * scale;
     this.line.visible = true;
     this.shadow.visible = true;
   }

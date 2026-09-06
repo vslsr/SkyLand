@@ -338,7 +338,10 @@ export class ThreeRenderScene implements RenderScene {
       this.dropRolls.set(proxy.id, new ThreeDropRollVisual(proxy.id, model.dropRollRig));
     }
     if (model.projectileRig) {
-      this.projectiles.set(proxy.id, new ThreeProjectileVisual(proxy.id, model.projectileRig));
+      this.projectiles.set(
+        proxy.id,
+        new ThreeProjectileVisual(proxy.id, model.projectileRig, desc.projectileArc),
+      );
     }
     if (model.containerLidRig) {
       this.containerLids.set(proxy.id, new ThreeContainerLidVisual(proxy.id, model.containerLidRig));

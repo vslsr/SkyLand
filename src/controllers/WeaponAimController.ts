@@ -3,8 +3,8 @@ import { PlayerInputTags } from '../input/config/playerInput';
 import type { InputSubsystem } from '../input/core/InputSubsystem';
 import type { BallisticPreviewState } from '../render/RenderScene';
 import {
-  resolveWeaponStrike,
   weaponImpactPoint,
+  weaponStrikeAt,
 } from '../../shared/items/index.mjs';
 import { MUZZLE_HEIGHT } from '../../shared/ballistics/index.mjs';
 
@@ -131,13 +131,15 @@ export class WeaponAimController {
       this.port.setPreview(undefined);
       return;
     }
-    // 还没攒过空放阈值时 `resolveArc` 给不出弧：这一箭现在松手也射不出去，
-    // 所以线也不该出现。
     this.port.setPreview(this.resolveArc(player, this.chargeRatio));
   }
 
   /**
-   * 这一份蓄力比例下，从出手点到落点的那条弧。空放时没有。
+   * 这一份蓄力比例下，从出手点到落点的那条弧。
+   *
+   * **按下的第一帧就有线**，长度从最短射程开始长。早先它要等攒过空放阈值才出现，
+   * 于是线凭空出现在八米之外——玩家看到的是先抖一下，然后才开始伸长。攒够没有
+   * 由 `armed` 说，而不是由「有没有线」说：没攒够时线画淡一档，位置照旧是准的。
    *
    * `travel` 是这条弧被挡在哪儿：墙、地形、站在半路上的实体都会把它截短，
    * 于是白线画到障碍物那里为止，而不是穿过去落在墙后面。截断读的是和服务端
@@ -148,7 +150,7 @@ export class WeaponAimController {
     ratio: number,
   ): BallisticPreviewState | undefined {
     const weapon = this.port.getHeldWeapon()?.weapon;
-    const strike = weapon ? resolveWeaponStrike(weapon, ratio) : undefined;
+    const strike = weapon ? weaponStrikeAt(weapon, ratio) : undefined;
     if (!strike) return undefined;
     const impact = weaponImpactPoint(player.x, player.z, player.yaw, strike.distance);
     const arc: BallisticPreviewState = {
@@ -159,6 +161,7 @@ export class WeaponAimController {
       impactY: this.port.sampleGroundHeight(impact.x, impact.z),
       impactZ: impact.z,
       ratio: strike.ratio,
+      armed: strike.armed,
     };
     const travel = this.port.sweepProjectile?.(arc) ?? 1;
     // 一路无阻的那条弧不带 `travel`：省下的不是一个字段，是「这条线到底完不完整」

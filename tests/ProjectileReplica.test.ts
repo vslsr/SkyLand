@@ -98,13 +98,19 @@ test('箭的副本不装碰撞体：飞在空中的箭不该挡住走路的人',
   assert.equal(system.sweepProjectileTargets([0, 1.2, -3], [0, 1.2, 3], PROJECTILE_RADIUS), 1);
 });
 
-test('箭尖跟着位移走：上升时仰着、下落时扎着，停下之后保持最后那个角度', () => {
+test('箭尖跟着切线走：上升时仰着、下落时扎着，且不跟着位置一起抖', () => {
   // 直接喂 transform SoA：俯仰的输入就是「渲染世界这一帧读到的世界坐标」，
   // 快照插值怎么算出那对坐标由 `SnapshotBuffer` 的用例负责。
   const transforms = new RenderTransformBuffer();
   const pitchRoot = new THREE.Group();
   const id = 3 as ProxyId;
-  const visual = new ThreeProjectileVisual(id, { pitchRoot });
+  // 弧随 spawn 过来一次：从 (0,1,0) 打到 (0,0,20)，半蓄力。
+  const arc = {
+    originX: 0, originY: 1, originZ: 0,
+    impactX: 0, impactY: 0, impactZ: 20,
+    ratio: 0.5,
+  };
+  const visual = new ThreeProjectileVisual(id, { pitchRoot }, arc);
   const world = { x: 0, y: 0, z: 0, yaw: 0 };
   // 写面和读面是分开的：`publish()` 翻一次面才是渲染世界读得到的那一帧。
   const frame = (x: number, y: number, z: number) => {
@@ -113,20 +119,36 @@ test('箭尖跟着位移走：上升时仰着、下落时扎着，停下之后�
     visual.update(transforms, world);
   };
 
-  // 第一帧没有「上一帧」，所以还没有可信的切线：保持水平。
+  // 刚出手：仰着。第一帧就有角度——朝向是位置的函数，不需要「上一帧」。
   frame(0, 1, 0);
+  const launch = pitchRoot.rotation.x;
+  assert.ok(launch < 0, `模型沿 +Z 躺着，抬头是绕 X 负向转，实际 ${launch}`);
+
+  // 快到落点：扎下去。
+  frame(0, 0.2, 18);
+  assert.ok(pitchRoot.rotation.x > 0, '下落段该扎下去');
+
+  // **同一个位置附近抖一厘米，角度只跟着动一点点。** 这是这条修复的要害：
+  // 早先拿两帧位移去差分，复制过来的坐标量化到厘米，一帧位移又只有几十厘米，
+  // 于是箭在空中筛糠。
+  frame(0, 0.2, 10);
+  const steady = pitchRoot.rotation.x;
+  frame(0.01, 0.21, 10.01);
+  assert.ok(Math.abs(pitchRoot.rotation.x - steady) < 1e-3, '位置抖一厘米，箭尖几乎不动');
+
+  // 插在墙上不动了：位置不变，走到的那一成也不变，姿态自然保持。
+  const stuck = pitchRoot.rotation.x;
+  frame(0.01, 0.21, 10.01);
+  assert.equal(pitchRoot.rotation.x, stuck);
+});
+
+test('没有弧的弹药保持水平：编一条弧出来只会让它指错', () => {
+  const transforms = new RenderTransformBuffer();
+  const pitchRoot = new THREE.Group();
+  const id = 4 as ProxyId;
+  const visual = new ThreeProjectileVisual(id, { pitchRoot }, undefined);
+  transforms.write(id, 0, 5, 5, 0);
+  transforms.publish();
+  visual.update(transforms, { x: 0, y: 0, z: 0, yaw: 0 });
   assert.equal(pitchRoot.rotation.x, 0);
-
-  // 往前上方走一段：抬头，角度就是这一帧位移的切线。
-  frame(0, 1.5, 1);
-  assert.ok(Math.abs(pitchRoot.rotation.x - Math.atan2(0.5, 1)) < 1e-6);
-
-  // 往前下方走一段：低头。
-  frame(0, 0.5, 2);
-  const falling = pitchRoot.rotation.x;
-  assert.ok(falling < 0, `下落段该扎下去，实际 ${falling}`);
-
-  // 插在墙上不动了：保持扎进去的姿态，而不是因为不动就弹回水平。
-  frame(0, 0.5, 2);
-  assert.equal(pitchRoot.rotation.x, falling);
 });

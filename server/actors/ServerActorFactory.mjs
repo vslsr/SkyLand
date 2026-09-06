@@ -24,6 +24,7 @@ import {
   HAZARD_COMPONENT,
   HazardComponent,
   HEALTH_COMPONENT,
+  PROJECTILE_COMPONENT,
   WEAPON_SHOT_COMPONENT,
   HealthComponent,
   WeaponShotComponent,
@@ -298,6 +299,16 @@ export function createServerActorWorld(sceneDefinition, options = {}) {
   return world;
 }
 
+/**
+ * 弧的端点量化到厘米。
+ *
+ * 比坐标本身粗一点也无所谓：客户端拿它求的是**朝向**，一厘米的端点误差换算到
+ * 二十米外的俯仰角上不到千分之一度。
+ */
+function roundArcCoordinate(value) {
+  return Math.round((Number(value) || 0) * 100) / 100;
+}
+
 /** 四元数量化到千分之一：视觉上看不出差别，包里少一半字节。 */
 function roundRotation(value) {
   return Math.round((Number(value) || 0) * 1000) / 1000;
@@ -332,6 +343,7 @@ export function createActorSnapshots(world, options = {}) {
     const hazard = actor.getComponent(HAZARD_COMPONENT);
     const health = actor.getComponent(HEALTH_COMPONENT);
     const weaponShot = actor.getComponent(WEAPON_SHOT_COMPONENT)?.snapshot();
+    const projectile = actor.getComponent(PROJECTILE_COMPONENT);
     const temperature = actor.getComponent(TEMPERATURE_COMPONENT);
     const combustible = actor.getComponent(COMBUSTIBLE_COMPONENT);
     const container = actor.getComponent(CONTAINER_COMPONENT);
@@ -395,6 +407,20 @@ export function createActorSnapshots(world, options = {}) {
       },
       // 射出去那一发和玩家那一条走同一个形状：接收方不需要知道射手是谁。
       ...(weaponShot ? { weaponShot } : {}),
+      // 这一箭走的那条弧。**射出那一刻就定下来，飞行途中不变**，所以它是一次性
+      // 事实而不是每帧状态；发它是为了让客户端能解析地求出箭尖朝哪儿——拿两帧
+      // 位置去差分的话，方向会跟着量化过的坐标一起抖。
+      ...(projectile ? {
+        projectile: {
+          originX: roundArcCoordinate(projectile.originX),
+          originY: roundArcCoordinate(projectile.originY),
+          originZ: roundArcCoordinate(projectile.originZ),
+          impactX: roundArcCoordinate(projectile.impactX),
+          impactY: roundArcCoordinate(projectile.impactY),
+          impactZ: roundArcCoordinate(projectile.impactZ),
+          ratio: Math.round(projectile.ratio * 1000) / 1000,
+        },
+      } : {}),
       ...(buoyancy ? {
         buoyancy: {
           state: buoyancy.state,

@@ -144,6 +144,17 @@ export interface SnapshotWeaponShot {
   revision: number;
 }
 
+/** 一条已经定下来的弹道。字段和 `shared/ballistics` 的 `BallisticArc` 同名同义。 */
+export interface SnapshotProjectileArc {
+  originX: number;
+  originY: number;
+  originZ: number;
+  impactX: number;
+  impactY: number;
+  impactZ: number;
+  ratio: number;
+}
+
 export type ActorFloatState = 'afloat' | 'overloaded' | 'flooding' | 'sinking';
 export type ActorEventType =
   | 'cargo:add'
@@ -154,6 +165,13 @@ export type ActorEventType =
 
 export interface SnapshotActor {
   id: string;
+  /**
+   * 这一箭走的那条弧。射出那一刻定下来，飞行途中不变。
+   *
+   * 发它是为了让客户端**解析地**求出箭尖朝哪儿：拿两帧位置去差分的话，方向会
+   * 跟着量化过的坐标一起抖，快照边界上还会整个跳一格。
+   */
+  projectile?: SnapshotProjectileArc;
   /**
    * 这个 Actor 最近射出去的那一发。
    *

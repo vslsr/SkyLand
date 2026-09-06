@@ -10,18 +10,36 @@ import { tagMatches } from '../abilities/index.mjs';
  * 这里不认识 Actor、场景与网络：进来的是数字，出去的也是数字。
  */
 
-/** 一次攻击的判定形状。落点 + 半径，抛物线不参与判定（它是 `A` 里的表现）。 */
-export function resolveWeaponStrike(weapon, chargeRatio) {
-  const ratio = clamp01(chargeRatio);
+/**
+ * 这一份蓄力**换算出来的那一击**，不问它够不够格发射。
+ *
+ * 分成两个函数是为了让预览能从按下的第一帧就画起来。空放阈值说的是「这一下发不
+ * 发得出去」，不是「这一下瞄的是哪儿」——瞄的地方从按下那一刻就有了。用一个函数
+ * 兼两件事的话，线只能在攒过阈值的那一帧凭空出现在八米之外，读起来是先抖一下、
+ * 然后才开始伸长。
+ */
+export function weaponStrikeAt(weapon, chargeRatio) {
   if (!weapon) return undefined;
-  // 空放：攒得太少就不发射，也不进冷却——按错一下不该让弓卡在那里。
-  if (ratio < weapon.charge.minimumRatio) return undefined;
+  const ratio = clamp01(chargeRatio);
   return {
     ratio,
     distance: lerp(weapon.range.minimum, weapon.range.maximum, ratio),
     damageScale: lerp(weapon.charge.damageScale.minimum, weapon.charge.damageScale.maximum, ratio),
     radius: weapon.radius,
+    /** 现在松手打不打得出去。低于空放阈值就是「还没攒够」。 */
+    armed: ratio >= weapon.charge.minimumRatio,
   };
+}
+
+/**
+ * 一次攻击的判定形状。落点 + 半径，抛物线不参与判定（它是 `A` 里的表现）。
+ *
+ * **判定这一侧照旧是有门槛的**：攒得太少就不发射，也不进冷却——按错一下不该让弓
+ * 卡在那里。想拿到「还没攒够时瞄的是哪儿」用 `weaponStrikeAt`。
+ */
+export function resolveWeaponStrike(weapon, chargeRatio) {
+  const strike = weaponStrikeAt(weapon, chargeRatio);
+  return strike?.armed ? strike : undefined;
 }
 
 /**

@@ -134,11 +134,20 @@ test('没有指针（触屏、手柄）时把朝向交回移动方向', () => {
   assert.equal(harness.facing.at(-1), undefined);
 });
 
-test('蓄力没过空放阈值不画线，过了之后落点与服务端读同一份换算', () => {
+test('按下第一帧就有线，只是还没攒够；落点与服务端读同一份换算', () => {
   const harness = aimHarness();
-  harness.controller.setChargeRatio(BOW.charge.minimumRatio * 0.5);
+  // 线不再等攒过空放阈值才出现——那样它会凭空出现在八米之外，读起来是先抖一下
+  // 才开始伸长。攒够没有由 `armed` 说。
+  harness.controller.setChargeRatio(0);
   harness.controller.update();
-  assert.equal(harness.previews.at(-1), undefined, '这一箭现在松手也射不出去');
+  const first = harness.previews.at(-1)!;
+  assert.equal(first.armed, false, '这一箭现在松手射不出去');
+  const shortest = Math.hypot(first.impactX - first.originX, first.impactZ - first.originZ);
+  assert.ok(Math.abs(shortest - BOW.range.minimum) < 1e-9, '从最短射程开始长');
+
+  harness.controller.setChargeRatio(BOW.charge.minimumRatio);
+  harness.controller.update();
+  assert.equal(harness.previews.at(-1)?.armed, true, '攒过阈值就打得出去了');
 
   harness.player.yaw = Math.PI / 2;
   harness.controller.setChargeRatio(1);
