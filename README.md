@@ -1554,6 +1554,10 @@ docker compose --profile nginx-tls up -d
 # 5. 确认两个都在
 docker ps
 docker compose logs nginx
+
+# 强制重开
+docker compose --profile nginx-tls down --remove-orphans
+docker compose --profile nginx-tls up -d --force-recreate
 ```
 
 然后开 https://111.229.172.59.sslip.io/。
