@@ -9,6 +9,10 @@ import {
   WORLD_PROP_VARIANT_MAXIMUM_COUNT,
   WORLD_PROP_VARIANT_WEIGHT_MAXIMUM,
 } from '../../shared/world/worldPropVariants.mjs';
+import {
+  DEFAULT_HOTBAR_CAPACITY,
+  MAXIMUM_HOTBAR_CAPACITY,
+} from '../../shared/actor/index.mjs';
 import { DEFAULT_WEATHER, WEATHER_TYPES, isWeatherType } from '../../shared/weather.mjs';
 import {
   DEFAULT_DAY_LENGTH_SECONDS,
@@ -298,20 +302,54 @@ const PROP_KIND_CONTENT_KEY = { tree: 'trees', grass: 'grass' };
  * 客户端再用房间种子 + 放置记录地址选择同一项。原型仍只描述「它是什么」。
  */
 /**
- * `gameplay.startingInventory`：新玩家进房间时直接发到背包里的物品。
- * 只在没有可采集材料的地图上用（纯海域图上扩建船体的木头）；条目必须是目录里的物品。
+ * `gameplay.startingInventory`：新玩家进房间时直接发到身上的物品。
+ *
+ * 落点由 `hotbarSlot` 决定，而不是另开一张「起始物品栏」表：物品栏是一条特殊的
+ * 背包（见 `InventoryComponent`），发一件东西下去要么留在背包里、要么进物品栏
+ * 某一格，是同一件事的两个落点。写成两张表的话，同一件物品可以同时出现在两张
+ * 表上，「发几件」就得先把两张表合起来才数得出来。
+ *
+ * - 不写 `hotbarSlot`：留在背包里（纯海域图上扩建船体的木头）；
+ * - 写了：那一摞直接装进物品栏那一格（流式大世界开局手边的弹弓）。
+ *
+ * 条目必须是目录里的物品；格号按 0 起算（0 就是数字键 1 那一格），上限取玩家原型
+ * 的物品栏格数。
  */
-function validateStartingInventory(raw, filename) {
+function validateStartingInventory(raw, filename, playerActorArchetype) {
   if (raw === undefined) return [];
   if (!Array.isArray(raw) || raw.length > 8) {
     throw new TypeError(`${filename}.gameplay.startingInventory 必须是最多 8 项的数组`);
   }
+  const hotbarCapacity = Math.min(
+    MAXIMUM_HOTBAR_CAPACITY,
+    playerActorArchetype.components.inventory?.hotbarCapacity ?? DEFAULT_HOTBAR_CAPACITY,
+  );
+  const seenItemTypes = new Set();
+  const seenHotbarSlots = new Set();
   return raw.map((entry, index) => {
     const path = `${filename}.gameplay.startingInventory[${index}]`;
     const record = requireObject(entry, path);
     const itemType = requireString(record.itemType, `${path}.itemType`, 48);
     if (!itemCatalog.has(itemType)) throw new TypeError(`${path}.itemType 不是目录里的物品：${itemType}`);
-    return { itemType, quantity: requireInteger(record.quantity, `${path}.quantity`, 1, 999) };
+    // 同一种物品只写一条：两条发下去会并成一摞，装配那一条再从这一摞里取，
+    // 「哪一份进物品栏、哪一份留在背包」就由堆叠顺序说了算，配置上看不出来。
+    if (seenItemTypes.has(itemType)) throw new TypeError(`${path}.itemType 重复：${itemType}`);
+    seenItemTypes.add(itemType);
+    const quantity = requireInteger(record.quantity, `${path}.quantity`, 1, 999);
+    if (record.hotbarSlot === undefined) return { itemType, quantity };
+    const hotbarSlot = requireInteger(record.hotbarSlot, `${path}.hotbarSlot`, 0, hotbarCapacity - 1);
+    if (seenHotbarSlots.has(hotbarSlot)) {
+      throw new TypeError(`${path}.hotbarSlot 和前面一条撞了：${hotbarSlot}`);
+    }
+    seenHotbarSlots.add(hotbarSlot);
+    // 物品栏一格就是一摞：超出堆叠上限的部分会静悄悄留在背包里，那不是配置写的意思。
+    const stackLimit = itemCatalog.require(itemType).stackLimit;
+    if (quantity > stackLimit) {
+      throw new TypeError(
+        `${path}.quantity 超过 ${itemType} 的堆叠上限 ${stackLimit}，一格物品栏装不下`,
+      );
+    }
+    return { itemType, quantity, hotbarSlot };
   });
 }
 
@@ -758,7 +796,11 @@ function validateSceneDefinition(raw, filename, actorCatalog) {
     }
     return [hull];
   });
-  const startingInventory = validateStartingInventory(gameplay.startingInventory, filename);
+  const startingInventory = validateStartingInventory(
+    gameplay.startingInventory,
+    filename,
+    playerActorArchetype,
+  );
   const worldProps = validateWorldProps(gameplay, filename, actorCatalog, world, content);
   const creatureSpawns = validateCreatureSpawns(gameplay, filename, actorCatalog, world);
   if (

@@ -275,7 +275,8 @@ export class ServerScene {
     // 各件复制过去的格坐标自己重建一份，两端因此不会各记一套。
     this.buildSites = new BuildSiteIndex();
     this.nextBuildId = 1;
-    // 这张地图发给新玩家的起始材料（纯海域图上扩建船体用的木头）。
+    // 这张地图发给新玩家的起始物品：不写格号的留在背包里（纯海域图上扩建船体
+    // 用的木头），写了格号的直接装进物品栏那一格（大世界开局手边的弹弓）。
     this.startingInventory = Array.isArray(definition.gameplay?.startingInventory)
       ? definition.gameplay.startingInventory
       : [];
@@ -460,7 +461,16 @@ export class ServerScene {
     actor.syncWaterMovementEffect(this.isWaterAt(actor.x, actor.z));
     const inventory = actor.getComponent(INVENTORY_COMPONENT);
     if (inventory) {
-      for (const entry of this.startingInventory) inventory.add(entry.itemType, entry.quantity);
+      for (const entry of this.startingInventory) {
+        inventory.add(entry.itemType, entry.quantity);
+        // 指定了格号的那一条接着搬进物品栏。装配是一次真实的转移（见
+        // `InventoryComponent.assignHotbarSlot`），所以刚发下去的那一摞会离开
+        // 背包，玩家在两个地方看到的仍是同一件东西。选中格不动：开局是空手，
+        // 那一格摆在那里等玩家按数字键切过去。
+        if (entry.hotbarSlot !== undefined) {
+          inventory.assignHotbarSlot(entry.hotbarSlot, entry.itemType);
+        }
+      }
     }
   }
 

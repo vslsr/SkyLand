@@ -49,10 +49,12 @@ test('附近的休眠物品堆自动合并，捡起来直接到空着的手上',
   const remaining = scene.actorWorld.query(ITEM_STACK_COMPONENT);
   assert.equal(remaining.length, 1);
   assert.equal(remaining[0].parent?.id, 'player-1');
-  // 捡起来的东西先上手：空手时它落进物品栏第一格，并且当场就握着。
+  // 捡起来的东西先上手：空手时它落进第一个空格，并且当场就握着。第一格是大世界
+  // 发的那把弹弓（`gameplay.startingInventory`），所以木头落在它后面那一格。
   const own = scene.createSnapshot('player-1').players[0];
-  assert.deepEqual(own.hotbar.slots[0], { itemType: 'wood', quantity: 10 });
-  assert.equal(own.hotbar.activeIndex, 0);
+  assert.deepEqual(own.hotbar.slots[0], { itemType: 'slingshot', quantity: 1 });
+  assert.deepEqual(own.hotbar.slots[1], { itemType: 'wood', quantity: 10 });
+  assert.equal(own.hotbar.activeIndex, 1);
   assert.deepEqual(own.inventory, [], '物品栏装得下就轮不到背包');
 });
 
