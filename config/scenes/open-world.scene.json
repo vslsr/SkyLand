@@ -82,6 +82,9 @@
     "runtimeActorArchetypes": [
       "ground-foundation", "wood-wall", "stone-wall", "campfire", "float-foundation", "float-wall"
     ],
+    "startingInventory": [
+      { "itemType": "slingshot", "quantity": 1, "hotbarSlot": 0 }
+    ],
     "worldProps": {
       "tree": [
         { "archetype": "generated-tree", "weight": 5 },

@@ -308,7 +308,7 @@
         },
         "startingInventory": {
           "type": "array",
-          "description": "新玩家进房间时发到背包里的物品；给没有可采集材料的地图用（例如纯海域图上扩建船体的木头）",
+          "description": "新玩家进房间时发到身上的物品：不写 hotbarSlot 的留在背包里（例如纯海域图上扩建船体的木头），写了的直接装进物品栏那一格（例如大世界开局的弹弓）。同一种物品只写一条。",
           "maxItems": 8,
           "items": {
             "type": "object",
@@ -316,7 +316,13 @@
             "required": ["itemType", "quantity"],
             "properties": {
               "itemType": { "type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$" },
-              "quantity": { "type": "integer", "minimum": 1, "maximum": 999 }
+              "quantity": { "type": "integer", "minimum": 1, "maximum": 999 },
+              "hotbarSlot": {
+                "description": "落进物品栏第几格，0 起算（0 就是数字键 1 那一格）。不写就留在背包里。一格只放得下一摞，所以 quantity 不能超过该物品的堆叠上限，格号也不能和别的条目重复。",
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 8
+              }
             }
           }
         },

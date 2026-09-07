@@ -699,8 +699,13 @@ export interface SceneDefinition extends SceneSummary {
   gameplay: {
     playerActor: { archetypeId: string };
     runtimeActorArchetypes?: string[];
-    /** 新玩家进房间时发到背包里的物品；给没有可采集材料的地图用。 */
-    startingInventory?: { itemType: string; quantity: number }[];
+    /**
+     * 新玩家进房间时发到身上的物品。
+     *
+     * `hotbarSlot` 决定落点：不写留在背包里，写了就直接装进物品栏那一格
+     * （0 起算，0 就是数字键 1 那一格）。
+     */
+    startingInventory?: { itemType: string; quantity: number; hotbarSlot?: number }[];
     /** 流式世界每种物件的带权原型变体；实例选择由世界种子确定。 */
     worldProps?: Partial<Record<
       'tree' | 'grass' | 'rock' | 'mushroom',
