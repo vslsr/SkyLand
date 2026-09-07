@@ -22,11 +22,35 @@
 
 ## 发版
 
+一条命令：
+
 ```bash
 cd <仓库目录>
-git pull
+bash deploy/redeploy.sh
+```
+
+`deploy/redeploy.sh` 做的就是下面这几步——拉 `origin/main`、重新编译镜像、把
+skyland 和 nginx 一起滚动替换、清悬空镜像，最后走 nginx 打一遍健康检查和跨源隔离头。
+编译在镜像里做（Dockerfile 的 build 阶段跑 `npm ci && npm run build`），部署机不需要
+装 Node。首次跑没有证书时给它 `SKYLAND_CERT_HOST=<IP 或域名>`，它会顺手签一张自签的。
+
+它**会丢掉工作区的本地改动**（`git checkout -f -B`），也不用 `git pull`——main 的历史
+被强推过，`pull` 会以 `refusing to merge unrelated histories` 失败。
+
+手动等价物：
+
+```bash
+cd <仓库目录>
+git fetch origin main && git checkout -f -B main origin/main
 docker compose --profile nginx-tls up -d --build
 docker image prune -f
+```
+
+不想每次都写 `--profile nginx-tls`，就把 profile 记进 `.env`（compose 自动读它）：
+
+```bash
+cp .env.example .env          # 里面是 COMPOSE_PROFILES=nginx-tls
+docker compose up -d --build  # 从此自动带上 nginx
 ```
 
 只改了 `deploy/nginx-tls.conf` 时不用重建镜像：

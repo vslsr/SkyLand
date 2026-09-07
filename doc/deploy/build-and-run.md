@@ -230,6 +230,11 @@ docker compose --profile nginx-tls up -d
 # 浏览器开 https://111.229.172.59/
 ```
 
+`cp .env.example .env` 之后这台机器上的 `docker compose` 就自带这个 profile
+（`COMPOSE_PROFILES=nginx-tls`），`docker compose up -d --build` 一条命令即可；
+连拉取、编译、自检一起的是 `bash deploy/redeploy.sh`，见
+[operations.md 的发版一节](./operations.md)。
+
 证书写在 `deploy/tls/`（已在 `.gitignore` 里）。已经有正式证书时，把 `cert.pem` /
 `key.pem` 放进这个目录即可，不用跑脚本。需要放行安全组的 443 入站。
 
@@ -331,8 +336,15 @@ sudo ufw allow 80,443/tcp
 
 ```bash
 cd /srv/skyland
-git pull
-docker compose up -d --build      # 重新构建并滚动替换
+bash deploy/redeploy.sh           # 拉取 + 重新编译 + 起 skyland/nginx + 自检
+```
+
+拆开来是：
+
+```bash
+cd /srv/skyland
+git fetch origin main && git checkout -f -B main origin/main
+docker compose up -d --build      # 重新构建并滚动替换（带 nginx 见 .env.example）
 docker image prune -f             # 清掉悬空镜像
 ```
 
