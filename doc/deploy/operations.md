@@ -192,5 +192,57 @@ curl -k https://127.0.0.1/api/health                 # 绕过公网，服务本�
 | 页面报「拿不到 SharedArrayBuffer」 | 走了 http，或反代覆盖了 COOP/COEP。`curl -kI` 查那三行 |
 | 页面能开，进房间就断 | WebSocket 升级没转发，或 `proxy_read_timeout` 太短 |
 | `webReady: false`，页面 503 | 镜像里没有 `dist/`，构建阶段 `vite build` 失败了 |
+| 起容器报 `failed to set up container networking: network <一串 ID> not found` | 网络被重建过，容器上记的还是旧 ID。见下一节 |
 
 更完整的排查表在 `build-and-run.md` 第 6 节。
+
+### `network ... not found`：容器上记的网络 ID 过期了
+
+```
+✔ Network skyland_default  Created
+✔ Container skyland        Started
+⠹ Container skyland-nginx  Starting
+Error response from daemon: failed to set up container networking:
+network 2a634f0115be...563d not found
+```
+
+关键在第一行：`skyland_default` 是**新建**的。容器里存的是网络的 ID 而不是名字，
+旧网络没了（守护进程重启、`docker network prune`、宿主机硬重启后本地 kv 库对不上，
+都会造成这个结果）之后 compose 按名字新建一个，ID 变了，而已经存在的容器还指着旧 ID，
+一启动就报找不到网络。`up -d` 修不了：compose 比对的是 compose 文件里的配置，
+配置没变就只 `start`，不重建容器——所以先起来的 skyland 那行看着是成功的，
+它本来就在跑，这一步是空操作。
+
+按名字重建一遍即可：
+
+```bash
+docker compose --profile nginx-tls down --remove-orphans
+docker compose --profile nginx-tls up -d --force-recreate
+```
+
+`down` 自己也报同一个错，说明容器连断开旧网络都做不到，直接删：
+
+```bash
+docker rm -f skyland skyland-nginx
+docker network rm skyland_default     # 报 not found 就是已经没了，跳过
+docker compose --profile nginx-tls up -d
+```
+
+还是不行就是守护进程里的网络状态本身坏了，重启 docker（**会重启这台机器上所有容器**，
+不止 SkyLand）：
+
+```bash
+systemctl restart docker
+docker compose --profile nginx-tls up -d
+```
+
+重建容器不丢数据：日志和证书分别在 `skyland-logs` 命名卷和宿主机的 `deploy/tls/` 里，
+都不在容器的可写层。丢的只有在线玩家的房间状态，发版本来也会丢。
+
+起来之后照例自查一遍：
+
+```bash
+docker compose ps
+curl -kI https://127.0.0.1/ | grep -i cross-origin
+curl -k  https://127.0.0.1/api/health
+```

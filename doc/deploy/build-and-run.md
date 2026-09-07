@@ -362,6 +362,7 @@ docker run -d --name skyland --init -p 127.0.0.1:3090:3090 skyland:0.1.0
 | 加载卡在 wasm，控制台报跨源资源被拒 | 引入了不带 `Cross-Origin-Resource-Policy` 的跨源资源（CDN 字体/图片），COEP 会静默拦掉 |
 | 构建时 OOM 被杀 | 构建机内存不足。加 swap，或在别处构建好推镜像 |
 | 日志目录写入报 EACCES | `/app/logs` 没挂卷或属主不对。用 `-v skyland-logs:/app/logs` |
+| 启动报 `failed to set up container networking: network <一串 ID> not found` | 网络被重建过（守护进程重启、`network prune`），容器上记的还是旧 ID。`docker compose down` 之后 `up -d --force-recreate`，细节见 `operations.md` 排查一节 |
 
 常用命令：
 
