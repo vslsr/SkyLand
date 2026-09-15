@@ -11,6 +11,7 @@ import type {
 } from './GameTransport';
 
 const WEB_SOCKET_OPEN = 1;
+const WEB_SOCKET_CONNECT_TIMEOUT_MS = 5_000;
 
 export type WebSocketFactory = (endpoint: string) => WebSocket;
 
@@ -46,10 +47,12 @@ export class WebSocketTransport implements GameTransport {
     this.currentState = 'connecting';
 
     const promise = new Promise<void>((resolve, reject) => {
+      let connectTimeout: ReturnType<typeof globalThis.setTimeout> | undefined;
       const removeConnectListeners = (): void => {
         socket.removeEventListener('open', handleOpen);
         socket.removeEventListener('error', handleConnectError);
         socket.removeEventListener('close', handleConnectClose);
+        if (connectTimeout !== undefined) globalThis.clearTimeout(connectTimeout);
       };
       const handleOpen = (): void => {
         removeConnectListeners();
@@ -71,6 +74,15 @@ export class WebSocketTransport implements GameTransport {
       socket.addEventListener('close', handleConnectClose, { once: true });
       socket.addEventListener('message', (event) => this.handleMessage(socket, event));
       socket.addEventListener('close', (event) => this.handleClose(socket, event));
+      connectTimeout = globalThis.setTimeout(() => {
+        removeConnectListeners();
+        if (this.socket === socket) {
+          this.socket = undefined;
+          this.currentState = 'disconnected';
+        }
+        socket.close();
+        reject(new Error('房间连接建立超时'));
+      }, WEB_SOCKET_CONNECT_TIMEOUT_MS);
     });
 
     this.connectPromise = promise;

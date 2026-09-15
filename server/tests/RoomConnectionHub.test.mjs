@@ -120,7 +120,51 @@ test('RoomConnectionHub 在传输之外处理会话，并标记广播通道', ()
   assert.equal(sent.at(-1).message.type, 'room:summary');
 
   session.close();
+  assert.equal(roomManager.calls.length, 0, '短线后在重连窗口内保留玩家');
+  hub.close();
   assert.deepEqual(roomManager.calls.shift(), ['leaveRoom', 'room-1', 'player-1']);
+});
+
+test('RoomConnectionHub 在保留窗口内恢复同一个玩家', () => {
+  const roomManager = new MockRoomManager();
+  const firstSent = [];
+  const hub = new RoomConnectionHub(roomManager, { reconnectGraceMs: 100 });
+  const first = hub.openSession((message) => firstSent.push(message));
+
+  first.receive({ type: 'room:join', roomId: 'room-1', name: 'Player' });
+  const joined = firstSent.at(-1);
+  assert.equal(joined.type, 'room:joined');
+  assert.ok(joined.reconnectToken);
+  first.close();
+  assert.equal(roomManager.calls.length, 1, '断线时不立即 leaveRoom');
+
+  const secondSent = [];
+  const second = hub.openSession((message) => secondSent.push(message));
+  second.receive({
+    type: 'room:resume',
+    roomId: joined.room.id,
+    playerId: joined.player.id,
+    reconnectToken: joined.reconnectToken,
+  });
+  const resumed = secondSent.at(-1);
+  assert.equal(resumed.type, 'room:resumed');
+  assert.equal(resumed.player.id, joined.player.id);
+  assert.notEqual(resumed.reconnectToken, joined.reconnectToken, '每次恢复后轮换令牌');
+
+  second.receive({ type: 'room:leave' });
+  assert.deepEqual(roomManager.calls.at(-1), ['leaveRoom', 'room-1', 'player-1']);
+  hub.close();
+});
+
+test('RoomConnectionHub 在重连窗口到期后移除玩家', async () => {
+  const roomManager = new MockRoomManager();
+  const hub = new RoomConnectionHub(roomManager, { reconnectGraceMs: 5 });
+  const session = hub.openSession(() => {});
+  session.receive({ type: 'room:join', roomId: 'room-1', name: 'Player' });
+  session.close();
+
+  await new Promise((resolve) => setTimeout(resolve, 15));
+  assert.deepEqual(roomManager.calls.at(-1), ['leaveRoom', 'room-1', 'player-1']);
   hub.close();
 });
 

@@ -47,7 +47,11 @@ export interface RoomClientOptions {
   codec?: MessageCodec;
   roomDirectory?: RoomDirectory;
   endpoint?: string | (() => string);
+  reconnectDelaysMs?: readonly number[];
 }
+
+const DEFAULT_RECONNECT_DELAYS_MS = [0, 500, 1_000, 2_000, 4_000, 5_000, 5_000];
+const RESUME_RESPONSE_TIMEOUT_MS = 4_000;
 
 function defaultWebSocketEndpoint(): string {
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -63,6 +67,7 @@ export class RoomClient {
   private readonly codec: MessageCodec;
   private readonly roomDirectory: RoomDirectory;
   private readonly resolveEndpoint: () => string;
+  private readonly reconnectDelaysMs: readonly number[];
   private readonly roomListeners = new Set<RoomUpdateListener>();
   private readonly snapshotListeners = new Set<SnapshotListener>();
   private readonly disconnectListeners = new Set<DisconnectListener>();
@@ -74,6 +79,9 @@ export class RoomClient {
   private inventoryCommandSequence = 0;
   private terrainEditSequence = 0;
   private buildCommandSequence = 0;
+  private joinedRoom?: JoinedRoom;
+  private reconnecting?: Promise<void>;
+  private reconnectGeneration = 0;
 
   public constructor(options: RoomClientOptions = {}) {
     this.transport = options.transport ?? new WebSocketTransport();
@@ -83,10 +91,11 @@ export class RoomClient {
     this.resolveEndpoint = typeof endpoint === 'function'
       ? endpoint
       : () => endpoint ?? defaultWebSocketEndpoint();
+    this.reconnectDelaysMs = options.reconnectDelaysMs ?? DEFAULT_RECONNECT_DELAYS_MS;
 
     this.transport.onPacket((payload) => this.handlePacket(payload));
     this.transport.onDisconnect(() => {
-      for (const listener of this.disconnectListeners) listener();
+      void this.handleTransportDisconnect();
     });
   }
 
@@ -116,8 +125,16 @@ export class RoomClient {
         if (!message) return;
         if (message.type === 'room:joined' && message.room && message.player && message.scene) {
           this.resetSequences();
+          const joined = {
+            room: message.room,
+            player: message.player,
+            scene: message.scene,
+            reconnectToken: message.reconnectToken,
+          };
+          this.joinedRoom = joined;
+          this.reconnectGeneration += 1;
           cleanup();
-          resolve({ room: message.room, player: message.player, scene: message.scene });
+          resolve(joined);
         } else if (message.type === 'error') {
           cleanup();
           reject(new Error(message.message ?? '加入房间失败'));
@@ -143,6 +160,8 @@ export class RoomClient {
   }
 
   public leaveRoom(): void {
+    this.joinedRoom = undefined;
+    this.reconnectGeneration += 1;
     this.resetSequences();
     this.send({ type: 'room:leave' }, 'control');
   }
@@ -341,6 +360,98 @@ export class RoomClient {
     await this.transport.connect({ endpoint: this.resolveEndpoint() });
   }
 
+  private async handleTransportDisconnect(): Promise<void> {
+    const joined = this.joinedRoom;
+    if (!joined?.reconnectToken) {
+      this.notifyDisconnected();
+      return;
+    }
+    if (this.reconnecting) return;
+
+    const generation = ++this.reconnectGeneration;
+    const reconnecting = this.reconnect(joined, generation);
+    this.reconnecting = reconnecting;
+    try {
+      await reconnecting;
+    } finally {
+      if (this.reconnecting === reconnecting) this.reconnecting = undefined;
+    }
+  }
+
+  private async reconnect(joined: JoinedRoom, generation: number): Promise<void> {
+    for (const delayMs of this.reconnectDelaysMs) {
+      if (generation !== this.reconnectGeneration || this.joinedRoom !== joined) return;
+      if (delayMs > 0) await new Promise<void>((resolve) => globalThis.setTimeout(resolve, delayMs));
+      if (generation !== this.reconnectGeneration || this.joinedRoom !== joined) return;
+
+      try {
+        await this.ensureTransport();
+        const resumed = await this.requestResume(joined);
+        if (generation !== this.reconnectGeneration || this.joinedRoom !== joined) return;
+        this.joinedRoom = resumed;
+        for (const listener of this.roomListeners) listener(resumed.room);
+        return;
+      } catch {
+        // 短线期间网络状态可能反复变化；在保留窗口内继续按退避间隔重试。
+        this.transport.close();
+      }
+    }
+
+    if (generation !== this.reconnectGeneration || this.joinedRoom !== joined) return;
+    this.joinedRoom = undefined;
+    this.notifyDisconnected();
+  }
+
+  private requestResume(joined: JoinedRoom): Promise<JoinedRoom> {
+    return new Promise<JoinedRoom>((resolve, reject) => {
+      const timeout = globalThis.setTimeout(() => {
+        cleanup();
+        reject(new Error('恢复房间超时'));
+      }, RESUME_RESPONSE_TIMEOUT_MS);
+
+      const stopPacket = this.transport.onPacket((payload) => {
+        const message = this.codec.decode(payload);
+        if (!message) return;
+        if (message.type === 'room:resumed' && message.room && message.player
+          && message.reconnectToken) {
+          cleanup();
+          resolve({
+            room: message.room,
+            player: message.player,
+            scene: joined.scene,
+            reconnectToken: message.reconnectToken,
+          });
+        } else if (message.type === 'error') {
+          cleanup();
+          reject(new Error(message.message ?? '恢复房间失败'));
+        }
+      });
+      const stopDisconnect = this.transport.onDisconnect(() => {
+        cleanup();
+        reject(new Error('恢复房间时连接再次断开'));
+      });
+      const cleanup = (): void => {
+        globalThis.clearTimeout(timeout);
+        stopPacket();
+        stopDisconnect();
+      };
+
+      if (!this.send({
+        type: 'room:resume',
+        roomId: joined.room.id,
+        playerId: joined.player.id,
+        reconnectToken: joined.reconnectToken!,
+      }, 'control')) {
+        cleanup();
+        reject(new Error('房间连接尚未恢复'));
+      }
+    });
+  }
+
+  private notifyDisconnected(): void {
+    for (const listener of this.disconnectListeners) listener();
+  }
+
   private handlePacket(payload: string | Uint8Array): void {
     const message = this.codec.decode(payload);
     if (message?.type === 'room:summary' && message.room) {
@@ -352,6 +463,8 @@ export class RoomClient {
     } else if (message?.type === 'debug:transform-log:status' && message.transformLog) {
       for (const listener of this.playerTransformLogListeners) listener(message.transformLog);
     } else if (message?.type === 'room:closed') {
+      this.joinedRoom = undefined;
+      this.reconnectGeneration += 1;
       this.transport.close();
     }
   }

@@ -1,6 +1,7 @@
 import {
   INPUT_MESSAGE_BURST,
   MAXIMUM_INPUT_MESSAGES_PER_SECOND,
+  ROOM_RECONNECT_GRACE_MS,
 } from '../../shared/networkTuning.mjs';
 import { randomUUID } from 'node:crypto';
 import { PlayerTransformLogStore } from '../debug/PlayerTransformLogStore.mjs';
@@ -13,8 +14,10 @@ export class RoomConnectionHub {
   constructor(roomManager, options = {}) {
     this.roomManager = roomManager;
     this.transformLogStore = options.transformLogStore ?? new PlayerTransformLogStore();
+    this.reconnectGraceMs = options.reconnectGraceMs ?? ROOM_RECONNECT_GRACE_MS;
     this.transformLogSessions = new Map();
     this.sessions = new Set();
+    this.suspendedSessions = new Map();
 
     this.handleSnapshot = (roomId, snapshot, playerId) => {
       if (playerId) {
@@ -34,6 +37,11 @@ export class RoomConnectionHub {
       this.broadcastToRoom(room.id, { type: 'room:summary', room }, 'control');
     };
     this.handleRoomClosed = (roomId) => {
+      for (const [token, suspended] of this.suspendedSessions) {
+        if (suspended.roomId !== roomId) continue;
+        clearTimeout(suspended.timer);
+        this.suspendedSessions.delete(token);
+      }
       for (const recording of this.transformLogSessions.values()) {
         if (recording.roomId === roomId) {
           void this.finishPlayerTransformLog(recording.sessionId, 'room-closed');
@@ -69,6 +77,8 @@ export class RoomConnectionHub {
       send,
       roomId: undefined,
       playerId: undefined,
+      player: undefined,
+      reconnectToken: undefined,
       inputTokens: INPUT_MESSAGE_BURST,
       inputTokensAt: Date.now(),
       transformLogSessionId: undefined,
@@ -87,7 +97,12 @@ export class RoomConnectionHub {
     for (const recording of Array.from(this.transformLogSessions.values())) {
       void this.finishPlayerTransformLog(recording.sessionId, 'hub-closed');
     }
-    for (const session of Array.from(this.sessions)) this.closeSession(session);
+    for (const session of Array.from(this.sessions)) this.closeSession(session, false);
+    for (const suspended of Array.from(this.suspendedSessions.values())) {
+      clearTimeout(suspended.timer);
+      this.roomManager.leaveRoom(suspended.roomId, suspended.playerId);
+    }
+    this.suspendedSessions.clear();
     this.roomManager.off('snapshot', this.handleSnapshot);
     this.roomManager.off('terrain', this.handleTerrain);
     this.roomManager.off('summary', this.handleSummary);
@@ -106,9 +121,18 @@ export class RoomConnectionHub {
           const joined = this.roomManager.joinRoom(String(message.roomId ?? ''), message.name);
           session.roomId = joined.room.id;
           session.playerId = joined.player.id;
-          this.send(session, { type: 'room:joined', ...joined }, 'control');
+          session.player = joined.player;
+          session.reconnectToken = randomUUID();
+          this.send(session, {
+            type: 'room:joined',
+            ...joined,
+            reconnectToken: session.reconnectToken,
+          }, 'control');
           break;
         }
+        case 'room:resume':
+          this.resumeSession(session, message);
+          break;
         case 'room:leave':
           this.leaveCurrentRoom(session);
           this.send(session, { type: 'room:left' }, 'control');
@@ -214,11 +238,77 @@ export class RoomConnectionHub {
     }
   }
 
-  closeSession(session) {
+  closeSession(session, allowResume = true) {
     if (session.closed) return;
     session.closed = true;
-    this.leaveCurrentRoom(session);
+    if (allowResume && session.roomId && session.playerId && session.reconnectToken) {
+      this.suspendCurrentRoom(session);
+    } else {
+      this.leaveCurrentRoom(session);
+    }
     this.sessions.delete(session);
+  }
+
+  suspendCurrentRoom(session) {
+    if (!session.roomId || !session.playerId || !session.reconnectToken) return;
+    if (session.transformLogSessionId) {
+      this.stopPlayerTransformLog(
+        session,
+        session.transformLogSessionId,
+        [],
+        'connection-closed',
+      );
+    }
+
+    const suspended = {
+      roomId: session.roomId,
+      playerId: session.playerId,
+      player: session.player,
+      reconnectToken: session.reconnectToken,
+      timer: undefined,
+    };
+    suspended.timer = setTimeout(() => {
+      if (this.suspendedSessions.get(suspended.reconnectToken) !== suspended) return;
+      this.suspendedSessions.delete(suspended.reconnectToken);
+      this.roomManager.leaveRoom(suspended.roomId, suspended.playerId);
+    }, this.reconnectGraceMs);
+    suspended.timer.unref?.();
+    this.suspendedSessions.set(suspended.reconnectToken, suspended);
+
+    session.roomId = undefined;
+    session.playerId = undefined;
+    session.player = undefined;
+    session.reconnectToken = undefined;
+  }
+
+  resumeSession(session, message) {
+    this.leaveCurrentRoom(session);
+    const token = String(message.reconnectToken ?? '');
+    const suspended = this.suspendedSessions.get(token);
+    if (!suspended
+      || suspended.roomId !== String(message.roomId ?? '')
+      || suspended.playerId !== String(message.playerId ?? '')) {
+      throw new Error('重连凭据无效或已经过期');
+    }
+    const room = this.roomManager.getRoom?.(suspended.roomId);
+    if (!room) {
+      clearTimeout(suspended.timer);
+      this.suspendedSessions.delete(token);
+      throw new Error('房间不存在或已经关闭');
+    }
+
+    clearTimeout(suspended.timer);
+    this.suspendedSessions.delete(token);
+    session.roomId = suspended.roomId;
+    session.playerId = suspended.playerId;
+    session.player = suspended.player;
+    session.reconnectToken = randomUUID();
+    this.send(session, {
+      type: 'room:resumed',
+      room,
+      player: suspended.player,
+      reconnectToken: session.reconnectToken,
+    }, 'control');
   }
 
   startPlayerTransformLog(session) {
@@ -358,6 +448,8 @@ export class RoomConnectionHub {
     }
     session.roomId = undefined;
     session.playerId = undefined;
+    session.player = undefined;
+    session.reconnectToken = undefined;
   }
 
   broadcastToRoom(roomId, message, channel) {

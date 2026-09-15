@@ -1,0 +1,16 @@
+# Overlay for the h5sgame Compose project. Run together with h5sgame's base
+# and HTTPS files so one nginx serves h5sgame on 80/443 and SkyLand on 5050.
+services:
+  nginx:
+    ports:
+      - "5050:5050"
+    volumes:
+      - "${SKYLAND_ROOT:-/srv/skyland}/deploy/nginx-shared-skyland.conf:/etc/nginx/shared-sites-enabled/skyland.conf:ro"
+    networks:
+      - default
+      - skyland_shared
+
+networks:
+  skyland_shared:
+    external: true
+    name: skyland_default

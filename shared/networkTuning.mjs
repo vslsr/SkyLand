@@ -88,3 +88,11 @@ export const RECONCILE_RATE = 9;
 
 /** WebSocket 心跳间隔（毫秒），用来清理半开连接。 */
 export const SOCKET_HEARTBEAT_MS = 30_000;
+
+/**
+ * 连接中断后为原玩家保留座位与权威实体的时间（毫秒）。
+ *
+ * 这个窗口只按在线玩家数保留一份已有状态，不随世界尺寸增长；移动仍会在
+ * MOVEMENT_IDLE_TIMEOUT_MS 后归零，所以弱网玩家不会保持最后一次输入继续移动。
+ */
+export const ROOM_RECONNECT_GRACE_MS = 60_000;

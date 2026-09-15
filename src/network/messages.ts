@@ -18,6 +18,8 @@ export interface RoomSummary {
 export interface JoinedRoom {
   room: RoomSummary;
   scene: SceneDefinition;
+  /** 仅保存在当前页面内，用于短线后恢复同一权威玩家。 */
+  reconnectToken?: string;
   player: {
     id: string;
     name: string;
@@ -180,6 +182,7 @@ export type BuildCommand =
 
 export type ClientMessage =
   | { type: 'room:join'; roomId: string; name: string }
+  | { type: 'room:resume'; roomId: string; playerId: string; reconnectToken: string }
   | { type: 'room:leave' }
   | { type: 'weather:set'; weather: WeatherType }
   /**
@@ -248,6 +251,7 @@ export interface ServerMessage {
   player?: JoinedRoom['player'];
   snapshot?: RoomSnapshot;
   scene?: SceneDefinition;
+  reconnectToken?: string;
   message?: string;
   /** room:terrain 携带的地形覆盖格；只有服务端确认过的编辑会出现在这里。 */
   cells?: Array<{ cellX: number; cellZ: number; code: number }>;

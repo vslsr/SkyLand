@@ -58,6 +58,13 @@ export class WebSocketGateway {
       connection.session.receive(message);
     });
 
+    // ws 会在超出 maxPayload 等协议错误时触发 error。这个事件必须由每条连接
+    // 自己消费，否则 EventEmitter 会把它当作未处理异常并终止整个服务进程。
+    socket.on('error', () => {
+      connection.session.close();
+      this.connections.delete(socket);
+    });
+
     socket.on('close', () => {
       connection.session.close();
       this.connections.delete(socket);

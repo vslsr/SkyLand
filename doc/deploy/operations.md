@@ -8,7 +8,7 @@
 ## 当前形态
 
 ```
-浏览器 ──https──▶ nginx:443（自签证书，terminate TLS）
+浏览器 ──https──▶ 宿主机:5050 → nginx:443（自签证书，terminate TLS）
                      │  proxy_pass，透传 COOP/COEP，转发 WebSocket 升级
                      ▼
                  skyland:3090（Node）── fork ──▶ room-worker.mjs × N
@@ -19,6 +19,23 @@
 - 启动方式：`docker compose --profile nginx-tls up -d`
 - skyland 容器本身只监听 `127.0.0.1:3090`，对外由 nginx 收口
 - 证书在 `deploy/tls/`（不入库），由 `deploy/generate-self-signed-cert.sh` 生成
+
+### 与 h5sgame 共用一个 Nginx
+
+同机运行 `h5sgame` 时，可以保留它的 Nginx 作为唯一公网入口：80/443 继续代理
+h5sgame，5050 代理 SkyLand。共享代理需要同时加入两个 Compose 网络。
+
+```bash
+cd /opt/h5-minepock
+docker compose -p h5sgame-prod \
+  -f docker-compose.yml \
+  -f docker-compose.https.yml \
+  -f /srv/skyland/deploy/docker-compose.shared-nginx.yml \
+  up -d nginx
+```
+
+叠加文件会挂载 `deploy/nginx-shared-skyland.conf`，并让 h5sgame 的 Nginx 加入
+`skyland_default` 网络。SkyLand 的独立 `nginx-tls` profile 此时不要启动。
 
 ## 发版
 
@@ -65,8 +82,8 @@ docker compose restart nginx
 发完自查：
 
 ```bash
-curl -kI https://127.0.0.1/ | grep -i cross-origin   # COOP/COEP/CORP 三行都要在
-curl -k  https://127.0.0.1/api/health                # webReady 必须是 true
+curl -kI https://127.0.0.1:5050/ | grep -i cross-origin   # COOP/COEP/CORP 三行都要在
+curl -k  https://127.0.0.1:5050/api/health                # webReady 必须是 true
 ```
 
 浏览器侧的验收永远是这一句，不要靠「看起来能动」：
@@ -133,7 +150,7 @@ Caddy 自动签发和续期，浏览器无警告。注意 80 和 443 都要能�
 
 ### 2. 让 h5sgame 和 SkyLand 共存
 
-现在 `h5sgame-prod-nginx-1` 是停着的——两个站都要 80/443，没有域名时无法区分。
+现有 H5 继续使用 80/443，SkyLand 默认使用 HTTPS 5050，两个项目可独立运行。
 有域名之后用 `server_name` 分流即可，一个 nginx 带两个 server 块：
 
 ```nginx
@@ -206,12 +223,12 @@ docker run --rm -v skyland-logs:/data -v "$PWD":/backup alpine \
 docker compose ps                                    # 容器都在吗
 docker compose logs --tail=100 nginx                 # 反代这一层
 docker compose logs --tail=100 skyland               # 应用这一层
-curl -k https://127.0.0.1/api/health                 # 绕过公网，服务本身好吗
+curl -k https://127.0.0.1:5050/api/health                 # 绕过公网，服务本身好吗
 ```
 
 | 现象 | 大概率原因 |
 | --- | --- |
-| 浏览器一直转圈，服务器日志什么都没有 | 安全组没放行 443，请求根本没到机器 |
+| 浏览器一直转圈，服务器日志什么都没有 | 安全组没放行 TCP 5050，请求根本没到机器 |
 | nginx 起不来，`host not found in upstream "skyland"` | skyland 容器没起；`depends_on` 只管顺序不管就绪 |
 | 页面报「拿不到 SharedArrayBuffer」 | 走了 http，或反代覆盖了 COOP/COEP。`curl -kI` 查那三行 |
 | 页面能开，进房间就断 | WebSocket 升级没转发，或 `proxy_read_timeout` 太短 |

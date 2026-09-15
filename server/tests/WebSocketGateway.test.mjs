@@ -77,3 +77,51 @@ test('WebSocketGateway 只负责帧适配并把消息交给连接枢纽', async 
 
   await cleanup();
 });
+
+test('WebSocketGateway 遇到超大消息时只关闭来源连接', async (context) => {
+  let closedSessions = 0;
+  const connectionHub = {
+    openSession(send) {
+      send({ type: 'connected' }, 'control');
+      let closed = false;
+      return {
+        receive() {},
+        close() {
+          if (closed) return;
+          closed = true;
+          closedSessions += 1;
+        },
+      };
+    },
+  };
+
+  const server = http.createServer();
+  const gateway = new WebSocketGateway(server, connectionHub);
+  const sockets = [];
+  context.after(async () => {
+    for (const socket of sockets) socket.terminate();
+    gateway.close();
+    if (server.listening) await new Promise((resolve) => server.close(resolve));
+  });
+
+  server.listen(0, '127.0.0.1');
+  await once(server, 'listening');
+  const address = server.address();
+  assert.equal(typeof address, 'object');
+  const endpoint = `ws://127.0.0.1:${address.port}/ws`;
+
+  const oversized = new WebSocket(endpoint);
+  sockets.push(oversized);
+  oversized.on('error', () => {});
+  await once(oversized, 'open');
+  const oversizedClosed = once(oversized, 'close');
+  oversized.send('x'.repeat(9_000));
+  await oversizedClosed;
+  assert.equal(closedSessions, 1);
+
+  const healthy = new WebSocket(endpoint);
+  sockets.push(healthy);
+  const connected = nextJson(healthy);
+  await once(healthy, 'open');
+  assert.deepEqual(await connected, { type: 'connected' });
+});

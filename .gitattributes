@@ -1,0 +1,2 @@
+# Linux deployment scripts must retain LF on Windows checkouts.
+deploy/*.sh text eol=lf

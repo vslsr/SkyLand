@@ -60,8 +60,10 @@ done
 echo "  skyland 容器: ${state:-unknown}"
 # 走 nginx 打一遍：这一条同时验了 TLS 收口、反代和服务端自己发的跨源隔离头。
 # 没有 COOP/COEP/CORP 就没有 SharedArrayBuffer，客户端会直接抛「渲染循环搬不进线程」。
-curl -kfsS https://127.0.0.1/api/health | head -c 400; echo
-curl -kfsSI https://127.0.0.1/ | grep -i '^cross-origin' || {
+https_binding="$("${COMPOSE[@]}" port nginx 443 | head -n 1)"
+https_port="${https_binding##*:}"
+curl -kfsS "https://127.0.0.1:${https_port}/api/health" | head -c 400; echo
+curl -kfsSI "https://127.0.0.1:${https_port}/" | grep -i '^cross-origin' || {
   echo "跨源隔离响应头没拿到，页面会起不来——检查 deploy/nginx-tls.conf 有没有被改动过。" >&2
   exit 1
 }

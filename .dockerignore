@@ -3,6 +3,9 @@
 .cursor
 .agents
 .codex
+.env
+deploy/tls
+logs
 
 node_modules
 dist

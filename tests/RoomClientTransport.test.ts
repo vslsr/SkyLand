@@ -97,6 +97,7 @@ test('RoomClient 按消息用途选择 control 与 realtime 通道', async () =>
     room,
     scene: {},
     player: { id: 'player-1', name: 'Player', slot: 0, spawn: { x: 0, z: 0 } },
+    reconnectToken: 'resume-1',
   }));
   assert.equal((await joining).player.id, 'player-1');
 
@@ -176,6 +177,50 @@ test('RoomClient 按消息用途选择 control 与 realtime 通道', async () =>
   );
   assert.equal(client.stopPlayerTransformLog('session-1', []), true);
   assert.equal(decodeSent(transport.sent.at(-1)!.payload).type, 'debug:transform-log:stop');
+});
+
+test('RoomClient 在短线后恢复同一个房间玩家且不通知掉线', async () => {
+  const transport = new MemoryTransport();
+  const client = new RoomClient({
+    transport,
+    roomDirectory,
+    endpoint: 'memory://rooms',
+    reconnectDelaysMs: [0],
+  });
+  let disconnected = 0;
+  client.onDisconnect(() => { disconnected += 1; });
+
+  const joining = client.joinRoom(room.id, 'Player');
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  transport.receive(JSON.stringify({
+    type: 'room:joined',
+    room,
+    scene: {},
+    player: { id: 'player-1', name: 'Player', slot: 0, spawn: { x: 0, z: 0 } },
+    reconnectToken: 'resume-1',
+  }));
+  await joining;
+
+  transport.close();
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  assert.deepEqual(decodeSent(transport.sent.at(-1)!.payload), {
+    type: 'room:resume',
+    roomId: 'room-1',
+    playerId: 'player-1',
+    reconnectToken: 'resume-1',
+  });
+
+  transport.receive(JSON.stringify({
+    type: 'room:resumed',
+    room: { ...room, playerCount: 1 },
+    player: { id: 'player-1', name: 'Player', slot: 0, spawn: { x: 0, z: 0 } },
+    reconnectToken: 'resume-2',
+  }));
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  assert.equal(disconnected, 0);
+  assert.equal(client.sendPlayerInput([
+    { tick: 3, move: { x: 0, z: 0 }, sprint: false, jump: false, yaw: 0 },
+  ]), 3);
 });
 
 test('JSON codec 同时接受文本与二进制传输载荷', () => {

@@ -123,7 +123,8 @@ docker compose down              # 停止并删除容器（保留 skyland-logs �
 docker compose down -v           # 连日志卷一起删
 ```
 
-默认把宿主机 80 直接映射到容器的 3090，前面不放反代。注意这个默认值只够验证
+默认将 Node 服务发布到宿主机 127.0.0.1:3090。启用 nginx-tls profile 后，
+HTTPS 入口为宿主机 5050（映射到 nginx 容器 443），不占用已有站点的 80/443。注意这个默认值只够验证
 `/api/health` 和静态资源是否正常——**浏览器里游戏起不来**，因为纯 HTTP 没有跨源隔离，
 见 4.1。真要能玩，按 4.2 拿到安全上下文。
 
@@ -191,7 +192,7 @@ COOP/COEP 头发得再对，`crossOriginIsolated` 仍然是 `false`。
 | `--profile tls`（Caddy） | Let's Encrypt 自动签发续期 | 无 | 80 + 443 | 已备案域名，或服务器在境外 |
 
 启用任一 profile 时 skyland 自己不要再占 80，保持默认的只发布到回环即可。
-`nginx-tls` 和 `tls` 都占 80/443，不能同时起；`quicktunnel` 不占任何端口，可以并存。
+`nginx-tls` 默认占用 5050，`tls` 需要 80/443；`quicktunnel` 不占任何端口，可以并存。
 
 > **境内服务器的坑：`<IP>.sslip.io` + Let's Encrypt 走不通。** 云厂商会在入口拦截
 > 未备案域名走 80/443 的请求，返回一个 webblock 页。Let's Encrypt 是多视角校验，
@@ -227,7 +228,7 @@ docker compose logs cloudflared | grep trycloudflare.com
 ```bash
 ./deploy/generate-self-signed-cert.sh 111.229.172.59   # 换成你的公网 IP
 docker compose --profile nginx-tls up -d
-# 浏览器开 https://111.229.172.59/
+# 浏览器开 https://111.229.172.59:5050/
 ```
 
 `cp .env.example .env` 之后这台机器上的 `docker compose` 就自带这个 profile
@@ -236,7 +237,7 @@ docker compose --profile nginx-tls up -d
 [operations.md 的发版一节](./operations.md)。
 
 证书写在 `deploy/tls/`（已在 `.gitignore` 里）。已经有正式证书时，把 `cert.pem` /
-`key.pem` 放进这个目录即可，不用跑脚本。需要放行安全组的 443 入站。
+`key.pem` 放进这个目录即可，不用跑脚本。需要放行安全组的 TCP 5050 入站。可用 `SKYLAND_HTTPS_PUBLISH` 覆盖发布地址。
 
 `deploy/nginx-tls.conf` 里刻意没有任何 `add_header` / `proxy_hide_header`：
 COOP/COEP/CORP 由 Node 服务端统一发，nginx 默认透传，一旦覆盖就前功尽弃。
