@@ -310,9 +310,23 @@ export interface ActorArchetypeDefinition {
       mode: 'ping-pong' | 'loop';
     };
     /**
-     * 会自己寻路的 AI。搜索、跟随与重寻路全在服务端（`shared/navigation` +
-     * `NavigationSystem`），客户端不读它——位置整段由快照插值而来——列在这里
-     * 和 `patrolPath` 同一个理由：让原型的形状在两侧对得上。
+     * 实体：在游戏里频繁移动的对象，最基础的那一层类型（生物、玩家都挂它）。
+     * 服务端用它做局部避障的位置表；客户端不读——列在这里是为了让原型的形状
+     * 在两侧对得上。
+     */
+    movingEntity?: {
+      radius?: number;
+      avoidCrowd?: boolean;
+    };
+    /**
+     * 会自己寻路的 AI。搜索、跟随、重寻路与**局部避障**全在服务端
+     * （`shared/navigation` + `NavigationSystem`），客户端不读它——位置整段由
+     * 快照插值而来——列在这里和 `patrolPath` 同一个理由：让原型的形状在两侧
+     * 对得上。
+     *
+     * 避障尤其不能在这边跑第二遍：它的输入是**整张位置表**，而客户端手上那张
+     * 表是插值出来的、比服务端晚一个插值延迟，同样的算法喂不同的输入只会得出
+     * 另一条轨迹——本地算得越认真，画面和权威位置差得越远。
      */
     navigation?: {
       speed: number;

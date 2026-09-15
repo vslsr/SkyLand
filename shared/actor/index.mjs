@@ -126,6 +126,10 @@ export {
   MAX_GUIDE_PATH_POINTS,
 } from './components/GuidePathComponent.mjs';
 export {
+  MOVING_ENTITY_COMPONENT,
+  MovingEntityComponent,
+} from './components/MovingEntityComponent.mjs';
+export {
   NAVIGATION_COMPONENT,
   NavigationComponent,
 } from './components/NavigationComponent.mjs';

@@ -1101,6 +1101,23 @@
             }
           }
         },
+        "movingEntity": {
+          "description": "实体：在游戏里频繁移动的对象，最基础的那一层类型。写了 navigation 的不必再写它——会寻路就一定频繁移动，构造时自动补一个；显式写出来只是为了改这两个数。",
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "radius": {
+              "description": "地面足迹半径，米。避障、寻路的「这一格塞不塞得下」、碰撞推出必须是同一个数；默认取 navigation.radius，再退到 render.radius。",
+              "type": "number",
+              "exclusiveMinimum": 0,
+              "maximum": 4
+            },
+            "avoidCrowd": {
+              "description": "自己要不要给别的实体让路（局部避障）。默认 true。写 false 的仍然是别人的障碍，只是自己不让——玩家就是这一类。",
+              "type": "boolean"
+            }
+          }
+        },
         "navigation": {
           "description": "会自己寻路的 AI。搜索算法在 shared/navigation，这里只写这一只生物的体型、脾气与搜索预算。搜索窗口和节点上限是大世界的成本封顶，不是调优旋钮。",
           "type": "object",
@@ -1183,10 +1200,6 @@
             },
             "swim": {
               "description": "会不会游泳。写 true 等于把水的代价从「走不了」调成一个正数；显式写了 malus.water 时以后者为准。",
-              "type": "boolean"
-            },
-            "avoidCrowd": {
-              "description": "要不要给别的会走路的单位让路（局部避障）。默认 true。写 false 的仍然是别人的障碍，只是自己不让。",
               "type": "boolean"
             },
             "malus": {

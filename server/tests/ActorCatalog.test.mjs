@@ -492,3 +492,53 @@ test('ActorCatalog 净化弹药原型，并拒绝看不见的箭与两套积分'
   unknown.components.projectile.homing = true;
   await assert.rejects(loadSingleActor(unknown), /包含未知字段：homing/);
 });
+
+test('ActorCatalog 校验实体层，并且避障开关只认实体这一层', async () => {
+  const base = {
+    schemaVersion: 1,
+    id: 'entity-probe',
+    components: {
+      movingEntity: { radius: 0.5, avoidCrowd: false },
+      render: {
+        model: 'line-art-floor-plaque',
+        color: '#ffffff',
+        accentColor: '#333333',
+        width: 1,
+        length: 1,
+        height: 0.1,
+      },
+    },
+  };
+  const catalog = await loadSingleActor(base);
+  assert.deepEqual(catalog.require('entity-probe').components.movingEntity, {
+    radius: 0.5,
+    avoidCrowd: false,
+  });
+
+  const wrongType = structuredClone(base);
+  wrongType.components.movingEntity.avoidCrowd = 'no';
+  await assert.rejects(loadSingleActor(wrongType), /avoidCrowd 必须是布尔值/);
+
+  const unknownKey = structuredClone(base);
+  unknownKey.components.movingEntity.speed = 2;
+  await assert.rejects(loadSingleActor(unknownKey), /movingEntity 包含未知字段：speed/);
+
+  // 「让不让路」是实体这一层的事，不是寻路的事：两处都能写的话，一只没有
+  // navigation 的实体就没有地方写它，而同一个开关会有两个来源。
+  const onNavigation = {
+    schemaVersion: 1,
+    id: 'walker-probe',
+    components: {
+      navigation: { speed: 1.5, avoidCrowd: false },
+      render: {
+        model: 'line-art-floor-plaque',
+        color: '#ffffff',
+        accentColor: '#333333',
+        width: 1,
+        length: 1,
+        height: 0.1,
+      },
+    },
+  };
+  await assert.rejects(loadSingleActor(onNavigation), /navigation 包含未知字段：avoidCrowd/);
+});

@@ -1,5 +1,6 @@
 import {
   HEALTH_COMPONENT,
+  MOVING_ENTITY_COMPONENT,
   NAVIGATION_COMPONENT,
   PATROL_PATH_COMPONENT,
   TRANSFORM_COMPONENT,
@@ -62,7 +63,7 @@ const HEIGHT_EPSILON = 1e-6;
  *
  * 1. 挑目标——这一版只有一个来源：`chase` 写着就追最近的活玩家。
  * 2. 排队——每 tick 只放 `SEARCHES_PER_TICK` 次搜索过去，轮流来。
- * 3. 避障——同一 tick 里所有 agent 先照一张位置快照互相让路（`LocalAvoidance`）。
+ * 3. 避障——同一 tick 里所有**实体**先照一张位置快照互相让路（`LocalAvoidance`）。
  * 4. 落地——把水平位置写回权威 Transform，Y 按精确坐标重新采样地面。
  *
  * 第 3 件事是搜索**做不到**的那一半：两只沿同一条路走的生物各自的路都是最优的，
@@ -130,15 +131,21 @@ export class NavigationSystem {
     // 避障先建表，再动任何人：整个 tick 里所有人看到的是**同一张**位置快照。
     // 读实时坐标的话，结果会取决于这个数组的顺序——服务端是权威，那种不可复现
     // 的分歧最后会变成客户端与服务端对不上的位置。
-    this.beginAvoidanceFrame(actors);
+    //
+    // 建表按的是**实体**而不是「会寻路的」：玩家不寻路，却是生物最该绕开的那个
+    // 圆。两张表合成一张的代价是这里多查一次 world.query，换来的是避障不必认识
+    // 「谁是生物、谁是玩家」——它只认识圆。
+    this.beginAvoidanceFrame(world.query(MOVING_ENTITY_COMPONENT, TRANSFORM_COMPONENT));
 
     this.searchesThisTick = 0;
     let searchBudget = this.searchesPerTick;
     // 从游标处开始转一圈：预算用完时，下一 tick 从没轮到的那一只接着排。
     const start = this.cursor % actors.length;
     for (let offset = 0; offset < actors.length; offset += 1) {
-      const agentIndex = (start + offset) % actors.length;
-      const actor = actors[agentIndex];
+      const actor = actors[(start + offset) % actors.length];
+      // 这只在避障表里排第几个。没挂实体层的（裸 ActorWorld 里手搭的测试用例）
+      // 是 -1，那一位就不参与避让，而不是崩在里面。
+      const agentIndex = actor.getComponent(MOVING_ENTITY_COMPONENT)?.frameIndex ?? -1;
       const agent = actor.requireComponent(NAVIGATION_COMPONENT);
       const transform = actor.requireComponent(TRANSFORM_COMPONENT);
 
@@ -191,18 +198,33 @@ export class NavigationSystem {
   }
 
   /**
-   * 把这一 tick 所有会寻路的 Actor 填进避障的输入表。
+   * 把这一 tick 的所有实体填进避障的输入表。
    *
-   * **全都填，包括这一刻不走的**：死掉的、正在瞄准的、站定的，对别人来说仍然
-   * 是挡在路上的一个圆。漏掉它们的话，一只站着不动的生物会被别人直接穿过去。
+   * **全都填，包括这一刻不走的**：死掉的、正在瞄准的、站定的、玩家，对别人来说
+   * 仍然是挡在路上的一个圆。漏掉它们的话，一只站着不动的生物会被别人直接穿过去。
    * `moving` 这一位正是给这件事用的——挡路者自己不会让路时，避让责任全在对方。
+   *
+   * 会寻路的那些顺手把自己的运动状态报进实体层：驱动者只有它一个，而想知道
+   * 「这只这一刻走多快」的系统会越来越多，让每一个都去认识 `NavigationComponent`
+   * 是把寻路的内部状态摊给全世界。
    */
-  beginAvoidanceFrame(actors) {
+  beginAvoidanceFrame(entities) {
     const records = this.avoidanceAgents;
-    for (let index = 0; index < actors.length; index += 1) {
-      const actor = actors[index];
-      const agent = actor.requireComponent(NAVIGATION_COMPONENT);
+    for (let index = 0; index < entities.length; index += 1) {
+      const actor = entities[index];
+      const entity = actor.requireComponent(MOVING_ENTITY_COMPONENT);
       const transform = actor.requireComponent(TRANSFORM_COMPONENT);
+      const agent = actor.getComponent(NAVIGATION_COMPONENT);
+      if (agent) {
+        // 上一 tick 结束时的状态：这一 tick 还没有人动过，而「它正被推着走吗」
+        // 只在 tick 之间变化，用得着的精度就是这个。
+        entity.reportMotion(
+          agent.speed,
+          agent.driving && agent.hasPath,
+          agent.hasGoal ? Math.hypot(agent.goalX - transform.x, agent.goalZ - transform.z) : Infinity,
+        );
+      }
+      entity.frameIndex = index;
       let record = records[index];
       if (!record) {
         record = { x: 0, z: 0, radius: 0, speed: 0, moving: false, goalDistance: Infinity, avoids: true };
@@ -210,17 +232,13 @@ export class NavigationSystem {
       }
       record.x = transform.x;
       record.z = transform.z;
-      record.radius = agent.profile.radius;
-      record.speed = agent.speed;
-      // 上一 tick 结束时的状态：这一 tick 还没有人动过，而「它正被推着走吗」
-      // 只在 tick 之间变化，用得着的精度就是这个。
-      record.moving = agent.driving && agent.hasPath;
-      record.goalDistance = agent.hasGoal
-        ? Math.hypot(agent.goalX - transform.x, agent.goalZ - transform.z)
-        : Infinity;
-      record.avoids = agent.avoidsCrowd;
+      record.radius = entity.radius;
+      record.speed = entity.speed;
+      record.moving = entity.moving;
+      record.goalDistance = entity.goalDistance;
+      record.avoids = entity.avoidsCrowd;
     }
-    this.avoidance.beginFrame(records, actors.length);
+    this.avoidance.beginFrame(records, entities.length);
   }
 
   /**
@@ -305,7 +323,7 @@ export class NavigationSystem {
    * 了、这条边上有没有墙、这一步的高差行不行），两套判据会让 AI 走进墙里。
    */
   avoid(context, agent, transform, agentIndex, step, pose) {
-    if (!agent.avoidsCrowd) return;
+    if (agentIndex < 0) return;
     const travelX = pose.x - transform.x;
     const travelZ = pose.z - transform.z;
     const travel = Math.hypot(travelX, travelZ);
@@ -332,7 +350,7 @@ export class NavigationSystem {
    */
   spread(world, context, agent, transform, agentIndex, step) {
     const speed = this.avoidance.config.idleSeparationSpeed;
-    if (speed <= 0 || !agent.avoidsCrowd) return;
+    if (speed <= 0 || agentIndex < 0) return;
     const push = this.avoidance.separate(agentIndex, this.pushOutput);
     if (push.strength <= 0) return;
     const travel = speed * push.strength * step;

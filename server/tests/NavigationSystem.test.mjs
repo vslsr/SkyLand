@@ -3,6 +3,7 @@ import test from 'node:test';
 import './initRapier.mjs';
 import {
   INVENTORY_COMPONENT,
+  MOVING_ENTITY_COMPONENT,
   NAVIGATION_COMPONENT,
   TRANSFORM_COMPONENT,
 } from '../../shared/actor/index.mjs';
@@ -346,4 +347,37 @@ test('挤在一起站定的两只会慢慢挪开，而不是重叠成一坨', as
   runTicks(scene, clock, 60);
   const after = Math.hypot(first.x - second.x, first.z - second.z);
   assert.ok(after > before, `站定的两只该挪开，${before.toFixed(3)} → ${after.toFixed(3)}`);
+});
+
+test('玩家也是实体：生物绕着他走，而他一步都不被推着动', async () => {
+  // 实体（`MovingEntityComponent`）是「频繁移动的对象」这一层最基础的类型，
+  // 生物和玩家挂的是同一个。玩家写着 `avoidCrowd: false`——方向盘永远在他自己
+  // 手里——但他仍然在避障那张表里，生物这才会从他身边让开而不是径直穿过他。
+  const { scene, clock } = await createStreamingScene([{ id: 'hunter-a', x: 0, z: 0 }]);
+  scene.addPlayer({ id: 'prey', name: '猎物', slot: 0 });
+  const player = scene.players.get('prey');
+  const [hunter] = hunters(scene);
+  const transform = hunter.requireComponent(TRANSFORM_COMPONENT);
+  assert.ok(
+    player.getComponent(MOVING_ENTITY_COMPONENT),
+    '玩家挂着实体层：他是别人要绕开的那个圆',
+  );
+  assert.equal(
+    player.getComponent(MOVING_ENTITY_COMPONENT).avoidsCrowd,
+    false,
+    '玩家自己不让路',
+  );
+  assert.ok(hunter.getComponent(MOVING_ENTITY_COMPONENT), '会寻路的自动带一个实体层');
+
+  // 把猎手和玩家叠在一起：猎手已经在 keepDistance 之内，手上没有路，只有实体
+  // 之间的互相推开还在起作用。
+  placePlayer(player, 0.05, 0);
+  const playerBefore = { x: player.x, z: player.z };
+  const overlapBefore = Math.hypot(player.x - transform.x, player.z - transform.z);
+  runTicks(scene, clock, 60);
+  const overlapAfter = Math.hypot(player.x - transform.x, player.z - transform.z);
+
+  assert.ok(overlapAfter > overlapBefore, `猎手该从玩家身上挪开，${overlapBefore.toFixed(3)} → ${overlapAfter.toFixed(3)}`);
+  assert.equal(player.x, playerBefore.x, '玩家一步都不该被避障推动');
+  assert.equal(player.z, playerBefore.z);
 });

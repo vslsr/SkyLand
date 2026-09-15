@@ -698,6 +698,30 @@ function validateWeaponUser(raw, filename) {
 }
 
 /**
+ * 实体：在游戏里频繁移动的东西。
+ *
+ * 这是最基础的那一层类型，会走路的都挂它。**写了 `navigation` 的不必再写它**——
+ * 会寻路就一定频繁移动，构造时自动补一个；显式写出来只是为了改这两个数。
+ */
+function validateMovingEntity(raw, filename) {
+  const path = `${filename}.components.movingEntity`;
+  const definition = requireObject(raw, path);
+  const knownKeys = new Set(['radius', 'avoidCrowd']);
+  for (const key of Object.keys(definition)) {
+    if (!knownKeys.has(key)) throw new TypeError(`${path} 包含未知字段：${key}`);
+  }
+  if (definition.avoidCrowd !== undefined && typeof definition.avoidCrowd !== 'boolean') {
+    throw new TypeError(`${path}.avoidCrowd 必须是布尔值`);
+  }
+  return {
+    ...(definition.radius === undefined
+      ? {}
+      : { radius: requireNumber(definition.radius, `${path}.radius`, Number.EPSILON, 4) }),
+    ...(definition.avoidCrowd === undefined ? {} : { avoidCrowd: definition.avoidCrowd }),
+  };
+}
+
+/**
  * 会自己寻路的 AI。
  *
  * 这里校验的是**这一只生物**：体型多大、抬得多高、怕不怕水、想得多远。寻路
@@ -714,7 +738,7 @@ function validateNavigation(raw, filename) {
   const knownKeys = new Set([
     'speed', 'turnSpeed', 'radius', 'height', 'stepUp', 'maxDrop',
     'nodeRadius', 'arriveRadius', 'repathSeconds', 'goalTolerance',
-    'searchRadiusCells', 'maxVisitedNodes', 'swim', 'malus', 'chase', 'avoidCrowd',
+    'searchRadiusCells', 'maxVisitedNodes', 'swim', 'malus', 'chase',
   ]);
   for (const key of Object.keys(definition)) {
     if (!knownKeys.has(key)) throw new TypeError(`${path} 包含未知字段：${key}`);
@@ -730,9 +754,6 @@ function validateNavigation(raw, filename) {
   };
   if (definition.swim !== undefined && typeof definition.swim !== 'boolean') {
     throw new TypeError(`${path}.swim 必须是布尔值`);
-  }
-  if (definition.avoidCrowd !== undefined && typeof definition.avoidCrowd !== 'boolean') {
-    throw new TypeError(`${path}.avoidCrowd 必须是布尔值`);
   }
 
   let malus;
@@ -780,7 +801,6 @@ function validateNavigation(raw, filename) {
     ...optionalNumber('height', Number.EPSILON, 8),
     ...optionalNumber('stepUp', 0, 4),
     ...optionalNumber('maxDrop', 0, 16),
-    ...(definition.avoidCrowd === undefined ? {} : { avoidCrowd: definition.avoidCrowd }),
     ...optionalNumber('nodeRadius', Number.EPSILON, 4),
     ...optionalNumber('arriveRadius', Number.EPSILON, 16),
     ...optionalNumber('repathSeconds', Number.EPSILON, 30),
@@ -1290,6 +1310,7 @@ function validateActorArchetype(raw, filename) {
     'generatedProp',
     'guidePath',
     'patrolPath',
+    'movingEntity',
     'navigation',
     'weaponUser',
     'buildPiece',
@@ -1310,6 +1331,9 @@ function validateActorArchetype(raw, filename) {
     : undefined;
   const patrolPath = components.patrolPath
     ? validatePatrolPath(components.patrolPath, filename)
+    : undefined;
+  const movingEntity = components.movingEntity
+    ? validateMovingEntity(components.movingEntity, filename)
     : undefined;
   const navigation = components.navigation
     ? validateNavigation(components.navigation, filename)
@@ -1540,6 +1564,7 @@ function validateActorArchetype(raw, filename) {
       ...(generatedProp ? { generatedProp } : {}),
       ...(guidePath ? { guidePath } : {}),
       ...(patrolPath ? { patrolPath } : {}),
+      ...(movingEntity ? { movingEntity } : {}),
       ...(navigation ? { navigation } : {}),
       ...(weaponUser ? { weaponUser } : {}),
       ...(buildPiece ? { buildPiece } : {}),

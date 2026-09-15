@@ -6,6 +6,7 @@ import {
   WeaponShotComponent,
   BuoyancyComponent,
   InventoryComponent,
+  MovingEntityComponent,
   PickupDropComponent,
   PLAYER_JUMP_COMPONENT,
   PlayerJumpComponent,
@@ -65,6 +66,16 @@ export class ServerPlayerActor extends Actor {
     // 射出去那一发记在射手自己身上。玩家一律带着它（一发都没射过时它不进快照），
     // 因为「手上随时可能换成一把弓」是玩家这一类实体的常态。
     this.addComponent(new WeaponShotComponent());
+    // 玩家是最典型的「频繁移动的对象」，所以他也是实体——但 `avoidCrowd` 恒为
+    // `false`：方向盘永远在玩家自己手里，谁也不许替他打方向。他进这张表是为了
+    // **被别人绕开**，生物这才会从他身边让过去而不是径直穿过他。
+    //
+    // 运动状态一直是「站着」：玩家不会给 AI 让路，所以避让责任本来就全在生物
+    // 那一边，而那正是挡路者不动时的算法分支。
+    this.addComponent(new MovingEntityComponent({
+      radius: archetype.components.movingEntity?.radius ?? archetype.components.render?.radius,
+      avoidCrowd: false,
+    }));
     this.waterMovementEffect = new WaterMovementEffectController(gameAbility.abilitySystem);
     // applyPlayerMovement 读取这份复用对象；每次输入只更新 GAS CurrentValue，避免热路径分配。
     this.effectiveMovement = {
