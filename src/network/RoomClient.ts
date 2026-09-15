@@ -31,7 +31,8 @@ export type { PlayerInputFrame, PlayerInputStep, RoomSnapshot } from './protocol
 
 type RoomUpdateListener = (room: RoomSummary) => void;
 type SnapshotListener = (snapshot: RoomSnapshot) => void;
-type DisconnectListener = () => void;
+/** 断线通知。`notice` 只有在服务端说明了原因（例如被管理员断开）时才有。 */
+type DisconnectListener = (notice?: string) => void;
 type PlayerTransformLogListener = (status: PlayerTransformLogStatus) => void;
 
 /** 服务端确认过的一格地形覆盖。code 的打包格式见 terrainConfig.mjs。 */
@@ -66,6 +67,8 @@ export class RoomClient {
   private readonly roomListeners = new Set<RoomUpdateListener>();
   private readonly snapshotListeners = new Set<SnapshotListener>();
   private readonly disconnectListeners = new Set<DisconnectListener>();
+  /** 服务端在断开前说明的原因；连接真正断掉时随断线事件发出去，只用一次。 */
+  private disconnectNotice?: string;
   private readonly playerTransformLogListeners = new Set<PlayerTransformLogListener>();
   private readonly terrainListeners = new Set<TerrainPatchListener>();
   private readonly actorInputSequences = new Map<string, number>();
@@ -86,7 +89,9 @@ export class RoomClient {
 
     this.transport.onPacket((payload) => this.handlePacket(payload));
     this.transport.onDisconnect(() => {
-      for (const listener of this.disconnectListeners) listener();
+      const notice = this.disconnectNotice;
+      this.disconnectNotice = undefined;
+      for (const listener of this.disconnectListeners) listener(notice);
     });
   }
 
@@ -352,6 +357,11 @@ export class RoomClient {
     } else if (message?.type === 'debug:transform-log:status' && message.transformLog) {
       for (const listener of this.playerTransformLogListeners) listener(message.transformLog);
     } else if (message?.type === 'room:closed') {
+      this.transport.close();
+    } else if (message?.type === 'connection:kicked') {
+      // 运维后台踢人：服务端随后就会关掉 socket，这里先记下原因，
+      // 免得玩家只看到「连接断了」而不知道为什么。
+      this.disconnectNotice = typeof message.message === 'string' ? message.message : '你已被管理员断开连接';
       this.transport.close();
     }
   }

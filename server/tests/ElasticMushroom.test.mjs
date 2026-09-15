@@ -162,7 +162,15 @@ test('物品栏一格都腾不出来时退回叼在嘴上：拖拽 → 拔断 �
   assert.equal(scene.createSnapshot().players.find((entry) => entry.id === 'player-a').heldActorId, mushroomId);
   assert.equal(mushroom.parentActorId, 'player-a');
   assert.equal(mushroom.transform, undefined, 'Attach 后不应继续复制冗余世界坐标');
-  assert.deepEqual(mushroom.localTransform, { x: 0, y: 0.3, z: 0.36, yaw: 0 });
+  // 挂点取玩家原型的 pickupDrop（场景换一只玩家原型，嘴的高度就跟着变），
+  // 写死数字会在换原型时变成一条与真相脱节的断言。
+  const mouth = scene.players.get('player-a').getComponent('pickupDrop');
+  assert.deepEqual(mushroom.localTransform, {
+    x: mouth.mouthLocalX,
+    y: mouth.mouthLocalY,
+    z: mouth.mouthLocalZ,
+    yaw: mouth.mouthLocalYaw,
+  });
   assert.equal(mushroom.interactable.enabled, false, '非位置属性仍需正常同步');
   assert.equal(scene.physics.hasDynamicActor(mushroomId), false);
 

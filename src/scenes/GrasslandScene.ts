@@ -565,9 +565,9 @@ export class GrasslandScene extends Scene {
     });
     // 地形覆盖只从服务端来：客户端不做本地预测，避免脚下的世界两端不一致。
     this.roomClient.onTerrainPatch((cells) => this.world.applyTerrainPatches(cells));
-    this.roomClient.onDisconnect(() => {
+    this.roomClient.onDisconnect((notice) => {
       this.playerTransformLog?.handleDisconnect();
-      this.handleDisconnect();
+      this.handleDisconnect(notice);
     });
   }
 
@@ -785,6 +785,7 @@ export class GrasslandScene extends Scene {
   }
 
   private async joinRoom(room: RoomSummary, temporaryName: string): Promise<void> {
+    this.lobbyPage.setNotice('');
     this.lobbyPage.setBusy(true, `正在加入「${room.name}」…`);
     try {
       this.completeJoin(await this.roomClient.joinRoom(room.id, temporaryName));
@@ -1021,8 +1022,9 @@ export class GrasslandScene extends Scene {
     });
   }
 
-  private handleDisconnect(): void {
+  private handleDisconnect(notice?: string): void {
     if (!this.joinedRoom) return;
+    this.lobbyPage.setNotice(notice ?? '');
     this.joinedRoom = undefined;
     this.localPlayerPosition = undefined;
     this.terrainEditorPanel.setAvailable(false);

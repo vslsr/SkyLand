@@ -8,6 +8,7 @@ export interface AdminOverview {
   rooms: number;
   maxRooms: number;
   players: number;
+  connections: number;
   capacity: number;
   idleRooms: number;
   scenes: number;
@@ -36,6 +37,21 @@ export interface AdminRoom {
   createdAt: string;
   idleExpiresAt: string | null;
   players: AdminRoomPlayer[];
+}
+
+export interface AdminConnection {
+  id: string;
+  remoteAddress: string;
+  connectedAt: string;
+  onlineSeconds: number;
+  roomId: string | null;
+  roomName: string | null;
+  sceneName: string | null;
+  playerId: string | null;
+  playerName: string | null;
+  slot: number | null;
+  joinedAt: string | null;
+  recordingTransformLog: boolean;
 }
 
 export interface AdminScene {
@@ -131,6 +147,11 @@ export const adminApi = {
   rooms: () => request<{ rooms: AdminRoom[]; maxRooms: number }>('/rooms'),
   closeRoom: (roomId: string) => request<{ ok: true }>(`/rooms/${encodeURIComponent(roomId)}`, { method: 'DELETE' }),
   scenes: () => request<{ scenes: AdminScene[] }>('/scenes'),
+  connections: () => request<{ connections: AdminConnection[]; inRoom: number }>('/connections'),
+  kickConnection: (connectionId: string) => request<{ ok: true }>(
+    `/connections/${encodeURIComponent(connectionId)}/kick`,
+    { method: 'POST', body: JSON.stringify({}) },
+  ),
   logs: (level: AdminLogLevel | 'all', query: string) => {
     const search = new URLSearchParams({ level, limit: '200' });
     if (query) search.set('q', query);

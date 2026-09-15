@@ -3,6 +3,7 @@ import type { AdminPanel } from './AdminPanel';
 import { createButton, createElement, createField } from './dom';
 import { LogsPanel } from './panels/LogsPanel';
 import { OverviewPanel } from './panels/OverviewPanel';
+import { PlayersPanel } from './panels/PlayersPanel';
 import { RoomsPanel } from './panels/RoomsPanel';
 import { ScenesPanel } from './panels/ScenesPanel';
 import { SettingsPanel } from './panels/SettingsPanel';
@@ -26,6 +27,7 @@ export class AdminConsole {
   private readonly panelHost = createElement('div', { className: 'admin-panel-host' });
   private readonly panels: AdminPanel[] = [
     new OverviewPanel(),
+    new PlayersPanel(),
     new RoomsPanel(),
     new ScenesPanel(),
     new LogsPanel(),

@@ -5,6 +5,7 @@ import {
   TRANSFORM_COMPONENT,
 } from '../../shared/actor/index.mjs';
 import {
+  elasticTetherStretch,
   releaseElasticTether,
   updateElasticTetherTarget,
 } from './ElasticTetherMutations.mjs';
@@ -34,11 +35,7 @@ export class ElasticTetherSystem {
         releaseElasticTether(tether, interactable);
         continue;
       }
-      const length = Math.hypot(
-        tether.targetX - transform.x,
-        tether.targetY - transform.y,
-        tether.targetZ - transform.z,
-      );
+      const length = elasticTetherStretch(tether, transform);
       if (length >= tether.breakLength && !actor.getComponent(ELASTIC_DETACH_COMPONENT)) {
         releaseElasticTether(tether, interactable);
       }

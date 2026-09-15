@@ -7,7 +7,7 @@ import {
   SIMPLE_COLLISION_COMPONENT,
   TRANSFORM_COMPONENT,
 } from '../../shared/actor/index.mjs';
-import { releaseElasticTether } from './ElasticTetherMutations.mjs';
+import { elasticTetherStretch, releaseElasticTether } from './ElasticTetherMutations.mjs';
 import { pickupActor } from './PickupDropMutations.mjs';
 
 /**
@@ -46,8 +46,10 @@ export class ElasticDetachSystem {
         const dx = tether.targetX - transform.x;
         const dy = tether.targetY - transform.y;
         const dz = tether.targetZ - transform.z;
-        const length = Math.hypot(dx, dy, dz);
-        if (length >= tether.detachLength) {
+        // 判定用水平拉伸（见 elasticTetherStretch），弹出方向仍用三维：
+        // 拔出来的东西要带着向上的分量离地，不能贴着地面平推出去。
+        if (elasticTetherStretch(tether, transform) >= tether.detachLength) {
+          const length = Math.hypot(dx, dy, dz);
           const inverseLength = length > 1e-6 ? 1 / length : 0;
           const direction = {
             x: dx * inverseLength,

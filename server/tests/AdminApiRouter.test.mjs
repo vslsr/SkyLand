@@ -71,6 +71,7 @@ async function startAdminServer(options = {}) {
   const router = new AdminApiRouter({
     roomManager,
     sceneCatalog,
+    getConnectionHub: () => options.connectionHub,
     settingsStore,
     sessionStore: options.sessionStore ?? new AdminSessionStore(),
     logBuffer,
@@ -306,6 +307,74 @@ test('日志面板按级别与关键字过滤网关日志', async () => {
     // 登录动作自己也会记一条日志，正好验证「后台操作可回溯」。
     const all = await harness.request('/logs?level=all', { headers: { cookie } });
     assert.ok(all.payload.entries.some((entry) => entry.message.includes('[admin] 登录成功')));
+  } finally {
+    await harness.close();
+  }
+});
+
+class FakeConnectionHub {
+  constructor(connections) {
+    this.connections = connections;
+    this.kicked = [];
+  }
+
+  listConnections() {
+    return this.connections;
+  }
+
+  kickConnection(connectionId, reason) {
+    if (!this.connections.some((connection) => connection.id === connectionId)) return false;
+    this.connections = this.connections.filter((connection) => connection.id !== connectionId);
+    this.kicked.push([connectionId, reason]);
+    return true;
+  }
+}
+
+test('在线玩家面板：列出全部连接，并能按连接踢人', async () => {
+  const connectionHub = new FakeConnectionHub([
+    { id: 'conn-1', roomId: 'room-a', playerName: '旅人' },
+    { id: 'conn-2', roomId: null, playerName: null },
+  ]);
+  const harness = await startAdminServer({ connectionHub });
+  try {
+    const { cookie } = await login(harness);
+    const listed = await harness.request('/connections', { headers: { cookie } });
+    assert.equal(listed.status, 200);
+    assert.equal(listed.payload.connections.length, 2);
+    assert.equal(listed.payload.inRoom, 1, '还停在大厅的那条不算进房');
+
+    const kicked = await harness.request('/connections/conn-1/kick', {
+      method: 'POST',
+      headers: { cookie, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ reason: '违规' }),
+    });
+    assert.equal(kicked.status, 200);
+    assert.deepEqual(connectionHub.kicked, [['conn-1', '违规']]);
+    assert.equal((await harness.request('/connections/conn-1/kick', {
+      method: 'POST',
+      headers: { cookie, 'Content-Type': 'application/json' },
+      body: '{}',
+    })).status, 404);
+
+    const overview = await harness.request('/overview', { headers: { cookie } });
+    assert.equal(overview.payload.overview.connections, 1);
+  } finally {
+    await harness.close();
+  }
+});
+
+test('没有连接枢纽时在线玩家面板是空的，而不是报错', async () => {
+  const harness = await startAdminServer();
+  try {
+    const { cookie } = await login(harness);
+    const listed = await harness.request('/connections', { headers: { cookie } });
+    assert.equal(listed.status, 200);
+    assert.deepEqual(listed.payload.connections, []);
+    assert.equal((await harness.request('/connections/conn-1/kick', {
+      method: 'POST',
+      headers: { cookie, 'Content-Type': 'application/json' },
+      body: '{}',
+    })).status, 503);
   } finally {
     await harness.close();
   }

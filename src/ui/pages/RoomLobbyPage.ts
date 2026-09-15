@@ -7,6 +7,7 @@ type JoinHandler = (room: RoomSummary, temporaryName: string) => void;
 export class RoomLobbyPage extends ModalWindow {
   private readonly roomGrid = document.createElement('div');
   private readonly statusElement = document.createElement('p');
+  private readonly noticeElement = document.createElement('p');
   private readonly nameInput = document.createElement('input');
   private readonly refreshButton = document.createElement('button');
   private readonly createButton = document.createElement('button');
@@ -46,10 +47,16 @@ export class RoomLobbyPage extends ModalWindow {
     this.refreshButton.addEventListener('click', () => this.refreshHandler?.());
     toolbar.append(nameField, this.refreshButton);
 
+    // 提示条独立于状态行：状态行每次刷新房间列表都会被重写，而「你为什么被退回大厅」
+    // 这种话要一直留到玩家再次进房为止。
+    this.noticeElement.className = 'room-lobby__notice';
+    this.noticeElement.hidden = true;
+    this.noticeElement.setAttribute('role', 'status');
+
     this.roomGrid.className = 'room-grid';
     this.roomGrid.setAttribute('aria-label', '房间列表');
     this.statusElement.className = 'room-list-status';
-    this.bodyElement.append(toolbar, this.roomGrid, this.statusElement);
+    this.bodyElement.append(toolbar, this.noticeElement, this.roomGrid, this.statusElement);
 
     this.createButton.className = 'paper-button paper-button--primary';
     this.createButton.type = 'button';
@@ -93,6 +100,12 @@ export class RoomLobbyPage extends ModalWindow {
     this.roomGrid.replaceChildren(...rooms.map((room) => this.createRoomCard(room)));
     this.refreshButton.disabled = false;
     this.createButton.disabled = false;
+  }
+
+  /** 常驻提示（被管理员断开、房间被关闭…）。传空串清掉。 */
+  public setNotice(message: string): void {
+    this.noticeElement.textContent = message;
+    this.noticeElement.hidden = message.length === 0;
   }
 
   public setBusy(busy: boolean, message = ''): void {

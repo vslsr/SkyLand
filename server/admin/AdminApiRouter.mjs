@@ -11,6 +11,7 @@ import {
 export const ADMIN_SESSION_COOKIE = 'skyland_admin_session';
 // 房间 id 当前是 UUID，这里放宽到字母数字与短横：换了生成方式也不会悄悄变成 404。
 const ROOM_ID_PATTERN = /^\/api\/admin\/rooms\/([A-Za-z0-9-]{1,64})$/;
+const CONNECTION_KICK_PATTERN = /^\/api\/admin\/connections\/([A-Za-z0-9-]{1,64})\/kick$/;
 
 function parseCookies(header) {
   const cookies = new Map();
@@ -61,6 +62,8 @@ function sessionCookie(request, token, maxAgeSeconds) {
 export class AdminApiRouter {
   constructor(options) {
     this.roomManager = options.roomManager;
+    // 连接枢纽惰性取用：它与后台路由互相不持有对方，装配顺序因此不受限。
+    this.getConnectionHub = options.getConnectionHub ?? (() => undefined);
     this.sceneCatalog = options.sceneCatalog;
     this.settingsStore = options.settingsStore;
     this.sessionStore = options.sessionStore;
@@ -114,12 +117,16 @@ export class AdminApiRouter {
     if (readable && path === '/api/admin/overview') return this.sendOverview(request, response);
     if (readable && path === '/api/admin/rooms') return this.sendRooms(request, response);
     if (readable && path === '/api/admin/scenes') return this.sendScenes(request, response);
+    if (readable && path === '/api/admin/connections') return this.sendConnections(request, response);
     if (readable && path === '/api/admin/logs') return this.sendLogs(request, response, url);
     if (readable && path === '/api/admin/settings') return this.sendSettings(request, response);
     if (method === 'PUT' && path === '/api/admin/settings') return this.saveSettings(request, response);
 
     const roomMatch = path.match(ROOM_ID_PATTERN);
     if (method === 'DELETE' && roomMatch) return this.closeRoom(request, response, roomMatch[1]);
+
+    const kickMatch = path.match(CONNECTION_KICK_PATTERN);
+    if (method === 'POST' && kickMatch) return this.kickConnection(request, response, kickMatch[1]);
 
     return false;
   }
@@ -221,6 +228,7 @@ export class AdminApiRouter {
           rooms: rooms.length,
           maxRooms: settings.maxRooms,
           players: rooms.reduce((total, room) => total + room.playerCount, 0),
+          connections: this.getConnectionHub()?.listConnections().length ?? 0,
           capacity: rooms.reduce((total, room) => total + room.capacity, 0),
           idleRooms: rooms.filter((room) => room.playerCount === 0).length,
           scenes: this.sceneCatalog.list().length,
@@ -257,6 +265,39 @@ export class AdminApiRouter {
       };
     });
     sendJson(response, 200, { scenes }, request.method);
+    return true;
+  }
+
+  /** 在线连接：已进房的与还停在大厅的都在里面，后者 roomId 为 null。 */
+  sendConnections(request, response) {
+    const hub = this.getConnectionHub();
+    const connections = hub ? hub.listConnections() : [];
+    sendJson(
+      response,
+      200,
+      {
+        connections,
+        inRoom: connections.filter((connection) => connection.roomId !== null).length,
+      },
+      request.method,
+    );
+    return true;
+  }
+
+  async kickConnection(request, response, connectionId) {
+    const hub = this.getConnectionHub();
+    if (!hub) {
+      sendJson(response, 503, { error: '连接枢纽尚未就绪' }, request.method);
+      return true;
+    }
+    const body = await readJsonBody(request);
+    const reason = String(body.reason ?? '你已被管理员断开连接').slice(0, 64);
+    if (!hub.kickConnection(connectionId, reason)) {
+      sendJson(response, 404, { error: '连接不存在（可能已经断开）' }, request.method);
+      return true;
+    }
+    console.log(`[admin] 断开连接 ${connectionId}（${reason}）`);
+    sendJson(response, 200, { ok: true }, request.method);
     return true;
   }
 

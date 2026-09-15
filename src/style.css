@@ -772,6 +772,21 @@ body.has-interaction-target .crosshair {
   box-shadow: 0 0 0 2px rgba(111, 133, 92, 0.15);
 }
 
+/* 大厅常驻提示条：被管理员断开、房间被关闭这类「你为什么回到这里」的话。 */
+.room-lobby__notice {
+  margin: 0 0 13px;
+  padding: 9px 11px;
+  color: #7a3b2e;
+  font-size: 11px;
+  line-height: 1.6;
+  background: rgba(155, 63, 49, 0.06);
+  border: 1px solid rgba(155, 63, 49, 0.32);
+}
+
+.room-lobby__notice[hidden] {
+  display: none;
+}
+
 .room-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(145px, 1fr));

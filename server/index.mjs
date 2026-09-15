@@ -31,9 +31,11 @@ const roomManager = new RoomProcessManager({
   getMaxRooms: () => adminSettings.get().maxRooms,
 });
 const staticWebServer = new StaticWebServer(webRoot);
+const connectionHub = new RoomConnectionHub(roomManager);
 const adminApiRouter = new AdminApiRouter({
   roomManager,
   sceneCatalog,
+  getConnectionHub: () => connectionHub,
   settingsStore: adminSettings,
   sessionStore: new AdminSessionStore(),
   logBuffer,
@@ -68,7 +70,6 @@ const server = http.createServer(async (request, response) => {
   }
 });
 
-const connectionHub = new RoomConnectionHub(roomManager);
 const gateway = new WebSocketGateway(server, connectionHub);
 
 server.listen(port, host, async () => {

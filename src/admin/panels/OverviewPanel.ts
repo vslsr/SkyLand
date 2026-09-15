@@ -11,6 +11,7 @@ interface StatDefinition {
 
 const STATS: StatDefinition[] = [
   { label: '在线玩家', read: (o) => String(o.players), hint: (o) => `席位合计 ${o.capacity}` },
+  { label: '连接数', read: (o) => String(o.connections), hint: (o) => `其中 ${Math.max(0, o.connections - o.players)} 条还在大厅` },
   { label: '运行房间', read: (o) => String(o.rooms), hint: (o) => `上限 ${describeRoomLimit(o.maxRooms)}` },
   { label: '空置房间', read: (o) => String(o.idleRooms), hint: () => '无人时按设置自动回收' },
   { label: '可用地图', read: (o) => String(o.scenes) },

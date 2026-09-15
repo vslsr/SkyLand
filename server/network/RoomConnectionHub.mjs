@@ -64,9 +64,16 @@ export class RoomConnectionHub {
     roomManager.on('transform-log:stopped', this.handleTransformLogStopped);
   }
 
-  openSession(send) {
+  openSession(send, options = {}) {
     const record = {
+      // 连接自己的 id：后台踢人按它定位，和房间里的 playerId 是两码事
+      // （还没进房的连接也要能被看到、被踢）。
+      id: randomUUID(),
       send,
+      remoteAddress: String(options.remoteAddress ?? 'unknown'),
+      closeTransport: options.closeTransport,
+      connectedAt: Date.now(),
+      joinedAt: undefined,
       roomId: undefined,
       playerId: undefined,
       inputTokens: INPUT_MESSAGE_BURST,
@@ -106,6 +113,7 @@ export class RoomConnectionHub {
           const joined = this.roomManager.joinRoom(String(message.roomId ?? ''), message.name);
           session.roomId = joined.room.id;
           session.playerId = joined.player.id;
+          session.joinedAt = Date.now();
           this.send(session, { type: 'room:joined', ...joined }, 'control');
           break;
         }
@@ -358,6 +366,48 @@ export class RoomConnectionHub {
     }
     session.roomId = undefined;
     session.playerId = undefined;
+    session.joinedAt = undefined;
+  }
+
+  /**
+   * 当前所有连接（含尚未进房的）。运维后台的「在线玩家」面板读它。
+   * 数量与在线人数同阶，和世界大小无关。
+   */
+  listConnections() {
+    const now = Date.now();
+    return Array.from(this.sessions, (session) => {
+      const player = session.roomId && session.playerId
+        ? this.roomManager.listRoomPlayers(session.roomId).find((entry) => entry.id === session.playerId)
+        : undefined;
+      const room = session.roomId ? this.roomManager.getRoom(session.roomId) : undefined;
+      return {
+        id: session.id,
+        remoteAddress: session.remoteAddress,
+        connectedAt: new Date(session.connectedAt).toISOString(),
+        onlineSeconds: Math.round((now - session.connectedAt) / 1000),
+        roomId: session.roomId ?? null,
+        roomName: room?.name ?? null,
+        sceneName: room?.sceneName ?? null,
+        playerId: session.playerId ?? null,
+        playerName: player?.name ?? null,
+        slot: player?.slot ?? null,
+        joinedAt: session.joinedAt ? new Date(session.joinedAt).toISOString() : null,
+        recordingTransformLog: Boolean(session.transformLogSessionId),
+      };
+    }).sort((left, right) => left.connectedAt.localeCompare(right.connectedAt));
+  }
+
+  /**
+   * 踢掉一条连接：先告诉对面为什么被踢（客户端据此显示提示，而不是「连接莫名断了」），
+   * 再退房并关掉传输。没有传输关闭钩子时（测试里的假连接）只做前两步。
+   */
+  kickConnection(connectionId, reason = '你已被管理员断开连接') {
+    const session = Array.from(this.sessions).find((candidate) => candidate.id === connectionId);
+    if (!session) return false;
+    this.send(session, { type: 'connection:kicked', message: reason }, 'control');
+    this.closeSession(session);
+    session.closeTransport?.(reason);
+    return true;
   }
 
   broadcastToRoom(roomId, message, channel) {

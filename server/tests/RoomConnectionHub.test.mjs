@@ -204,3 +204,41 @@ test('RoomConnectionHub 关联玩家录制会话并在 DS 停止后返回双端�
   session.close();
   hub.close();
 });
+
+test('后台能看到全部连接（含还没进房的），也能按连接把人踢下线', () => {
+  const roomManager = new MockRoomManager();
+  roomManager.listRoomPlayers = (roomId) => (roomId === 'room-1'
+    ? [{ id: 'player-1', name: '旅人', slot: 0 }]
+    : []);
+  roomManager.getRoom = (roomId) => ({ id: roomId, name: '测试房间', sceneName: '草地' });
+
+  const hub = new RoomConnectionHub(roomManager);
+  const joinedMessages = [];
+  const lobbyMessages = [];
+  let closedReason;
+  const joined = hub.openSession((message) => joinedMessages.push(message), {
+    remoteAddress: '10.0.0.7',
+    closeTransport: (reason) => { closedReason = reason; },
+  });
+  hub.openSession((message) => lobbyMessages.push(message), { remoteAddress: '10.0.0.8' });
+  joined.receive({ type: 'room:join', roomId: 'room-1', name: '旅人' });
+
+  const connections = hub.listConnections();
+  assert.equal(connections.length, 2);
+  const inRoom = connections.find((connection) => connection.roomId === 'room-1');
+  assert.equal(inRoom.playerName, '旅人');
+  assert.equal(inRoom.remoteAddress, '10.0.0.7');
+  assert.equal(inRoom.roomName, '测试房间');
+  assert.ok(inRoom.joinedAt);
+  const inLobby = connections.find((connection) => connection.roomId === null);
+  assert.equal(inLobby.playerName, null);
+  assert.equal(inLobby.joinedAt, null, '还没进房就不该有进房时间');
+
+  assert.equal(hub.kickConnection(inRoom.id, '违规'), true);
+  // 先说明原因再关连接：玩家看到的是「被管理员断开」，不是莫名其妙掉线。
+  assert.deepEqual(joinedMessages.at(-1), { type: 'connection:kicked', message: '违规' });
+  assert.equal(closedReason, '违规');
+  assert.ok(roomManager.calls.some(([name, roomId, playerId]) => name === 'leaveRoom' && roomId === 'room-1' && playerId === 'player-1'));
+  assert.equal(hub.listConnections().length, 1);
+  assert.equal(hub.kickConnection(inRoom.id), false, '同一条连接不会被踢两次');
+});
