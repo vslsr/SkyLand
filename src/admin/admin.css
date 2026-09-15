@@ -1,0 +1,491 @@
+/*
+ * 运维后台的纸面线稿样式。
+ *
+ * 与游戏内 UI 同一套视觉语言（米白纸底、墨色细线、直角、偏移投影、字距拉开的小标题），
+ * 但**不复用** src/style.css：那份样式把 html/body 钉成满屏不滚动，是为画布服务的，
+ * 后台是一张会往下长的普通文档页。共用的是颜色与控件写法，不是布局。
+ */
+
+:root {
+  --admin-paper: #fdfbf6;
+  --admin-ink: #1c1a17;
+  --admin-ink-soft: rgba(28, 26, 23, 0.62);
+  --admin-line: rgba(28, 26, 23, 0.22);
+  --admin-line-strong: rgba(28, 26, 23, 0.5);
+  --admin-moss: #728562;
+  --admin-alert: #8b4058;
+  --admin-shadow: 10px 12px 0 rgba(28, 26, 23, 0.07);
+
+  color: var(--admin-ink);
+  font-family: Inter, "Microsoft YaHei", system-ui, sans-serif;
+  background: var(--admin-paper);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  min-width: 320px;
+  margin: 0;
+  background:
+    repeating-linear-gradient(90deg, rgba(28, 26, 23, 0.035) 0 1px, transparent 1px 64px),
+    var(--admin-paper);
+}
+
+button,
+input,
+select {
+  color: inherit;
+  font: inherit;
+}
+
+button {
+  cursor: pointer;
+}
+
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.48;
+}
+
+h1 {
+  margin: 4px 0 0;
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: clamp(26px, 3.4vw, 38px);
+  font-weight: 500;
+  line-height: 1.05;
+}
+
+h2 {
+  margin: 0;
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: clamp(20px, 2.4vw, 27px);
+  font-weight: 500;
+}
+
+h3 {
+  margin: 0 0 12px;
+  color: var(--admin-moss);
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+}
+
+.admin-root {
+  min-height: 100vh;
+  padding: clamp(18px, 3vw, 46px);
+}
+
+.admin-kicker {
+  margin: 0;
+  color: var(--admin-moss);
+  font-size: 8px;
+  font-weight: 800;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+}
+
+/* ---- 登录页 ---- */
+
+.admin-login {
+  display: grid;
+  min-height: 78vh;
+  place-items: center;
+}
+
+.admin-login__card {
+  width: min(420px, 100%);
+  padding: 30px 30px 26px;
+}
+
+.admin-login__form {
+  display: grid;
+  gap: 14px;
+  margin-top: 22px;
+}
+
+/* ---- 壳子 ---- */
+
+.admin-shell[hidden],
+.admin-login[hidden] {
+  display: none;
+}
+
+.admin-shell {
+  display: grid;
+  max-width: 1180px;
+  gap: 18px;
+  margin: 0 auto;
+}
+
+.admin-topbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 14px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--admin-line-strong);
+}
+
+.admin-topbar__tools {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+.admin-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.admin-tab {
+  min-height: 34px;
+  padding: 0 14px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  background: transparent;
+  border: 1px solid var(--admin-line);
+  transition: color 140ms ease, background 140ms ease, border-color 140ms ease;
+}
+
+.admin-tab:hover {
+  background: #e5ecd7;
+}
+
+.admin-tab[aria-pressed="true"] {
+  color: var(--admin-paper);
+  background: var(--admin-ink);
+  border-color: var(--admin-ink);
+}
+
+/* ---- 面板 ---- */
+
+.admin-panel {
+  display: grid;
+  gap: 18px;
+  padding: 24px clamp(18px, 2.4vw, 28px);
+  background: rgba(253, 251, 246, 0.97);
+  border: 1px solid var(--admin-line-strong);
+  box-shadow: var(--admin-shadow);
+}
+
+.admin-panel__header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--admin-line);
+}
+
+.admin-panel__description {
+  margin: 8px 0 0;
+  color: var(--admin-ink-soft);
+  font-size: 11px;
+  line-height: 1.6;
+}
+
+.admin-panel__actions {
+  display: flex;
+  gap: 8px;
+}
+
+.admin-panel__body {
+  display: grid;
+  gap: 18px;
+}
+
+.admin-panel__status {
+  min-height: 1.5em;
+  margin: 0;
+  color: var(--admin-ink-soft);
+  font-size: 11px;
+}
+
+.admin-panel__status.is-error {
+  color: var(--admin-alert);
+}
+
+.admin-section + .admin-section {
+  padding-top: 20px;
+  margin-top: 4px;
+  border-top: 1px solid var(--admin-line);
+}
+
+.admin-section {
+  display: grid;
+  gap: 14px;
+  justify-items: start;
+}
+
+.admin-note {
+  margin: 0;
+  color: var(--admin-ink-soft);
+  font-size: 11px;
+  line-height: 1.7;
+  overflow-wrap: anywhere;
+}
+
+/* ---- 表单控件 ---- */
+
+.admin-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  align-items: flex-start;
+  width: 100%;
+}
+
+.admin-field {
+  display: grid;
+  min-width: 180px;
+  flex: 1 1 200px;
+  gap: 6px;
+}
+
+.admin-field__label {
+  color: var(--admin-moss);
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+
+.admin-field__hint {
+  color: var(--admin-ink-soft);
+  font-size: 10px;
+  line-height: 1.6;
+}
+
+.admin-input {
+  min-height: 38px;
+  padding: 0 11px;
+  font-size: 13px;
+  background: rgba(253, 251, 246, 0.86);
+  border: 1px solid var(--admin-line-strong);
+  border-radius: 0;
+}
+
+.admin-input:focus-visible {
+  outline: 1px solid var(--admin-ink);
+  outline-offset: 1px;
+}
+
+.paper-button {
+  min-height: 38px;
+  padding: 0 15px;
+  font-size: 10px;
+  font-weight: 750;
+  letter-spacing: 0.05em;
+  text-align: center;
+  text-decoration: none;
+  background: transparent;
+  border: 1px solid rgba(28, 26, 23, 0.38);
+  transition: color 140ms ease, background 140ms ease, border-color 140ms ease;
+}
+
+a.paper-button {
+  display: inline-grid;
+  color: var(--admin-ink);
+  place-items: center;
+}
+
+.paper-button:not(:disabled):hover {
+  background: #e5ecd7;
+}
+
+.paper-button--primary {
+  min-width: 150px;
+  color: var(--admin-paper);
+  background: var(--admin-ink);
+  border-color: var(--admin-ink);
+}
+
+.paper-button--primary:not(:disabled):hover {
+  color: var(--admin-ink);
+  background: #dce6ca;
+}
+
+.paper-button--danger:not(:disabled):hover {
+  color: var(--admin-paper);
+  background: var(--admin-alert);
+  border-color: var(--admin-alert);
+}
+
+/* ---- 数据展示 ---- */
+
+.admin-stats {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(auto-fill, minmax(168px, 1fr));
+}
+
+.admin-stat {
+  display: grid;
+  gap: 5px;
+  padding: 14px 15px;
+  border: 1px solid var(--admin-line);
+}
+
+.admin-stat__label {
+  color: var(--admin-moss);
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+
+.admin-stat__value {
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 26px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+
+.admin-stat__hint {
+  color: var(--admin-ink-soft);
+  font-size: 10px;
+}
+
+.admin-card-grid {
+  display: grid;
+  gap: 14px;
+  grid-template-columns: repeat(auto-fill, minmax(288px, 1fr));
+}
+
+.admin-card {
+  display: grid;
+  gap: 12px;
+  align-content: start;
+  padding: 18px 18px 16px;
+  background: rgba(253, 251, 246, 0.97);
+  border: 1px solid var(--admin-line-strong);
+  box-shadow: var(--admin-shadow);
+}
+
+.admin-card__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.admin-card__head h3 {
+  margin: 0;
+  color: var(--admin-ink);
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 18px;
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.admin-card__badge {
+  padding: 4px 8px;
+  color: var(--admin-ink-soft);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  white-space: nowrap;
+  border: 1px solid var(--admin-line);
+}
+
+.admin-card__meta {
+  display: grid;
+  margin: 0;
+  gap: 4px 12px;
+  grid-template-columns: auto 1fr;
+  font-size: 11px;
+}
+
+.admin-card__meta dt {
+  color: var(--admin-moss);
+  font-weight: 700;
+  letter-spacing: 0.08em;
+}
+
+.admin-card__meta dd {
+  margin: 0;
+  color: var(--admin-ink-soft);
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+
+.admin-card__players {
+  margin: 0;
+  padding-top: 10px;
+  color: var(--admin-ink-soft);
+  font-size: 11px;
+  line-height: 1.7;
+  border-top: 1px solid var(--admin-line);
+}
+
+.admin-card__footer {
+  display: flex;
+  justify-content: flex-end;
+}
+
+/* ---- 日志 ---- */
+
+.admin-console {
+  max-height: 460px;
+  padding: 10px 12px;
+  overflow: auto;
+  background: rgba(253, 251, 246, 0.86);
+  border: 1px solid var(--admin-line-strong);
+}
+
+.admin-console__line {
+  display: grid;
+  margin: 0;
+  padding: 3px 0;
+  gap: 10px;
+  grid-template-columns: 62px 34px 1fr;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.admin-console__line + .admin-console__line {
+  border-top: 1px solid rgba(28, 26, 23, 0.08);
+}
+
+.admin-console__time {
+  color: rgba(28, 26, 23, 0.45);
+}
+
+.admin-console__level {
+  color: var(--admin-moss);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+}
+
+.admin-console__line.is-warn .admin-console__level {
+  color: #9a6b2f;
+}
+
+.admin-console__line.is-error .admin-console__level,
+.admin-console__line.is-error .admin-console__message {
+  color: var(--admin-alert);
+}
+
+.admin-console__message {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 640px) {
+  .admin-console__line {
+    grid-template-columns: 58px 1fr;
+  }
+
+  .admin-console__level {
+    display: none;
+  }
+}

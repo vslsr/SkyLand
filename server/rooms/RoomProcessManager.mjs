@@ -30,12 +30,16 @@ export class RoomProcessManager extends EventEmitter {
     this.capacity = options.capacity;
     this.sceneCatalog = options.sceneCatalog;
     this.emptyRoomTtlMs = options.emptyRoomTtlMs ?? DEFAULT_EMPTY_ROOM_TTL_MS;
+    // 房间数上限由后台设置实时决定（0 = 不限制），所以取的是函数而不是一个启动时的快照。
+    this.getMaxRooms = options.getMaxRooms ?? (() => 0);
     this.rooms = new Map();
     this.shuttingDown = false;
   }
 
   async createRoom(name, requestedSceneId) {
     if (!this.sceneCatalog) throw new Error('场景目录尚未配置');
+    const maxRooms = Number(this.getMaxRooms()) || 0;
+    if (maxRooms > 0 && this.rooms.size >= maxRooms) throw new Error('服务器房间已满，请稍后再试');
     const fallbackSceneId = this.sceneCatalog.list()[0]?.id;
     const sceneDefinition = this.sceneCatalog.require(requestedSceneId || fallbackSceneId);
     const id = randomUUID();
@@ -111,6 +115,17 @@ export class RoomProcessManager extends EventEmitter {
 
   listRooms() {
     return Array.from(this.rooms.values(), (record) => this.toSummary(record));
+  }
+
+  /** 房间内的在场玩家（后台房间面板用；出生点等内部状态不外泄）。 */
+  listRoomPlayers(roomId) {
+    const record = this.rooms.get(roomId);
+    if (!record) return [];
+    return Array.from(record.players.values(), (player) => ({
+      id: player.id,
+      name: player.name,
+      slot: player.slot,
+    }));
   }
 
   getRoom(roomId) {

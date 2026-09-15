@@ -200,3 +200,39 @@ test('房间 IPC 贯通控制权、船舶输入和载重事件', async () => {
   manager.removeRoom(room.id);
   await exited;
 });
+
+test('房间数达到后台设定的上限后不再开新房间', async () => {
+  const sceneCatalog = await SceneCatalog.load();
+  let maxRooms = 1;
+  const manager = new RoomProcessManager({ sceneCatalog, getMaxRooms: () => maxRooms });
+
+  try {
+    const room = await manager.createRoom('第一间', undefined);
+    await assert.rejects(() => manager.createRoom('第二间', undefined), /房间已满/);
+
+    // 上限调大后立刻能建；0 表示不限制。
+    maxRooms = 0;
+    const second = await manager.createRoom('第二间', undefined);
+    assert.notEqual(second.id, room.id);
+    assert.equal(manager.listRooms().length, 2);
+  } finally {
+    manager.shutdown();
+  }
+});
+
+test('后台能看到房间里的在场玩家', async () => {
+  const sceneCatalog = await SceneCatalog.load();
+  const manager = new RoomProcessManager({ sceneCatalog });
+
+  try {
+    const room = await manager.createRoom('观察间', undefined);
+    const { player } = manager.joinRoom(room.id, '旅人');
+    assert.deepEqual(manager.listRoomPlayers(room.id), [{ id: player.id, name: '旅人', slot: player.slot }]);
+
+    manager.leaveRoom(room.id, player.id);
+    assert.deepEqual(manager.listRoomPlayers(room.id), []);
+    assert.deepEqual(manager.listRoomPlayers('不存在的房间'), []);
+  } finally {
+    manager.shutdown();
+  }
+});

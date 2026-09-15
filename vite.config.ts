@@ -13,6 +13,11 @@ const CROSS_ORIGIN_ISOLATION_HEADERS = {
 export default defineConfig({
   plugins: [wasm()],
   build: {
+    // 两个页面入口：游戏本体与运维后台。后台是独立文档，不与游戏共用运行时。
+    rollupOptions: {
+      // 相对项目根目录写：这里不引 node:path，仓库没装 @types/node，tsc 会当场报错。
+      input: { main: 'index.html', admin: 'admin.html' },
+    },
     // chunkgen.wasm 只有几 KB，会被默认的内联阈值转成 base64 塞进 JS。
     // 保持它是独立文件：体积不再被 base64 放大三分之一，浏览器也能单独缓存。
     assetsInlineLimit: (filePath) => (filePath.endsWith('.wasm') ? false : undefined),

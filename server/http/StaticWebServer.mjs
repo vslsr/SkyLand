@@ -83,6 +83,16 @@ export class StaticWebServer {
       fileStat = await getFileStat(filePath);
     }
 
+    // 无扩展名的干净地址先找同名 HTML（/admin → admin.html），多页入口因此不必带 .html 出现在链接里。
+    if (!fileStat?.isFile() && extname(decodedPath) === '' && requestedPath !== this.rootDirectory) {
+      const htmlPath = `${requestedPath}.html`;
+      const htmlStat = await getFileStat(htmlPath);
+      if (htmlStat?.isFile()) {
+        filePath = htmlPath;
+        fileStat = htmlStat;
+      }
+    }
+
     // Vite 客户端路由没有扩展名时回退到 index.html；静态资源缺失则保持 404。
     if (!fileStat?.isFile() && extname(decodedPath) === '') {
       filePath = this.indexPath;

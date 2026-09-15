@@ -4,3 +4,7 @@ dist/
 *.log
 deploy/tls/
 .env
+
+# 本地构建产物与后台设置文件
+*.tsbuildinfo
+data/

@@ -11,6 +11,7 @@ async function createFixture() {
   await mkdir(join(root, 'assets'));
   await writeFile(join(root, 'index.html'), '<!doctype html><title>SkyLand</title>');
   await writeFile(join(root, 'assets', 'app.js'), 'console.log("SkyLand")');
+  await writeFile(join(root, 'admin.html'), '<!doctype html><title>运维后台</title>');
 
   const staticWebServer = new StaticWebServer(root);
   const server = http.createServer(async (request, response) => {
@@ -74,6 +75,27 @@ test('does not turn missing static assets into the SPA entry', async () => {
   try {
     const response = await fetch(`${fixture.origin}/assets/missing.js`);
     assert.equal(response.status, 404);
+  } finally {
+    await fixture.close();
+  }
+});
+
+test('serves a sibling HTML page for a clean URL', async () => {
+  const fixture = await createFixture();
+  try {
+    // /admin 必须落到 admin.html，而不是被 SPA 回退吞成游戏入口。
+    const clean = await fetch(`${fixture.origin}/admin`);
+    assert.equal(clean.status, 200);
+    assert.match(await clean.text(), /运维后台/);
+
+    const explicit = await fetch(`${fixture.origin}/admin.html`);
+    assert.equal(explicit.status, 200);
+    assert.match(await explicit.text(), /运维后台/);
+
+    // 没有同名 HTML 的干净地址仍然回退到游戏入口。
+    const fallback = await fetch(`${fixture.origin}/somewhere`);
+    assert.equal(fallback.status, 200);
+    assert.match(await fallback.text(), /SkyLand/);
   } finally {
     await fixture.close();
   }

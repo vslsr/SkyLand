@@ -1,16 +1,5 @@
 import { sendJson } from './HttpResponses.mjs';
-
-async function readJson(request) {
-  const chunks = [];
-  let size = 0;
-  for await (const chunk of request) {
-    size += chunk.length;
-    if (size > 4096) throw new Error('请求内容过大');
-    chunks.push(chunk);
-  }
-  if (chunks.length === 0) return {};
-  return JSON.parse(Buffer.concat(chunks).toString('utf8'));
-}
+import { readJsonBody } from './readJsonBody.mjs';
 
 export class ApiRouter {
   constructor(roomManager, options = {}) {
@@ -57,7 +46,7 @@ export class ApiRouter {
       }
 
       if (request.method === 'POST' && url.pathname === '/api/rooms') {
-        const body = await readJson(request);
+        const body = await readJsonBody(request);
         const room = await this.roomManager.createRoom(body.name, body.sceneId);
         sendJson(response, 201, { room }, request.method);
         return true;
