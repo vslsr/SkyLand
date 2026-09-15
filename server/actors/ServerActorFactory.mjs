@@ -48,6 +48,7 @@ import {
   PlayerMovementComponent,
   PROJECTILE_COMPONENT,
   PlayerJumpComponent,
+  MovingEntityComponent,
   NavigationComponent,
   PatrolPathComponent,
   ProjectileComponent,
@@ -187,6 +188,15 @@ export function createServerActor(spawn, archetype, runtime = {}) {
     actor.addComponent(new NavigationComponent({
       radius: archetype.components.render?.radius,
       ...archetype.components.navigation,
+    }));
+  }
+  // 实体是最基础的那一层：**会寻路就一定频繁移动**，所以写了 navigation 的原型
+  // 不必再写一遍 movingEntity，这里替它补上。半径按同一条链取（原型显式写的 →
+  // 寻路体型 → 模型半径），免得「避障用的圆」和「寻路用的圆」悄悄分成两个数。
+  if (archetype.components.movingEntity || archetype.components.navigation) {
+    actor.addComponent(new MovingEntityComponent({
+      radius: archetype.components.navigation?.radius ?? archetype.components.render?.radius,
+      ...archetype.components.movingEntity,
     }));
   }
   // 弧、蓄力比例、射手、哪件武器打的都由射出它的那一下给（`runtime.projectile`）；
