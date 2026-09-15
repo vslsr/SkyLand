@@ -1185,6 +1185,10 @@
               "description": "会不会游泳。写 true 等于把水的代价从「走不了」调成一个正数；显式写了 malus.water 时以后者为准。",
               "type": "boolean"
             },
+            "avoidCrowd": {
+              "description": "要不要给别的会走路的单位让路（局部避障）。默认 true。写 false 的仍然是别人的障碍，只是自己不让。",
+              "type": "boolean"
+            },
             "malus": {
               "description": "各类地面的代价加成，乘在这一步的距离上。-1 表示走不了。",
               "type": "object",

@@ -714,7 +714,7 @@ function validateNavigation(raw, filename) {
   const knownKeys = new Set([
     'speed', 'turnSpeed', 'radius', 'height', 'stepUp', 'maxDrop',
     'nodeRadius', 'arriveRadius', 'repathSeconds', 'goalTolerance',
-    'searchRadiusCells', 'maxVisitedNodes', 'swim', 'malus', 'chase',
+    'searchRadiusCells', 'maxVisitedNodes', 'swim', 'malus', 'chase', 'avoidCrowd',
   ]);
   for (const key of Object.keys(definition)) {
     if (!knownKeys.has(key)) throw new TypeError(`${path} 包含未知字段：${key}`);
@@ -730,6 +730,9 @@ function validateNavigation(raw, filename) {
   };
   if (definition.swim !== undefined && typeof definition.swim !== 'boolean') {
     throw new TypeError(`${path}.swim 必须是布尔值`);
+  }
+  if (definition.avoidCrowd !== undefined && typeof definition.avoidCrowd !== 'boolean') {
+    throw new TypeError(`${path}.avoidCrowd 必须是布尔值`);
   }
 
   let malus;
@@ -777,6 +780,7 @@ function validateNavigation(raw, filename) {
     ...optionalNumber('height', Number.EPSILON, 8),
     ...optionalNumber('stepUp', 0, 4),
     ...optionalNumber('maxDrop', 0, 16),
+    ...(definition.avoidCrowd === undefined ? {} : { avoidCrowd: definition.avoidCrowd }),
     ...optionalNumber('nodeRadius', Number.EPSILON, 4),
     ...optionalNumber('arriveRadius', Number.EPSILON, 16),
     ...optionalNumber('repathSeconds', Number.EPSILON, 30),

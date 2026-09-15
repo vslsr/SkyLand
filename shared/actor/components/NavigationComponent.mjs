@@ -54,6 +54,14 @@ export class NavigationComponent extends ActorComponent {
     /** 目标挪出这么远就立刻重想，米。追人时这一条比定时那一条先触发。 */
     this.goalTolerance = Math.max(0.1, finiteOr(definition.goalTolerance, 1.5));
     /**
+     * 要不要给别的会走路的单位让路（`shared/navigation` 的 `LocalAvoidance`）。
+     *
+     * 默认开：搜索只认识静态世界，两只沿同一条路走的生物各自的路都是最优的，
+     * 走起来却是一只顶着另一只。关掉的仍然**是别人的障碍**——它只是自己不让，
+     * 一只体型压倒性的首领穿过小兵是这么写的，而不是把它从表里摘掉。
+     */
+    this.avoidsCrowd = definition.avoidCrowd !== false;
+    /**
      * 追击参数。写了才追人；不写的话这只单位只在别人调 `setGoal` 时才动。
      * @type {{ senseRadius: number, giveUpRadius: number, keepDistance: number } | undefined}
      */

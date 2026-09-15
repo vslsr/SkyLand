@@ -7,8 +7,13 @@ import {
 } from '../../shared/actor/index.mjs';
 import {
   DEFAULT_NAV_SEARCH_RADIUS_CELLS,
+  LocalAvoidance,
   MAX_NAV_SEARCH_RADIUS_CELLS,
+  NAV_CELL_SIZE,
   NavPathfinder,
+  classifyNavCell,
+  navEdgeBlocked,
+  navMalusOf,
   smoothNavPath,
   toNavCell,
 } from '../../shared/navigation/index.mjs';
@@ -45,6 +50,9 @@ const ACTIVE_RADIUS = 48;
  */
 export const NAVIGATION_HANDOVER_RADIUS = 0.15;
 
+/** 高差判断的容差，米。和平滑那一层用同一个数，两边的判据不该差一丝。 */
+const HEIGHT_EPSILON = 1e-6;
+
 /**
  * 让带 `navigation` 的 Actor 自己找路走。
  *
@@ -54,7 +62,13 @@ export const NAVIGATION_HANDOVER_RADIUS = 0.15;
  *
  * 1. 挑目标——这一版只有一个来源：`chase` 写着就追最近的活玩家。
  * 2. 排队——每 tick 只放 `SEARCHES_PER_TICK` 次搜索过去，轮流来。
- * 3. 落地——把水平位置写回权威 Transform，Y 按精确坐标重新采样地面。
+ * 3. 避障——同一 tick 里所有 agent 先照一张位置快照互相让路（`LocalAvoidance`）。
+ * 4. 落地——把水平位置写回权威 Transform，Y 按精确坐标重新采样地面。
+ *
+ * 第 3 件事是搜索**做不到**的那一半：两只沿同一条路走的生物各自的路都是最优的，
+ * 走起来却是一只顶着另一只。把别的生物写进代价图再重寻也能解决，代价是把每
+ * tick 的几十条算术换成每 tick 一次 A*——二十只生物就能烧光 tick 预算。避障只
+ * 改这一步的方向，不改路。
  *
  * 排在 `PatrolPathSystem` **之前**：它决定这只生物这一刻是不是正被导航推着走，
  * 巡逻据此让位。反过来的话，巡逻会在同一 tick 里把刚转向玩家的脸转回路线上。
@@ -79,6 +93,19 @@ export class NavigationSystem {
     this.cursor = 0;
     /** 这一 tick 真的做了几次搜索。测试与性能计数用。 */
     this.searchesThisTick = 0;
+    // 局部避障。桶边长取一格导航格：这一层的 agent 半径都在半格上下，一格
+    // 分桶时每次查询扫的是九到二十五个桶，正好。
+    this.avoidance = new LocalAvoidance({ ...(options.avoidance ?? {}), hashCellSize: NAV_CELL_SIZE });
+    /**
+     * 每帧重填的避障输入。数组按容量复用，只增不减——一个房间里会寻路的生物
+     * 数是有上界的，而每 tick 重建一个数组就是每 tick 一次分配。
+     * @type {import('../../shared/navigation/LocalAvoidance.mjs').AvoidanceAgent[]}
+     */
+    this.avoidanceAgents = [];
+    this.steerOutput = { x: 0, z: 0, avoided: false };
+    this.pushOutput = { x: 0, z: 0, strength: 0 };
+    /** 问「这一格是什么」时复用的输出对象。 */
+    this.navCell = { type: 0, standY: 0 };
     this.pose = {
       x: 0, z: 0, yaw: 0, hasHeading: false, moving: false, arrived: false, stuck: false,
     };
@@ -100,12 +127,18 @@ export class NavigationSystem {
     const actors = world.query(NAVIGATION_COMPONENT, TRANSFORM_COMPONENT);
     if (actors.length === 0) return;
 
+    // 避障先建表，再动任何人：整个 tick 里所有人看到的是**同一张**位置快照。
+    // 读实时坐标的话，结果会取决于这个数组的顺序——服务端是权威，那种不可复现
+    // 的分歧最后会变成客户端与服务端对不上的位置。
+    this.beginAvoidanceFrame(actors);
+
     this.searchesThisTick = 0;
     let searchBudget = this.searchesPerTick;
     // 从游标处开始转一圈：预算用完时，下一 tick 从没轮到的那一只接着排。
     const start = this.cursor % actors.length;
     for (let offset = 0; offset < actors.length; offset += 1) {
-      const actor = actors[(start + offset) % actors.length];
+      const agentIndex = (start + offset) % actors.length;
+      const actor = actors[agentIndex];
       const agent = actor.requireComponent(NAVIGATION_COMPONENT);
       const transform = actor.requireComponent(TRANSFORM_COMPONENT);
 
@@ -139,6 +172,9 @@ export class NavigationSystem {
       if (intent === 'hold') {
         agent.clearPath();
         agent.tickTimers(step);
+        // 站定的也要互相推开：追到同一个玩家面前停下的几只手上都没有路，
+        // 不推的话它们会重叠成一坨站在原地。
+        this.spread(world, context, agent, transform, agentIndex, step);
         continue;
       }
 
@@ -150,8 +186,41 @@ export class NavigationSystem {
         this.search(context, agent, transform);
       }
 
-      this.follow(world, agent, transform, step);
+      this.follow(world, context, agent, transform, agentIndex, step);
     }
+  }
+
+  /**
+   * 把这一 tick 所有会寻路的 Actor 填进避障的输入表。
+   *
+   * **全都填，包括这一刻不走的**：死掉的、正在瞄准的、站定的，对别人来说仍然
+   * 是挡在路上的一个圆。漏掉它们的话，一只站着不动的生物会被别人直接穿过去。
+   * `moving` 这一位正是给这件事用的——挡路者自己不会让路时，避让责任全在对方。
+   */
+  beginAvoidanceFrame(actors) {
+    const records = this.avoidanceAgents;
+    for (let index = 0; index < actors.length; index += 1) {
+      const actor = actors[index];
+      const agent = actor.requireComponent(NAVIGATION_COMPONENT);
+      const transform = actor.requireComponent(TRANSFORM_COMPONENT);
+      let record = records[index];
+      if (!record) {
+        record = { x: 0, z: 0, radius: 0, speed: 0, moving: false, goalDistance: Infinity, avoids: true };
+        records[index] = record;
+      }
+      record.x = transform.x;
+      record.z = transform.z;
+      record.radius = agent.profile.radius;
+      record.speed = agent.speed;
+      // 上一 tick 结束时的状态：这一 tick 还没有人动过，而「它正被推着走吗」
+      // 只在 tick 之间变化，用得着的精度就是这个。
+      record.moving = agent.driving && agent.hasPath;
+      record.goalDistance = agent.hasGoal
+        ? Math.hypot(agent.goalX - transform.x, agent.goalZ - transform.z)
+        : Infinity;
+      record.avoids = agent.avoidsCrowd;
+    }
+    this.avoidance.beginFrame(records, actors.length);
   }
 
   /**
@@ -226,6 +295,83 @@ export class NavigationSystem {
     return true;
   }
 
+  /**
+   * 把这一步的方向交给避障改一改。**步长不变，只改方向**——改长度等于偷偷
+   * 给生物加速或减速，而速度是这只生物自己的属性。
+   *
+   * 改完的落点要重新验一次能不能走：避让是往侧面挪，而侧面可能是一堵墙或一个
+   * 断崖。验不过就按原来的走——宁可这一 tick 挤一下，也不能让避障把生物推进
+   * 一条 A* 明确拒绝过的格子里。验的判据和平滑那一层完全相同（这一格走不走得
+   * 了、这条边上有没有墙、这一步的高差行不行），两套判据会让 AI 走进墙里。
+   */
+  avoid(context, agent, transform, agentIndex, step, pose) {
+    if (!agent.avoidsCrowd) return;
+    const travelX = pose.x - transform.x;
+    const travelZ = pose.z - transform.z;
+    const travel = Math.hypot(travelX, travelZ);
+    if (travel <= 1e-6) return;
+    const steer = this.avoidance.steer(agentIndex, travelX / travel, travelZ / travel, this.steerOutput);
+    if (!steer.avoided) return;
+    const x = transform.x + steer.x * travel;
+    const z = transform.z + steer.z * travel;
+    if (!this.stepWalkable(context, agent.profile, transform.x, transform.z, x, z)) return;
+    pose.x = x;
+    pose.z = z;
+    pose.moving = true;
+    // 朝向跟着**实际走的方向**，不是路指的方向。两者分家的话，一只正在侧身
+    // 绕过同伴的生物会脸朝着前方横着挪。
+    pose.yaw = agent.turnTowardYaw(transform.yaw, Math.atan2(steer.x, steer.z), agent.turnSpeed * step);
+    pose.hasHeading = true;
+  }
+
+  /**
+   * 站定时互相推开，免得几只重叠成一坨。
+   *
+   * 只推真正**重叠**的那部分，而且速度是一个很小的常数：这不是走路，是一群
+   * 站着的生物慢慢挪开一点，快了就成了原地打滑。
+   */
+  spread(world, context, agent, transform, agentIndex, step) {
+    const speed = this.avoidance.config.idleSeparationSpeed;
+    if (speed <= 0 || !agent.avoidsCrowd) return;
+    const push = this.avoidance.separate(agentIndex, this.pushOutput);
+    if (push.strength <= 0) return;
+    const travel = speed * push.strength * step;
+    const x = transform.x + push.x * travel;
+    const z = transform.z + push.z * travel;
+    if (!this.stepWalkable(context, agent.profile, transform.x, transform.z, x, z)) return;
+    const groundY = world.context.groundHeightAt?.(x, z);
+    transform.setWorldTransform(
+      [x, Number.isFinite(groundY) ? groundY : transform.y, z],
+      transform.yaw,
+    );
+  }
+
+  /**
+   * 从 (fromX, fromZ) 挪到 (toX, toZ) 这一小步走不走得了。
+   *
+   * 没跨格就一定可以——那一格本来就站着人。跨格才需要问世界，而一 tick 的位移
+   * 通常只有几厘米，所以这条路径上真正做地形采样的 tick 是少数。**同时跨两条
+   * 格线的对角步直接拒绝**：正确地判它要按「先 X 后 Z」拆成两步各验一次，而
+   * 为了一步几厘米的避让去做那件事不划算，拒绝掉的代价只是这一 tick 不避让。
+   */
+  stepWalkable(context, profile, fromX, fromZ, toX, toZ) {
+    const fromCellX = toNavCell(fromX);
+    const fromCellZ = toNavCell(fromZ);
+    const toCellX = toNavCell(toX);
+    const toCellZ = toNavCell(toZ);
+    if (fromCellX === toCellX && fromCellZ === toCellZ) return true;
+    if (fromCellX !== toCellX && fromCellZ !== toCellZ) return false;
+    if (navEdgeBlocked(context, fromCellX, fromCellZ, toCellX, toCellZ)) return false;
+    classifyNavCell(context, profile, toCellX, toCellZ, this.navCell);
+    if (navMalusOf(profile.malus, this.navCell.type) < 0) return false;
+    const targetStandY = this.navCell.standY;
+    classifyNavCell(context, profile, fromCellX, fromCellZ, this.navCell);
+    const climb = targetStandY - this.navCell.standY;
+    if (climb > profile.stepUp + HEIGHT_EPSILON) return false;
+    if (-climb > profile.maxDrop + HEIGHT_EPSILON) return false;
+    return true;
+  }
+
   /** 附近有没有玩家。没有玩家的房间里一只生物都不动——那正是想要的。 */
   isActive(world, transform) {
     const players = world.context.players;
@@ -267,9 +413,10 @@ export class NavigationSystem {
     return agent.adoptPath(smoothed, context.revision, result.reachedGoal);
   }
 
-  /** 沿路径走一步，把结果写回权威 Transform。 */
-  follow(world, agent, transform, step) {
+  /** 沿路径走一步，让过路上的邻居，把结果写回权威 Transform。 */
+  follow(world, context, agent, transform, agentIndex, step) {
     const pose = agent.advance(step, transform, this.pose);
+    this.avoid(context, agent, transform, agentIndex, step, pose);
     if (!pose.moving && !pose.hasHeading) return;
     // 落地高度按精确的 (x, z) 重新采样，和巡逻走同一条路。路径节点带的 y 是
     // 寻路时的决策高度，拿它当落地高度会让走在斜坡上的生物一跳一跳。

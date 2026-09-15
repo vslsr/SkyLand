@@ -10,9 +10,16 @@
  * | `NavPathfinder.mjs` | `PathFinder` + `BinaryHeap` | A*、节点预算、最近点回退 |
  * | `smoothNavPath.mjs` | （无） | 拉绳平滑，把楼梯拉成直线 |
  * | `NavigationComponent` | `PathNavigation` | 跟着路走、什么时候重寻、卡住了怎么办 |
+ *
+ * 还有一层是 Minecraft 没有的：`LocalAvoidance`（局部避障 / RVO）。搜索认识静态
+ * 世界，它认识**别的会走路的生物**——两只沿同一条路走的生物各自的路都是最优的，
+ * 走起来却是一只顶着另一只。它只改这一步的方向，不改路；理由写在
+ * `avoidanceConfig.mjs` 顶上。
  */
 
+export { AgentSpatialHash } from './AgentSpatialHash.mjs';
 export { BinaryHeap } from './BinaryHeap.mjs';
+export { LocalAvoidance } from './LocalAvoidance.mjs';
 export { NavPathfinder } from './NavPathfinder.mjs';
 export { NavRegion } from './NavRegion.mjs';
 export { createNavProfile, navProfileClassifiesAlike } from './NavProfile.mjs';
@@ -32,5 +39,6 @@ export {
   navMalusOf,
   toNavCell,
 } from './navConfig.mjs';
+export { DEFAULT_AVOIDANCE, createAvoidanceConfig } from './avoidanceConfig.mjs';
 export { classifyNavCell, createNavigationContext, navEdgeBlocked } from './navNodeEvaluator.mjs';
 export { navLineWalkable, smoothNavPath } from './smoothNavPath.mjs';

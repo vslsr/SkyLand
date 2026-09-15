@@ -297,3 +297,53 @@ test('追完之后自己走回岗位再交还巡逻，全程不瞬移一步', as
     `任何一 tick 的位移都不该超过它自己走得动的距离：${maximumStep.toFixed(3)} > ${perTickLimit.toFixed(3)}`,
   );
 });
+
+test('两只猎手追同一个玩家不会叠在一起：一只让开，两只都追得上', async () => {
+  // 搜索给的两条路都是最优的，而且几乎重合——A* 不认识别的会走路的生物。
+  // 局部避障要证明的就是这一条：路不变，走起来不挤。
+  const { scene, clock } = await createStreamingScene([
+    { id: 'hunter-a', x: 0, z: 0 },
+    { id: 'hunter-b', x: 0.6, z: 0 },
+  ]);
+  scene.addPlayer({ id: 'prey', name: '猎物', slot: 0 });
+  const player = scene.players.get('prey');
+  const pack = hunters(scene);
+  assert.equal(pack.length, 2);
+  const [first, second] = pack.map((actor) => actor.requireComponent(TRANSFORM_COMPONENT));
+  const startGap = Math.hypot(first.x - second.x, first.z - second.z);
+
+  placePlayer(player, 14, 0);
+  let tightest = Infinity;
+  for (let tick = 0; tick < 120; tick += 1) {
+    runTicks(scene, clock, 1);
+    tightest = Math.min(tightest, Math.hypot(first.x - second.x, first.z - second.z));
+  }
+
+  // 两个半径之和是 0.8 米。允许贴近，但不许穿模成一只——那正是没有避障时的样子。
+  assert.ok(tightest > 0.4, `最近时也该留着间距，实际 ${tightest.toFixed(3)} 米`);
+  assert.ok(startGap > 0, '出发时本来就分开站着');
+  for (const transform of [first, second]) {
+    assert.ok(
+      Math.hypot(player.x - transform.x, player.z - transform.z) < 4,
+      '让路不是不追了：两只都该走到玩家跟前',
+    );
+  }
+});
+
+test('挤在一起站定的两只会慢慢挪开，而不是重叠成一坨', async () => {
+  const { scene, clock } = await createStreamingScene([
+    { id: 'hunter-a', x: 0, z: 0 },
+    { id: 'hunter-b', x: 0.1, z: 0 },
+  ]);
+  scene.addPlayer({ id: 'prey', name: '猎物', slot: 0 });
+  const player = scene.players.get('prey');
+  const [first, second] = hunters(scene).map((actor) => actor.requireComponent(TRANSFORM_COMPONENT));
+
+  // 玩家站在两只中间：它们都已经到了 keepDistance 之内，手上都没有路，
+  // 只有「站定时互相推开」这一条还在起作用。
+  placePlayer(player, 0.05, 0);
+  const before = Math.hypot(first.x - second.x, first.z - second.z);
+  runTicks(scene, clock, 60);
+  const after = Math.hypot(first.x - second.x, first.z - second.z);
+  assert.ok(after > before, `站定的两只该挪开，${before.toFixed(3)} → ${after.toFixed(3)}`);
+});
